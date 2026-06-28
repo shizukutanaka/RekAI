@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest an idea or enhancement for RekAI
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What are you trying to do that's hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Router
+        - Cache
+        - Provider (new backend)
+        - BYOK / security
+        - Web UI
+        - Docs
+        - Other
+    validations:
+      required: true
