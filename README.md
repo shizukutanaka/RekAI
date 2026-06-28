@@ -93,6 +93,9 @@ curl -s http://localhost:8000/v1/chat \
   -d '{"provider":"openai","model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'
 ```
 
+Runnable client snippets (curl, Python, JavaScript) live in
+[`examples/`](./examples).
+
 ## 📦 Monorepo layout
 
 ```
