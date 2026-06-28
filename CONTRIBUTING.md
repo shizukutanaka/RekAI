@@ -28,7 +28,9 @@ mypy rekai          # type check
 pytest              # tests
 ```
 
-All four must pass before a PR is merged — CI enforces this.
+All four must pass before a PR is merged — CI enforces this once activated
+(see [`ci/README.md`](./ci/README.md) to move the workflow into
+`.github/workflows/`).
 
 ## Frontend
 
