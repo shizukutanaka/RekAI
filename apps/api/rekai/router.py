@@ -19,6 +19,7 @@ _MODEL_PREFIX_RULES: tuple[tuple[str, str], ...] = (
     ("gpt-", "openai"),
     ("o1", "openai"),
     ("o3", "openai"),
+    ("claude", "anthropic"),
     ("llama", "ollama"),
     ("mistral", "ollama"),
     ("qwen", "ollama"),

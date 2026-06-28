@@ -25,6 +25,7 @@ def test_explicit_provider_wins(settings: Settings) -> None:
     [
         ("gpt-4o-mini", "openai"),
         ("o1-preview", "openai"),
+        ("claude-sonnet-4-6", "anthropic"),
         ("llama3.1", "ollama"),
         ("mistral", "ollama"),
         ("echo", "echo"),

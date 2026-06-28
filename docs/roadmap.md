@@ -53,7 +53,7 @@ have interface seams reserved today:
 
 ## Beyond v1.0
 
-- **v1.x** — stabilize the core, more providers (Anthropic, Gemini), streaming.
+- **v1.x** — stabilize the core, more providers (Gemini, …), streaming.
 - **v2.x** — plugin ecosystem for providers and policies.
 - **v3.x** — advanced multi-provider orchestration (fallback, load-balancing).
 - **v4.x** — agent workflows and automation.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from rekai.providers.anthropic import AnthropicProvider
 from rekai.providers.base import Provider
 from rekai.providers.echo import EchoProvider
 from rekai.providers.ollama import OllamaProvider
@@ -12,6 +13,7 @@ _PROVIDERS: dict[str, Provider] = {
     for p in (
         EchoProvider(),
         OpenAIProvider(),
+        AnthropicProvider(),
         OllamaProvider(),
     )
 }

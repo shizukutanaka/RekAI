@@ -46,8 +46,8 @@ ChatResponse
 
 1. If the request specifies `provider`, that wins.
 2. Otherwise the model name is matched against known prefixes
-   (`gpt-*`, `o1*`, `o3*` → OpenAI; `llama*`, `mistral*`, `qwen*`, `gemma*`,
-   `phi*` → Ollama; `echo` → Echo).
+   (`gpt-*`, `o1*`, `o3*` → OpenAI; `claude*` → Anthropic; `llama*`,
+   `mistral*`, `qwen*`, `gemma*`, `phi*` → Ollama; `echo` → Echo).
 3. Otherwise the configured `REKAI_DEFAULT_PROVIDER` is used.
 
 ## Caching

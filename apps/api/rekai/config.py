@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"
     ollama_base_url: str = "http://localhost:11434"
+    anthropic_api_key: str | None = None
+    anthropic_base_url: str = "https://api.anthropic.com/v1"
+    anthropic_version: str = "2023-06-01"
+    anthropic_default_max_tokens: int = 1024
 
     # Networking
     request_timeout_seconds: float = 60.0
