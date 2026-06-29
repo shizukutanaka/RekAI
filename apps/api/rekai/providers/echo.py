@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from rekai.providers.base import Provider, ProviderResult
+from rekai.providers.base import Provider, ProviderResult, StreamEvent
 from rekai.schemas import ChatRequest, Usage
 
 
@@ -40,11 +40,20 @@ class EchoProvider(Provider):
         )
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
+        async for ev in self.stream_events(request, api_key):
+            if ev.delta:
+                yield ev.delta
+
+    async def stream_events(
+        self, request: ChatRequest, api_key: str | None
+    ) -> AsyncIterator[StreamEvent]:
         result = await self.chat(request, api_key)
         # Emit word by word so the streaming path is visibly incremental.
         words = result.content.split(" ")
         for i, word in enumerate(words):
-            yield word if i == 0 else " " + word
+            yield StreamEvent(delta=word if i == 0 else " " + word)
+        # echo computes exact usage, so report it (not an estimate).
+        yield StreamEvent(usage=result.usage)
 
     async def list_models(self, api_key: str | None) -> list[str]:
         return ["echo"]

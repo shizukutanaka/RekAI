@@ -61,7 +61,8 @@ def test_stream_endpoint_emits_usage_summary(client: TestClient) -> None:
     # The penultimate event (before [DONE]) is the usage summary.
     summary = json.loads(payloads[-2])
     assert summary["provider"] == "echo"
-    assert summary["estimated"] is True
+    # echo reports exact usage via stream_events -> not estimated.
+    assert summary["estimated"] is False
     assert summary["usage"]["total_tokens"] > 0
     assert summary["cost_usd"] == 0.0  # echo is free
     # Streamed usage is now recorded in /v1/usage.
@@ -121,6 +122,43 @@ async def test_base_stream_fallback_single_chunk() -> None:
     assert chunks == ["all at once"]
 
 
+async def test_base_stream_events_reports_no_usage() -> None:
+    """The default stream_events wraps stream() and yields no usage event."""
+    from rekai.providers.base import Provider, ProviderResult
+    from rekai.schemas import Usage
+
+    class OneShot(Provider):
+        name = "oneshot-events-test"
+        requires_key = False
+
+        async def chat(self, request, api_key) -> ProviderResult:
+            return ProviderResult(content="hi there", model=request.model, usage=Usage())
+
+    events = [
+        e
+        async for e in OneShot().stream_events(
+            ChatRequest(model="x", messages=[ChatMessage(role="user", content="hi")]), None
+        )
+    ]
+    assert all(e.usage is None for e in events)
+    assert "".join(e.delta or "" for e in events) == "hi there"
+
+
+async def test_echo_stream_events_reports_exact_usage() -> None:
+    from rekai.providers.echo import EchoProvider
+
+    events = [
+        e
+        async for e in EchoProvider().stream_events(
+            ChatRequest(model="echo", messages=[ChatMessage(role="user", content="a b c")]),
+            None,
+        )
+    ]
+    usage_events = [e for e in events if e.usage is not None]
+    assert len(usage_events) == 1
+    assert usage_events[0].usage.total_tokens > 0
+
+
 # --- provider SSE/NDJSON line parsers ---------------------------------------
 
 
@@ -162,6 +200,29 @@ def test_anthropic_sse_parser(line, expected) -> None:
 )
 def test_ollama_ndjson_parser(line, expected) -> None:
     assert _parse_ollama_ndjson_line(line) == expected
+
+
+def test_openai_sse_event_parses_usage() -> None:
+    from rekai.providers.openai import _parse_openai_sse_event
+
+    line = (
+        'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":7,"total_tokens":12}}'
+    )
+    event = _parse_openai_sse_event(line)
+    assert event is not None and event.usage is not None
+    assert event.usage.total_tokens == 12
+    # A delta line yields a delta event, not usage.
+    delta_event = _parse_openai_sse_event('data: {"choices":[{"delta":{"content":"Hi"}}]}')
+    assert delta_event is not None and delta_event.delta == "Hi" and delta_event.usage is None
+
+
+def test_ollama_ndjson_event_parses_usage() -> None:
+    from rekai.providers.ollama import _parse_ollama_ndjson_event
+
+    line = '{"message":{"content":""},"done":true,"prompt_eval_count":4,"eval_count":6}'
+    event = _parse_ollama_ndjson_event(line)
+    assert event is not None and event.usage is not None
+    assert event.usage.total_tokens == 10
 
 
 # --- OpenAI native streaming with mocked HTTP -------------------------------
@@ -215,3 +276,19 @@ async def test_openai_native_stream(monkeypatch) -> None:
     req = ChatRequest(model="gpt-4o-mini", messages=[ChatMessage(role="user", content="hi")])
     chunks = [c async for c in OpenAIProvider().stream(req, api_key="sk-test")]
     assert "".join(chunks) == "Hello world"
+
+
+async def test_openai_stream_events_surfaces_usage(monkeypatch) -> None:
+    lines = [
+        'data: {"choices":[{"delta":{"content":"Hello"}}]}',
+        'data: {"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}',
+        "data: [DONE]",
+    ]
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: _FakeClient(lines))
+
+    req = ChatRequest(model="gpt-4o-mini", messages=[ChatMessage(role="user", content="hi")])
+    events = [e async for e in OpenAIProvider().stream_events(req, api_key="sk-test")]
+    deltas = "".join(e.delta or "" for e in events)
+    usage = next((e.usage for e in events if e.usage is not None), None)
+    assert deltas == "Hello"
+    assert usage is not None and usage.total_tokens == 3

@@ -214,12 +214,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         async def event_source():
             completion = []
+            reported_usage: Usage | None = None
             errored = False
             try:
-                async for delta in provider.stream(request, x_provider_key):
-                    if delta:
-                        completion.append(delta)
-                        yield f"data: {json.dumps({'delta': delta})}\n\n"
+                async for event in provider.stream_events(request, x_provider_key):
+                    if event.delta:
+                        completion.append(event.delta)
+                        yield f"data: {json.dumps({'delta': event.delta})}\n\n"
+                    if event.usage is not None:
+                        reported_usage = event.usage
             except ProviderError as exc:
                 errored = True
                 metrics.record_error()
@@ -227,14 +230,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 yield f"data: {json.dumps(payload)}\n\n"
 
             if not errored:
-                # Usage is estimated from text (the stream carries no token counts).
-                prompt_tokens = sum(estimate_tokens(m.content) for m in request.messages)
-                completion_tokens = estimate_tokens("".join(completion))
-                usage = Usage(
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    total_tokens=prompt_tokens + completion_tokens,
-                )
+                # Prefer provider-reported usage; otherwise estimate from text.
+                estimated = reported_usage is None
+                if reported_usage is not None:
+                    usage = reported_usage
+                else:
+                    prompt_tokens = sum(estimate_tokens(m.content) for m in request.messages)
+                    completion_tokens = estimate_tokens("".join(completion))
+                    usage = Usage(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=prompt_tokens + completion_tokens,
+                    )
                 cost_usd = estimate_cost(provider_name, request.model, usage)
                 metrics.record_tokens(usage.total_tokens)
                 metrics.record_cost(cost_usd)
@@ -243,7 +250,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "model": request.model,
                     "usage": usage.model_dump(),
                     "cost_usd": cost_usd,
-                    "estimated": True,
+                    "estimated": estimated,
                 }
                 yield f"data: {json.dumps(summary)}\n\n"
             yield "data: [DONE]\n\n"

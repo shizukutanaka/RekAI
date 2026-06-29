@@ -33,6 +33,15 @@ class ProviderResult:
     usage: Usage = field(default_factory=Usage)
 
 
+@dataclass
+class StreamEvent:
+    """One event from a streaming completion: a text ``delta`` and/or final
+    provider-reported ``usage`` (yielded once at the end when available)."""
+
+    delta: str | None = None
+    usage: Usage | None = None
+
+
 class Provider(ABC):
     """Base class for all providers."""
 
@@ -55,6 +64,18 @@ class Provider(ABC):
         """
         result = await self.chat(request, api_key)
         yield result.content
+
+    async def stream_events(
+        self, request: ChatRequest, api_key: str | None
+    ) -> AsyncIterator[StreamEvent]:
+        """Yield :class:`StreamEvent`s (text deltas, then optional usage).
+
+        The default wraps :meth:`stream` and reports no usage, so the endpoint
+        falls back to estimating tokens from the streamed text. Providers that
+        can report exact usage override this.
+        """
+        async for delta in self.stream(request, api_key):
+            yield StreamEvent(delta=delta)
 
     def server_key_configured(self) -> bool:
         """Whether a server-side key is configured for this provider.

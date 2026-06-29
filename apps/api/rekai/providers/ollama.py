@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from rekai.config import get_settings
-from rekai.providers.base import Provider, ProviderError, ProviderResult
+from rekai.providers.base import Provider, ProviderError, ProviderResult, StreamEvent
 from rekai.schemas import ChatRequest, Usage
 
 
@@ -54,6 +54,13 @@ class OllamaProvider(Provider):
         )
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
+        async for ev in self.stream_events(request, api_key):
+            if ev.delta:
+                yield ev.delta
+
+    async def stream_events(
+        self, request: ChatRequest, api_key: str | None
+    ) -> AsyncIterator[StreamEvent]:
         settings = get_settings()
         payload = {
             "model": request.model,
@@ -72,9 +79,9 @@ class OllamaProvider(Provider):
                             status_code=resp.status_code if resp.status_code < 500 else 502,
                         )
                     async for line in resp.aiter_lines():
-                        delta = _parse_ollama_ndjson_line(line)
-                        if delta:
-                            yield delta
+                        event = _parse_ollama_ndjson_event(line)
+                        if event is not None:
+                            yield event
         except httpx.HTTPError as exc:
             raise ProviderError(
                 f"Ollama streaming request failed (is it running at "
@@ -84,10 +91,30 @@ class OllamaProvider(Provider):
 
 def _parse_ollama_ndjson_line(line: str) -> str | None:
     """Extract the text delta from one Ollama NDJSON line, if present."""
+    event = _parse_ollama_ndjson_event(line)
+    return event.delta if event else None
+
+
+def _parse_ollama_ndjson_event(line: str) -> StreamEvent | None:
+    """Parse one Ollama NDJSON line into a text delta or a final usage event."""
     if not line.strip():
         return None
     try:
         chunk = json.loads(line)
     except json.JSONDecodeError:
         return None
-    return chunk.get("message", {}).get("content") or None
+    content = chunk.get("message", {}).get("content")
+    if content:
+        return StreamEvent(delta=content)
+    if chunk.get("done"):
+        prompt_tokens = chunk.get("prompt_eval_count", 0)
+        completion_tokens = chunk.get("eval_count", 0)
+        if prompt_tokens or completion_tokens:
+            return StreamEvent(
+                usage=Usage(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=prompt_tokens + completion_tokens,
+                )
+            )
+    return None
