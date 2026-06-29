@@ -6,6 +6,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Cache correctness with tools** — the chat cache key now includes `tools`
+  and `tool_choice`. Previously two requests with identical messages but
+  different tools collided, so a tool-less reply could be served for a tools
+  request (and vice versa).
+- **Rate-limiter memory bound** — the per-client bucket map now prunes idle
+  (fully-refilled) buckets once it passes a soft cap (`max_buckets`, default
+  10k), so a flood of distinct client keys can't grow memory without bound.
+- **Memory cache bound** — `MemoryCache` drops expired entries before growing
+  past `max_entries` (default 10k), instead of only evicting on read.
+
 ### Changed
 - Refreshed the README and architecture docs to reflect the 1.1.0 feature set
   (all five providers, tool calling, embeddings, model discovery + pricing,

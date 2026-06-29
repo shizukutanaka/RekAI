@@ -16,13 +16,19 @@ from rekai.schemas import ChatRequest
 
 
 def cache_key(request: ChatRequest, provider: str) -> str:
-    """A deterministic key for a (provider, model, messages, temperature) tuple."""
+    """A deterministic key for the request fields that affect the response.
+
+    Includes ``tools``/``tool_choice`` — otherwise two requests with identical
+    messages but different tools would collide and return the wrong response.
+    """
     payload = {
         "provider": provider,
         "model": request.model,
         "temperature": request.temperature,
         "max_tokens": request.max_tokens,
         "messages": [m.model_dump() for m in request.messages],
+        "tools": request.tools,
+        "tool_choice": request.tool_choice,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "rekai:chat:" + hashlib.sha256(raw.encode()).hexdigest()
@@ -45,8 +51,9 @@ class CacheBackend(Protocol):
 class MemoryCache:
     """A tiny TTL cache backed by a dict. Not shared across processes."""
 
-    def __init__(self) -> None:
+    def __init__(self, max_entries: int = 10_000) -> None:
         self._store: dict[str, tuple[float, str]] = {}
+        self._max_entries = max_entries
 
     async def get(self, key: str) -> str | None:
         item = self._store.get(key)
@@ -59,6 +66,12 @@ class MemoryCache:
         return value
 
     async def set(self, key: str, value: str, ttl: int) -> None:
+        # Drop expired entries before growing past the cap so the dict can't
+        # accumulate keys that are never read again.
+        if len(self._store) >= self._max_entries:
+            now = time.time()
+            for k in [k for k, (exp, _) in self._store.items() if exp < now]:
+                del self._store[k]
         self._store[key] = (time.time() + ttl, value)
 
     @property

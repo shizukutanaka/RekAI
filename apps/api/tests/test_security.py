@@ -37,6 +37,25 @@ def test_rate_limiter_blocks_after_capacity() -> None:
     assert limiter.allow("other") is True
 
 
+def test_rate_limiter_prunes_idle_buckets() -> None:
+    import time
+
+    # Active clients (below capacity) are retained even when the cap is hit, so
+    # legitimate traffic keeps its budget.
+    limiter = RateLimiter(capacity=5, window=60, max_buckets=10)
+    for i in range(11):
+        limiter.allow(f"active-{i}")  # each consumes a token -> not full -> kept
+    assert len(limiter._buckets) == 11
+
+    # _prune drops fully-refilled (idle) buckets but keeps active ones.
+    now = time.time()
+    limiter._buckets["idle"] = (5.0, now)  # tokens == capacity -> idle
+    limiter._buckets["busy"] = (0.5, now)  # partially spent -> active
+    limiter._prune(now)
+    assert "idle" not in limiter._buckets
+    assert "busy" in limiter._buckets
+
+
 def test_rate_limiter_retry_after() -> None:
     limiter = RateLimiter(capacity=2, window=60)
     # Tokens available -> no wait.
