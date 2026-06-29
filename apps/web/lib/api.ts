@@ -29,6 +29,17 @@ export interface ModelInfo {
   provider: string;
 }
 
+export interface UsageSummary {
+  requests_total: number;
+  cache_hits_total: number;
+  cache_misses_total: number;
+  errors_total: number;
+  fallbacks_total: number;
+  tokens_total: number;
+  cost_usd_total: number;
+  requests_by_provider: Record<string, number>;
+}
+
 const KEY_STORAGE = "rekai.providerKey";
 
 export function getStoredKey(): string {
@@ -143,4 +154,10 @@ export async function fetchModels(): Promise<ModelInfo[]> {
   } catch {
     return [];
   }
+}
+
+export async function fetchUsage(): Promise<UsageSummary> {
+  const res = await fetch(`${API_URL}/v1/usage`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Could not load usage (${res.status})`);
+  return res.json();
 }

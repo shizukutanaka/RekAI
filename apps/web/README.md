@@ -17,6 +17,9 @@ Open http://localhost:3000.
 - **/** — chat. Pick a model, send messages. Toggle **Stream** to render
   responses token-by-token via `/v1/chat/stream` (on by default). Assistant
   bubbles show the provider, whether the response was cached, and token usage.
+- **/usage** — live dashboard of `/v1/usage`: requests, cache hit rate, tokens,
+  estimated cost, fallbacks, errors, and a per-provider request breakdown
+  (auto-refreshes every 5s).
 - **/settings** — store your provider API key (BYOK). The key lives only in
   browser local storage and is sent as the `X-Provider-Key` header.
 

@@ -24,7 +24,8 @@ is a self-hostable AI gateway that runs with a single `docker compose up`.
 - [x] Chat interface
 - [x] Model selector
 - [x] Settings page (BYOK key storage)
-- [x] Cache / provider / token indicators
+- [x] Cache / provider / token / cost indicators
+- [x] Usage dashboard (/usage)
 
 ### M4 — Quality ✅
 - [x] Test suite (router, cache, providers, security, endpoints)
