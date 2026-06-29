@@ -41,10 +41,11 @@ is a self-hostable AI gateway that runs with a single `docker compose up`.
 - [x] Cost estimation + `/v1/usage` summary
 - [x] Provider fallback / failover
 - [x] Client examples (curl, Python, JavaScript)
+- [x] Python and JavaScript/TypeScript SDKs
+- [x] Release notes (CHANGELOG v1.0.0)
+- [x] Version bump to 1.0.0 across packages
 - [ ] Demo deployment
-- [ ] GitHub Release + release notes
-- [ ] Examples (`docs/`, client snippets)
-- [ ] v1.0 tag
+- [ ] GitHub Release + `v1.0.0` tag (maintainer action)
 
 ## Explicitly out of scope for v1.0
 

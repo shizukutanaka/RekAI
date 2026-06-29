@@ -6,6 +6,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-06-29
+
+First public release — a self-hostable AI router & gateway. Runs with a single
+`docker compose up`, works out of the box via the keyless `echo` provider, and
+exposes one OpenAI-style chat API across five backends with caching, BYOK,
+streaming, fallback, cost estimation, and a built-in web UI.
+
 ### Added
 - **Monorepo foundation** — `apps/api` (FastAPI) and `apps/web` (Next.js),
   Docker Compose, devcontainer, issue/PR templates, and OSS docs
@@ -63,4 +70,5 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - SDK CI now runs `ruff format --check` (previously only `ruff check`), and the
   SDK source was reformatted to match.
 
-[Unreleased]: https://github.com/shizukutanaka/RekAI/commits/main
+[Unreleased]: https://github.com/shizukutanaka/RekAI/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/shizukutanaka/RekAI/releases/tag/v1.0.0
