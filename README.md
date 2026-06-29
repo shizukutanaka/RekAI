@@ -123,6 +123,19 @@ See [`docs/roadmap.md`](./docs/roadmap.md). In short:
 | **M4 Quality** | Tests, OpenAPI, logging, security |
 | **M5 Release** | OSS docs, demo, v1.0 |
 
+## 🛠️ Development
+
+Common tasks are wrapped in a `Makefile`:
+
+```bash
+make install   # install API + web dependencies
+make check     # lint, type-check, test, and build the web app
+make run-api   # run the API   (make run-web for the UI)
+make up        # docker compose up --build
+```
+
+Run `make help` for the full list. Changes are tracked in [CHANGELOG.md](./CHANGELOG.md).
+
 ## 🤝 Contributing
 
 Contributions are welcome! Read [CONTRIBUTING.md](./CONTRIBUTING.md) and our [Code of Conduct](./CODE_OF_CONDUCT.md).

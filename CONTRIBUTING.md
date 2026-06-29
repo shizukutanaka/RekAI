@@ -16,6 +16,14 @@ docker compose up --build
 Or run each app directly — see [`apps/api/README.md`](./apps/api/README.md) and
 [`apps/web/README.md`](./apps/web/README.md).
 
+A `Makefile` wraps the common tasks — run `make help` to list them:
+
+```bash
+make install   # install API + web deps
+make check     # lint, type-check, test, web build
+make run-api   # / make run-web
+```
+
 ## Backend
 
 ```bash
@@ -51,9 +59,10 @@ npm run build
 
 ## Pull requests
 
-1. Make sure tests, lint, and type checks pass.
+1. Make sure tests, lint, and type checks pass (`make check`).
 2. Add or update tests for behavior changes.
-3. Update docs (`README.md`, `docs/`) when you change public behavior.
+3. Update docs (`README.md`, `docs/`) and add a `CHANGELOG.md` entry under
+   **Unreleased** when you change public behavior.
 4. Fill out the PR template.
 
 ## Reporting bugs / requesting features
