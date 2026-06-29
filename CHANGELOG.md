@@ -7,6 +7,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Container healthchecks & readiness gating** — the web image gained a
+  `HEALTHCHECK` (the API already had one), and Docker Compose now starts `web`
+  only once `api` is `service_healthy` (which itself waits on Redis). A
+  `docker compose up` comes up in dependency order and reports real readiness.
 - **Embeddings** — `POST /v1/embeddings` with provider routing, caching, BYOK,
   and metrics. Echo returns deterministic vectors (no key); OpenAI(-compatible)
   calls the real `/embeddings` API. `Provider.embed()` is the extension point.
