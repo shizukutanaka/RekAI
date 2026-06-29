@@ -59,6 +59,20 @@ jobs:
       - name: Test (pytest)
         run: pytest -q
 
+  js-sdk:
+    name: JS SDK (test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/js-sdk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Test (node --test)
+        run: npm test
+
   web:
     name: Web (lint · build)
     runs-on: ubuntu-latest

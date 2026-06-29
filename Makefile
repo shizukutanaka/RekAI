@@ -3,6 +3,7 @@
 API_DIR := apps/api
 WEB_DIR := apps/web
 SDK_DIR := packages/python-sdk
+JS_SDK_DIR := packages/js-sdk
 
 .DEFAULT_GOAL := help
 
@@ -49,9 +50,10 @@ typecheck: ## Type-check the API (mypy)
 	cd $(API_DIR) && mypy rekai
 
 .PHONY: test
-test: ## Run the API and SDK test suites (pytest)
+test: ## Run the API, Python SDK, and JS SDK test suites
 	cd $(API_DIR) && pytest -q
 	cd $(SDK_DIR) && pytest -q
+	cd $(JS_SDK_DIR) && npm test
 
 .PHONY: web-build
 web-build: ## Build the web app

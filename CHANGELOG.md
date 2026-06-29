@@ -35,6 +35,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Python SDK** — installable `rekai-client` package (`packages/python-sdk`)
   with `RekAIClient` (`chat`, `stream`, `models`, `usage`, `health`), BYOK,
   and fallback support.
+- **JavaScript/TypeScript SDK** — zero-dependency `@rekai/client`
+  (`packages/js-sdk`) mirroring the Python client, with TypeScript types and an
+  async-generator `stream()`.
 - **CI** — GitHub Actions for API (ruff, mypy, pytest), web (lint, build), and
   Docker image builds.
 - **Makefile** — common developer tasks (`make help`).

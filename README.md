@@ -121,7 +121,8 @@ RekAI/
 │   ├── api/   # FastAPI backend (router, cache, providers, BYOK)
 │   └── web/   # Next.js chat UI
 ├── packages/
-│   └── python-sdk/   # rekai-client: official Python client
+│   ├── python-sdk/   # rekai-client: official Python client
+│   └── js-sdk/       # @rekai/client: official JS/TS client
 ├── examples/  # curl / Python / JavaScript snippets
 ├── docs/      # architecture & guides
 ├── docker-compose.yml
