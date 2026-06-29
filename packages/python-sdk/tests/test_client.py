@@ -103,6 +103,26 @@ def test_stream_yields_deltas() -> None:
     assert "".join(chunks) == "Hello world"
 
 
+def test_stream_invokes_on_usage() -> None:
+    sse = (
+        'data: {"delta": "Hi"}\n\n'
+        'data: {"provider":"echo","model":"echo",'
+        '"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2},'
+        '"cost_usd":0.0,"estimated":false}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=sse)
+
+    client = make_client(handler)
+    seen: dict = {}
+    chunks = list(client.stream("echo", "hi", on_usage=lambda s: seen.update(s)))
+    assert "".join(chunks) == "Hi"
+    assert seen["usage"]["total_tokens"] == 2
+    assert seen["estimated"] is False
+
+
 def test_stream_raises_on_error_event() -> None:
     sse = 'data: {"error": "provider_error", "detail": "boom"}\n\ndata: [DONE]\n\n'
 

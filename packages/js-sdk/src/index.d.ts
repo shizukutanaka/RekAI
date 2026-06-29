@@ -8,6 +8,14 @@ export interface FallbackTarget {
   model?: string;
 }
 
+export interface StreamSummary {
+  provider: string;
+  model: string;
+  usage: Usage;
+  cost_usd: number | null;
+  estimated: boolean;
+}
+
 export interface ChatOptions {
   provider?: string;
   temperature?: number;
@@ -15,6 +23,8 @@ export interface ChatOptions {
   cache?: boolean;
   fallbacks?: FallbackTarget[];
   providerKey?: string;
+  /** Called once with the final usage summary during streaming. */
+  onUsage?: (summary: StreamSummary) => void;
 }
 
 export interface Usage {

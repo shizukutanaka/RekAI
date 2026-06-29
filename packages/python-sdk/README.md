@@ -30,8 +30,8 @@ result = client.chat(
     provider_key="sk-...",
 )
 
-# Streaming
-for chunk in client.stream("echo", "stream me"):
+# Streaming (with optional usage/cost callback)
+for chunk in client.stream("echo", "stream me", on_usage=lambda s: print("\n", s)):
     print(chunk, end="", flush=True)
 
 # Reliability: fall back to echo on upstream errors

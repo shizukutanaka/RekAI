@@ -18,6 +18,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `{"usage", "cost_usd", "estimated"}` summary event, and streamed requests are
   counted in `/v1/usage` and `/metrics` (previously only non-streamed were). The
   web chat shows token/cost on streamed replies.
+- **SDK streaming usage** — the Python (`on_usage`) and JS (`onUsage`) clients
+  now surface the final streaming usage/cost summary via an optional callback.
 - **Accurate streaming usage** — providers gained `stream_events()`; all five
   (echo, OpenAI via `stream_options`, Anthropic, Gemini, Ollama) report exact
   token counts during streaming (`estimated: false`), with text estimation as

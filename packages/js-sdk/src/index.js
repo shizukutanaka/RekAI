@@ -79,7 +79,8 @@ export class RekAIClient {
   }
 
   /**
-   * Stream a chat completion, yielding text chunks.
+   * Stream a chat completion, yielding text chunks. If `opts.onUsage` is given,
+   * it is called once with the final usage summary when the server reports it.
    * @param {string} model
    * @param {string|Array<{role:string,content:string}>} messages
    * @param {object} [opts]
@@ -118,6 +119,7 @@ export class RekAIClient {
           continue;
         }
         if (event.delta) yield event.delta;
+        else if (event.usage) opts.onUsage?.(event);
         else if (event.error) throw new RekAIError(event.detail || event.error);
       }
     }

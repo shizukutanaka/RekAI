@@ -30,8 +30,10 @@ await client.chat("gpt-4o-mini", [{ role: "user", content: "Write a haiku." }], 
   providerKey: "sk-...",
 });
 
-// Streaming
-for await (const chunk of client.stream("echo", "stream me")) {
+// Streaming (with optional usage/cost callback)
+for await (const chunk of client.stream("echo", "stream me", {
+  onUsage: (s) => console.log("\n", s),
+})) {
   process.stdout.write(chunk);
 }
 

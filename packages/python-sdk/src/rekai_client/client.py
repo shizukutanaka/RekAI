@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -158,8 +158,14 @@ class RekAIClient:
         temperature: float = 0.7,
         max_tokens: int | None = None,
         provider_key: str | None = None,
+        on_usage: Callable[[dict[str, Any]], None] | None = None,
     ) -> Iterator[str]:
-        """Yield response text chunks from the streaming endpoint."""
+        """Yield response text chunks from the streaming endpoint.
+
+        If ``on_usage`` is given, it is called once with the final usage summary
+        ``{"provider", "model", "usage", "cost_usd", "estimated"}`` when the
+        server reports it (just before the stream ends).
+        """
         payload = self._payload(model, messages, provider, temperature, max_tokens, True, None)
         with self._client.stream(
             "POST", "/v1/chat/stream", json=payload, headers=self._headers(provider_key)
@@ -177,6 +183,9 @@ class RekAIClient:
                     continue
                 if "delta" in event:
                     yield event["delta"]
+                elif "usage" in event:
+                    if on_usage is not None:
+                        on_usage(event)
                 elif "error" in event:
                     raise RekAIError(event.get("detail") or event["error"])
 

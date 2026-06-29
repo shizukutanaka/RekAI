@@ -43,6 +43,9 @@ before(async () => {
         const sse =
           'data: {"delta": "Hello"}\n\n' +
           'data: {"delta": " world"}\n\n' +
+          'data: {"provider":"echo","model":"echo",' +
+          '"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3},' +
+          '"cost_usd":0,"estimated":false}\n\n' +
           "data: [DONE]\n\n";
         return send(res, 200, sse, { "Content-Type": "text/event-stream" });
       }
@@ -99,6 +102,19 @@ test("stream yields deltas", async () => {
   const chunks = [];
   for await (const c of client.stream("echo", "hi")) chunks.push(c);
   assert.equal(chunks.join(""), "Hello world");
+});
+
+test("stream reports usage via onUsage", async () => {
+  const client = new RekAIClient(baseUrl);
+  let summary = null;
+  const chunks = [];
+  for await (const c of client.stream("echo", "hi", { onUsage: (s) => (summary = s) })) {
+    chunks.push(c);
+  }
+  assert.equal(chunks.join(""), "Hello world");
+  assert.ok(summary);
+  assert.equal(summary.usage.total_tokens, 3);
+  assert.equal(summary.estimated, false);
 });
 
 test("models, usage, health", async () => {
