@@ -104,6 +104,8 @@ class GeminiProvider(Provider):
             f"{request.model}:streamGenerateContent?alt=sse"
         )
         last_usage: dict | None = None
+        # Gemini streams a functionCall complete within a chunk; collect across chunks.
+        tool_calls: list[dict] = []
         try:
             async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
                 async with client.stream(
@@ -128,10 +130,18 @@ class GeminiProvider(Provider):
                         text = _extract_text(chunk)
                         if text:
                             yield StreamEvent(delta=text)
+                        calls = _extract_tool_calls(chunk)
+                        if calls:
+                            tool_calls.extend(calls)
                         if chunk.get("usageMetadata"):
                             last_usage = chunk["usageMetadata"]
         except httpx.HTTPError as exc:
             raise ProviderError(f"Gemini streaming request failed: {exc}") from exc
+        if tool_calls:
+            # Re-id sequentially since per-chunk indices may collide.
+            for i, call in enumerate(tool_calls):
+                call["id"] = f"call_{call['function']['name'] or 'fn'}_{i}"
+            yield StreamEvent(tool_calls=tool_calls)
         if last_usage is not None:
             prompt_tokens = last_usage.get("promptTokenCount", 0)
             completion_tokens = last_usage.get("candidatesTokenCount", 0)

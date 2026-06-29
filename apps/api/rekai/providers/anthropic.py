@@ -115,6 +115,9 @@ class AnthropicProvider(Provider):
         input_tokens = 0
         output_tokens = 0
         saw_usage = False
+        # tool_use blocks: id/name from content_block_start, args from
+        # input_json_delta fragments, keyed by block index.
+        tool_blocks: dict[int, dict] = {}
         try:
             async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
                 async with client.stream(
@@ -137,10 +140,26 @@ class AnthropicProvider(Provider):
                         except json.JSONDecodeError:
                             continue
                         etype = event.get("type")
-                        if etype == "content_block_delta":
-                            text = event.get("delta", {}).get("text")
+                        if etype == "content_block_start":
+                            block = event.get("content_block", {})
+                            if block.get("type") == "tool_use":
+                                tool_blocks[event.get("index", 0)] = {
+                                    "id": block.get("id", ""),
+                                    "type": "function",
+                                    "function": {
+                                        "name": block.get("name", ""),
+                                        "arguments": "",
+                                    },
+                                }
+                        elif etype == "content_block_delta":
+                            delta = event.get("delta", {})
+                            text = delta.get("text")
                             if text:
                                 yield StreamEvent(delta=text)
+                            elif delta.get("type") == "input_json_delta":
+                                slot = tool_blocks.get(event.get("index", 0))
+                                if slot is not None:
+                                    slot["function"]["arguments"] += delta.get("partial_json", "")
                         elif etype == "message_start":
                             usage = event.get("message", {}).get("usage", {})
                             input_tokens = usage.get("input_tokens", input_tokens)
@@ -153,6 +172,8 @@ class AnthropicProvider(Provider):
                                 saw_usage = True
         except httpx.HTTPError as exc:
             raise ProviderError(f"Anthropic streaming request failed: {exc}") from exc
+        if tool_blocks:
+            yield StreamEvent(tool_calls=[tool_blocks[i] for i in sorted(tool_blocks)])
         if saw_usage:
             yield StreamEvent(
                 usage=Usage(

@@ -143,3 +143,32 @@ async def test_anthropic_chat_forwards_and_returns_tool_calls(monkeypatch) -> No
     # tool_use blocks translated back to OpenAI tool_calls.
     assert result.tool_calls is not None
     assert result.tool_calls[0]["function"]["name"] == "get_weather"
+
+
+async def test_anthropic_stream_events_assembles_tool_calls(monkeypatch) -> None:
+    from tests.test_streaming import _FakeClient
+
+    lines = [
+        'data: {"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":0}}}',
+        'data: {"type":"content_block_start","index":0,'
+        '"content_block":{"type":"tool_use","id":"tu_1","name":"get_weather"}}',
+        'data: {"type":"content_block_delta","index":0,'
+        '"delta":{"type":"input_json_delta","partial_json":"{\\"ci"}}',
+        'data: {"type":"content_block_delta","index":0,'
+        '"delta":{"type":"input_json_delta","partial_json":"ty\\":\\"Tokyo\\"}"}}',
+        'data: {"type":"message_delta","delta":{},"usage":{"output_tokens":4}}',
+        'data: {"type":"message_stop"}',
+    ]
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: _FakeClient(lines))
+
+    req = ChatRequest(
+        model="claude-sonnet-4-6",
+        messages=[ChatMessage(role="user", content="weather?")],
+        tools=[OPENAI_TOOL],
+    )
+    events = [e async for e in AnthropicProvider().stream_events(req, api_key="sk-ant")]
+    tool_calls = next((e.tool_calls for e in events if e.tool_calls is not None), None)
+    assert tool_calls is not None
+    assert tool_calls[0]["id"] == "tu_1"
+    assert tool_calls[0]["function"]["name"] == "get_weather"
+    assert tool_calls[0]["function"]["arguments"] == '{"city":"Tokyo"}'

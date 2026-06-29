@@ -17,7 +17,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (OpenAI `tools`/`tool_choice`/`tool_calls` ↔ Anthropic
   `input_schema`/`tool_use`/`tool_result`). **Gemini** likewise via
   `functionDeclarations`/`functionCall`/`functionResponse` — uniform tool
-  calling across OpenAI, Anthropic, and Gemini through one API.
+  calling across OpenAI, Anthropic, and Gemini through one API, in both
+  non-streaming and streaming modes.
 - **Exact provider routing from the web** — the chat UI sends the selected
   model's provider (from `/v1/models`), so custom and explicitly-chosen
   providers route correctly instead of falling back to the default.

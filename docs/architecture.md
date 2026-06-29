@@ -115,8 +115,9 @@ providers that support them (OpenAI and OpenAI-compatible backends). The model's
 `tool_calls` are returned on `ChatResponse`. Messages carry the round-trip
 fields (`tool_calls`, `tool_call_id`, `name`) and `content` is optional, so a
 full tools conversation can be replayed. Providers without tool support ignore
-these fields. For **streaming**, OpenAI's tool-call deltas are accumulated by
-index and returned in the final summary event's `tool_calls`.
+these fields. For **streaming**, tool calls are assembled and returned in the
+final summary event's `tool_calls` for all three providers (OpenAI/Anthropic
+deltas accumulated by index; Gemini `functionCall` parts collected).
 
 Tools work natively on **Anthropic** too: OpenAI-style `tools`/`tool_choice` are
 translated to Anthropic's `tools`/`input_schema`/`tool_choice`, assistant

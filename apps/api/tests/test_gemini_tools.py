@@ -150,3 +150,26 @@ async def test_gemini_chat_forwards_and_returns_tool_calls(monkeypatch) -> None:
     assert captured["payload"]["toolConfig"]["functionCallingConfig"]["mode"] == "AUTO"
     assert result.tool_calls is not None
     assert result.tool_calls[0]["function"]["name"] == "get_weather"
+
+
+async def test_gemini_stream_events_assembles_tool_calls(monkeypatch) -> None:
+    from tests.test_streaming import _FakeClient
+
+    lines = [
+        'data: {"candidates":[{"content":{"parts":[{"text":"checking"}]}}]}',
+        'data: {"candidates":[{"content":{"parts":['
+        '{"functionCall":{"name":"get_weather","args":{"city":"Tokyo"}}}]}}],'
+        '"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":2,"totalTokenCount":6}}',
+    ]
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: _FakeClient(lines))
+
+    req = ChatRequest(
+        model="gemini-1.5-pro",
+        messages=[ChatMessage(role="user", content="weather?")],
+        tools=[OPENAI_TOOL],
+    )
+    events = [e async for e in GeminiProvider().stream_events(req, api_key="g-key")]
+    tool_calls = next((e.tool_calls for e in events if e.tool_calls is not None), None)
+    assert tool_calls is not None
+    assert tool_calls[0]["function"]["name"] == "get_weather"
+    assert json.loads(tool_calls[0]["function"]["arguments"]) == {"city": "Tokyo"}
