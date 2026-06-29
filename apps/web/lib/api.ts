@@ -24,6 +24,28 @@ export function formatCost(cost: number | null | undefined): string {
   return `$${cost.toFixed(2)}`;
 }
 
+/**
+ * Build a user-friendly Error from a failed response. A 429 yields a clear
+ * "rate limited — retry in Ns" message sourced from the `Retry-After` header;
+ * otherwise the API's `detail`/`error` body is used.
+ */
+export async function errorFromResponse(res: Response): Promise<Error> {
+  if (res.status === 429) {
+    const retry = res.headers.get("Retry-After");
+    return new Error(
+      retry ? `Rate limited — retry in ${retry}s.` : "Rate limited — slow down.",
+    );
+  }
+  let detail = `Request failed (${res.status})`;
+  try {
+    const body = await res.json();
+    detail = body.detail || body.error || detail;
+  } catch {
+    /* ignore */
+  }
+  return new Error(detail);
+}
+
 export interface ModelInfo {
   id: string;
   provider: string;
@@ -97,14 +119,7 @@ export async function sendChat(params: {
   });
 
   if (!res.ok) {
-    let detail = `Request failed (${res.status})`;
-    try {
-      const body = await res.json();
-      detail = body.detail || body.error || detail;
-    } catch {
-      /* ignore */
-    }
-    throw new Error(detail);
+    throw await errorFromResponse(res);
   }
   return res.json();
 }
@@ -143,14 +158,7 @@ export async function streamChat(
   });
 
   if (!res.ok || !res.body) {
-    let detail = `Request failed (${res.status})`;
-    try {
-      const body = await res.json();
-      detail = body.detail || body.error || detail;
-    } catch {
-      /* ignore */
-    }
-    throw new Error(detail);
+    throw await errorFromResponse(res);
   }
 
   const reader = res.body.getReader();
@@ -241,14 +249,7 @@ export async function sendEmbeddings(params: {
   });
 
   if (!res.ok) {
-    let detail = `Request failed (${res.status})`;
-    try {
-      const body = await res.json();
-      detail = body.detail || body.error || detail;
-    } catch {
-      /* ignore */
-    }
-    throw new Error(detail);
+    throw await errorFromResponse(res);
   }
   return res.json();
 }

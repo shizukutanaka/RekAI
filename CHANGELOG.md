@@ -7,6 +7,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Graceful rate-limit UX in the web chat** — a 429 now shows a clear
+  "Rate limited — retry in Ns." message (from `Retry-After`) instead of a
+  generic failure. Required two fixes so the browser can actually read the
+  response: CORS is now the outermost middleware (so a short-circuit 429 still
+  carries CORS headers) and the custom headers (`Retry-After`, `X-RateLimit-*`,
+  `X-Request-ID`, `X-Response-Time-Ms`) are exposed via
+  `Access-Control-Expose-Headers`. CORS preflight (`OPTIONS`) no longer consumes
+  rate-limit budget. The web fetch helpers share one `errorFromResponse()`.
 - **Rate-limit headers** — every `/v1/*` response now carries
   `X-RateLimit-Limit` and `X-RateLimit-Remaining`, and rate-limited responses
   add a standard `Retry-After` (whole seconds until a token frees up, also

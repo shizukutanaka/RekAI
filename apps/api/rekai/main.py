@@ -75,12 +75,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         "caching and BYOK.",
         lifespan=lifespan,
     )
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origin_list,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
 
     cache: CacheBackend = build_cache(settings)
     limiter = RateLimiter(settings.rate_limit_requests, settings.rate_limit_window_seconds)
@@ -104,7 +98,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # --- middleware: rate limiting ---------------------------------------
     @app.middleware("http")
     async def _rate_limit(request: Request, call_next):
-        if settings.rate_limit_enabled and request.url.path.startswith("/v1/"):
+        # CORS preflight (OPTIONS) must not consume budget, or the browser sees a
+        # 429 on the preflight ("Failed to fetch") instead of the real response.
+        if (
+            settings.rate_limit_enabled
+            and request.method != "OPTIONS"
+            and request.url.path.startswith("/v1/")
+        ):
             client = request.client.host if request.client else "anonymous"
             limit = str(settings.rate_limit_requests)
             if not limiter.allow(client):
@@ -147,6 +147,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request_id,
         )
         return response
+
+    # CORS is added last so it wraps the others (outermost): short-circuit
+    # responses like a 429 from the rate limiter still get CORS headers, so the
+    # browser can read them instead of failing the fetch.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origin_list,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        # Expose custom response headers so browser JS can read them (they are
+        # not CORS-safelisted by default).
+        expose_headers=[
+            "Retry-After",
+            "X-RateLimit-Limit",
+            "X-RateLimit-Remaining",
+            "X-Request-ID",
+            "X-Response-Time-Ms",
+        ],
+    )
 
     # --- routes -----------------------------------------------------------
     @app.get("/health", response_model=HealthResponse, tags=["system"])

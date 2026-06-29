@@ -75,6 +75,27 @@ def test_endpoint_sets_ratelimit_headers() -> None:
     assert resp.headers["X-RateLimit-Remaining"] == "4"
 
 
+def test_options_preflight_not_rate_limited() -> None:
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        rate_limit_enabled=True,
+        rate_limit_requests=1,
+        rate_limit_window_seconds=60,
+    )
+    client = TestClient(create_app(settings))
+    # Consume the only token, then a CORS preflight must still pass (not 429).
+    assert client.post("/v1/chat", json={"model": "echo", "messages": []}).status_code != 429
+    pre = client.options(
+        "/v1/chat",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert pre.status_code != 429
+
+
 def test_endpoint_429_sets_retry_after() -> None:
     settings = Settings(
         environment="test",
@@ -86,7 +107,11 @@ def test_endpoint_429_sets_retry_after() -> None:
     client = TestClient(create_app(settings))
     body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
     assert client.post("/v1/chat", json=body).status_code == 200
-    blocked = client.post("/v1/chat", json=body)
+    blocked = client.post("/v1/chat", json=body, headers={"Origin": "http://localhost:3000"})
     assert blocked.status_code == 429
     assert int(blocked.headers["Retry-After"]) >= 1
     assert blocked.json()["error"] == "rate_limited"
+    # CORS is outermost, so even this short-circuit 429 is browser-readable.
+    assert blocked.headers["access-control-allow-origin"] == "*"
+    # Retry-After is exposed to browser JS (not CORS-safelisted by default).
+    assert "retry-after" in blocked.headers["access-control-expose-headers"].lower()

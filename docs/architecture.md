@@ -102,7 +102,10 @@ client-supplied one), records latency, and logs an access line
 `X-Request-ID` and `X-Response-Time-Ms` are returned on every response,
 including errors, so requests can be traced end to end. `/v1/*` responses also
 carry `X-RateLimit-Limit`/`X-RateLimit-Remaining`, and a 429 adds `Retry-After`
-(seconds until the client's bucket refills a token).
+(seconds until the client's bucket refills a token). CORS is the outermost
+middleware and exposes these custom headers (`Access-Control-Expose-Headers`),
+so even a short-circuit 429 is readable by browser JS; preflight `OPTIONS`
+requests don't consume rate-limit budget.
 
 Counters live in memory for a fast, lock-protected request path (the standard
 per-instance model for Prometheus `/metrics`). When `REKAI_REDIS_URL` is set,

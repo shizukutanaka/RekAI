@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { cosineSimilarity, formatCost, modelsOfType, parseSSEFrame } from "./api";
+import {
+  cosineSimilarity,
+  errorFromResponse,
+  formatCost,
+  modelsOfType,
+  parseSSEFrame,
+} from "./api";
 
 describe("formatCost", () => {
   it("returns empty string for null/undefined (unknown price)", () => {
@@ -56,6 +62,32 @@ describe("modelsOfType", () => {
 
   it("treats a missing type as chat", () => {
     expect(modelsOfType(models, "chat").map((m) => m.id)).toEqual(["gpt-4o", "legacy"]);
+  });
+});
+
+describe("errorFromResponse", () => {
+  it("uses Retry-After for a 429", async () => {
+    const res = new Response(JSON.stringify({ detail: "Too many requests." }), {
+      status: 429,
+      headers: { "Retry-After": "30" },
+    });
+    const err = await errorFromResponse(res);
+    expect(err.message).toBe("Rate limited — retry in 30s.");
+  });
+
+  it("falls back for a 429 with no header", async () => {
+    const res = new Response("nope", { status: 429 });
+    expect((await errorFromResponse(res)).message).toBe("Rate limited — slow down.");
+  });
+
+  it("uses the body detail for other errors", async () => {
+    const res = new Response(JSON.stringify({ detail: "no key" }), { status: 401 });
+    expect((await errorFromResponse(res)).message).toBe("no key");
+  });
+
+  it("falls back to the status when the body is not JSON", async () => {
+    const res = new Response("boom", { status: 500 });
+    expect((await errorFromResponse(res)).message).toBe("Request failed (500)");
   });
 });
 
