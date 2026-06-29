@@ -24,6 +24,7 @@ uvicorn rekai.main:app --reload
 | GET    | `/metrics`    | Prometheus-style metrics                 |
 | GET    | `/v1/models`  | Known models per provider                |
 | POST   | `/v1/chat`    | Chat completion (router + cache + BYOK)  |
+| POST   | `/v1/chat/stream` | Streaming chat completion (SSE)      |
 
 ### Example
 

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from rekai import __version__
 from rekai.cache import CacheBackend, build_cache
@@ -14,6 +16,7 @@ from rekai.metrics import metrics
 from rekai.providers import provider_names
 from rekai.providers.base import ProviderError
 from rekai.rate_limit import RateLimiter
+from rekai.router import select_provider
 from rekai.schemas import (
     ChatRequest,
     ChatResponse,
@@ -121,6 +124,50 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         cache_backend: CacheBackend = Depends(get_cache),
     ) -> ChatResponse:
         return await handle_chat(request, x_provider_key, config, cache_backend)
+
+    @app.post(
+        "/v1/chat/stream",
+        tags=["chat"],
+        responses={
+            200: {"content": {"text/event-stream": {}}},
+            401: {"model": ErrorResponse},
+            429: {"model": ErrorResponse},
+            502: {"model": ErrorResponse},
+        },
+    )
+    async def chat_stream(
+        request: ChatRequest,
+        x_provider_key: str | None = Header(default=None, alias="X-Provider-Key"),
+        config: Settings = Depends(get_config),
+    ) -> StreamingResponse:
+        """Stream a chat completion as Server-Sent Events.
+
+        Emits ``data: {"delta": "..."}`` events followed by a terminating
+        ``data: [DONE]``. Streaming responses are not cached.
+        """
+        provider_name, provider = select_provider(request, config)
+        metrics.record_request(provider_name)
+
+        async def event_source():
+            try:
+                async for delta in provider.stream(request, x_provider_key):
+                    if delta:
+                        yield f"data: {json.dumps({'delta': delta})}\n\n"
+            except ProviderError as exc:
+                metrics.record_error()
+                payload = {"error": "provider_error", "detail": str(exc)}
+                yield f"data: {json.dumps(payload)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(
+            event_source(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "X-RekAI-Provider": provider_name,
+            },
+        )
 
     return app
 

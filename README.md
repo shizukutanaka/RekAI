@@ -13,6 +13,7 @@ RekAI sits between your application and multiple LLM providers (OpenAI, Ollama, 
 
 - **Provider abstraction** — one API, many backends (`openai`, `anthropic`, `ollama`, plus an `echo` provider for local dev/tests).
 - **Smart routing** — pick a provider explicitly, or let RekAI choose by model name / configured default.
+- **Streaming** — Server-Sent Events at `/v1/chat/stream` for token-by-token responses.
 - **Response cache** — Redis-backed with an automatic in-memory fallback. Identical requests are served instantly and for free.
 - **BYOK** — users supply their own provider key per request (`X-Provider-Key`); keys are never persisted.
 - **Rate limiting** — simple per-client token bucket out of the box.

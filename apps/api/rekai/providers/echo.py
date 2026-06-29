@@ -6,6 +6,8 @@ without any external API or credentials.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+
 from rekai.providers.base import Provider, ProviderResult
 from rekai.schemas import ChatRequest, Usage
 
@@ -36,6 +38,13 @@ class EchoProvider(Provider):
                 total_tokens=prompt_tokens + completion_tokens,
             ),
         )
+
+    async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
+        result = await self.chat(request, api_key)
+        # Emit word by word so the streaming path is visibly incremental.
+        words = result.content.split(" ")
+        for i, word in enumerate(words):
+            yield word if i == 0 else " " + word
 
     async def list_models(self, api_key: str | None) -> list[str]:
         return ["echo"]

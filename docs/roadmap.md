@@ -34,6 +34,9 @@ is a self-hostable AI gateway that runs with a single `docker compose up`.
 - [x] Rate limiting
 
 ### M5 — Release
+- [x] Anthropic (Claude) provider
+- [x] Streaming responses (SSE)
+- [x] Client examples (curl, Python, JavaScript)
 - [ ] Demo deployment
 - [ ] GitHub Release + release notes
 - [ ] Examples (`docs/`, client snippets)

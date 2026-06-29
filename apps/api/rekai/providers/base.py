@@ -8,6 +8,7 @@ implementing this small interface and registering it.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
 from rekai.schemas import ChatRequest, Usage
@@ -44,6 +45,16 @@ class Provider(ABC):
     @abstractmethod
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
         """Execute a chat completion."""
+
+    async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
+        """Yield response text incrementally.
+
+        The default implementation falls back to a single :meth:`chat` call and
+        yields the whole answer as one chunk, so every provider supports the
+        streaming endpoint even without native streaming.
+        """
+        result = await self.chat(request, api_key)
+        yield result.content
 
     async def list_models(self, api_key: str | None) -> list[str]:
         """Return known model ids. Override when the backend can enumerate them."""

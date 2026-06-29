@@ -50,6 +50,15 @@ ChatResponse
    `mistral*`, `qwen*`, `gemma*`, `phi*` → Ollama; `echo` → Echo).
 3. Otherwise the configured `REKAI_DEFAULT_PROVIDER` is used.
 
+## Streaming
+
+`POST /v1/chat/stream` returns `text/event-stream`. Each `Provider` implements
+`stream()`; the base class falls back to a single `chat()` call so every
+provider works on the streaming path even without native support. The endpoint
+emits `data: {"delta": "..."}` events and a terminating `data: [DONE]`. Errors
+are delivered as a `data: {"error": ...}` event rather than an HTTP status, since
+the stream has already started. Streamed responses are not cached.
+
 ## Caching
 
 The cache key is a SHA-256 of the `(provider, model, temperature, max_tokens,
