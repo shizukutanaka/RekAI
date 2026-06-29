@@ -24,7 +24,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   OpenAI-compatible backends can advertise their own embedding models via
   `REKAI_CUSTOM_EMBEDDING_MODELS`. Runnable
   `examples/{python,javascript}/embeddings.{py,mjs}` show a cosine-similarity
-  demo.
+  demo, and `examples/python/semantic_search.py` ranks a corpus against a query
+  (the core of RAG retrieval).
 - **Tool / function calling** — `ChatRequest` accepts OpenAI-style `tools` and
   `tool_choice` (passed through); the model's `tool_calls` are returned on
   `ChatResponse`. Messages support `tool_calls`/`tool_call_id`/`name` and

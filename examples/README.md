@@ -20,6 +20,7 @@ matching model, e.g. `MODEL=gpt-4o-mini`.
 | `python/stream.py`       | Python 3 (stdlib) | `python python/stream.py`         |
 | `python/tools.py`        | Python 3 (stdlib) | `python python/tools.py` (needs a tool-capable model + key) |
 | `python/embeddings.py`   | Python 3 (stdlib) | `python python/embeddings.py`     |
+| `python/semantic_search.py` | Python 3 (stdlib) | `python python/semantic_search.py "your query"` |
 | `javascript/chat.mjs`    | Node 18+       | `node javascript/chat.mjs`           |
 | `javascript/embeddings.mjs` | Node 18+    | `node javascript/embeddings.mjs`     |
 
