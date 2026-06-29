@@ -100,7 +100,9 @@ The outermost middleware assigns each request an `X-Request-ID` (or propagates a
 client-supplied one), records latency, and logs an access line
 (`METHOD path -> status Nms id=...`) under the `rekai.access` logger. Both
 `X-Request-ID` and `X-Response-Time-Ms` are returned on every response,
-including errors, so requests can be traced end to end.
+including errors, so requests can be traced end to end. `/v1/*` responses also
+carry `X-RateLimit-Limit`/`X-RateLimit-Remaining`, and a 429 adds `Retry-After`
+(seconds until the client's bucket refills a token).
 
 Counters live in memory for a fast, lock-protected request path (the standard
 per-instance model for Prometheus `/metrics`). When `REKAI_REDIS_URL` is set,

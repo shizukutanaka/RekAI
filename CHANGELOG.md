@@ -7,10 +7,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
-- **`Retry-After` on 429s** — rate-limited responses now carry a standard
-  `Retry-After` header (whole seconds until a token frees up) and the detail
-  message echoes it, so clients can back off precisely. `RateLimiter` gained a
-  non-consuming `retry_after()` peek.
+- **Rate-limit headers** — every `/v1/*` response now carries
+  `X-RateLimit-Limit` and `X-RateLimit-Remaining`, and rate-limited responses
+  add a standard `Retry-After` (whole seconds until a token frees up, also
+  echoed in the detail). `RateLimiter` gained non-consuming `remaining()` and
+  `retry_after()` peeks.
 - **Container healthchecks & readiness gating** — the web image gained a
   `HEALTHCHECK` (the API already had one), and Docker Compose now starts `web`
   only once `api` is `service_healthy` (which itself waits on Redis). A

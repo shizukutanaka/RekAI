@@ -50,6 +50,31 @@ def test_rate_limiter_retry_after() -> None:
     assert limiter.retry_after("client") == wait
 
 
+def test_rate_limiter_remaining() -> None:
+    limiter = RateLimiter(capacity=3, window=60)
+    assert limiter.remaining("client") == 3  # full, non-consuming
+    assert limiter.remaining("client") == 3  # still full (peek)
+    limiter.allow("client")
+    assert limiter.remaining("client") == 2
+
+
+def test_endpoint_sets_ratelimit_headers() -> None:
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        rate_limit_enabled=True,
+        rate_limit_requests=5,
+        rate_limit_window_seconds=60,
+    )
+    client = TestClient(create_app(settings))
+    body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+    resp = client.post("/v1/chat", json=body)
+    assert resp.status_code == 200
+    assert resp.headers["X-RateLimit-Limit"] == "5"
+    # One token consumed by this request -> 4 remain.
+    assert resp.headers["X-RateLimit-Remaining"] == "4"
+
+
 def test_endpoint_429_sets_retry_after() -> None:
     settings = Settings(
         environment="test",

@@ -30,6 +30,14 @@ class RateLimiter:
         self._buckets[key] = (tokens - 1.0, now)
         return True
 
+    def remaining(self, key: str) -> int:
+        """Whole tokens currently available to ``key`` — a non-consuming peek."""
+        now = time.time()
+        tokens, last = self._buckets.get(key, (float(self.capacity), now))
+        refill = (now - last) * (self.capacity / self.window)
+        tokens = min(self.capacity, tokens + refill)
+        return int(tokens)
+
     def retry_after(self, key: str) -> int:
         """Whole seconds until ``key`` has a token again (>= 1; 0 if available now).
 

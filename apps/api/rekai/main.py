@@ -106,6 +106,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def _rate_limit(request: Request, call_next):
         if settings.rate_limit_enabled and request.url.path.startswith("/v1/"):
             client = request.client.host if request.client else "anonymous"
+            limit = str(settings.rate_limit_requests)
             if not limiter.allow(client):
                 metrics.record_error()
                 retry_after = limiter.retry_after(client)
@@ -115,8 +116,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         error="rate_limited",
                         detail=f"Too many requests. Retry in {retry_after}s.",
                     ).model_dump(),
-                    headers={"Retry-After": str(retry_after)},
+                    headers={
+                        "Retry-After": str(retry_after),
+                        "X-RateLimit-Limit": limit,
+                        "X-RateLimit-Remaining": "0",
+                    },
                 )
+            response = await call_next(request)
+            response.headers["X-RateLimit-Limit"] = limit
+            response.headers["X-RateLimit-Remaining"] = str(limiter.remaining(client))
+            return response
         return await call_next(request)
 
     # --- middleware: request id + latency (outermost) --------------------
