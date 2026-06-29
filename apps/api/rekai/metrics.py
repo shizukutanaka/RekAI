@@ -13,6 +13,7 @@ class Metrics:
         self.cache_misses_total = 0
         self.errors_total = 0
         self.tokens_total = 0
+        self.cost_usd_total = 0.0
         self.requests_by_provider: dict[str, int] = {}
 
     def record_request(self, provider: str) -> None:
@@ -35,6 +36,24 @@ class Metrics:
         with self._lock:
             self.tokens_total += count
 
+    def record_cost(self, cost_usd: float | None) -> None:
+        if cost_usd:
+            with self._lock:
+                self.cost_usd_total += cost_usd
+
+    def snapshot(self) -> dict:
+        """Return a copy of the current counters as plain data."""
+        with self._lock:
+            return {
+                "requests_total": self.requests_total,
+                "cache_hits_total": self.cache_hits_total,
+                "cache_misses_total": self.cache_misses_total,
+                "errors_total": self.errors_total,
+                "tokens_total": self.tokens_total,
+                "cost_usd_total": round(self.cost_usd_total, 6),
+                "requests_by_provider": dict(self.requests_by_provider),
+            }
+
     def render(self) -> str:
         """Render metrics in Prometheus text exposition format."""
         lines = [
@@ -53,6 +72,9 @@ class Metrics:
             "# HELP rekai_tokens_total Total tokens accounted across responses.",
             "# TYPE rekai_tokens_total counter",
             f"rekai_tokens_total {self.tokens_total}",
+            "# HELP rekai_cost_usd_total Approximate cumulative USD cost.",
+            "# TYPE rekai_cost_usd_total counter",
+            f"rekai_cost_usd_total {round(self.cost_usd_total, 6)}",
         ]
         for provider, count in sorted(self.requests_by_provider.items()):
             lines.append(f'rekai_requests_total{{provider="{provider}"}} {count}')

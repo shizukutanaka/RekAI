@@ -15,6 +15,7 @@ RekAI sits between your application and multiple LLM providers (OpenAI, Ollama, 
 - **Smart routing** — pick a provider explicitly, or let RekAI choose by model name / configured default.
 - **Streaming** — Server-Sent Events at `/v1/chat/stream` for token-by-token responses.
 - **Response cache** — Redis-backed with an automatic in-memory fallback. Identical requests are served instantly and for free.
+- **Cost awareness** — each response carries an estimated USD cost; cumulative spend is exposed at `/v1/usage`.
 - **BYOK** — users supply their own provider key per request (`X-Provider-Key`); keys are never persisted.
 - **Rate limiting** — simple per-client token bucket out of the box.
 - **OpenAPI** — auto-generated docs at `/docs` and a machine-readable schema at `/openapi.json`.

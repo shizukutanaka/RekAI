@@ -36,6 +36,7 @@ is a self-hostable AI gateway that runs with a single `docker compose up`.
 ### M5 — Release
 - [x] Anthropic (Claude) provider
 - [x] Streaming responses (SSE)
+- [x] Cost estimation + `/v1/usage` summary
 - [x] Client examples (curl, Python, JavaScript)
 - [ ] Demo deployment
 - [ ] GitHub Release + release notes

@@ -11,8 +11,17 @@ export interface ChatResponse {
   model: string;
   content: string;
   usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  cost_usd: number | null;
   cached: boolean;
   created: number;
+}
+
+/** Format an estimated USD cost for display, or "" when unknown. */
+export function formatCost(cost: number | null | undefined): string {
+  if (cost === null || cost === undefined) return "";
+  if (cost === 0) return "free";
+  if (cost < 0.01) return `$${cost.toFixed(4)}`;
+  return `$${cost.toFixed(2)}`;
 }
 
 export interface ModelInfo {

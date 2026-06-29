@@ -38,6 +38,10 @@ class ChatResponse(BaseModel):
     model: str
     content: str
     usage: Usage
+    cost_usd: float | None = Field(
+        default=None,
+        description="Approximate USD cost. 0.0 for free/local providers, null if unknown.",
+    )
     cached: bool = False
     created: int
 
@@ -49,6 +53,16 @@ class ModelInfo(BaseModel):
 
 class ModelsResponse(BaseModel):
     data: list[ModelInfo]
+
+
+class UsageSummary(BaseModel):
+    requests_total: int
+    cache_hits_total: int
+    cache_misses_total: int
+    errors_total: int
+    tokens_total: int
+    cost_usd_total: float
+    requests_by_provider: dict[str, int]
 
 
 class HealthResponse(BaseModel):

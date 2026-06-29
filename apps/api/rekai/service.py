@@ -10,6 +10,7 @@ from rekai.cache import CacheBackend, cache_key
 from rekai.config import Settings
 from rekai.logging_config import get_logger
 from rekai.metrics import metrics
+from rekai.pricing import estimate_cost
 from rekai.router import select_provider
 from rekai.schemas import ChatRequest, ChatResponse, Usage
 
@@ -38,14 +39,18 @@ async def handle_chat(
         metrics.record_cache(hit=False)
 
     result = await provider.chat(request, api_key)
-    metrics.record_tokens(result.usage.total_tokens)
+    usage = result.usage or Usage()
+    cost_usd = estimate_cost(provider_name, result.model, usage)
+    metrics.record_tokens(usage.total_tokens)
+    metrics.record_cost(cost_usd)
 
     response = ChatResponse(
         id=f"rekai-{uuid.uuid4().hex[:24]}",
         provider=provider_name,
         model=result.model,
         content=result.content,
-        usage=result.usage or Usage(),
+        usage=usage,
+        cost_usd=cost_usd,
         cached=False,
         created=int(time.time()),
     )

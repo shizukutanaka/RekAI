@@ -36,6 +36,7 @@ ChatResponse
 | `rekai/service.py`      | Orchestrate route → cache → provider → cache               |
 | `rekai/cache.py`        | Cache key + Redis/memory/null backends                    |
 | `rekai/providers/`      | Provider abstraction and concrete backends                |
+| `rekai/pricing.py`      | Per-model price table + cost estimation                   |
 | `rekai/rate_limit.py`   | Per-client token bucket                                   |
 | `rekai/security.py`     | Optional key encryption helpers, key masking              |
 | `rekai/metrics.py`      | Prometheus-style counters                                 |
@@ -69,6 +70,15 @@ messages)` tuple, so identical requests collapse to one upstream call. Backends:
 - **Null** when caching is disabled.
 
 A client can opt a single request out with `"cache": false`.
+
+## Cost estimation
+
+Each non-streamed response carries an approximate `cost_usd`, computed by
+`rekai/pricing.py` from a per-model price table (`(input, output)` USD per 1M
+tokens). Free/local providers (`echo`, `ollama`) report `0.0`; unpriced models
+report `null`. Cumulative cost is exposed at `/v1/usage` and `/metrics`
+(`rekai_cost_usd_total`). Prices are approximate and meant for budgeting, not
+billing — extend or override them with `pricing.register_price()`.
 
 ## BYOK
 

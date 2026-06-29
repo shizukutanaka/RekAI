@@ -24,6 +24,7 @@ from rekai.schemas import (
     HealthResponse,
     ModelInfo,
     ModelsResponse,
+    UsageSummary,
 )
 from rekai.service import handle_chat
 
@@ -93,6 +94,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/metrics", tags=["system"], response_class=PlainTextResponse)
     async def metrics_endpoint() -> str:
         return metrics.render()
+
+    @app.get("/v1/usage", response_model=UsageSummary, tags=["system"])
+    async def usage_summary() -> UsageSummary:
+        return UsageSummary(**metrics.snapshot())
 
     @app.get("/v1/models", response_model=ModelsResponse, tags=["chat"])
     async def list_models() -> ModelsResponse:

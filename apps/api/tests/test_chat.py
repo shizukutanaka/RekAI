@@ -12,6 +12,20 @@ def test_chat_echo(client: TestClient) -> None:
     assert body["content"] == "Echo: hello"
     assert body["cached"] is False
     assert body["usage"]["total_tokens"] > 0
+    # echo is a free provider -> cost is exactly 0.0 (not null).
+    assert body["cost_usd"] == 0.0
+
+
+def test_usage_summary_accumulates(client: TestClient) -> None:
+    before = client.get("/v1/usage").json()["requests_total"]
+    client.post(
+        "/v1/chat",
+        json={"model": "echo", "messages": [{"role": "user", "content": "count me"}]},
+    )
+    after = client.get("/v1/usage").json()
+    assert after["requests_total"] == before + 1
+    assert "echo" in after["requests_by_provider"]
+    assert isinstance(after["cost_usd_total"], (int, float))
 
 
 def test_chat_is_cached_on_second_call(client: TestClient) -> None:

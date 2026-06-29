@@ -5,6 +5,7 @@ import {
   ChatMessage,
   ModelInfo,
   fetchModels,
+  formatCost,
   getStoredKey,
   sendChat,
   streamChat,
@@ -14,6 +15,7 @@ interface DisplayMessage extends ChatMessage {
   provider?: string;
   cached?: boolean;
   tokens?: number;
+  cost?: number | null;
   streaming?: boolean;
 }
 
@@ -81,6 +83,7 @@ export default function ChatPage() {
             provider: res.provider,
             cached: res.cached,
             tokens: res.usage.total_tokens,
+            cost: res.cost_usd,
           },
         ]);
       }
@@ -149,6 +152,7 @@ export default function ChatPage() {
                 {m.provider}
                 {m.cached ? " · cached ⚡" : ""}
                 {typeof m.tokens === "number" ? ` · ${m.tokens} tokens` : ""}
+                {formatCost(m.cost) ? ` · ${formatCost(m.cost)}` : ""}
               </span>
             )}
           </div>
