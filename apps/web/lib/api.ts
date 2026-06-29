@@ -70,6 +70,7 @@ export async function sendChat(params: {
   providerKey?: string;
   temperature?: number;
   maxTokens?: number;
+  provider?: string;
 }): Promise<ChatResponse> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (params.providerKey) headers["X-Provider-Key"] = params.providerKey;
@@ -80,6 +81,7 @@ export async function sendChat(params: {
     body: JSON.stringify({
       model: params.model,
       messages: params.messages,
+      ...(params.provider ? { provider: params.provider } : {}),
       ...(params.temperature != null ? { temperature: params.temperature } : {}),
       ...(params.maxTokens ? { max_tokens: params.maxTokens } : {}),
     }),
@@ -109,6 +111,7 @@ export async function streamChat(
     providerKey?: string;
     temperature?: number;
     maxTokens?: number;
+    provider?: string;
   },
   onDelta: (text: string) => void,
   signal?: AbortSignal,
@@ -123,6 +126,7 @@ export async function streamChat(
     body: JSON.stringify({
       model: params.model,
       messages: params.messages,
+      ...(params.provider ? { provider: params.provider } : {}),
       ...(params.temperature != null ? { temperature: params.temperature } : {}),
       ...(params.maxTokens ? { max_tokens: params.maxTokens } : {}),
     }),

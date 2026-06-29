@@ -118,7 +118,14 @@ export default function ChatPage() {
         let summary: StreamSummary | null = null;
         try {
           await streamChat(
-            { model, messages: wire, providerKey, temperature, maxTokens: maxTokensNum },
+            {
+              model,
+              messages: wire,
+              providerKey,
+              temperature,
+              maxTokens: maxTokensNum,
+              provider: selectedProvider,
+            },
             (delta) => {
               setMessages((prev) => {
                 const next = [...prev];
@@ -162,6 +169,7 @@ export default function ChatPage() {
           providerKey,
           temperature,
           maxTokens: maxTokensNum,
+          provider: selectedProvider,
         });
         setMessages([
           ...history,

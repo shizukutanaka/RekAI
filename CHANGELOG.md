@@ -7,6 +7,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Exact provider routing from the web** — the chat UI sends the selected
+  model's provider (from `/v1/models`), so custom and explicitly-chosen
+  providers route correctly instead of falling back to the default.
 - **OpenAI-compatible provider** — set `REKAI_CUSTOM_BASE_URL` to front any
   OpenAI-compatible API (Groq, Together, OpenRouter, Mistral, vLLM, LM Studio…);
   reuses the OpenAI implementation incl. accurate streaming usage.
