@@ -46,6 +46,10 @@ res = client.chat(
 )
 print(res.tool_calls)  # the model's requested tool calls, if any
 
+# Embeddings (echo works keyless; OpenAI-compatible call the real API)
+emb = client.embeddings("echo", ["hello", "world"])
+print(len(emb.embeddings), emb.usage["total_tokens"], emb.cached)
+
 # Introspection
 client.models()   # [{"id": "...", "provider": "..."}, ...]
 client.usage()    # aggregate counters

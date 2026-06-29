@@ -127,6 +127,25 @@ export class RekAIClient {
     }
   }
 
+  /**
+   * Create embeddings for a string or array of strings.
+   * @param {string} model
+   * @param {string|string[]} input
+   * @param {object} [opts]
+   * @returns {Promise<object>}
+   */
+  async embeddings(model, input, opts = {}) {
+    const payload = { model, input, cache: opts.cache ?? true };
+    if (opts.provider != null) payload.provider = opts.provider;
+    const res = await fetch(`${this.baseUrl}/v1/embeddings`, {
+      method: "POST",
+      headers: this._headers(opts.providerKey),
+      body: JSON.stringify(payload),
+    });
+    await this._raiseForStatus(res);
+    return res.json();
+  }
+
   /** @returns {Promise<Array<{id:string,provider:string}>>} */
   async models() {
     const res = await fetch(`${this.baseUrl}/v1/models`);

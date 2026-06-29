@@ -55,6 +55,20 @@ export interface ModelInfo {
   provider: string;
 }
 
+export interface EmbeddingsOptions {
+  provider?: string;
+  cache?: boolean;
+  providerKey?: string;
+}
+
+export interface EmbeddingsResult {
+  provider: string;
+  model: string;
+  embeddings: number[][];
+  usage: Usage;
+  cached: boolean;
+}
+
 export interface UsageSummary {
   requests_total: number;
   cache_hits_total: number;
@@ -83,6 +97,11 @@ export class RekAIClient {
   constructor(baseUrl?: string, options?: RekAIClientOptions);
   chat(model: string, messages: Messages, opts?: ChatOptions): Promise<ChatResult>;
   stream(model: string, messages: Messages, opts?: ChatOptions): AsyncGenerator<string>;
+  embeddings(
+    model: string,
+    input: string | string[],
+    opts?: EmbeddingsOptions,
+  ): Promise<EmbeddingsResult>;
   models(): Promise<ModelInfo[]>;
   usage(): Promise<UsageSummary>;
   health(): Promise<Record<string, unknown>>;

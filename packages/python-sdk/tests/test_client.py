@@ -7,7 +7,7 @@ import json
 import httpx
 import pytest
 
-from rekai_client import ChatResult, RekAIClient, RekAIError
+from rekai_client import ChatResult, EmbeddingsResult, RekAIClient, RekAIError
 
 
 def make_client(handler) -> RekAIClient:
@@ -161,6 +161,62 @@ def test_stream_raises_on_error_event() -> None:
     client = make_client(handler)
     with pytest.raises(RekAIError):
         list(client.stream("echo", "hi"))
+
+
+def test_embeddings_returns_result() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        captured["key"] = request.headers.get("X-Provider-Key")
+        return httpx.Response(
+            200,
+            json={
+                "provider": "echo",
+                "model": "echo",
+                "embeddings": [[0.1, 0.2], [0.3, 0.4]],
+                "usage": {"prompt_tokens": 2, "completion_tokens": 0, "total_tokens": 2},
+                "cached": False,
+            },
+        )
+
+    client = make_client(handler)
+    result = client.embeddings("echo", ["a", "b"], provider="echo", provider_key="sk-e")
+    assert isinstance(result, EmbeddingsResult)
+    assert result.embeddings == [[0.1, 0.2], [0.3, 0.4]]
+    assert result.usage["total_tokens"] == 2
+    assert captured["body"] == {
+        "model": "echo",
+        "input": ["a", "b"],
+        "cache": True,
+        "provider": "echo",
+    }
+    assert captured["url"].endswith("/v1/embeddings")
+    assert captured["key"] == "sk-e"
+
+
+def test_embeddings_accepts_string_input() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "provider": "echo",
+                "model": "echo",
+                "embeddings": [[0.5]],
+                "usage": {},
+                "cached": True,
+            },
+        )
+
+    client = make_client(handler)
+    result = client.embeddings("echo", "hello", cache=False)
+    assert captured["body"]["input"] == "hello"
+    assert captured["body"]["cache"] is False
+    assert result.cached is True
 
 
 def test_models_usage_health() -> None:

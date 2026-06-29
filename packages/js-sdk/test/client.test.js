@@ -50,6 +50,15 @@ before(async () => {
           "data: [DONE]\n\n";
         return send(res, 200, sse, { "Content-Type": "text/event-stream" });
       }
+      if (req.url === "/v1/embeddings") {
+        return send(res, 200, {
+          provider: "echo",
+          model: "echo",
+          embeddings: [[0.1, 0.2], [0.3, 0.4]],
+          usage: { prompt_tokens: 2, completion_tokens: 0, total_tokens: 2 },
+          cached: false,
+        });
+      }
       if (req.url === "/v1/models") {
         return send(res, 200, { data: [{ id: "echo", provider: "echo" }] });
       }
@@ -128,6 +137,25 @@ test("stream reports usage via onUsage", async () => {
   assert.ok(summary);
   assert.equal(summary.usage.total_tokens, 3);
   assert.equal(summary.estimated, false);
+});
+
+test("embeddings returns vectors and forwards options", async () => {
+  const client = new RekAIClient(baseUrl);
+  const result = await client.embeddings("echo", ["a", "b"], {
+    provider: "echo",
+    providerKey: "sk-e",
+  });
+  assert.deepEqual(result.embeddings, [[0.1, 0.2], [0.3, 0.4]]);
+  assert.equal(result.usage.total_tokens, 2);
+  assert.deepEqual(lastRequest.body, { model: "echo", input: ["a", "b"], cache: true, provider: "echo" });
+  assert.equal(lastRequest.headers["x-provider-key"], "sk-e");
+});
+
+test("embeddings accepts a string input", async () => {
+  const client = new RekAIClient(baseUrl);
+  await client.embeddings("echo", "hello", { cache: false });
+  assert.equal(lastRequest.body.input, "hello");
+  assert.equal(lastRequest.body.cache, false);
 });
 
 test("models, usage, health", async () => {

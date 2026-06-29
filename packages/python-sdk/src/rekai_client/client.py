@@ -50,6 +50,27 @@ class ChatResult:
         )
 
 
+@dataclass
+class EmbeddingsResult:
+    """A text-embeddings response."""
+
+    provider: str
+    model: str
+    embeddings: list[list[float]]
+    usage: dict[str, int]
+    cached: bool
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EmbeddingsResult:
+        return cls(
+            provider=data["provider"],
+            model=data["model"],
+            embeddings=data.get("embeddings", []),
+            usage=data.get("usage", {}),
+            cached=data.get("cached", False),
+        )
+
+
 def _normalize(messages: Messages) -> list[Message]:
     if isinstance(messages, str):
         return [{"role": "user", "content": messages}]
@@ -198,6 +219,25 @@ class RekAIClient:
                         on_usage(event)
                 elif "error" in event:
                     raise RekAIError(event.get("detail") or event["error"])
+
+    def embeddings(
+        self,
+        model: str,
+        input: str | list[str],
+        *,
+        provider: str | None = None,
+        cache: bool = True,
+        provider_key: str | None = None,
+    ) -> EmbeddingsResult:
+        """Create embeddings for a string or list of strings."""
+        payload: dict[str, Any] = {"model": model, "input": input, "cache": cache}
+        if provider is not None:
+            payload["provider"] = provider
+        resp = self._client.post(
+            "/v1/embeddings", json=payload, headers=self._headers(provider_key)
+        )
+        self._raise_for_status(resp)
+        return EmbeddingsResult.from_dict(resp.json())
 
     def models(self) -> list[dict[str, str]]:
         resp = self._client.get("/v1/models")

@@ -49,6 +49,10 @@ const res = await client.chat("gpt-4o-mini", "weather in Tokyo?", {
 });
 console.log(res.tool_calls); // the model's requested tool calls, if any
 
+// Embeddings (echo works keyless; OpenAI-compatible call the real API)
+const emb = await client.embeddings("echo", ["hello", "world"]);
+console.log(emb.embeddings.length, emb.usage.total_tokens, emb.cached);
+
 // Introspection
 await client.models();   // [{ id, provider }, ...]
 await client.usage();    // aggregate counters
