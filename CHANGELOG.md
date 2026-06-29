@@ -7,6 +7,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Rate-limit budget hint in the web chat** — after a request the composer
+  shows a subtle "N / M requests left in the rate-limit window", read from the
+  `X-RateLimit-*` headers via a new `parseRateLimit()` and an `onRateLimit`
+  callback on the chat fetch helpers.
 - **Graceful rate-limit UX in the web chat** — a 429 now shows a clear
   "Rate limited — retry in Ns." message (from `Retry-After`) instead of a
   generic failure. Required two fixes so the browser can actually read the

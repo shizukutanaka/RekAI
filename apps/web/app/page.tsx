@@ -5,6 +5,7 @@ import {
   ChatMessage,
   HealthResponse,
   ModelInfo,
+  RateLimitInfo,
   StreamSummary,
   fetchHealth,
   fetchModels,
@@ -37,6 +38,7 @@ export default function ChatPage() {
   const [error, setError] = useState("");
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [hasKey, setHasKey] = useState(false);
+  const [rateLimit, setRateLimit] = useState<RateLimitInfo | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -128,6 +130,7 @@ export default function ChatPage() {
               temperature,
               maxTokens: maxTokensNum,
               provider: selectedProvider,
+              onRateLimit: setRateLimit,
             },
             (delta) => {
               setMessages((prev) => {
@@ -173,6 +176,7 @@ export default function ChatPage() {
           temperature,
           maxTokens: maxTokensNum,
           provider: selectedProvider,
+          onRateLimit: setRateLimit,
         });
         setMessages([
           ...history,
@@ -363,6 +367,12 @@ export default function ChatPage() {
           </button>
         )}
       </div>
+
+      {rateLimit?.remaining != null && rateLimit.limit != null && (
+        <p className="hint rate-hint">
+          {rateLimit.remaining} / {rateLimit.limit} requests left in the rate-limit window
+        </p>
+      )}
     </>
   );
 }

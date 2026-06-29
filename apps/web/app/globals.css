@@ -377,6 +377,12 @@ button.stop:hover {
   margin-top: 6px;
 }
 
+.rate-hint {
+  text-align: right;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
 .saved {
   color: #7ee08a;
   font-size: 14px;

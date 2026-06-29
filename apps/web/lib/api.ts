@@ -24,6 +24,22 @@ export function formatCost(cost: number | null | undefined): string {
   return `$${cost.toFixed(2)}`;
 }
 
+export interface RateLimitInfo {
+  limit: number | null;
+  remaining: number | null;
+}
+
+/** Read the `X-RateLimit-*` headers off a response (null when absent). */
+export function parseRateLimit(res: Response): RateLimitInfo {
+  const num = (h: string): number | null => {
+    const v = res.headers.get(h);
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  return { limit: num("X-RateLimit-Limit"), remaining: num("X-RateLimit-Remaining") };
+}
+
 /**
  * Build a user-friendly Error from a failed response. A 429 yields a clear
  * "rate limited — retry in Ns" message sourced from the `Retry-After` header;
@@ -102,6 +118,7 @@ export async function sendChat(params: {
   temperature?: number;
   maxTokens?: number;
   provider?: string;
+  onRateLimit?: (info: RateLimitInfo) => void;
 }): Promise<ChatResponse> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (params.providerKey) headers["X-Provider-Key"] = params.providerKey;
@@ -118,6 +135,7 @@ export async function sendChat(params: {
     }),
   });
 
+  params.onRateLimit?.(parseRateLimit(res));
   if (!res.ok) {
     throw await errorFromResponse(res);
   }
@@ -136,6 +154,7 @@ export async function streamChat(
     temperature?: number;
     maxTokens?: number;
     provider?: string;
+    onRateLimit?: (info: RateLimitInfo) => void;
   },
   onDelta: (text: string) => void,
   signal?: AbortSignal,
@@ -157,6 +176,7 @@ export async function streamChat(
     signal,
   });
 
+  params.onRateLimit?.(parseRateLimit(res));
   if (!res.ok || !res.body) {
     throw await errorFromResponse(res);
   }

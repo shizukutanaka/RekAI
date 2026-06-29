@@ -4,6 +4,7 @@ import {
   errorFromResponse,
   formatCost,
   modelsOfType,
+  parseRateLimit,
   parseSSEFrame,
 } from "./api";
 
@@ -62,6 +63,24 @@ describe("modelsOfType", () => {
 
   it("treats a missing type as chat", () => {
     expect(modelsOfType(models, "chat").map((m) => m.id)).toEqual(["gpt-4o", "legacy"]);
+  });
+});
+
+describe("parseRateLimit", () => {
+  it("reads the X-RateLimit-* headers", () => {
+    const res = new Response("", {
+      headers: { "X-RateLimit-Limit": "60", "X-RateLimit-Remaining": "42" },
+    });
+    expect(parseRateLimit(res)).toEqual({ limit: 60, remaining: 42 });
+  });
+
+  it("returns nulls when the headers are absent", () => {
+    expect(parseRateLimit(new Response(""))).toEqual({ limit: null, remaining: null });
+  });
+
+  it("returns null for a non-numeric header", () => {
+    const res = new Response("", { headers: { "X-RateLimit-Remaining": "n/a" } });
+    expect(parseRateLimit(res).remaining).toBeNull();
   });
 });
 
