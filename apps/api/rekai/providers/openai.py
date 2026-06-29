@@ -16,6 +16,9 @@ class OpenAIProvider(Provider):
     name = "openai"
     requires_key = True
 
+    def server_key_configured(self) -> bool:
+        return bool(get_settings().openai_api_key)
+
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
         settings = get_settings()
         key = api_key or settings.openai_api_key

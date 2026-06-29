@@ -56,6 +56,15 @@ class Provider(ABC):
         result = await self.chat(request, api_key)
         yield result.content
 
+    def server_key_configured(self) -> bool:
+        """Whether a server-side key is configured for this provider.
+
+        ``True`` means the provider is usable without a per-request BYOK key.
+        Keyless providers are always ready; key-requiring providers override this
+        to check their configured key.
+        """
+        return not self.requires_key
+
     async def list_models(self, api_key: str | None) -> list[str]:
         """Return known model ids. Override when the backend can enumerate them."""
         return []

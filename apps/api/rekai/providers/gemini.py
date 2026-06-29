@@ -16,6 +16,9 @@ class GeminiProvider(Provider):
     name = "gemini"
     requires_key = True
 
+    def server_key_configured(self) -> bool:
+        return bool(get_settings().gemini_api_key)
+
     def _resolve_key(self, api_key: str | None) -> str:
         key = api_key or get_settings().gemini_api_key
         if not key:

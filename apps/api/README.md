@@ -20,7 +20,7 @@ uvicorn rekai.main:app --reload
 
 | Method | Path          | Description                              |
 |--------|---------------|------------------------------------------|
-| GET    | `/health`     | Liveness, version, providers, cache type |
+| GET    | `/health`     | Liveness, version, providers (+ per-provider readiness), cache type |
 | GET    | `/metrics`    | Prometheus-style metrics                 |
 | GET    | `/v1/usage`   | Aggregate counters (requests, tokens, cost) |
 | GET    | `/v1/models`  | Known models per provider                |

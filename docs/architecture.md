@@ -115,12 +115,19 @@ passed straight to the provider call and never logged, cached, or persisted. A
 server-side default key (e.g. `REKAI_OPENAI_API_KEY`) is used only when no BYOK
 header is present.
 
+### Readiness
+
+`/health` reports `provider_status` per provider: `ready` (usable now — keyless,
+or a server-side key is configured) or `byok_only` (needs an `X-Provider-Key`).
+Key-requiring providers override `server_key_configured()` to check their key.
+
 ## Adding a provider
 
 1. Subclass `rekai.providers.base.Provider` and implement `chat()`.
 2. Register it in `rekai/providers/registry.py` (or at runtime with
    `register_provider`).
-3. Optionally add routing prefixes in `rekai/router.py`.
+3. Optionally add routing prefixes in `rekai/router.py` and override
+   `server_key_configured()` if it needs a key.
 
 That's the entire surface area — see `rekai/providers/echo.py` for the smallest
 working example.

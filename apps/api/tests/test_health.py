@@ -10,6 +10,17 @@ def test_health(client: TestClient) -> None:
     assert body["cache"] in {"memory", "redis", "disabled"}
 
 
+def test_health_provider_status(client: TestClient) -> None:
+    status = client.get("/health").json()["provider_status"]
+    # Keyless providers are ready out of the box.
+    assert status["echo"] == "ready"
+    assert status["ollama"] == "ready"
+    # Key-requiring providers without a server key need BYOK (test env has none).
+    assert status["openai"] == "byok_only"
+    assert status["anthropic"] == "byok_only"
+    assert status["gemini"] == "byok_only"
+
+
 def test_metrics_endpoint(client: TestClient) -> None:
     resp = client.get("/metrics")
     assert resp.status_code == 200

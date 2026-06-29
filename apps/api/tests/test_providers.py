@@ -18,6 +18,11 @@ async def test_echo_models() -> None:
     assert await EchoProvider().list_models(None) == ["echo"]
 
 
+def test_keyless_provider_is_always_ready() -> None:
+    # Keyless providers report ready without any server-side key.
+    assert EchoProvider().server_key_configured() is True
+
+
 def test_registry_contains_builtin_providers() -> None:
     names = provider_names()
     assert {"echo", "openai", "anthropic", "gemini", "ollama"} <= set(names)

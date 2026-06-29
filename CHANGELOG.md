@@ -53,6 +53,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **pre-commit** — config running ruff (lint + format) and file-hygiene hooks.
 - **.dockerignore** for both apps so image builds exclude local
   `node_modules`/`.venv`/caches.
+- **Provider readiness** in `/health` (`provider_status`): `ready` vs
+  `byok_only` per provider.
 
 ### Fixed
 - Web `output: standalone` is now gated behind `NEXT_OUTPUT=standalone` (set by

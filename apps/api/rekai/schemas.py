@@ -85,6 +85,11 @@ class HealthResponse(BaseModel):
     status: Literal["ok"]
     version: str
     providers: list[str]
+    provider_status: dict[str, Literal["ready", "byok_only"]] = Field(
+        default_factory=dict,
+        description="Per-provider readiness: 'ready' (usable now) or "
+        "'byok_only' (needs an X-Provider-Key).",
+    )
     cache: str
 
 

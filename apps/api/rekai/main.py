@@ -8,6 +8,7 @@ import json
 import time
 import uuid
 from collections.abc import AsyncIterator
+from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +20,7 @@ from rekai.config import Settings, get_settings
 from rekai.logging_config import configure_logging, get_logger
 from rekai.metrics import metrics
 from rekai.metrics_store import build_metrics_store
-from rekai.providers import provider_names
+from rekai.providers import get_provider, provider_names
 from rekai.providers.base import ProviderError
 from rekai.rate_limit import RateLimiter
 from rekai.router import select_provider
@@ -135,10 +136,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # --- routes -----------------------------------------------------------
     @app.get("/health", response_model=HealthResponse, tags=["system"])
     async def health() -> HealthResponse:
+        provider_status: dict[str, Literal["ready", "byok_only"]] = {}
+        for name in provider_names():
+            provider = get_provider(name)
+            ready = provider is not None and provider.server_key_configured()
+            provider_status[name] = "ready" if ready else "byok_only"
         return HealthResponse(
             status="ok",
             version=__version__,
             providers=provider_names(),
+            provider_status=provider_status,
             cache=cache.label,
         )
 
@@ -152,8 +159,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/v1/models", response_model=ModelsResponse, tags=["chat"])
     async def list_models() -> ModelsResponse:
-        from rekai.providers.registry import get_provider
-
         data: list[ModelInfo] = []
         for name in provider_names():
             provider = get_provider(name)
