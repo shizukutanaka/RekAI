@@ -31,6 +31,7 @@ export default function ChatPage() {
   const [streaming, setStreaming] = useState(true);
   const [system, setSystem] = useState("");
   const [temperature, setTemperature] = useState(0.7);
+  const [maxTokens, setMaxTokens] = useState("");
   const [showOptions, setShowOptions] = useState(false);
   const [error, setError] = useState("");
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -108,6 +109,8 @@ export default function ChatPage() {
       ? [{ role: "system" as const, content: system.trim() }, ...convo]
       : convo;
     const providerKey = getStoredKey();
+    const mt = parseInt(maxTokens, 10);
+    const maxTokensNum = Number.isFinite(mt) && mt > 0 ? mt : undefined;
 
     try {
       if (streaming) {
@@ -118,7 +121,7 @@ export default function ChatPage() {
         let summary: StreamSummary | null = null;
         try {
           await streamChat(
-            { model, messages: wire, providerKey, temperature },
+            { model, messages: wire, providerKey, temperature, maxTokens: maxTokensNum },
             (delta) => {
               setMessages((prev) => {
                 const next = [...prev];
@@ -156,7 +159,13 @@ export default function ChatPage() {
           return next;
         });
       } else {
-        const res = await sendChat({ model, messages: wire, providerKey, temperature });
+        const res = await sendChat({
+          model,
+          messages: wire,
+          providerKey,
+          temperature,
+          maxTokens: maxTokensNum,
+        });
         setMessages([
           ...history,
           {
@@ -249,6 +258,17 @@ export default function ChatPage() {
               step={0.1}
               value={temperature}
               onChange={(e) => setTemperature(Number(e.target.value))}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="maxtok">Max tokens</label>
+            <input
+              id="maxtok"
+              type="number"
+              min={1}
+              value={maxTokens}
+              placeholder="default (provider limit)"
+              onChange={(e) => setMaxTokens(e.target.value)}
             />
           </div>
         </div>

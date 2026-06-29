@@ -7,6 +7,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Max tokens control** — the chat Options panel now exposes a `max_tokens`
+  cap (forwarded on both the streaming and non-streaming requests).
 - **Streaming usage/cost** — `POST /v1/chat/stream` now emits a final
   `{"usage", "cost_usd", "estimated"}` summary event, and streamed requests are
   counted in `/v1/usage` and `/metrics` (previously only non-streamed were). The

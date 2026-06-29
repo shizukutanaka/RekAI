@@ -16,8 +16,9 @@ Open http://localhost:3000.
 
 - **/** — chat. Pick a model, send messages. Toggle **Stream** to render
   responses token-by-token via `/v1/chat/stream` (on by default); a **Stop**
-  button cancels an in-flight stream. **Options** exposes a system prompt and a
-  temperature slider. The conversation is saved to local storage and restored on
+  button cancels an in-flight stream. **Options** exposes a system prompt, a
+  temperature slider, and a max-tokens cap. The conversation is saved to local
+  storage and restored on
   reload (**Clear** wipes it). Assistant bubbles show the provider, whether the
   response was cached, token usage, and estimated cost.
 - **/usage** — live dashboard of `/v1/usage`: requests, cache hit rate, tokens,
