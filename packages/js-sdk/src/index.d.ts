@@ -23,6 +23,10 @@ export interface ChatOptions {
   cache?: boolean;
   fallbacks?: FallbackTarget[];
   providerKey?: string;
+  /** OpenAI-style tool/function definitions, passed through. */
+  tools?: Record<string, unknown>[];
+  /** Tool choice ('auto' | 'none' | 'required' | object), passed through. */
+  toolChoice?: unknown;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
 }
@@ -38,6 +42,7 @@ export interface ChatResult {
   provider: string;
   model: string;
   content: string;
+  tool_calls: Record<string, unknown>[] | null;
   usage: Usage;
   cost_usd: number | null;
   cached: boolean;

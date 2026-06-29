@@ -33,6 +33,7 @@ class ChatResult:
     cost_usd: float | None
     cached: bool
     fallback_used: bool
+    tool_calls: list[dict[str, Any]] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ChatResult:
@@ -45,6 +46,7 @@ class ChatResult:
             cost_usd=data.get("cost_usd"),
             cached=data.get("cached", False),
             fallback_used=data.get("fallback_used", False),
+            tool_calls=data.get("tool_calls"),
         )
 
 
@@ -102,6 +104,8 @@ class RekAIClient:
         max_tokens: int | None,
         cache: bool,
         fallbacks: list[dict[str, Any]] | None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": model,
@@ -115,6 +119,10 @@ class RekAIClient:
             payload["max_tokens"] = max_tokens
         if fallbacks is not None:
             payload["fallbacks"] = fallbacks
+        if tools is not None:
+            payload["tools"] = tools
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
         return payload
 
     @staticmethod
@@ -140,10 +148,12 @@ class RekAIClient:
         max_tokens: int | None = None,
         cache: bool = True,
         fallbacks: list[dict[str, Any]] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: Any | None = None,
         provider_key: str | None = None,
     ) -> ChatResult:
         payload = self._payload(
-            model, messages, provider, temperature, max_tokens, cache, fallbacks
+            model, messages, provider, temperature, max_tokens, cache, fallbacks, tools, tool_choice
         )
         resp = self._client.post("/v1/chat", json=payload, headers=self._headers(provider_key))
         self._raise_for_status(resp)

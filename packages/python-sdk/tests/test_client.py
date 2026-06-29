@@ -81,6 +81,35 @@ def test_chat_passes_options() -> None:
     assert body["fallbacks"] == [{"provider": "echo"}]
 
 
+def test_chat_forwards_tools_and_returns_tool_calls() -> None:
+    captured = {}
+    tool_call = {"id": "c1", "type": "function", "function": {"name": "get_weather"}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "content": "",
+                "tool_calls": [tool_call],
+                "usage": {},
+                "cost_usd": None,
+                "cached": False,
+                "fallback_used": False,
+            },
+        )
+
+    client = make_client(handler)
+    tools = [{"type": "function", "function": {"name": "get_weather"}}]
+    result = client.chat("gpt-4o-mini", "weather?", tools=tools, tool_choice="auto")
+    assert captured["body"]["tools"] == tools
+    assert captured["body"]["tool_choice"] == "auto"
+    assert result.tool_calls == [tool_call]
+
+
 def test_chat_raises_on_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"error": "provider_error", "detail": "no key"})

@@ -37,6 +37,15 @@ for chunk in client.stream("echo", "stream me", on_usage=lambda s: print("\n", s
 # Reliability: fall back to echo on upstream errors
 client.chat("gpt-4o-mini", "hi", fallbacks=[{"provider": "echo", "model": "echo"}])
 
+# Tool / function calling (OpenAI-compatible)
+res = client.chat(
+    "gpt-4o-mini",
+    "weather in Tokyo?",
+    tools=[{"type": "function", "function": {"name": "get_weather"}}],
+    tool_choice="auto",
+)
+print(res.tool_calls)  # the model's requested tool calls, if any
+
 # Introspection
 client.models()   # [{"id": "...", "provider": "..."}, ...]
 client.usage()    # aggregate counters

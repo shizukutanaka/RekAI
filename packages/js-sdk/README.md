@@ -42,6 +42,13 @@ await client.chat("gpt-4o-mini", "hi", {
   fallbacks: [{ provider: "echo", model: "echo" }],
 });
 
+// Tool / function calling (OpenAI-compatible)
+const res = await client.chat("gpt-4o-mini", "weather in Tokyo?", {
+  tools: [{ type: "function", function: { name: "get_weather" } }],
+  toolChoice: "auto",
+});
+console.log(res.tool_calls); // the model's requested tool calls, if any
+
 // Introspection
 await client.models();   // [{ id, provider }, ...]
 await client.usage();    // aggregate counters

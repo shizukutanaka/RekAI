@@ -33,6 +33,7 @@ before(async () => {
           provider: "echo",
           model: "echo",
           content: "Echo: hi",
+          tool_calls: lastRequest.body && lastRequest.body.tools ? [{ id: "c1" }] : null,
           usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
           cost_usd: 0.0,
           cached: false,
@@ -87,6 +88,18 @@ test("chat forwards options and BYOK header", async () => {
   assert.equal(lastRequest.body.max_tokens, 64);
   assert.deepEqual(lastRequest.body.fallbacks, [{ provider: "echo" }]);
   assert.equal(lastRequest.headers["x-provider-key"], "sk-override");
+});
+
+test("chat forwards tools and returns tool_calls", async () => {
+  const client = new RekAIClient(baseUrl);
+  const tools = [{ type: "function", function: { name: "get_weather" } }];
+  const result = await client.chat("gpt-4o-mini", "weather?", {
+    tools,
+    toolChoice: "auto",
+  });
+  assert.deepEqual(lastRequest.body.tools, tools);
+  assert.equal(lastRequest.body.tool_choice, "auto");
+  assert.deepEqual(result.tool_calls, [{ id: "c1" }]);
 });
 
 test("chat raises RekAIError on error status", async () => {

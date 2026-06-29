@@ -11,6 +11,7 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `tool_choice` (passed through); the model's `tool_calls` are returned on
   `ChatResponse`. Messages support `tool_calls`/`tool_call_id`/`name` and
   optional `content` for full round-trips. (Non-streaming; OpenAI-compatible.)
+  Both SDKs expose `tools`/`tool_choice` and surface `tool_calls`.
 - **Exact provider routing from the web** — the chat UI sends the selected
   model's provider (from `/v1/models`), so custom and explicitly-chosen
   providers route correctly instead of falling back to the default.
