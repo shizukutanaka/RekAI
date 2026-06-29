@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCost, parseSSEFrame } from "./api";
+import { cosineSimilarity, formatCost, parseSSEFrame } from "./api";
 
 describe("formatCost", () => {
   it("returns empty string for null/undefined (unknown price)", () => {
@@ -18,6 +18,26 @@ describe("formatCost", () => {
   it("uses 2 decimals for larger costs", () => {
     expect(formatCost(1.5)).toBe("$1.50");
     expect(formatCost(0.25)).toBe("$0.25");
+  });
+});
+
+describe("cosineSimilarity", () => {
+  it("is 1 for identical vectors", () => {
+    expect(cosineSimilarity([1, 2, 3], [1, 2, 3])).toBeCloseTo(1, 6);
+  });
+
+  it("is 0 for orthogonal vectors", () => {
+    expect(cosineSimilarity([1, 0], [0, 1])).toBeCloseTo(0, 6);
+  });
+
+  it("is -1 for opposite vectors", () => {
+    expect(cosineSimilarity([1, 1], [-1, -1])).toBeCloseTo(-1, 6);
+  });
+
+  it("returns 0 for mismatched lengths, empty, or zero vectors", () => {
+    expect(cosineSimilarity([1, 2], [1])).toBe(0);
+    expect(cosineSimilarity([], [])).toBe(0);
+    expect(cosineSimilarity([0, 0], [1, 1])).toBe(0);
   });
 });
 

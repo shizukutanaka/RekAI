@@ -203,6 +203,62 @@ export function parseSSEFrame(frame: string): SSEEvent {
   }
 }
 
+export interface EmbeddingsResponse {
+  provider: string;
+  model: string;
+  embeddings: number[][];
+  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  cost_usd: number | null;
+  cached: boolean;
+}
+
+export async function sendEmbeddings(params: {
+  model: string;
+  input: string[];
+  providerKey?: string;
+  provider?: string;
+}): Promise<EmbeddingsResponse> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (params.providerKey) headers["X-Provider-Key"] = params.providerKey;
+
+  const res = await fetch(`${API_URL}/v1/embeddings`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model: params.model,
+      input: params.input,
+      ...(params.provider ? { provider: params.provider } : {}),
+    }),
+  });
+
+  if (!res.ok) {
+    let detail = `Request failed (${res.status})`;
+    try {
+      const body = await res.json();
+      detail = body.detail || body.error || detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+/** Cosine similarity of two equal-length vectors. Pure, for unit testing. */
+export function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length !== b.length || a.length === 0) return 0;
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  if (na === 0 || nb === 0) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
 export async function fetchModels(): Promise<ModelInfo[]> {
   try {
     const res = await fetch(`${API_URL}/v1/models`);
