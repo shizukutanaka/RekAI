@@ -1,0 +1,49 @@
+# Render Blueprint for RekAI — provisions Redis + API + Web in one deploy.
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Usage: push this repo to GitHub, then in the Render dashboard choose
+# "New +" → "Blueprint" and point it at the repo. Render reads this file.
+#
+# Note: Render renamed managed Redis to "Key Value". If your account rejects
+# `type: redis`, change it to `type: keyvalue` (the rest is identical).
+
+services:
+  # --- Redis (cache + persisted metrics) ---
+  - type: redis
+    name: rekai-redis
+    plan: free
+    ipAllowList: [] # internal connections only
+    maxmemoryPolicy: allkeys-lru
+
+  # --- API (FastAPI) ---
+  - type: web
+    name: rekai-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: ./apps/api
+    healthCheckPath: /health
+    envVars:
+      - key: REKAI_REDIS_URL
+        fromService:
+          type: redis
+          name: rekai-redis
+          property: connectionString
+      - key: REKAI_CORS_ORIGINS
+        value: "*"
+      # Optional server-side keys (otherwise users supply their own via BYOK):
+      # - key: REKAI_OPENAI_API_KEY
+      #   sync: false
+
+  # --- Web (Next.js) ---
+  - type: web
+    name: rekai-web
+    runtime: docker
+    plan: free
+    dockerfilePath: ./apps/web/Dockerfile
+    dockerContext: ./apps/web
+    envVars:
+      # Baked into the client bundle at build time (must be the API's public URL).
+      # Render service URLs are predictable: https://<name>.onrender.com
+      - key: NEXT_PUBLIC_API_URL
+        value: https://rekai-api.onrender.com

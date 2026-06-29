@@ -7,6 +7,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Deploy configs** — a Render Blueprint (`deploy/render.yaml`) provisioning
+  Redis + API + Web, plus a deploy guide. The web `Dockerfile` accepts
+  `NEXT_PUBLIC_API_URL` as a build arg so the API URL is baked correctly.
 - **Regenerate** — re-run the last user turn for a fresh assistant reply,
   without duplicating messages.
 - **Max tokens control** — the chat Options panel now exposes a `max_tokens`

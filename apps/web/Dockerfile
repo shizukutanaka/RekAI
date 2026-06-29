@@ -8,6 +8,10 @@ RUN npm install --no-audit --no-fund
 FROM node:20-slim AS build
 WORKDIR /app
 ENV NEXT_OUTPUT=standalone
+# NEXT_PUBLIC_* is baked into the client bundle at build time, so the API URL
+# must be supplied as a build arg (defaults to localhost for compose).
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build

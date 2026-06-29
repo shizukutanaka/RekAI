@@ -28,6 +28,9 @@ services:
   web:
     build:
       context: ./apps/web
+      args:
+        # Baked into the client bundle at build time.
+        NEXT_PUBLIC_API_URL: http://localhost:8000
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000

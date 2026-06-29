@@ -58,6 +58,11 @@ docker compose up --build
 - API:  http://localhost:8000  (docs at http://localhost:8000/docs)
 - Web:  http://localhost:3000
 
+### Deploy
+
+One-click on Render (Redis + API + Web) or self-host with Docker — see
+[`deploy/`](./deploy).
+
 ### Local development (without Docker)
 
 **Backend**
