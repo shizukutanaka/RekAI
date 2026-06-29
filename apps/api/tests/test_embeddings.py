@@ -84,6 +84,20 @@ def test_models_endpoint_tags_embedding_models(client: TestClient) -> None:
     assert by_id[("gpt-4o-mini", "chat")]["provider"] == "openai"
 
 
+def test_models_endpoint_type_filter(client: TestClient) -> None:
+    embed = client.get("/v1/models", params={"type": "embedding"}).json()["data"]
+    assert embed and all(m["type"] == "embedding" for m in embed)
+    chat = client.get("/v1/models", params={"type": "chat"}).json()["data"]
+    assert chat and all(m["type"] == "chat" for m in chat)
+    # No filter returns both kinds.
+    all_types = {m["type"] for m in client.get("/v1/models").json()["data"]}
+    assert all_types == {"chat", "embedding"}
+
+
+def test_models_endpoint_rejects_bad_type(client: TestClient) -> None:
+    assert client.get("/v1/models", params={"type": "audio"}).status_code == 422
+
+
 async def test_openai_lists_embedding_models() -> None:
     models = await OpenAIProvider().list_embedding_models(None)
     assert "text-embedding-3-small" in models

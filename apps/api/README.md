@@ -23,7 +23,7 @@ uvicorn rekai.main:app --reload
 | GET    | `/health`     | Liveness, version, providers (+ per-provider readiness), cache type |
 | GET    | `/metrics`    | Prometheus-style metrics                 |
 | GET    | `/v1/usage`   | Aggregate counters (requests, tokens, cost) |
-| GET    | `/v1/models`  | Known models per provider (each tagged `type`: `chat`/`embedding`) |
+| GET    | `/v1/models`  | Known models per provider (each tagged `type`; filter with `?type=chat\|embedding`) |
 | POST   | `/v1/chat`    | Chat completion (router + cache + BYOK)  |
 | POST   | `/v1/chat/stream` | Streaming chat completion (SSE)      |
 | POST   | `/v1/embeddings` | Text embeddings (router + cache + BYOK) |

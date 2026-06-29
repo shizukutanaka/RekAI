@@ -8,7 +8,6 @@ import {
   fetchModels,
   formatCost,
   getStoredKey,
-  modelsOfType,
   sendEmbeddings,
 } from "@/lib/api";
 
@@ -25,9 +24,8 @@ export default function EmbeddingsPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    fetchModels().then((m) => {
-      const embed = modelsOfType(m, "embedding");
-      if (embed.length) setModels(embed);
+    fetchModels("embedding").then((m) => {
+      if (m.length) setModels(m);
     });
   }, []);
 

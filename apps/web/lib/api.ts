@@ -289,9 +289,10 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-export async function fetchModels(): Promise<ModelInfo[]> {
+export async function fetchModels(type?: "chat" | "embedding"): Promise<ModelInfo[]> {
   try {
-    const res = await fetch(`${API_URL}/v1/models`);
+    const url = type ? `${API_URL}/v1/models?type=${type}` : `${API_URL}/v1/models`;
+    const res = await fetch(url);
     if (!res.ok) return [];
     const body = await res.json();
     return body.data ?? [];

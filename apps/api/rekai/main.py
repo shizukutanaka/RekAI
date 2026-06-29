@@ -10,7 +10,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Literal
 
-from fastapi import Depends, FastAPI, Header, Request
+from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
@@ -192,16 +192,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return UsageSummary(**metrics.snapshot())
 
     @app.get("/v1/models", response_model=ModelsResponse, tags=["chat"])
-    async def list_models() -> ModelsResponse:
+    async def list_models(
+        type: Literal["chat", "embedding"] | None = Query(
+            None, description="Filter by model type: 'chat' or 'embedding'."
+        ),
+    ) -> ModelsResponse:
         data: list[ModelInfo] = []
         for name in provider_names():
             provider = get_provider(name)
             if provider is None:
                 continue
-            for model in await provider.list_models(None):
-                data.append(ModelInfo(id=model, provider=name, type="chat"))
-            for model in await provider.list_embedding_models(None):
-                data.append(ModelInfo(id=model, provider=name, type="embedding"))
+            if type != "embedding":
+                for model in await provider.list_models(None):
+                    data.append(ModelInfo(id=model, provider=name, type="chat"))
+            if type != "chat":
+                for model in await provider.list_embedding_models(None):
+                    data.append(ModelInfo(id=model, provider=name, type="embedding"))
         return ModelsResponse(data=data)
 
     @app.post(
