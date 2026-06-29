@@ -36,6 +36,7 @@ is a self-hostable AI gateway that runs with a single `docker compose up`.
 
 ### M5 — Release
 - [x] Anthropic (Claude) provider
+- [x] Google Gemini provider
 - [x] Streaming responses (SSE)
 - [x] Cost estimation + `/v1/usage` summary
 - [x] Provider fallback / failover
@@ -59,7 +60,7 @@ have interface seams reserved today:
 
 ## Beyond v1.0
 
-- **v1.x** — stabilize the core, more providers (Gemini, …), streaming.
+- **v1.x** — stabilize the core, more providers, advanced streaming.
 - **v2.x** — plugin ecosystem for providers and policies.
 - **v3.x** — advanced multi-provider orchestration (fallback, load-balancing).
 - **v4.x** — agent workflows and automation.

@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     anthropic_version: str = "2023-06-01"
     anthropic_default_max_tokens: int = 1024
+    gemini_api_key: str | None = None
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
 
     # Networking
     request_timeout_seconds: float = 60.0

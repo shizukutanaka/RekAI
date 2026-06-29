@@ -30,6 +30,11 @@ _PRICES_PER_1M: dict[str, tuple[float, float]] = {
     "claude-opus": (15.00, 75.00),
     "claude-sonnet": (3.00, 15.00),
     "claude-haiku": (0.80, 4.00),
+    # Google Gemini
+    "gemini-1.5-flash": (0.075, 0.30),
+    "gemini-1.5-pro": (1.25, 5.00),
+    "gemini-2.0-flash": (0.10, 0.40),
+    "gemini-2.5-pro": (1.25, 10.00),
 }
 
 

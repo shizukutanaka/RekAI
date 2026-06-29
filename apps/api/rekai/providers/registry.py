@@ -5,6 +5,7 @@ from __future__ import annotations
 from rekai.providers.anthropic import AnthropicProvider
 from rekai.providers.base import Provider
 from rekai.providers.echo import EchoProvider
+from rekai.providers.gemini import GeminiProvider
 from rekai.providers.ollama import OllamaProvider
 from rekai.providers.openai import OpenAIProvider
 
@@ -14,6 +15,7 @@ _PROVIDERS: dict[str, Provider] = {
         EchoProvider(),
         OpenAIProvider(),
         AnthropicProvider(),
+        GeminiProvider(),
         OllamaProvider(),
     )
 }

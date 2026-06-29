@@ -20,7 +20,7 @@ async def test_echo_models() -> None:
 
 def test_registry_contains_builtin_providers() -> None:
     names = provider_names()
-    assert {"echo", "openai", "anthropic", "ollama"} <= set(names)
+    assert {"echo", "openai", "anthropic", "gemini", "ollama"} <= set(names)
 
 
 def test_register_custom_provider() -> None:
