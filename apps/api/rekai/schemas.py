@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-Role = Literal["system", "user", "assistant"]
+Role = Literal["system", "user", "assistant", "tool"]
 
 
 class ChatMessage(BaseModel):
     role: Role
-    content: str = Field(..., min_length=1)
+    # Optional because assistant tool-call messages carry tool_calls instead.
+    content: str | None = None
+    name: str | None = None
+    # Pass-through OpenAI-style tool fields (round-tripping tool calls).
+    tool_calls: list[dict[str, Any]] | None = None
+    tool_call_id: str | None = None
 
 
 class FallbackTarget(BaseModel):
@@ -36,6 +41,14 @@ class ChatRequest(BaseModel):
         description="Ordered fallbacks tried on upstream (5xx) errors. "
         "Overrides the server default chain.",
     )
+    tools: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="OpenAI-style tool/function definitions, passed through to the provider.",
+    )
+    tool_choice: Any | None = Field(
+        default=None,
+        description="Tool choice ('auto' | 'none' | 'required' | {...}), passed through.",
+    )
 
 
 class Usage(BaseModel):
@@ -49,6 +62,9 @@ class ChatResponse(BaseModel):
     provider: str
     model: str
     content: str
+    tool_calls: list[dict[str, Any]] | None = Field(
+        default=None, description="Tool calls returned by the model, if any."
+    )
     usage: Usage
     cost_usd: float | None = Field(
         default=None,

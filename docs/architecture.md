@@ -108,6 +108,15 @@ they are **persisted write-behind**: a baseline is loaded on startup and the
 snapshot is flushed to Redis periodically and on shutdown, so `/v1/usage`
 totals survive restarts. Without Redis the store is a no-op.
 
+## Tool / function calling
+
+`ChatRequest` accepts OpenAI-style `tools` and `tool_choice`, passed through to
+providers that support them (OpenAI and OpenAI-compatible backends). The model's
+`tool_calls` are returned on `ChatResponse`. Messages carry the round-trip
+fields (`tool_calls`, `tool_call_id`, `name`) and `content` is optional, so a
+full tools conversation can be replayed. Providers without tool support ignore
+these fields. (Streaming tool calls are not yet assembled — use non-streaming.)
+
 ## Cost estimation
 
 Each non-streamed response carries an approximate `cost_usd`, computed by

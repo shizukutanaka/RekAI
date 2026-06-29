@@ -31,6 +31,7 @@ class ProviderResult:
     content: str
     model: str
     usage: Usage = field(default_factory=Usage)
+    tool_calls: list[dict] | None = None
 
 
 @dataclass

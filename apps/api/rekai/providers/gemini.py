@@ -38,7 +38,7 @@ class GeminiProvider(Provider):
             contents.append(
                 {
                     "role": "model" if m.role == "assistant" else "user",
-                    "parts": [{"text": m.content}],
+                    "parts": [{"text": m.content or ""}],
                 }
             )
         if not contents:
@@ -51,7 +51,7 @@ class GeminiProvider(Provider):
         if request.max_tokens is not None:
             payload["generationConfig"]["maxOutputTokens"] = request.max_tokens
 
-        system_parts = [m.content for m in request.messages if m.role == "system"]
+        system_parts = [m.content or "" for m in request.messages if m.role == "system"]
         if system_parts:
             payload["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
         return payload

@@ -45,11 +45,15 @@ class OpenAIProvider(Provider):
 
         payload: dict = {
             "model": request.model,
-            "messages": [m.model_dump() for m in request.messages],
+            "messages": [m.model_dump(exclude_none=True) for m in request.messages],
             "temperature": request.temperature,
         }
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
+        if request.tools is not None:
+            payload["tools"] = request.tools
+        if request.tool_choice is not None:
+            payload["tool_choice"] = request.tool_choice
 
         url = f"{self._base_url().rstrip('/')}/chat/completions"
         try:
@@ -69,16 +73,17 @@ class OpenAIProvider(Provider):
             )
 
         data = resp.json()
-        choice = data["choices"][0]["message"]["content"]
+        message = data["choices"][0]["message"]
         usage = data.get("usage", {})
         return ProviderResult(
-            content=choice,
+            content=message.get("content") or "",
             model=data.get("model", request.model),
             usage=Usage(
                 prompt_tokens=usage.get("prompt_tokens", 0),
                 completion_tokens=usage.get("completion_tokens", 0),
                 total_tokens=usage.get("total_tokens", 0),
             ),
+            tool_calls=message.get("tool_calls"),
         )
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
@@ -94,7 +99,7 @@ class OpenAIProvider(Provider):
 
         payload: dict = {
             "model": request.model,
-            "messages": [m.model_dump() for m in request.messages],
+            "messages": [m.model_dump(exclude_none=True) for m in request.messages],
             "temperature": request.temperature,
             "stream": True,
             # Ask for a final usage chunk for accurate accounting.

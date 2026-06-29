@@ -20,7 +20,7 @@ class OllamaProvider(Provider):
         settings = get_settings()
         payload = {
             "model": request.model,
-            "messages": [m.model_dump() for m in request.messages],
+            "messages": [m.model_dump(exclude_none=True) for m in request.messages],
             "stream": False,
             "options": {"temperature": request.temperature},
         }
@@ -64,7 +64,7 @@ class OllamaProvider(Provider):
         settings = get_settings()
         payload = {
             "model": request.model,
-            "messages": [m.model_dump() for m in request.messages],
+            "messages": [m.model_dump(exclude_none=True) for m in request.messages],
             "stream": True,
             "options": {"temperature": request.temperature},
         }

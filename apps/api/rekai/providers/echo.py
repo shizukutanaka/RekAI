@@ -23,11 +23,11 @@ class EchoProvider(Provider):
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
         last_user = next(
-            (m.content for m in reversed(request.messages) if m.role == "user"),
-            request.messages[-1].content,
+            (m.content for m in reversed(request.messages) if m.role == "user" and m.content),
+            request.messages[-1].content or "",
         )
         content = f"Echo: {last_user}"
-        prompt_tokens = sum(_count_tokens(m.content) for m in request.messages)
+        prompt_tokens = sum(_count_tokens(m.content or "") for m in request.messages)
         completion_tokens = _count_tokens(content)
         return ProviderResult(
             content=content,

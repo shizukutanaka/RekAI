@@ -110,6 +110,7 @@ async def handle_chat(
             provider=attempt.provider_name,
             model=result.model,
             content=result.content,
+            tool_calls=result.tool_calls,
             usage=usage,
             cost_usd=cost_usd,
             cached=False,

@@ -32,9 +32,11 @@ class AnthropicProvider(Provider):
     def _build_payload(self, request: ChatRequest, *, stream: bool) -> dict:
         settings = get_settings()
         # Anthropic takes system prompts as a top-level field, not in `messages`.
-        system_parts = [m.content for m in request.messages if m.role == "system"]
+        system_parts = [m.content or "" for m in request.messages if m.role == "system"]
         chat_messages = [
-            {"role": m.role, "content": m.content} for m in request.messages if m.role != "system"
+            {"role": m.role, "content": m.content or ""}
+            for m in request.messages
+            if m.role != "system"
         ]
         if not chat_messages:
             raise ProviderError("Anthropic requires at least one user/assistant message.", 400)
