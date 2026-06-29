@@ -244,6 +244,21 @@ button.stop:hover {
   font-size: 14px;
 }
 
+.notice {
+  margin: 0 20px 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #3a341f;
+  border: 1px solid #6b5a2b;
+  color: #e0c97e;
+  font-size: 14px;
+}
+
+.notice a {
+  color: #f0d98e;
+  text-decoration: underline;
+}
+
 .page {
   padding: 24px 20px;
 }

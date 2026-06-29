@@ -54,7 +54,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **.dockerignore** for both apps so image builds exclude local
   `node_modules`/`.venv`/caches.
 - **Provider readiness** in `/health` (`provider_status`): `ready` vs
-  `byok_only` per provider, surfaced as badges on the web Settings page.
+  `byok_only` per provider, surfaced as badges on the web Settings page and as
+  an inline chat hint when the selected model needs a key that isn't set.
 
 ### Fixed
 - Web `output: standalone` is now gated behind `NEXT_OUTPUT=standalone` (set by

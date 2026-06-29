@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ChatMessage,
+  HealthResponse,
   ModelInfo,
+  fetchHealth,
   fetchModels,
   formatCost,
   getStoredKey,
@@ -30,6 +32,8 @@ export default function ChatPage() {
   const [temperature, setTemperature] = useState(0.7);
   const [showOptions, setShowOptions] = useState(false);
   const [error, setError] = useState("");
+  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [hasKey, setHasKey] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -39,6 +43,11 @@ export default function ChatPage() {
     fetchModels().then((m) => {
       if (m.length) setModels(m);
     });
+    fetchHealth().then(setHealth);
+    setHasKey(Boolean(getStoredKey()));
+    // Re-check the stored key when returning to the tab (it may be set elsewhere).
+    const onFocus = () => setHasKey(Boolean(getStoredKey()));
+    window.addEventListener("focus", onFocus);
     // Restore a previous conversation, if any.
     try {
       const saved = window.localStorage.getItem(HISTORY_KEY);
@@ -46,7 +55,15 @@ export default function ChatPage() {
     } catch {
       /* ignore malformed history */
     }
+    return () => window.removeEventListener("focus", onFocus);
   }, []);
+
+  // The provider that the selected model routes to (from /v1/models), if known.
+  const selectedProvider = models.find((m) => m.id === model)?.provider;
+  const needsKey =
+    selectedProvider != null &&
+    health?.provider_status[selectedProvider] === "byok_only" &&
+    !hasKey;
 
   // Persist the conversation (skip while a stream is mid-flight).
   useEffect(() => {
@@ -254,6 +271,13 @@ export default function ChatPage() {
         {loading && !streaming && <div className="msg assistant">…</div>}
         <div ref={bottomRef} />
       </div>
+
+      {needsKey && (
+        <div className="notice">
+          <strong>{selectedProvider}</strong> needs an API key. Add one under{" "}
+          <a href="/settings">Settings</a> (BYOK) to use this model.
+        </div>
+      )}
 
       {error && <div className="error">{error}</div>}
 
