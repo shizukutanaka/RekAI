@@ -74,7 +74,7 @@ jobs:
         run: npm test
 
   web:
-    name: Web (lint · build)
+    name: Web (lint · test · build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -95,6 +95,9 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Test
+        run: npm test
 
       - name: Build
         run: npm run build

@@ -141,21 +141,36 @@ export async function streamChat(
     while ((sep = buffer.indexOf("\n\n")) !== -1) {
       const frame = buffer.slice(0, sep);
       buffer = buffer.slice(sep + 2);
-      const dataLine = frame
-        .split("\n")
-        .find((l) => l.startsWith("data:"));
-      if (!dataLine) continue;
-      const payload = dataLine.slice("data:".length).trim();
-      if (payload === "[DONE]") return;
-      try {
-        const event = JSON.parse(payload);
-        if (event.delta) onDelta(event.delta);
-        else if (event.error) throw new Error(event.detail || event.error);
-      } catch (err) {
-        if (err instanceof Error && err.message) throw err;
-        /* ignore malformed frame */
-      }
+      const ev = parseSSEFrame(frame);
+      if (ev.kind === "done") return;
+      if (ev.kind === "delta") onDelta(ev.text);
+      else if (ev.kind === "error") throw new Error(ev.message);
     }
+  }
+}
+
+export type SSEEvent =
+  | { kind: "delta"; text: string }
+  | { kind: "done" }
+  | { kind: "error"; message: string }
+  | { kind: "ignore" };
+
+/**
+ * Parse a single SSE frame (text between blank-line separators) into a typed
+ * event. Pure and side-effect free so it can be unit-tested.
+ */
+export function parseSSEFrame(frame: string): SSEEvent {
+  const dataLine = frame.split("\n").find((l) => l.startsWith("data:"));
+  if (!dataLine) return { kind: "ignore" };
+  const payload = dataLine.slice("data:".length).trim();
+  if (payload === "[DONE]") return { kind: "done" };
+  try {
+    const event = JSON.parse(payload);
+    if (event.delta) return { kind: "delta", text: event.delta };
+    if (event.error) return { kind: "error", message: event.detail || event.error };
+    return { kind: "ignore" };
+  } catch {
+    return { kind: "ignore" };
   }
 }
 

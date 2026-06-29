@@ -47,8 +47,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **JavaScript/TypeScript SDK** — zero-dependency `@rekai/client`
   (`packages/js-sdk`) mirroring the Python client, with TypeScript types and an
   async-generator `stream()`.
-- **CI** — GitHub Actions for API (ruff, mypy, pytest), web (lint, build), and
-  Docker image builds.
+- **CI** — GitHub Actions for API (ruff, mypy, pytest), web (lint, vitest,
+  build), Python/JS SDK tests, a live-API smoke job, and Docker image builds.
+- **Web unit tests** — vitest coverage for the pure client helpers
+  (`formatCost`, `parseSSEFrame`).
 - **Makefile** — common developer tasks (`make help`).
 - **Smoke test** — `scripts/smoke.sh` exercises the core endpoints of a running
   instance (health, chat, stream, usage, models, OpenAPI).

@@ -50,10 +50,11 @@ typecheck: ## Type-check the API (mypy)
 	cd $(API_DIR) && mypy rekai
 
 .PHONY: test
-test: ## Run the API, Python SDK, and JS SDK test suites
+test: ## Run the API, Python SDK, JS SDK, and web test suites
 	cd $(API_DIR) && pytest -q
 	cd $(SDK_DIR) && pytest -q
 	cd $(JS_SDK_DIR) && npm test
+	cd $(WEB_DIR) && npm test
 
 .PHONY: web-build
 web-build: ## Build the web app
