@@ -93,6 +93,12 @@ client-supplied one), records latency, and logs an access line
 `X-Request-ID` and `X-Response-Time-Ms` are returned on every response,
 including errors, so requests can be traced end to end.
 
+Counters live in memory for a fast, lock-protected request path (the standard
+per-instance model for Prometheus `/metrics`). When `REKAI_REDIS_URL` is set,
+they are **persisted write-behind**: a baseline is loaded on startup and the
+snapshot is flushed to Redis periodically and on shutdown, so `/v1/usage`
+totals survive restarts. Without Redis the store is a no-op.
+
 ## Cost estimation
 
 Each non-streamed response carries an approximate `cost_usd`, computed by

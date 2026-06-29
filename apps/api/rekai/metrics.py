@@ -46,6 +46,18 @@ class Metrics:
             with self._lock:
                 self.cost_usd_total += cost_usd
 
+    def seed(self, snapshot: dict) -> None:
+        """Set counters from a persisted snapshot (used on startup)."""
+        with self._lock:
+            self.requests_total = snapshot.get("requests_total", 0)
+            self.cache_hits_total = snapshot.get("cache_hits_total", 0)
+            self.cache_misses_total = snapshot.get("cache_misses_total", 0)
+            self.errors_total = snapshot.get("errors_total", 0)
+            self.fallbacks_total = snapshot.get("fallbacks_total", 0)
+            self.tokens_total = snapshot.get("tokens_total", 0)
+            self.cost_usd_total = snapshot.get("cost_usd_total", 0.0)
+            self.requests_by_provider = dict(snapshot.get("requests_by_provider", {}))
+
     def snapshot(self) -> dict:
         """Return a copy of the current counters as plain data."""
         with self._lock:

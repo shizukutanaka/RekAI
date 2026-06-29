@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = 3600
     redis_url: str | None = None  # e.g. redis://localhost:6379/0
 
+    # Metrics persistence (only active when redis_url is set)
+    metrics_persist_interval_seconds: int = 30
+
     # Rate limiting (token bucket per client)
     rate_limit_enabled: bool = True
     rate_limit_requests: int = 60

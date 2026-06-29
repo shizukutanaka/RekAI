@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import time
 import uuid
+from collections.abc import AsyncIterator
 
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +18,7 @@ from rekai.cache import CacheBackend, build_cache
 from rekai.config import Settings, get_settings
 from rekai.logging_config import configure_logging, get_logger
 from rekai.metrics import metrics
+from rekai.metrics_store import build_metrics_store
 from rekai.providers import provider_names
 from rekai.providers.base import ProviderError
 from rekai.rate_limit import RateLimiter
@@ -37,11 +41,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level)
 
+    metrics_store = build_metrics_store(settings)
+
+    async def _flush_loop(interval: int) -> None:
+        while True:
+            await asyncio.sleep(interval)
+            await metrics_store.save(metrics.snapshot())
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        baseline = await metrics_store.load()
+        if baseline:
+            metrics.seed(baseline)
+            access_logger.info("loaded persisted metrics snapshot")
+        flush_task = asyncio.create_task(_flush_loop(settings.metrics_persist_interval_seconds))
+        try:
+            yield
+        finally:
+            flush_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await flush_task
+            await metrics_store.save(metrics.snapshot())
+
     app = FastAPI(
         title="RekAI",
         version=__version__,
         description="A lightweight AI router & gateway with provider abstraction, "
         "caching and BYOK.",
+        lifespan=lifespan,
     )
     app.add_middleware(
         CORSMiddleware,

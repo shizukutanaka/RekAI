@@ -27,6 +27,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Observability** — structured logging, per-request `X-Request-ID` +
   `X-Response-Time-Ms` headers with access logging, Prometheus-style
   `/metrics`, `/v1/usage`, and auto-generated OpenAPI at `/docs`.
+- **Persistent metrics** — write-behind persistence of the usage counters to
+  Redis (when configured) so `/v1/usage` totals survive restarts; in-memory and
+  no-op otherwise.
 - **Web UI** — chat with model selector, streaming toggle, and cache/provider/
   token/cost indicators; a live **usage dashboard** at `/usage`; a settings
   page for BYOK keys.
