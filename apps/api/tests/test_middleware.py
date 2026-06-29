@@ -4,6 +4,28 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from rekai.config import Settings
+from rekai.main import create_app
+
+
+def test_oversized_body_rejected() -> None:
+    settings = Settings(environment="test", default_provider="echo", max_body_bytes=200)
+    client = TestClient(create_app(settings))
+    big = {"model": "echo", "messages": [{"role": "user", "content": "x" * 500}]}
+    resp = client.post("/v1/chat", json=big)
+    assert resp.status_code == 413
+    assert resp.json()["error"] == "payload_too_large"
+    # A small body still goes through.
+    small = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+    assert client.post("/v1/chat", json=small).status_code == 200
+
+
+def test_body_limit_disabled_with_zero() -> None:
+    settings = Settings(environment="test", default_provider="echo", max_body_bytes=0)
+    client = TestClient(create_app(settings))
+    big = {"model": "echo", "messages": [{"role": "user", "content": "x" * 5000}]}
+    assert client.post("/v1/chat", json=big).status_code == 200
+
 
 def test_request_id_generated(client: TestClient) -> None:
     resp = client.get("/health")

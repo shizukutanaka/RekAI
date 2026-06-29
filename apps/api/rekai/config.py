@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     rate_limit_requests: int = 60
     rate_limit_window_seconds: int = 60
 
+    # Reject /v1/* request bodies larger than this many bytes (0 disables).
+    max_body_bytes: int = 1_000_000
+
     # Provider defaults (server-side keys; BYOK via header overrides these)
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"

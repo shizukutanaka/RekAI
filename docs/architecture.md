@@ -12,6 +12,9 @@ POST /v1/chat
 [ request ctx ]   ── assigns/propagates X-Request-ID, times the request
    │
    ▼
+[ body guard ]    ── 413 if the /v1 body exceeds REKAI_MAX_BODY_BYTES
+   │
+   ▼
 [ rate limiter ]  ── 429 (+ Retry-After) if the client exceeds its budget
    │
    ▼

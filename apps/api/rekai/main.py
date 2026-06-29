@@ -99,13 +99,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # --- middleware: rate limiting ---------------------------------------
     @app.middleware("http")
     async def _rate_limit(request: Request, call_next):
+        is_api_write = request.method != "OPTIONS" and request.url.path.startswith("/v1/")
+
+        # Reject oversized bodies up front (cheap Content-Length check) so a huge
+        # payload can't tie up parsing or memory.
+        if is_api_write and settings.max_body_bytes > 0:
+            content_length = request.headers.get("content-length")
+            if content_length is not None and content_length.isdigit():
+                if int(content_length) > settings.max_body_bytes:
+                    metrics.record_error()
+                    return JSONResponse(
+                        status_code=413,
+                        content=ErrorResponse(
+                            error="payload_too_large",
+                            detail=f"Request body exceeds {settings.max_body_bytes} bytes.",
+                        ).model_dump(),
+                    )
+
         # CORS preflight (OPTIONS) must not consume budget, or the browser sees a
         # 429 on the preflight ("Failed to fetch") instead of the real response.
-        if (
-            settings.rate_limit_enabled
-            and request.method != "OPTIONS"
-            and request.url.path.startswith("/v1/")
-        ):
+        if settings.rate_limit_enabled and is_api_write:
             client = request.client.host if request.client else "anonymous"
             limit = str(settings.rate_limit_requests)
             if not limiter.allow(client):
