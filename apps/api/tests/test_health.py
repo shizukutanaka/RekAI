@@ -43,3 +43,12 @@ def test_openapi_schema(client: TestClient) -> None:
     schema = resp.json()
     assert "/v1/chat" in schema["paths"]
     assert schema["info"]["title"] == "RekAI"
+
+
+def test_openapi_documents_error_responses(client: TestClient) -> None:
+    paths = client.get("/openapi.json").json()["paths"]
+    for path in ("/v1/chat", "/v1/embeddings", "/v1/chat/stream"):
+        responses = paths[path]["post"]["responses"]
+        # The rate-limit and body-size errors are part of the documented contract.
+        assert "413" in responses
+        assert "429" in responses

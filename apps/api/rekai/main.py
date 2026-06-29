@@ -249,6 +249,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tags=["chat"],
         responses={
             401: {"model": ErrorResponse},
+            413: {"model": ErrorResponse},
             429: {"model": ErrorResponse},
             502: {"model": ErrorResponse},
         },
@@ -268,6 +269,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         responses={
             400: {"model": ErrorResponse},
             401: {"model": ErrorResponse},
+            413: {"model": ErrorResponse},
             429: {"model": ErrorResponse},
             502: {"model": ErrorResponse},
         },
@@ -286,6 +288,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         responses={
             200: {"content": {"text/event-stream": {}}},
             401: {"model": ErrorResponse},
+            413: {"model": ErrorResponse},
             429: {"model": ErrorResponse},
             502: {"model": ErrorResponse},
         },

@@ -10,7 +10,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Request body size limit** — `/v1/*` requests whose `Content-Length` exceeds
   `REKAI_MAX_BODY_BYTES` (default 1 MB; 0 disables) are rejected with
   `413 Payload Too Large` before parsing, protecting the server from oversized
-  payloads.
+  payloads. The `413` (and existing `429`) responses are now documented in the
+  OpenAPI schema for the chat/embeddings/stream endpoints.
 - **`X-RekAI-Version` header** — every response advertises the gateway version
   that served it (exposed via CORS), so clients and proxies can see which
   version answered.
