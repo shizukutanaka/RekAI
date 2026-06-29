@@ -14,8 +14,9 @@ Open http://localhost:3000.
 
 ## Pages
 
-- **/** — chat. Pick a model, send messages. Assistant bubbles show the
-  provider, whether the response was cached, and token usage.
+- **/** — chat. Pick a model, send messages. Toggle **Stream** to render
+  responses token-by-token via `/v1/chat/stream` (on by default). Assistant
+  bubbles show the provider, whether the response was cached, and token usage.
 - **/settings** — store your provider API key (BYOK). The key lives only in
   browser local storage and is sent as the `X-Provider-Key` header.
 
