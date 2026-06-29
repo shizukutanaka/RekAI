@@ -140,3 +140,12 @@ Key-requiring providers override `server_key_configured()` to check their key.
 
 That's the entire surface area — see `rekai/providers/echo.py` for the smallest
 working example.
+
+### OpenAI-compatible backends
+
+Many providers (Groq, Together, OpenRouter, Mistral, vLLM, LM Studio, …) speak
+the OpenAI `/chat/completions` API. Set `REKAI_CUSTOM_BASE_URL` (plus optional
+`REKAI_CUSTOM_NAME`, `REKAI_CUSTOM_API_KEY`, `REKAI_CUSTOM_MODELS`) to register
+`OpenAICompatibleProvider`, which reuses the OpenAI implementation (including
+accurate streaming usage) pointed at that endpoint. Select it with
+`provider="<name>"` or `REKAI_DEFAULT_PROVIDER`.

@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
 
+    # A custom OpenAI-compatible backend (Groq, Together, OpenRouter, Mistral,
+    # local vLLM/LM Studio, …). Enabled when a base URL is configured.
+    custom_name: str = "custom"
+    custom_base_url: str | None = None
+    custom_api_key: str | None = None
+    custom_models: str = ""  # comma-separated, for /v1/models listing
+
     # Networking
     request_timeout_seconds: float = 60.0
     cors_origins: str = "*"
@@ -60,6 +67,10 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def custom_model_list(self) -> list[str]:
+        return [m.strip() for m in self.custom_models.split(",") if m.strip()]
 
     @property
     def fallback_target_list(self) -> list[tuple[str, str | None]]:

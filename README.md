@@ -11,7 +11,7 @@ RekAI sits between your application and multiple LLM providers (OpenAI, Ollama, 
 
 ## ✨ Features
 
-- **Provider abstraction** — one API, many backends (`openai`, `anthropic`, `gemini`, `ollama`, plus an `echo` provider for local dev/tests).
+- **Provider abstraction** — one API, many backends (`openai`, `anthropic`, `gemini`, `ollama`, plus an `echo` provider for local dev/tests). Point at **any OpenAI-compatible endpoint** (Groq, Together, OpenRouter, Mistral, vLLM, LM Studio…) with one env var.
 - **Smart routing** — pick a provider explicitly, or let RekAI choose by model name / configured default.
 - **Fallback / failover** — on an upstream error, retry down a configured chain of `(provider, model)` targets.
 - **Streaming** — Server-Sent Events at `/v1/chat/stream` for token-by-token responses.

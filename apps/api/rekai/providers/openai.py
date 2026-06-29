@@ -16,18 +16,32 @@ class OpenAIProvider(Provider):
     name = "openai"
     requires_key = True
 
+    # --- overridable hooks (subclassed for OpenAI-compatible backends) -----
+    def _base_url(self) -> str:
+        return get_settings().openai_base_url
+
+    def _server_key(self) -> str | None:
+        return get_settings().openai_api_key
+
+    def _key_env_hint(self) -> str:
+        return "REKAI_OPENAI_API_KEY"
+
+    def _resolve_key(self, api_key: str | None) -> str:
+        key = api_key or self._server_key()
+        if not key:
+            raise ProviderError(
+                f"No {self.name} API key. Provide one with the 'X-Provider-Key' header "
+                f"(BYOK) or set {self._key_env_hint()}.",
+                status_code=401,
+            )
+        return key
+
     def server_key_configured(self) -> bool:
-        return bool(get_settings().openai_api_key)
+        return bool(self._server_key())
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
         settings = get_settings()
-        key = api_key or settings.openai_api_key
-        if not key:
-            raise ProviderError(
-                "No OpenAI API key. Provide one with the 'X-Provider-Key' header (BYOK) "
-                "or set REKAI_OPENAI_API_KEY.",
-                status_code=401,
-            )
+        key = self._resolve_key(api_key)
 
         payload: dict = {
             "model": request.model,
@@ -37,7 +51,7 @@ class OpenAIProvider(Provider):
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
 
-        url = f"{settings.openai_base_url.rstrip('/')}/chat/completions"
+        url = f"{self._base_url().rstrip('/')}/chat/completions"
         try:
             async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
                 resp = await client.post(
@@ -46,11 +60,11 @@ class OpenAIProvider(Provider):
                     headers={"Authorization": f"Bearer {key}"},
                 )
         except httpx.HTTPError as exc:  # network-level failure
-            raise ProviderError(f"OpenAI request failed: {exc}") from exc
+            raise ProviderError(f"{self.name} request failed: {exc}") from exc
 
         if resp.status_code >= 400:
             raise ProviderError(
-                f"OpenAI returned {resp.status_code}: {resp.text[:200]}",
+                f"{self.name} returned {resp.status_code}: {resp.text[:200]}",
                 status_code=resp.status_code if resp.status_code < 500 else 502,
             )
 
@@ -76,26 +90,20 @@ class OpenAIProvider(Provider):
         self, request: ChatRequest, api_key: str | None
     ) -> AsyncIterator[StreamEvent]:
         settings = get_settings()
-        key = api_key or settings.openai_api_key
-        if not key:
-            raise ProviderError(
-                "No OpenAI API key. Provide one with the 'X-Provider-Key' header (BYOK) "
-                "or set REKAI_OPENAI_API_KEY.",
-                status_code=401,
-            )
+        key = self._resolve_key(api_key)
 
         payload: dict = {
             "model": request.model,
             "messages": [m.model_dump() for m in request.messages],
             "temperature": request.temperature,
             "stream": True,
-            # Ask OpenAI to include a final usage chunk for accurate accounting.
+            # Ask for a final usage chunk for accurate accounting.
             "stream_options": {"include_usage": True},
         }
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
 
-        url = f"{settings.openai_base_url.rstrip('/')}/chat/completions"
+        url = f"{self._base_url().rstrip('/')}/chat/completions"
         try:
             async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
                 async with client.stream(
@@ -104,7 +112,7 @@ class OpenAIProvider(Provider):
                     if resp.status_code >= 400:
                         body = (await resp.aread()).decode()[:200]
                         raise ProviderError(
-                            f"OpenAI returned {resp.status_code}: {body}",
+                            f"{self.name} returned {resp.status_code}: {body}",
                             status_code=resp.status_code if resp.status_code < 500 else 502,
                         )
                     async for line in resp.aiter_lines():
@@ -112,7 +120,7 @@ class OpenAIProvider(Provider):
                         if event is not None:
                             yield event
         except httpx.HTTPError as exc:
-            raise ProviderError(f"OpenAI streaming request failed: {exc}") from exc
+            raise ProviderError(f"{self.name} streaming request failed: {exc}") from exc
 
     async def list_models(self, api_key: str | None) -> list[str]:
         # Static, commonly-available models; avoids an extra network round-trip.

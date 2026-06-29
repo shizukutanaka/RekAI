@@ -7,6 +7,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **OpenAI-compatible provider** — set `REKAI_CUSTOM_BASE_URL` to front any
+  OpenAI-compatible API (Groq, Together, OpenRouter, Mistral, vLLM, LM Studio…);
+  reuses the OpenAI implementation incl. accurate streaming usage.
 - **Deploy configs** — a Render Blueprint (`deploy/render.yaml`) provisioning
   Redis + API + Web, plus a deploy guide. The web `Dockerfile` accepts
   `NEXT_PUBLIC_API_URL` as a build arg so the API URL is baked correctly.
