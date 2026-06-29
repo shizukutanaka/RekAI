@@ -5,6 +5,7 @@ import {
   ChatMessage,
   HealthResponse,
   ModelInfo,
+  StreamSummary,
   fetchHealth,
   fetchModels,
   formatCost,
@@ -114,6 +115,7 @@ export default function ChatPage() {
         setMessages([...history, { role: "assistant", content: "", streaming: true }]);
         const controller = new AbortController();
         abortRef.current = controller;
+        let summary: StreamSummary | null = null;
         try {
           await streamChat(
             { model, messages: wire, providerKey, temperature },
@@ -128,6 +130,9 @@ export default function ChatPage() {
               });
             },
             controller.signal,
+            (s) => {
+              summary = s;
+            },
           );
         } catch (e) {
           // A user-initiated stop is not an error — keep what streamed so far.
@@ -135,6 +140,7 @@ export default function ChatPage() {
         }
         // Finalize the bubble (mark complete; note if it was stopped early).
         const wasAborted = controller.signal.aborted;
+        const finalSummary = summary as StreamSummary | null;
         setMessages((prev) => {
           const next = [...prev];
           const last = next[next.length - 1];
@@ -143,6 +149,8 @@ export default function ChatPage() {
               ...last,
               streaming: false,
               provider: wasAborted ? `${model} · stopped` : model,
+              tokens: finalSummary?.usage.total_tokens,
+              cost: finalSummary?.cost_usd ?? undefined,
             };
           }
           return next;

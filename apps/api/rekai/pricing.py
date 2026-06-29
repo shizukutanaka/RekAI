@@ -58,6 +58,12 @@ def price_for_model(model: str) -> tuple[float, float] | None:
     return best
 
 
+def estimate_tokens(text: str) -> int:
+    """A naive token estimate (whitespace words). Used where the provider does
+    not report exact usage — e.g. the text-only streaming path."""
+    return max(1, len(text.split()))
+
+
 def estimate_cost(provider: str, model: str, usage: Usage) -> float | None:
     """Estimate the USD cost of a response.
 

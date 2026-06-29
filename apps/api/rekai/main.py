@@ -20,6 +20,7 @@ from rekai.config import Settings, get_settings
 from rekai.logging_config import configure_logging, get_logger
 from rekai.metrics import metrics
 from rekai.metrics_store import build_metrics_store
+from rekai.pricing import estimate_cost, estimate_tokens
 from rekai.providers import get_provider, provider_names
 from rekai.providers.base import ProviderError
 from rekai.rate_limit import RateLimiter
@@ -31,6 +32,7 @@ from rekai.schemas import (
     HealthResponse,
     ModelInfo,
     ModelsResponse,
+    Usage,
     UsageSummary,
 )
 from rekai.service import handle_chat
@@ -203,21 +205,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> StreamingResponse:
         """Stream a chat completion as Server-Sent Events.
 
-        Emits ``data: {"delta": "..."}`` events followed by a terminating
-        ``data: [DONE]``. Streaming responses are not cached.
+        Emits ``data: {"delta": "..."}`` events, then a final
+        ``data: {"usage": {...}, "cost_usd": ..., "estimated": true}`` summary,
+        then a terminating ``data: [DONE]``. Streaming responses are not cached.
         """
         provider_name, provider = select_provider(request, config)
         metrics.record_request(provider_name)
 
         async def event_source():
+            completion = []
+            errored = False
             try:
                 async for delta in provider.stream(request, x_provider_key):
                     if delta:
+                        completion.append(delta)
                         yield f"data: {json.dumps({'delta': delta})}\n\n"
             except ProviderError as exc:
+                errored = True
                 metrics.record_error()
                 payload = {"error": "provider_error", "detail": str(exc)}
                 yield f"data: {json.dumps(payload)}\n\n"
+
+            if not errored:
+                # Usage is estimated from text (the stream carries no token counts).
+                prompt_tokens = sum(estimate_tokens(m.content) for m in request.messages)
+                completion_tokens = estimate_tokens("".join(completion))
+                usage = Usage(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=prompt_tokens + completion_tokens,
+                )
+                cost_usd = estimate_cost(provider_name, request.model, usage)
+                metrics.record_tokens(usage.total_tokens)
+                metrics.record_cost(cost_usd)
+                summary = {
+                    "provider": provider_name,
+                    "model": request.model,
+                    "usage": usage.model_dump(),
+                    "cost_usd": cost_usd,
+                    "estimated": True,
+                }
+                yield f"data: {json.dumps(summary)}\n\n"
             yield "data: [DONE]\n\n"
 
         return StreamingResponse(

@@ -109,6 +109,7 @@ export async function streamChat(
   },
   onDelta: (text: string) => void,
   signal?: AbortSignal,
+  onSummary?: (summary: StreamSummary) => void,
 ): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (params.providerKey) headers["X-Provider-Key"] = params.providerKey;
@@ -152,13 +153,23 @@ export async function streamChat(
       const ev = parseSSEFrame(frame);
       if (ev.kind === "done") return;
       if (ev.kind === "delta") onDelta(ev.text);
+      else if (ev.kind === "summary") onSummary?.(ev.summary);
       else if (ev.kind === "error") throw new Error(ev.message);
     }
   }
 }
 
+export interface StreamSummary {
+  provider: string;
+  model: string;
+  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  cost_usd: number | null;
+  estimated: boolean;
+}
+
 export type SSEEvent =
   | { kind: "delta"; text: string }
+  | { kind: "summary"; summary: StreamSummary }
   | { kind: "done" }
   | { kind: "error"; message: string }
   | { kind: "ignore" };
@@ -176,6 +187,7 @@ export function parseSSEFrame(frame: string): SSEEvent {
     const event = JSON.parse(payload);
     if (event.delta) return { kind: "delta", text: event.delta };
     if (event.error) return { kind: "error", message: event.detail || event.error };
+    if (event.usage) return { kind: "summary", summary: event as StreamSummary };
     return { kind: "ignore" };
   } catch {
     return { kind: "ignore" };

@@ -51,6 +51,37 @@ def test_stream_endpoint_echo(client: TestClient) -> None:
     assert len([p for p in payloads if p != "[DONE]"]) > 1
 
 
+def test_stream_endpoint_emits_usage_summary(client: TestClient) -> None:
+    before = client.get("/v1/usage").json()["tokens_total"]
+    resp = client.post(
+        "/v1/chat/stream",
+        json={"model": "echo", "messages": [{"role": "user", "content": "alpha beta"}]},
+    )
+    payloads = _parse_sse(resp.text)
+    # The penultimate event (before [DONE]) is the usage summary.
+    summary = json.loads(payloads[-2])
+    assert summary["provider"] == "echo"
+    assert summary["estimated"] is True
+    assert summary["usage"]["total_tokens"] > 0
+    assert summary["cost_usd"] == 0.0  # echo is free
+    # Streamed usage is now recorded in /v1/usage.
+    after = client.get("/v1/usage").json()["tokens_total"]
+    assert after > before
+
+
+def test_stream_error_has_no_usage_summary(client: TestClient) -> None:
+    resp = client.post(
+        "/v1/chat/stream",
+        json={
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+    payloads = _parse_sse(resp.text)
+    assert not any('"usage"' in p for p in payloads)
+
+
 def test_stream_endpoint_error_is_sent_as_event(client: TestClient) -> None:
     # openai with no key -> ProviderError surfaced inside the stream.
     resp = client.post(

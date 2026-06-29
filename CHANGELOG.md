@@ -6,6 +6,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Streaming usage/cost** — `POST /v1/chat/stream` now emits a final
+  `{"usage", "cost_usd", "estimated"}` summary event, and streamed requests are
+  counted in `/v1/usage` and `/metrics` (previously only non-streamed were). The
+  web chat shows token/cost on streamed replies.
+
 ## [1.0.0] - 2026-06-29
 
 First public release — a self-hostable AI router & gateway. Runs with a single

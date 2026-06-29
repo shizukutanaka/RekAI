@@ -46,6 +46,17 @@ describe("parseSSEFrame", () => {
     });
   });
 
+  it("parses a usage summary event", () => {
+    const ev = parseSSEFrame(
+      'data: {"provider":"echo","model":"echo","usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3},"cost_usd":0,"estimated":true}',
+    );
+    expect(ev.kind).toBe("summary");
+    if (ev.kind === "summary") {
+      expect(ev.summary.usage.total_tokens).toBe(3);
+      expect(ev.summary.estimated).toBe(true);
+    }
+  });
+
   it("ignores frames without a data line", () => {
     expect(parseSSEFrame(": comment")).toEqual({ kind: "ignore" });
     expect(parseSSEFrame("event: ping")).toEqual({ kind: "ignore" });
