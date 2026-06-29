@@ -15,7 +15,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   streaming, OpenAI tool-call deltas are accumulated and returned in the final
   summary event. **Anthropic** tools work natively via format translation
   (OpenAI `tools`/`tool_choice`/`tool_calls` ↔ Anthropic
-  `input_schema`/`tool_use`/`tool_result`).
+  `input_schema`/`tool_use`/`tool_result`). **Gemini** likewise via
+  `functionDeclarations`/`functionCall`/`functionResponse` — uniform tool
+  calling across OpenAI, Anthropic, and Gemini through one API.
 - **Exact provider routing from the web** — the chat UI sends the selected
   model's provider (from `/v1/models`), so custom and explicitly-chosen
   providers route correctly instead of falling back to the default.

@@ -31,16 +31,7 @@ class GeminiProvider(Provider):
 
     def _build_payload(self, request: ChatRequest) -> dict:
         # Gemini uses roles "user"/"model" and carries the system prompt separately.
-        contents = []
-        for m in request.messages:
-            if m.role == "system":
-                continue
-            contents.append(
-                {
-                    "role": "model" if m.role == "assistant" else "user",
-                    "parts": [{"text": m.content or ""}],
-                }
-            )
+        contents = _translate_contents(request.messages)
         if not contents:
             raise ProviderError("Gemini requires at least one user/assistant message.", 400)
 
@@ -54,6 +45,13 @@ class GeminiProvider(Provider):
         system_parts = [m.content or "" for m in request.messages if m.role == "system"]
         if system_parts:
             payload["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
+
+        # Translate OpenAI-style tools / tool_choice into Gemini's format.
+        if request.tools:
+            payload["tools"] = _translate_tools(request.tools)
+            config = _translate_tool_config(request.tool_choice)
+            if config is not None:
+                payload["toolConfig"] = config
         return payload
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
@@ -75,12 +73,14 @@ class GeminiProvider(Provider):
 
         data = resp.json()
         content = _extract_text(data)
+        tool_calls = _extract_tool_calls(data)
         meta = data.get("usageMetadata", {})
         prompt_tokens = meta.get("promptTokenCount", 0)
         completion_tokens = meta.get("candidatesTokenCount", 0)
         return ProviderResult(
             content=content,
             model=request.model,
+            tool_calls=tool_calls,
             usage=Usage(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
@@ -173,3 +173,106 @@ def _parse_gemini_sse_line(line: str) -> str | None:
     except json.JSONDecodeError:
         return None
     return _extract_text(chunk) or None
+
+
+# --- OpenAI <-> Gemini tool translation -------------------------------------
+
+
+def _translate_tools(openai_tools: list[dict]) -> list[dict]:
+    """OpenAI tools -> Gemini ``[{"functionDeclarations": [...]}]``."""
+    declarations = []
+    for tool in openai_tools:
+        fn = tool.get("function", tool)
+        decl = {"name": fn.get("name", ""), "description": fn.get("description", "")}
+        params = fn.get("parameters")
+        if params:
+            decl["parameters"] = params
+        declarations.append(decl)
+    return [{"functionDeclarations": declarations}]
+
+
+def _translate_tool_config(choice: object) -> dict | None:
+    """OpenAI tool_choice -> Gemini ``toolConfig.functionCallingConfig``."""
+    if choice is None:
+        return None
+    mode = "AUTO"
+    allowed: list[str] | None = None
+    if choice == "auto":
+        mode = "AUTO"
+    elif choice == "required":
+        mode = "ANY"
+    elif choice == "none":
+        mode = "NONE"
+    elif isinstance(choice, dict):
+        name = choice.get("function", {}).get("name") or choice.get("name")
+        mode = "ANY"
+        allowed = [name] if name else None
+    config: dict = {"mode": mode}
+    if allowed:
+        config["allowedFunctionNames"] = allowed
+    return {"functionCallingConfig": config}
+
+
+def _translate_contents(messages: list) -> list[dict]:
+    """Map OpenAI-style messages (incl. tool calls/results) to Gemini contents."""
+    out: list[dict] = []
+    for m in messages:
+        if m.role == "system":
+            continue
+        if m.role == "tool":
+            out.append(
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "functionResponse": {
+                                "name": m.name or "",
+                                "response": {"result": m.content or ""},
+                            }
+                        }
+                    ],
+                }
+            )
+        elif m.role == "assistant" and m.tool_calls:
+            parts: list[dict] = []
+            if m.content:
+                parts.append({"text": m.content})
+            for tc in m.tool_calls:
+                fn = tc.get("function", {})
+                try:
+                    args = json.loads(fn.get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                parts.append({"functionCall": {"name": fn.get("name", ""), "args": args}})
+            out.append({"role": "model", "parts": parts})
+        else:
+            out.append(
+                {
+                    "role": "model" if m.role == "assistant" else "user",
+                    "parts": [{"text": m.content or ""}],
+                }
+            )
+    return out
+
+
+def _extract_tool_calls(data: dict) -> list[dict] | None:
+    """Gemini ``functionCall`` parts -> OpenAI-style ``tool_calls`` (ids synthesized)."""
+    candidates = data.get("candidates") or []
+    if not candidates:
+        return None
+    parts = candidates[0].get("content", {}).get("parts", [])
+    calls = []
+    for i, p in enumerate(parts):
+        fc = p.get("functionCall")
+        if fc:
+            calls.append(
+                {
+                    "id": f"call_{fc.get('name', 'fn')}_{i}",
+                    "type": "function",
+                    "function": {
+                        "name": fc.get("name", ""),
+                        "arguments": json.dumps(fc.get("args", {})),
+                    },
+                }
+            )
+    return calls or None

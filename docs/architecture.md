@@ -123,6 +123,9 @@ translated to Anthropic's `tools`/`input_schema`/`tool_choice`, assistant
 `tool_calls` and `tool` results round-trip to Anthropic `tool_use`/`tool_result`
 content blocks, and Anthropic's `tool_use` responses map back to OpenAI-style
 `tool_calls` — so a tools conversation is portable across OpenAI and Anthropic.
+**Gemini** is supported the same way (`functionDeclarations`/`functionCall`/
+`functionResponse` + `toolConfig`), so tool calling works uniformly across all
+three major cloud providers through one OpenAI-style API.
 
 ## Cost estimation
 
