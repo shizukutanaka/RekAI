@@ -6,6 +6,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-29
+
+A backward-compatible feature release building on 1.0.0: text embeddings across
+all providers, richer model discovery (types, pricing, filtering), rate-limit
+observability, structured logging, and hardening.
+
 ### Added
 - **Per-model pricing in `/v1/models`** — each entry now carries an optional
   `pricing` (`input_per_1m`/`output_per_1m` USD, or `null` when unknown) from
@@ -171,5 +177,6 @@ streaming, fallback, cost estimation, and a built-in web UI.
 - SDK CI now runs `ruff format --check` (previously only `ruff check`), and the
   SDK source was reformatted to match.
 
-[Unreleased]: https://github.com/shizukutanaka/RekAI/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/shizukutanaka/RekAI/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/shizukutanaka/RekAI/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/shizukutanaka/RekAI/releases/tag/v1.0.0
