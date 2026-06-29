@@ -19,7 +19,9 @@ matching model, e.g. `MODEL=gpt-4o-mini`.
 | `python/chat.py`         | Python 3 (stdlib) | `python python/chat.py`           |
 | `python/stream.py`       | Python 3 (stdlib) | `python python/stream.py`         |
 | `python/tools.py`        | Python 3 (stdlib) | `python python/tools.py` (needs a tool-capable model + key) |
+| `python/embeddings.py`   | Python 3 (stdlib) | `python python/embeddings.py`     |
 | `javascript/chat.mjs`    | Node 18+       | `node javascript/chat.mjs`           |
+| `javascript/embeddings.mjs` | Node 18+    | `node javascript/embeddings.mjs`     |
 
 ## Environment variables
 

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from rekai.providers.base import ProviderError
 from rekai.providers.echo import EchoProvider
+from rekai.providers.ollama import OllamaProvider
 from rekai.providers.openai import OpenAIProvider
 
 
@@ -97,3 +98,39 @@ async def test_openai_embeddings_parsed(monkeypatch) -> None:
     assert result.embeddings == [[0.1, 0.2], [0.4, 0.5]]
     assert captured["url"].endswith("/embeddings")
     assert captured["json"]["input"] == ["x", "y"]
+
+
+async def test_ollama_embeddings_parsed(monkeypatch) -> None:
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {
+                "model": "nomic-embed-text",
+                "embeddings": [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]],
+                "prompt_eval_count": 5,
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json):
+            captured["url"] = url
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    result = await OllamaProvider().embed(["x", "y"], "nomic-embed-text", api_key=None)
+    assert result.embeddings == [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
+    assert result.usage.prompt_tokens == 5
+    assert captured["url"].endswith("/api/embed")
+    assert captured["json"] == {"model": "nomic-embed-text", "input": ["x", "y"]}

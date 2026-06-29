@@ -11,7 +11,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and metrics. Echo returns deterministic vectors (no key); OpenAI(-compatible)
   calls the real `/embeddings` API. `Provider.embed()` is the extension point.
   Both SDKs expose `embeddings()` (Python `EmbeddingsResult`, JS returns the
-  parsed object) for client parity with the chat path.
+  parsed object) for client parity with the chat path. **Ollama** embeddings
+  are native via `/api/embed` (keyless, e.g. `nomic-embed-text`). Runnable
+  `examples/{python,javascript}/embeddings.{py,mjs}` show a cosine-similarity
+  demo.
 - **Tool / function calling** — `ChatRequest` accepts OpenAI-style `tools` and
   `tool_choice` (passed through); the model's `tool_calls` are returned on
   `ChatResponse`. Messages support `tool_calls`/`tool_call_id`/`name` and

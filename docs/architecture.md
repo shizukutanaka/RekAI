@@ -156,7 +156,8 @@ Key-requiring providers override `server_key_configured()` to check their key.
 It accepts a string or list of strings, returns one vector per input, and is
 cached (keyed by provider/model/inputs). Echo returns deterministic hash-based
 vectors so the endpoint works with no key; OpenAI and OpenAI-compatible backends
-call the real `/embeddings` API. Providers opt in by overriding `embed()`.
+call the real `/embeddings` API, and **Ollama** calls its local `/api/embed`
+(keyless, e.g. `nomic-embed-text`). Providers opt in by overriding `embed()`.
 
 ## Adding a provider
 

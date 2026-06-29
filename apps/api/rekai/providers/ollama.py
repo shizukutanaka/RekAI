@@ -8,7 +8,13 @@ from collections.abc import AsyncIterator
 import httpx
 
 from rekai.config import get_settings
-from rekai.providers.base import Provider, ProviderError, ProviderResult, StreamEvent
+from rekai.providers.base import (
+    EmbeddingResult,
+    Provider,
+    ProviderError,
+    ProviderResult,
+    StreamEvent,
+)
 from rekai.schemas import ChatRequest, Usage
 
 
@@ -51,6 +57,30 @@ class OllamaProvider(Provider):
                 completion_tokens=completion_tokens,
                 total_tokens=prompt_tokens + completion_tokens,
             ),
+        )
+
+    async def embed(self, inputs: list[str], model: str, api_key: str | None) -> EmbeddingResult:
+        settings = get_settings()
+        url = f"{settings.ollama_base_url.rstrip('/')}/api/embed"
+        try:
+            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+                resp = await client.post(url, json={"model": model, "input": inputs})
+        except httpx.HTTPError as exc:
+            raise ProviderError(
+                f"Ollama embeddings request failed "
+                f"(is it running at {settings.ollama_base_url}?): {exc}"
+            ) from exc
+        if resp.status_code >= 400:
+            raise ProviderError(
+                f"Ollama returned {resp.status_code}: {resp.text[:200]}",
+                status_code=resp.status_code if resp.status_code < 500 else 502,
+            )
+        data = resp.json()
+        prompt_tokens = data.get("prompt_eval_count", 0)
+        return EmbeddingResult(
+            embeddings=data.get("embeddings", []),
+            model=data.get("model", model),
+            usage=Usage(prompt_tokens=prompt_tokens, total_tokens=prompt_tokens),
         )
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
