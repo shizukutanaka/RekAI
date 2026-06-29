@@ -74,8 +74,10 @@ emits `data: {"delta": "..."}` events, then a final
 `data: {"usage": {...}, "cost_usd": ..., "estimated": true}` summary, then a
 terminating `data: [DONE]`. Providers expose `stream_events()` yielding text
 deltas and an optional final provider-reported usage; when present it is used
-verbatim (`estimated: false`) — echo, OpenAI (via `stream_options`), and Ollama
-do this. Otherwise usage is estimated from the streamed text (`estimated: true`).
+verbatim (`estimated: false`) — all five providers do this (echo exact; OpenAI
+via `stream_options`; Anthropic from `message_start`/`message_delta`; Gemini from
+`usageMetadata`; Ollama from the final chunk). Otherwise usage is estimated from
+the streamed text (`estimated: true`).
 Either way it is recorded into `/v1/usage` and `/metrics` like non-streamed
 requests. Errors are delivered as a
 `data: {"error": ...}` event rather than an HTTP status, since the stream has

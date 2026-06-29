@@ -292,3 +292,39 @@ async def test_openai_stream_events_surfaces_usage(monkeypatch) -> None:
     usage = next((e.usage for e in events if e.usage is not None), None)
     assert deltas == "Hello"
     assert usage is not None and usage.total_tokens == 3
+
+
+async def test_anthropic_stream_events_surfaces_usage(monkeypatch) -> None:
+    from rekai.providers.anthropic import AnthropicProvider
+
+    lines = [
+        'data: {"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":0}}}',
+        'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}}',
+        'data: {"type":"message_delta","delta":{},"usage":{"output_tokens":4}}',
+        'data: {"type":"message_stop"}',
+    ]
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: _FakeClient(lines))
+
+    req = ChatRequest(model="claude-sonnet-4-6", messages=[ChatMessage(role="user", content="hi")])
+    events = [e async for e in AnthropicProvider().stream_events(req, api_key="sk-ant")]
+    assert "".join(e.delta or "" for e in events) == "Hi"
+    usage = next((e.usage for e in events if e.usage is not None), None)
+    assert usage is not None
+    assert usage.prompt_tokens == 10 and usage.completion_tokens == 4 and usage.total_tokens == 14
+
+
+async def test_gemini_stream_events_surfaces_usage(monkeypatch) -> None:
+    from rekai.providers.gemini import GeminiProvider
+
+    lines = [
+        'data: {"candidates":[{"content":{"parts":[{"text":"Hi"}]}}]}',
+        'data: {"candidates":[{"content":{"parts":[{"text":"!"}]}}],'
+        '"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2,"totalTokenCount":5}}',
+    ]
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: _FakeClient(lines))
+
+    req = ChatRequest(model="gemini-1.5-flash", messages=[ChatMessage(role="user", content="hi")])
+    events = [e async for e in GeminiProvider().stream_events(req, api_key="g-key")]
+    assert "".join(e.delta or "" for e in events) == "Hi!"
+    usage = next((e.usage for e in events if e.usage is not None), None)
+    assert usage is not None and usage.total_tokens == 5

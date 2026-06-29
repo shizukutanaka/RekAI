@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from rekai.config import get_settings
-from rekai.providers.base import Provider, ProviderError, ProviderResult
+from rekai.providers.base import Provider, ProviderError, ProviderResult, StreamEvent
 from rekai.schemas import ChatRequest, Usage
 
 
@@ -89,6 +89,13 @@ class GeminiProvider(Provider):
         )
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
+        async for ev in self.stream_events(request, api_key):
+            if ev.delta:
+                yield ev.delta
+
+    async def stream_events(
+        self, request: ChatRequest, api_key: str | None
+    ) -> AsyncIterator[StreamEvent]:
         settings = get_settings()
         key = self._resolve_key(api_key)
         payload = self._build_payload(request)
@@ -96,6 +103,7 @@ class GeminiProvider(Provider):
             f"{settings.gemini_base_url.rstrip('/')}/models/"
             f"{request.model}:streamGenerateContent?alt=sse"
         )
+        last_usage: dict | None = None
         try:
             async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
                 async with client.stream(
@@ -108,11 +116,34 @@ class GeminiProvider(Provider):
                             status_code=resp.status_code if resp.status_code < 500 else 502,
                         )
                     async for line in resp.aiter_lines():
-                        delta = _parse_gemini_sse_line(line)
-                        if delta:
-                            yield delta
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[len("data:") :].strip()
+                        if not data:
+                            continue
+                        try:
+                            chunk = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        text = _extract_text(chunk)
+                        if text:
+                            yield StreamEvent(delta=text)
+                        if chunk.get("usageMetadata"):
+                            last_usage = chunk["usageMetadata"]
         except httpx.HTTPError as exc:
             raise ProviderError(f"Gemini streaming request failed: {exc}") from exc
+        if last_usage is not None:
+            prompt_tokens = last_usage.get("promptTokenCount", 0)
+            completion_tokens = last_usage.get("candidatesTokenCount", 0)
+            yield StreamEvent(
+                usage=Usage(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=last_usage.get(
+                        "totalTokenCount", prompt_tokens + completion_tokens
+                    ),
+                )
+            )
 
     async def list_models(self, api_key: str | None) -> list[str]:
         return [

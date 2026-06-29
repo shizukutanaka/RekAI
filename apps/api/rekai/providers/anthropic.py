@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from rekai.config import get_settings
-from rekai.providers.base import Provider, ProviderError, ProviderResult
+from rekai.providers.base import Provider, ProviderError, ProviderResult, StreamEvent
 from rekai.schemas import ChatRequest, Usage
 
 
@@ -97,10 +97,21 @@ class AnthropicProvider(Provider):
         )
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
+        async for ev in self.stream_events(request, api_key):
+            if ev.delta:
+                yield ev.delta
+
+    async def stream_events(
+        self, request: ChatRequest, api_key: str | None
+    ) -> AsyncIterator[StreamEvent]:
         settings = get_settings()
         key = self._resolve_key(api_key)
         payload = self._build_payload(request, stream=True)
         url = f"{settings.anthropic_base_url.rstrip('/')}/messages"
+        # input tokens arrive in message_start; output tokens in message_delta.
+        input_tokens = 0
+        output_tokens = 0
+        saw_usage = False
         try:
             async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
                 async with client.stream(
@@ -113,11 +124,40 @@ class AnthropicProvider(Provider):
                             status_code=resp.status_code if resp.status_code < 500 else 502,
                         )
                     async for line in resp.aiter_lines():
-                        delta = _parse_anthropic_sse_line(line)
-                        if delta:
-                            yield delta
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[len("data:") :].strip()
+                        if not data:
+                            continue
+                        try:
+                            event = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        etype = event.get("type")
+                        if etype == "content_block_delta":
+                            text = event.get("delta", {}).get("text")
+                            if text:
+                                yield StreamEvent(delta=text)
+                        elif etype == "message_start":
+                            usage = event.get("message", {}).get("usage", {})
+                            input_tokens = usage.get("input_tokens", input_tokens)
+                            output_tokens = usage.get("output_tokens", output_tokens)
+                            saw_usage = True
+                        elif etype == "message_delta":
+                            usage = event.get("usage", {})
+                            if "output_tokens" in usage:
+                                output_tokens = usage["output_tokens"]
+                                saw_usage = True
         except httpx.HTTPError as exc:
             raise ProviderError(f"Anthropic streaming request failed: {exc}") from exc
+        if saw_usage:
+            yield StreamEvent(
+                usage=Usage(
+                    prompt_tokens=input_tokens,
+                    completion_tokens=output_tokens,
+                    total_tokens=input_tokens + output_tokens,
+                )
+            )
 
     async def list_models(self, api_key: str | None) -> list[str]:
         return [
