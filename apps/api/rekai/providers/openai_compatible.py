@@ -20,11 +20,13 @@ class OpenAICompatibleProvider(OpenAIProvider):
         base_url: str,
         api_key: str | None = None,
         models: list[str] | None = None,
+        embedding_models: list[str] | None = None,
     ) -> None:
         self.name = name
         self._url = base_url
         self._key = api_key
         self._models = models or []
+        self._embedding_models = embedding_models or []
 
     def _base_url(self) -> str:
         return self._url
@@ -39,6 +41,6 @@ class OpenAICompatibleProvider(OpenAIProvider):
         return list(self._models)
 
     async def list_embedding_models(self, api_key: str | None) -> list[str]:
-        # Custom backends don't inherit OpenAI's embedding model names; their
-        # embedding models (if any) aren't enumerated here.
-        return []
+        # Custom backends don't inherit OpenAI's embedding model names; they
+        # advertise their own via REKAI_CUSTOM_EMBEDDING_MODELS.
+        return list(self._embedding_models)

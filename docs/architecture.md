@@ -180,7 +180,9 @@ working example.
 
 Many providers (Groq, Together, OpenRouter, Mistral, vLLM, LM Studio, …) speak
 the OpenAI `/chat/completions` API. Set `REKAI_CUSTOM_BASE_URL` (plus optional
-`REKAI_CUSTOM_NAME`, `REKAI_CUSTOM_API_KEY`, `REKAI_CUSTOM_MODELS`) to register
-`OpenAICompatibleProvider`, which reuses the OpenAI implementation (including
-accurate streaming usage) pointed at that endpoint. Select it with
-`provider="<name>"` or `REKAI_DEFAULT_PROVIDER`.
+`REKAI_CUSTOM_NAME`, `REKAI_CUSTOM_API_KEY`, `REKAI_CUSTOM_MODELS`,
+`REKAI_CUSTOM_EMBEDDING_MODELS`) to register `OpenAICompatibleProvider`, which
+reuses the OpenAI implementation (including accurate streaming usage and the
+`/embeddings` call) pointed at that endpoint. Select it with `provider="<name>"`
+or `REKAI_DEFAULT_PROVIDER`; any configured embedding models are advertised in
+`/v1/models` with `type="embedding"`.

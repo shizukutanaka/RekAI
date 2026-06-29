@@ -20,7 +20,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vector dims, cost, and pairwise cosine similarity. `/v1/models` now tags each
   entry with a `type` (`chat`/`embedding`) and advertises embedding models
   (`list_embedding_models()`), so the playground offers a real model dropdown
-  routed to the right provider and the chat selector stays chat-only. Runnable
+  routed to the right provider and the chat selector stays chat-only.
+  OpenAI-compatible backends can advertise their own embedding models via
+  `REKAI_CUSTOM_EMBEDDING_MODELS`. Runnable
   `examples/{python,javascript}/embeddings.{py,mjs}` show a cosine-similarity
   demo.
 - **Tool / function calling** — `ChatRequest` accepts OpenAI-style `tools` and

@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     custom_base_url: str | None = None
     custom_api_key: str | None = None
     custom_models: str = ""  # comma-separated, for /v1/models listing
+    custom_embedding_models: str = ""  # comma-separated embedding models
 
     # Networking
     request_timeout_seconds: float = 60.0
@@ -71,6 +72,10 @@ class Settings(BaseSettings):
     @property
     def custom_model_list(self) -> list[str]:
         return [m.strip() for m in self.custom_models.split(",") if m.strip()]
+
+    @property
+    def custom_embedding_model_list(self) -> list[str]:
+        return [m.strip() for m in self.custom_embedding_models.split(",") if m.strip()]
 
     @property
     def fallback_target_list(self) -> list[tuple[str, str | None]]:

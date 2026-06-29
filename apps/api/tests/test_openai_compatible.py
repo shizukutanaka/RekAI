@@ -30,6 +30,15 @@ async def test_list_models_returns_configured() -> None:
     assert await p.list_models(None) == ["m1", "m2"]
 
 
+async def test_list_embedding_models_returns_configured() -> None:
+    p = OpenAICompatibleProvider(
+        "vllm", "https://x/v1", models=["chat-1"], embedding_models=["embed-1", "embed-2"]
+    )
+    assert await p.list_embedding_models(None) == ["embed-1", "embed-2"]
+    # Without configuration, custom backends advertise no embedding models.
+    assert await OpenAICompatibleProvider("x", "https://x/v1").list_embedding_models(None) == []
+
+
 async def test_requires_key_uses_provider_name() -> None:
     p = OpenAICompatibleProvider("groq", "https://x/v1", api_key=None)
     with pytest.raises(ProviderError) as exc:

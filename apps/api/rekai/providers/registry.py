@@ -30,6 +30,7 @@ if _settings.custom_base_url:
         base_url=_settings.custom_base_url,
         api_key=_settings.custom_api_key,
         models=_settings.custom_model_list,
+        embedding_models=_settings.custom_embedding_model_list,
     )
     _PROVIDERS[_custom.name] = _custom
 
