@@ -12,7 +12,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   calls the real `/embeddings` API. `Provider.embed()` is the extension point.
   Both SDKs expose `embeddings()` (Python `EmbeddingsResult`, JS returns the
   parsed object) for client parity with the chat path. **Ollama** embeddings
-  are native via `/api/embed` (keyless, e.g. `nomic-embed-text`). Runnable
+  are native via `/api/embed` (keyless, e.g. `nomic-embed-text`) and **Gemini**
+  via `:batchEmbedContents` (e.g. `text-embedding-004`) — vectors now span all
+  cloud providers like chat. Runnable
   `examples/{python,javascript}/embeddings.{py,mjs}` show a cosine-similarity
   demo.
 - **Tool / function calling** — `ChatRequest` accepts OpenAI-style `tools` and

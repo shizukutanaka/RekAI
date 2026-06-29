@@ -8,7 +8,13 @@ from collections.abc import AsyncIterator
 import httpx
 
 from rekai.config import get_settings
-from rekai.providers.base import Provider, ProviderError, ProviderResult, StreamEvent
+from rekai.providers.base import (
+    EmbeddingResult,
+    Provider,
+    ProviderError,
+    ProviderResult,
+    StreamEvent,
+)
 from rekai.schemas import ChatRequest, Usage
 
 
@@ -87,6 +93,31 @@ class GeminiProvider(Provider):
                 total_tokens=meta.get("totalTokenCount", prompt_tokens + completion_tokens),
             ),
         )
+
+    async def embed(self, inputs: list[str], model: str, api_key: str | None) -> EmbeddingResult:
+        settings = get_settings()
+        key = self._resolve_key(api_key)
+        # Gemini wants the fully-qualified model name in each request.
+        qualified = model if model.startswith("models/") else f"models/{model}"
+        payload = {
+            "requests": [
+                {"model": qualified, "content": {"parts": [{"text": text}]}} for text in inputs
+            ]
+        }
+        url = f"{settings.gemini_base_url.rstrip('/')}/{qualified}:batchEmbedContents"
+        try:
+            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+                resp = await client.post(url, json=payload, headers={"x-goog-api-key": key})
+        except httpx.HTTPError as exc:
+            raise ProviderError(f"Gemini embeddings request failed: {exc}") from exc
+        if resp.status_code >= 400:
+            raise ProviderError(
+                f"Gemini returned {resp.status_code}: {resp.text[:200]}",
+                status_code=resp.status_code if resp.status_code < 500 else 502,
+            )
+        data = resp.json()
+        embeddings = [row.get("values", []) for row in data.get("embeddings", [])]
+        return EmbeddingResult(embeddings=embeddings, model=model)
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
         async for ev in self.stream_events(request, api_key):

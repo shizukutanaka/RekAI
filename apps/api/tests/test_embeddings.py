@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from rekai.providers.base import ProviderError
 from rekai.providers.echo import EchoProvider
+from rekai.providers.gemini import GeminiProvider
 from rekai.providers.ollama import OllamaProvider
 from rekai.providers.openai import OpenAIProvider
 
@@ -134,3 +135,44 @@ async def test_ollama_embeddings_parsed(monkeypatch) -> None:
     assert result.usage.prompt_tokens == 5
     assert captured["url"].endswith("/api/embed")
     assert captured["json"] == {"model": "nomic-embed-text", "input": ["x", "y"]}
+
+
+async def test_gemini_embeddings_parsed(monkeypatch) -> None:
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {
+                "embeddings": [
+                    {"values": [0.1, 0.2]},
+                    {"values": [0.3, 0.4]},
+                ]
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json, headers):
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    result = await GeminiProvider().embed(["x", "y"], "text-embedding-004", api_key="g-key")
+    assert result.embeddings == [[0.1, 0.2], [0.3, 0.4]]
+    assert captured["url"].endswith("/models/text-embedding-004:batchEmbedContents")
+    assert captured["headers"]["x-goog-api-key"] == "g-key"
+    # Each input becomes a qualified request.
+    reqs = captured["json"]["requests"]
+    assert reqs[0]["model"] == "models/text-embedding-004"
+    assert reqs[0]["content"]["parts"][0]["text"] == "x"
