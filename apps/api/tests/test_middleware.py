@@ -15,6 +15,13 @@ def test_request_id_generated(client: TestClient) -> None:
     float(resp.headers["X-Response-Time-Ms"])
 
 
+def test_version_header(client: TestClient) -> None:
+    from rekai import __version__
+
+    resp = client.get("/health")
+    assert resp.headers["X-RekAI-Version"] == __version__
+
+
 def test_request_id_propagated(client: TestClient) -> None:
     resp = client.get("/health", headers={"X-Request-ID": "my-trace-123"})
     assert resp.headers["X-Request-ID"] == "my-trace-123"

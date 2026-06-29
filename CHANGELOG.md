@@ -7,6 +7,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`X-RekAI-Version` header** — every response advertises the gateway version
+  that served it (exposed via CORS), so clients and proxies can see which
+  version answered.
 - **Root banner endpoint** — `GET /` returns a small JSON service banner
   (name, version, description, links to `/docs` and `/health`) so hitting the
   bare API URL is friendly instead of a 404.

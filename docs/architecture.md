@@ -100,7 +100,9 @@ The outermost middleware assigns each request an `X-Request-ID` (or propagates a
 client-supplied one), records latency, and logs an access line
 (`METHOD path -> status Nms id=...`) under the `rekai.access` logger. Set
 `REKAI_LOG_FORMAT=json` for structured one-object-per-line logs (the access
-record then carries `method`/`path`/`status`/`duration_ms`/`request_id` fields). Both
+record then carries `method`/`path`/`status`/`duration_ms`/`request_id` fields).
+Every response also carries `X-RekAI-Version` (the gateway version that served
+it), exposed to browser JS like the other custom headers. Both
 `X-Request-ID` and `X-Response-Time-Ms` are returned on every response,
 including errors, so requests can be traced end to end. `/v1/*` responses also
 carry `X-RateLimit-Limit`/`X-RateLimit-Remaining`, and a 429 adds `Retry-After`

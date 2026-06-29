@@ -139,6 +139,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         elapsed_ms = (time.perf_counter() - start) * 1000
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
+        response.headers["X-RekAI-Version"] = __version__
         access_logger.info(
             "%s %s -> %s %.1fms id=%s",
             request.method,
@@ -172,6 +173,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "X-RateLimit-Remaining",
             "X-Request-ID",
             "X-Response-Time-Ms",
+            "X-RekAI-Version",
         ],
     )
 
