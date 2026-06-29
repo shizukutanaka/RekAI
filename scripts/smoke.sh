@@ -25,6 +25,9 @@ check() {
 
 echo "Smoke-testing RekAI at $BASE_URL"
 
+check "root banner is served" bash -c \
+  "curl -fsS '$BASE_URL/' | grep -q '\"docs\":\"/docs\"'"
+
 check "health is ok" bash -c \
   "curl -fsS '$BASE_URL/health' | grep -q '\"status\":\"ok\"'"
 

@@ -7,6 +7,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Root banner endpoint** — `GET /` returns a small JSON service banner
+  (name, version, description, links to `/docs` and `/health`) so hitting the
+  bare API URL is friendly instead of a 404.
 - **Structured JSON logging** — set `REKAI_LOG_FORMAT=json` to emit one JSON
   object per log line (`ts`, `level`, `logger`, `message`, plus any `extra=`
   fields). The access log now carries structured `method`/`path`/`status`/

@@ -103,6 +103,14 @@ class ModelsResponse(BaseModel):
     data: list[ModelInfo]
 
 
+class ServiceInfo(BaseModel):
+    name: str
+    version: str
+    description: str
+    docs: str
+    health: str
+
+
 class UsageSummary(BaseModel):
     requests_total: int
     cache_hits_total: int

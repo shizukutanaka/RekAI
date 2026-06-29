@@ -1,6 +1,16 @@
 from fastapi.testclient import TestClient
 
 
+def test_root_banner(client: TestClient) -> None:
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "RekAI"
+    assert body["docs"] == "/docs"
+    assert body["health"] == "/health"
+    assert body["version"]
+
+
 def test_health(client: TestClient) -> None:
     resp = client.get("/health")
     assert resp.status_code == 200

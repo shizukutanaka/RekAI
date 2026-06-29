@@ -34,6 +34,7 @@ from rekai.schemas import (
     HealthResponse,
     ModelInfo,
     ModelsResponse,
+    ServiceInfo,
     Usage,
     UsageSummary,
 )
@@ -175,6 +176,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     # --- routes -----------------------------------------------------------
+    @app.get("/", response_model=ServiceInfo, tags=["system"])
+    async def root() -> ServiceInfo:
+        return ServiceInfo(
+            name=settings.app_name,
+            version=__version__,
+            description="A lightweight AI router & gateway. See /docs for the API.",
+            docs="/docs",
+            health="/health",
+        )
+
     @app.get("/health", response_model=HealthResponse, tags=["system"])
     async def health() -> HealthResponse:
         provider_status: dict[str, Literal["ready", "byok_only"]] = {}

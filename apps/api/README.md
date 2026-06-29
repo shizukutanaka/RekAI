@@ -20,6 +20,7 @@ uvicorn rekai.main:app --reload
 
 | Method | Path          | Description                              |
 |--------|---------------|------------------------------------------|
+| GET    | `/`           | Service banner (name, version, links to `/docs`, `/health`) |
 | GET    | `/health`     | Liveness, version, providers (+ per-provider readiness), cache type |
 | GET    | `/metrics`    | Prometheus-style metrics                 |
 | GET    | `/v1/usage`   | Aggregate counters (requests, tokens, cost) |
