@@ -38,7 +38,7 @@ check: lint typecheck test web-build ## Run all checks (lint, types, tests, web 
 .PHONY: lint
 lint: ## Lint the API + SDK (ruff) and web (eslint)
 	cd $(API_DIR) && ruff check . && ruff format --check .
-	cd $(SDK_DIR) && ruff check .
+	cd $(SDK_DIR) && ruff check . && ruff format --check .
 	cd $(WEB_DIR) && npm run lint
 
 .PHONY: fmt

@@ -35,10 +35,6 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   conversation persistence across reloads, and cache/provider/token/cost
   indicators; a live **usage dashboard** at `/usage`; a settings page for BYOK
   keys.
-
-### Fixed
-- Web `output: standalone` is now gated behind `NEXT_OUTPUT=standalone` (set by
-  the Dockerfile) so local `next start` works and the app hydrates correctly.
 - **Examples** — runnable curl, Python (incl. streaming), and JavaScript
   clients.
 - **Python SDK** — installable `rekai-client` package (`packages/python-sdk`)
@@ -54,7 +50,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Makefile** — common developer tasks (`make help`).
 - **Smoke test** — `scripts/smoke.sh` exercises the core endpoints of a running
   instance (health, chat, stream, usage, models, OpenAPI).
+- **pre-commit** — config running ruff (lint + format) and file-hygiene hooks.
 - **.dockerignore** for both apps so image builds exclude local
   `node_modules`/`.venv`/caches.
+
+### Fixed
+- Web `output: standalone` is now gated behind `NEXT_OUTPUT=standalone` (set by
+  the Dockerfile) so local `next start` works and the app hydrates correctly.
+- SDK CI now runs `ruff format --check` (previously only `ruff check`), and the
+  SDK source was reformatted to match.
 
 [Unreleased]: https://github.com/shizukutanaka/RekAI/commits/main

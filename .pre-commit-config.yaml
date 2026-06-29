@@ -1,0 +1,30 @@
+# Pre-commit hooks for RekAI. Install with:
+#   pip install pre-commit && pre-commit install
+# Run on all files once:
+#   pre-commit run --all-files
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.md$'
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  # Python: ruff lint + format. Ruff auto-discovers the nearest pyproject.toml,
+  # so files under apps/api and packages/python-sdk use their own config.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+        files: '^(apps/api|packages/python-sdk)/.*\.py$'
+      - id: ruff-format
+        files: '^(apps/api|packages/python-sdk)/.*\.py$'

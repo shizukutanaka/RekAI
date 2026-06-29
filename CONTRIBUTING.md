@@ -24,6 +24,13 @@ make check     # lint, type-check, test, web build
 make run-api   # / make run-web
 ```
 
+Optionally enable the git pre-commit hooks (ruff + file hygiene):
+
+```bash
+pip install pre-commit && pre-commit install
+pre-commit run --all-files   # run them once across the repo
+```
+
 ## Backend
 
 ```bash

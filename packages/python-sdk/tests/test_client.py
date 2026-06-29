@@ -12,9 +12,7 @@ from rekai_client import ChatResult, RekAIClient, RekAIError
 
 def make_client(handler) -> RekAIClient:
     client = RekAIClient("http://test")
-    client._client = httpx.Client(
-        base_url="http://test", transport=httpx.MockTransport(handler)
-    )
+    client._client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(handler))
     return client
 
 
@@ -95,11 +93,7 @@ def test_chat_raises_on_error() -> None:
 
 
 def test_stream_yields_deltas() -> None:
-    sse = (
-        'data: {"delta": "Hello"}\n\n'
-        'data: {"delta": " world"}\n\n'
-        "data: [DONE]\n\n"
-    )
+    sse = 'data: {"delta": "Hello"}\n\ndata: {"delta": " world"}\n\ndata: [DONE]\n\n'
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text=sse, headers={"content-type": "text/event-stream"})

@@ -145,9 +145,7 @@ class RekAIClient:
         payload = self._payload(
             model, messages, provider, temperature, max_tokens, cache, fallbacks
         )
-        resp = self._client.post(
-            "/v1/chat", json=payload, headers=self._headers(provider_key)
-        )
+        resp = self._client.post("/v1/chat", json=payload, headers=self._headers(provider_key))
         self._raise_for_status(resp)
         return ChatResult.from_dict(resp.json())
 
@@ -162,9 +160,7 @@ class RekAIClient:
         provider_key: str | None = None,
     ) -> Iterator[str]:
         """Yield response text chunks from the streaming endpoint."""
-        payload = self._payload(
-            model, messages, provider, temperature, max_tokens, True, None
-        )
+        payload = self._payload(model, messages, provider, temperature, max_tokens, True, None)
         with self._client.stream(
             "POST", "/v1/chat/stream", json=payload, headers=self._headers(provider_key)
         ) as resp:
