@@ -85,6 +85,28 @@ jobs:
       - name: Build
         run: npm run build
 
+  smoke:
+    name: Smoke test (live API)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install API
+        run: pip install -e ./apps/api
+      - name: Start API
+        run: |
+          uvicorn rekai.main:app --port 8000 &
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8000/health && break
+            sleep 1
+          done
+        working-directory: apps/api
+      - name: Smoke test
+        run: scripts/smoke.sh http://localhost:8000
+
   docker:
     name: Docker build
     runs-on: ubuntu-latest

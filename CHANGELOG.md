@@ -38,5 +38,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **CI** — GitHub Actions for API (ruff, mypy, pytest), web (lint, build), and
   Docker image builds.
 - **Makefile** — common developer tasks (`make help`).
+- **Smoke test** — `scripts/smoke.sh` exercises the core endpoints of a running
+  instance (health, chat, stream, usage, models, OpenAPI).
+- **.dockerignore** for both apps so image builds exclude local
+  `node_modules`/`.venv`/caches.
 
 [Unreleased]: https://github.com/shizukutanaka/RekAI/commits/main

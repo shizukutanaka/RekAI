@@ -87,6 +87,12 @@ curl -s http://localhost:8000/v1/chat \
   -d '{"model":"echo","messages":[{"role":"user","content":"hello"}]}' | jq
 ```
 
+Or smoke-test a running instance end to end:
+
+```bash
+scripts/smoke.sh                 # or: make smoke   (BASE_URL=http://localhost:8000)
+```
+
 Use a real provider by passing your own key (BYOK):
 
 ```bash

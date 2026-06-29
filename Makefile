@@ -69,6 +69,10 @@ run-web: ## Run the web dev server (http://localhost:3000)
 
 ## --- docker ---
 
+.PHONY: smoke
+smoke: ## Smoke-test a running API (BASE_URL=http://localhost:8000)
+	scripts/smoke.sh
+
 .PHONY: up
 up: ## Build and start the full stack (redis + api + web)
 	docker compose up --build
