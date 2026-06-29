@@ -56,6 +56,7 @@ before(async () => {
           model: "echo",
           embeddings: [[0.1, 0.2], [0.3, 0.4]],
           usage: { prompt_tokens: 2, completion_tokens: 0, total_tokens: 2 },
+          cost_usd: 0.0,
           cached: false,
         });
       }
@@ -147,6 +148,7 @@ test("embeddings returns vectors and forwards options", async () => {
   });
   assert.deepEqual(result.embeddings, [[0.1, 0.2], [0.3, 0.4]]);
   assert.equal(result.usage.total_tokens, 2);
+  assert.equal(result.cost_usd, 0.0);
   assert.deepEqual(lastRequest.body, { model: "echo", input: ["a", "b"], cache: true, provider: "echo" });
   assert.equal(lastRequest.headers["x-provider-key"], "sk-e");
 });

@@ -57,6 +57,22 @@ def test_embeddings_unsupported_provider(client: TestClient) -> None:
     assert "does not support embeddings" in resp.json()["detail"]
 
 
+def test_embeddings_endpoint_reports_cost(client: TestClient) -> None:
+    # echo is a free provider, so cost is 0.0 (not None).
+    resp = client.post("/v1/embeddings", json={"model": "echo", "input": "cost me"})
+    assert resp.status_code == 200
+    assert resp.json()["cost_usd"] == 0.0
+
+
+def test_embedding_pricing_input_only() -> None:
+    from rekai.pricing import estimate_cost
+    from rekai.schemas import Usage
+
+    usage = Usage(prompt_tokens=1000, completion_tokens=0, total_tokens=1000)
+    cost = estimate_cost("openai", "text-embedding-3-small", usage)
+    assert cost == round(1000 * 0.02 / 1_000_000, 6)
+
+
 async def test_default_provider_raises_for_embeddings() -> None:
     with pytest.raises(ProviderError):
         await OpenAIProvider().embed(["hi"], "text-embedding-3-small", api_key=None)

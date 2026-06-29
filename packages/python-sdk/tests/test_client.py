@@ -177,6 +177,7 @@ def test_embeddings_returns_result() -> None:
                 "model": "echo",
                 "embeddings": [[0.1, 0.2], [0.3, 0.4]],
                 "usage": {"prompt_tokens": 2, "completion_tokens": 0, "total_tokens": 2},
+                "cost_usd": 0.0,
                 "cached": False,
             },
         )
@@ -186,6 +187,7 @@ def test_embeddings_returns_result() -> None:
     assert isinstance(result, EmbeddingsResult)
     assert result.embeddings == [[0.1, 0.2], [0.3, 0.4]]
     assert result.usage["total_tokens"] == 2
+    assert result.cost_usd == 0.0
     assert captured["body"] == {
         "model": "echo",
         "input": ["a", "b"],

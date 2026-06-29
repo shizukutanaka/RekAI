@@ -66,6 +66,7 @@ export interface EmbeddingsResult {
   model: string;
   embeddings: number[][];
   usage: Usage;
+  cost_usd: number | null;
   cached: boolean;
 }
 

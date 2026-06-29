@@ -89,6 +89,7 @@ class EmbeddingsResponse(BaseModel):
     model: str
     embeddings: list[list[float]]
     usage: Usage
+    cost_usd: float | None = None
     cached: bool = False
 
 

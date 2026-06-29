@@ -168,11 +168,14 @@ async def handle_embeddings(
 
     result = await provider.embed(inputs, request.model, api_key)
     metrics.record_tokens(result.usage.total_tokens)
+    cost_usd = estimate_cost(provider_name, result.model, result.usage)
+    metrics.record_cost(cost_usd)
     response = EmbeddingsResponse(
         provider=provider_name,
         model=result.model,
         embeddings=result.embeddings,
         usage=result.usage,
+        cost_usd=cost_usd,
         cached=False,
     )
     if use_cache:

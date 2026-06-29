@@ -35,6 +35,10 @@ _PRICES_PER_1M: dict[str, tuple[float, float]] = {
     "gemini-1.5-pro": (1.25, 5.00),
     "gemini-2.0-flash": (0.10, 0.40),
     "gemini-2.5-pro": (1.25, 10.00),
+    # Embeddings (input-only; output price is 0).
+    "text-embedding-3-small": (0.02, 0.0),
+    "text-embedding-3-large": (0.13, 0.0),
+    "text-embedding-ada-002": (0.10, 0.0),
 }
 
 

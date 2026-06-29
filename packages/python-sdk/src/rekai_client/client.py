@@ -59,6 +59,7 @@ class EmbeddingsResult:
     embeddings: list[list[float]]
     usage: dict[str, int]
     cached: bool
+    cost_usd: float | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EmbeddingsResult:
@@ -68,6 +69,7 @@ class EmbeddingsResult:
             embeddings=data.get("embeddings", []),
             usage=data.get("usage", {}),
             cached=data.get("cached", False),
+            cost_usd=data.get("cost_usd"),
         )
 
 

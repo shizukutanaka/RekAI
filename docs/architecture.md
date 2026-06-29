@@ -133,7 +133,8 @@ three major cloud providers through one OpenAI-style API.
 Each non-streamed response carries an approximate `cost_usd`, computed by
 `rekai/pricing.py` from a per-model price table (`(input, output)` USD per 1M
 tokens). Free/local providers (`echo`, `ollama`) report `0.0`; unpriced models
-report `null`. Cumulative cost is exposed at `/v1/usage` and `/metrics`
+report `null`. Embeddings responses carry `cost_usd` too (input-only — the
+`text-embedding-3-*` / `ada-002` models are priced). Cumulative cost is exposed at `/v1/usage` and `/metrics`
 (`rekai_cost_usd_total`). Prices are approximate and meant for budgeting, not
 billing — extend or override them with `pricing.register_price()`.
 
