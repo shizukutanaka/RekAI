@@ -73,6 +73,22 @@ def test_embedding_pricing_input_only() -> None:
     assert cost == round(1000 * 0.02 / 1_000_000, 6)
 
 
+def test_models_endpoint_tags_embedding_models(client: TestClient) -> None:
+    data = client.get("/v1/models").json()["data"]
+    by_id = {(m["id"], m["type"]): m for m in data}
+    # Embedding models are tagged and routed to the right provider.
+    assert by_id[("text-embedding-3-small", "embedding")]["provider"] == "openai"
+    assert by_id[("text-embedding-004", "embedding")]["provider"] == "gemini"
+    assert ("echo", "embedding") in by_id
+    # Chat models keep type="chat".
+    assert by_id[("gpt-4o-mini", "chat")]["provider"] == "openai"
+
+
+async def test_openai_lists_embedding_models() -> None:
+    models = await OpenAIProvider().list_embedding_models(None)
+    assert "text-embedding-3-small" in models
+
+
 async def test_default_provider_raises_for_embeddings() -> None:
     with pytest.raises(ProviderError):
         await OpenAIProvider().embed(["hi"], "text-embedding-3-small", api_key=None)

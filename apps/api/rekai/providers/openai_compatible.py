@@ -37,3 +37,8 @@ class OpenAICompatibleProvider(OpenAIProvider):
 
     async def list_models(self, api_key: str | None) -> list[str]:
         return list(self._models)
+
+    async def list_embedding_models(self, api_key: str | None) -> list[str]:
+        # Custom backends don't inherit OpenAI's embedding model names; their
+        # embedding models (if any) aren't enumerated here.
+        return []

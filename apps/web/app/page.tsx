@@ -10,6 +10,7 @@ import {
   fetchModels,
   formatCost,
   getStoredKey,
+  modelsOfType,
   sendChat,
   streamChat,
 } from "@/lib/api";
@@ -62,6 +63,8 @@ export default function ChatPage() {
 
   // The provider that the selected model routes to (from /v1/models), if known.
   const selectedProvider = models.find((m) => m.id === model)?.provider;
+  // Chat selector excludes embedding-only models (they live on /embeddings).
+  const chatModels = modelsOfType(models, "chat");
   const needsKey =
     selectedProvider != null &&
     health?.provider_status[selectedProvider] === "byok_only" &&
@@ -230,9 +233,9 @@ export default function ChatPage() {
     <>
       <div className="controls">
         <label htmlFor="model">Model</label>
-        {models.length ? (
+        {chatModels.length ? (
           <select id="model" value={model} onChange={(e) => setModel(e.target.value)}>
-            {models.map((m) => (
+            {chatModels.map((m) => (
               <option key={`${m.provider}:${m.id}`} value={m.id}>
                 {m.id} ({m.provider})
               </option>

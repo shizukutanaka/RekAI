@@ -169,7 +169,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if provider is None:
                 continue
             for model in await provider.list_models(None):
-                data.append(ModelInfo(id=model, provider=name))
+                data.append(ModelInfo(id=model, provider=name, type="chat"))
+            for model in await provider.list_embedding_models(None):
+                data.append(ModelInfo(id=model, provider=name, type="embedding"))
         return ModelsResponse(data=data)
 
     @app.post(

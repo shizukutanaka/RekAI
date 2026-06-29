@@ -74,3 +74,6 @@ class EchoProvider(Provider):
 
     async def list_models(self, api_key: str | None) -> list[str]:
         return ["echo"]
+
+    async def list_embedding_models(self, api_key: str | None) -> list[str]:
+        return ["echo"]

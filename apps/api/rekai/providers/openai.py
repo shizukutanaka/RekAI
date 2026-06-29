@@ -176,6 +176,9 @@ class OpenAIProvider(Provider):
         # Static, commonly-available models; avoids an extra network round-trip.
         return ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"]
 
+    async def list_embedding_models(self, api_key: str | None) -> list[str]:
+        return ["text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002"]
+
 
 def _parse_openai_sse_line(line: str) -> str | None:
     """Extract the text delta from one OpenAI SSE line, if present."""

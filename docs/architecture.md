@@ -160,7 +160,10 @@ vectors so the endpoint works with no key; OpenAI and OpenAI-compatible backends
 call the real `/embeddings` API, **Ollama** calls its local `/api/embed`
 (keyless, e.g. `nomic-embed-text`), and **Gemini** uses `:batchEmbedContents`
 (e.g. `text-embedding-004`, via `provider="gemini"`). Providers opt in by
-overriding `embed()`.
+overriding `embed()`. `/v1/models` tags every entry with a `type`
+(`chat` or `embedding`) and lists embedding models alongside chat ones —
+providers advertise them via `list_embedding_models()`, so clients (and the web
+**Embeddings** page) can discover and route to the right one.
 
 ## Adding a provider
 

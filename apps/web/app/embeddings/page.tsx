@@ -3,9 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   EmbeddingsResponse,
+  ModelInfo,
   cosineSimilarity,
+  fetchModels,
   formatCost,
   getStoredKey,
+  modelsOfType,
   sendEmbeddings,
 } from "@/lib/api";
 
@@ -15,15 +18,26 @@ quarterly revenue grew`;
 
 export default function EmbeddingsPage() {
   const [model, setModel] = useState("echo");
+  const [models, setModels] = useState<ModelInfo[]>([]);
   const [text, setText] = useState(SAMPLE);
   const [result, setResult] = useState<EmbeddingsResponse | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    fetchModels().then((m) => {
+      const embed = modelsOfType(m, "embedding");
+      if (embed.length) setModels(embed);
+    });
+  }, []);
+
   const inputs = useMemo(
     () => text.split("\n").map((l) => l.trim()).filter(Boolean),
     [text],
   );
+
+  // The provider the selected model routes to (from /v1/models), if known.
+  const selectedProvider = models.find((m) => m.id === model)?.provider;
 
   async function run() {
     setLoading(true);
@@ -32,6 +46,7 @@ export default function EmbeddingsPage() {
       const data = await sendEmbeddings({
         model: model.trim() || "echo",
         input: inputs,
+        provider: selectedProvider,
         providerKey: getStoredKey() || undefined,
       });
       setResult(data);
@@ -75,12 +90,22 @@ export default function EmbeddingsPage() {
 
       <div className="field">
         <label htmlFor="model">Model</label>
-        <input
-          id="model"
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          placeholder="echo"
-        />
+        {models.length ? (
+          <select id="model" value={model} onChange={(e) => setModel(e.target.value)}>
+            {models.map((m) => (
+              <option key={`${m.provider}:${m.id}`} value={m.id}>
+                {m.id} ({m.provider})
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            id="model"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder="echo"
+          />
+        )}
       </div>
 
       <div className="field">

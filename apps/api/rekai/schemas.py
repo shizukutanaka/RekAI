@@ -96,6 +96,7 @@ class EmbeddingsResponse(BaseModel):
 class ModelInfo(BaseModel):
     id: str
     provider: str
+    type: Literal["chat", "embedding"] = "chat"
 
 
 class ModelsResponse(BaseModel):

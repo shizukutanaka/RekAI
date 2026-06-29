@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cosineSimilarity, formatCost, parseSSEFrame } from "./api";
+import { cosineSimilarity, formatCost, modelsOfType, parseSSEFrame } from "./api";
 
 describe("formatCost", () => {
   it("returns empty string for null/undefined (unknown price)", () => {
@@ -38,6 +38,24 @@ describe("cosineSimilarity", () => {
     expect(cosineSimilarity([1, 2], [1])).toBe(0);
     expect(cosineSimilarity([], [])).toBe(0);
     expect(cosineSimilarity([0, 0], [1, 1])).toBe(0);
+  });
+});
+
+describe("modelsOfType", () => {
+  const models = [
+    { id: "gpt-4o", provider: "openai", type: "chat" as const },
+    { id: "text-embedding-3-small", provider: "openai", type: "embedding" as const },
+    { id: "legacy", provider: "echo" }, // no type -> treated as chat
+  ];
+
+  it("filters to embedding models", () => {
+    expect(modelsOfType(models, "embedding").map((m) => m.id)).toEqual([
+      "text-embedding-3-small",
+    ]);
+  });
+
+  it("treats a missing type as chat", () => {
+    expect(modelsOfType(models, "chat").map((m) => m.id)).toEqual(["gpt-4o", "legacy"]);
   });
 });
 

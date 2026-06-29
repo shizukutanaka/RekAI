@@ -103,3 +103,7 @@ class Provider(ABC):
     async def list_models(self, api_key: str | None) -> list[str]:
         """Return known model ids. Override when the backend can enumerate them."""
         return []
+
+    async def list_embedding_models(self, api_key: str | None) -> list[str]:
+        """Return known embedding model ids. Override when embeddings are supported."""
+        return []

@@ -27,6 +27,15 @@ export function formatCost(cost: number | null | undefined): string {
 export interface ModelInfo {
   id: string;
   provider: string;
+  type?: "chat" | "embedding";
+}
+
+/** Filter models by type, treating a missing `type` as "chat" (older APIs). */
+export function modelsOfType(
+  models: ModelInfo[],
+  type: "chat" | "embedding",
+): ModelInfo[] {
+  return models.filter((m) => (m.type ?? "chat") === type);
 }
 
 export interface HealthResponse {

@@ -193,6 +193,9 @@ class GeminiProvider(Provider):
             "gemini-1.5-flash",
         ]
 
+    async def list_embedding_models(self, api_key: str | None) -> list[str]:
+        return ["text-embedding-004"]
+
 
 def _extract_text(data: dict) -> str:
     candidates = data.get("candidates") or []
