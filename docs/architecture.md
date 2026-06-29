@@ -51,6 +51,17 @@ ChatResponse
    `mistral*`, `qwen*`, `gemma*`, `phi*` → Ollama; `echo` → Echo).
 3. Otherwise the configured `REKAI_DEFAULT_PROVIDER` is used.
 
+## Fallback / failover
+
+A request may carry an ordered `fallbacks` list of `(provider, model)` targets;
+alternatively a server-wide chain is set via `REKAI_FALLBACK_ENABLED` +
+`REKAI_FALLBACK_TARGETS`. When an attempt raises a **5xx** `ProviderError`
+(upstream or network failure), RekAI moves to the next target. **4xx** client
+errors (bad request, missing BYOK key) are terminal and never trigger a
+fallback. The serving provider is reflected in the response `provider` field and
+`fallback_used` is set when a non-primary target answered. Each fallback attempt
+increments `rekai_fallbacks_total`.
+
 ## Streaming
 
 `POST /v1/chat/stream` returns `text/event-stream`. Each `Provider` implements

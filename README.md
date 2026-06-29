@@ -13,6 +13,7 @@ RekAI sits between your application and multiple LLM providers (OpenAI, Ollama, 
 
 - **Provider abstraction** — one API, many backends (`openai`, `anthropic`, `ollama`, plus an `echo` provider for local dev/tests).
 - **Smart routing** — pick a provider explicitly, or let RekAI choose by model name / configured default.
+- **Fallback / failover** — on an upstream error, retry down a configured chain of `(provider, model)` targets.
 - **Streaming** — Server-Sent Events at `/v1/chat/stream` for token-by-token responses.
 - **Response cache** — Redis-backed with an automatic in-memory fallback. Identical requests are served instantly and for free.
 - **Cost awareness** — each response carries an estimated USD cost; cumulative spend is exposed at `/v1/usage`.

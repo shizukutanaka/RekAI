@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     # Routing
     default_provider: str = "echo"
 
+    # Fallback: ordered "provider:model" targets tried on upstream (5xx) errors.
+    # e.g. "openai:gpt-4o-mini,echo" — model is optional (defaults to request model).
+    fallback_enabled: bool = False
+    fallback_targets: str = ""
+
     # Cache
     cache_enabled: bool = True
     cache_ttl_seconds: int = 3600
@@ -50,6 +55,20 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def fallback_target_list(self) -> list[tuple[str, str | None]]:
+        """Parse ``fallback_targets`` into ordered ``(provider, model | None)`` tuples."""
+        targets: list[tuple[str, str | None]] = []
+        for raw in self.fallback_targets.split(","):
+            raw = raw.strip()
+            if not raw:
+                continue
+            provider, _, model = raw.partition(":")
+            provider = provider.strip()
+            if provider:
+                targets.append((provider, model.strip() or None))
+        return targets
 
 
 @lru_cache

@@ -12,6 +12,7 @@ class Metrics:
         self.cache_hits_total = 0
         self.cache_misses_total = 0
         self.errors_total = 0
+        self.fallbacks_total = 0
         self.tokens_total = 0
         self.cost_usd_total = 0.0
         self.requests_by_provider: dict[str, int] = {}
@@ -32,6 +33,10 @@ class Metrics:
         with self._lock:
             self.errors_total += 1
 
+    def record_fallback(self) -> None:
+        with self._lock:
+            self.fallbacks_total += 1
+
     def record_tokens(self, count: int) -> None:
         with self._lock:
             self.tokens_total += count
@@ -49,6 +54,7 @@ class Metrics:
                 "cache_hits_total": self.cache_hits_total,
                 "cache_misses_total": self.cache_misses_total,
                 "errors_total": self.errors_total,
+                "fallbacks_total": self.fallbacks_total,
                 "tokens_total": self.tokens_total,
                 "cost_usd_total": round(self.cost_usd_total, 6),
                 "requests_by_provider": dict(self.requests_by_provider),
@@ -69,6 +75,9 @@ class Metrics:
             "# HELP rekai_errors_total Errors returned to clients.",
             "# TYPE rekai_errors_total counter",
             f"rekai_errors_total {self.errors_total}",
+            "# HELP rekai_fallbacks_total Times a fallback provider was attempted.",
+            "# TYPE rekai_fallbacks_total counter",
+            f"rekai_fallbacks_total {self.fallbacks_total}",
             "# HELP rekai_tokens_total Total tokens accounted across responses.",
             "# TYPE rekai_tokens_total counter",
             f"rekai_tokens_total {self.tokens_total}",
