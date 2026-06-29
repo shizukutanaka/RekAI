@@ -29,6 +29,14 @@ export interface ModelInfo {
   provider: string;
 }
 
+export interface HealthResponse {
+  status: string;
+  version: string;
+  providers: string[];
+  provider_status: Record<string, "ready" | "byok_only">;
+  cache: string;
+}
+
 export interface UsageSummary {
   requests_total: number;
   cache_hits_total: number;
@@ -189,4 +197,14 @@ export async function fetchUsage(): Promise<UsageSummary> {
   const res = await fetch(`${API_URL}/v1/usage`, { cache: "no-store" });
   if (!res.ok) throw new Error(`Could not load usage (${res.status})`);
   return res.json();
+}
+
+export async function fetchHealth(): Promise<HealthResponse | null> {
+  try {
+    const res = await fetch(`${API_URL}/health`, { cache: "no-store" });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
 }

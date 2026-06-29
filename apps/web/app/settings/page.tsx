@@ -1,14 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { API_URL, getStoredKey, setStoredKey } from "@/lib/api";
+import {
+  API_URL,
+  HealthResponse,
+  fetchHealth,
+  getStoredKey,
+  setStoredKey,
+} from "@/lib/api";
 
 export default function SettingsPage() {
   const [key, setKey] = useState("");
   const [saved, setSaved] = useState(false);
+  const [health, setHealth] = useState<HealthResponse | null>(null);
 
   useEffect(() => {
     setKey(getStoredKey());
+    fetchHealth().then(setHealth);
   }, []);
 
   function save() {
@@ -41,11 +49,32 @@ export default function SettingsPage() {
         {saved && <span className="saved">Saved ✓</span>}
       </div>
 
+      {health && (
+        <div className="field" style={{ marginTop: 32 }}>
+          <label>Providers</label>
+          <ul className="providers">
+            {Object.entries(health.provider_status).map(([name, status]) => (
+              <li key={name}>
+                <span>{name}</span>
+                <span className={`badge ${status}`}>
+                  {status === "ready" ? "ready" : "needs key"}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="hint">
+            <strong>ready</strong> works without a key; <strong>needs key</strong>{" "}
+            requires a BYOK key above (or a server-side key).
+          </p>
+        </div>
+      )}
+
       <div className="field" style={{ marginTop: 32 }}>
         <label>API endpoint</label>
         <p className="hint">
-          Connected to <code>{API_URL}</code>. Change it with{" "}
-          <code>NEXT_PUBLIC_API_URL</code>.
+          Connected to <code>{API_URL}</code>
+          {health ? ` · v${health.version} · cache: ${health.cache}` : ""}. Change
+          it with <code>NEXT_PUBLIC_API_URL</code>.
         </p>
       </div>
     </div>

@@ -359,3 +359,41 @@ button.stop:hover {
   color: #7ee08a;
   font-size: 14px;
 }
+
+.providers {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.providers li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.providers li:last-child {
+  border-bottom: none;
+}
+
+.badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+.badge.ready {
+  background: #1f3a2a;
+  color: #7ee08a;
+}
+
+.badge.byok_only {
+  background: #3a341f;
+  color: #e0c97e;
+}
