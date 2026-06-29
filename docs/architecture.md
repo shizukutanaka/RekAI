@@ -24,7 +24,7 @@ POST /v1/chat
 [ cache ]  ── hit? return immediately (cached=true)
    │ miss
    ▼
-[ provider.chat() ]  ── OpenAI · Ollama · Echo (uses BYOK key if present)
+[ provider.chat() ]  ── OpenAI · Anthropic · Gemini · Ollama · Echo (uses BYOK key if present)
    │
    ▼
 [ cache.set() ] + [ metrics ]  ── store response, record tokens

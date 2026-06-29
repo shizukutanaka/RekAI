@@ -2,7 +2,7 @@
 
 > A lightweight, self-hostable **AI router & gateway** with provider abstraction, response caching, BYOK (Bring Your Own Key), and a built-in chat UI.
 
-RekAI sits between your application and multiple LLM providers (OpenAI, Ollama, …). It routes each request to the right provider, caches responses to cut cost and latency, and lets every user bring their own API key.
+RekAI sits between your application and multiple LLM providers (OpenAI, Anthropic, Gemini, Ollama, and any OpenAI-compatible endpoint). It routes each request to the right provider, caches responses to cut cost and latency, supports chat, streaming, tool calling, and embeddings through one API, and lets every user bring their own API key.
 
 [![CI](https://github.com/shizukutanaka/RekAI/actions/workflows/ci.yml/badge.svg)](https://github.com/shizukutanaka/RekAI/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
@@ -14,14 +14,17 @@ RekAI sits between your application and multiple LLM providers (OpenAI, Ollama, 
 - **Provider abstraction** — one API, many backends (`openai`, `anthropic`, `gemini`, `ollama`, plus an `echo` provider for local dev/tests). Point at **any OpenAI-compatible endpoint** (Groq, Together, OpenRouter, Mistral, vLLM, LM Studio…) with one env var.
 - **Smart routing** — pick a provider explicitly, or let RekAI choose by model name / configured default.
 - **Fallback / failover** — on an upstream error, retry down a configured chain of `(provider, model)` targets.
-- **Streaming** — Server-Sent Events at `/v1/chat/stream` for token-by-token responses.
+- **Streaming** — Server-Sent Events at `/v1/chat/stream` for token-by-token responses, with accurate provider-reported usage.
+- **Tool / function calling** — OpenAI-style `tools`/`tool_choice` that work uniformly across OpenAI, Anthropic, and Gemini (RekAI translates the formats per provider).
+- **Embeddings** — `/v1/embeddings` across echo, OpenAI, Gemini, and Ollama, with the same routing, caching, BYOK, and cost; a web playground shows vectors and cosine similarity.
+- **Model discovery** — `/v1/models` lists every model with its `type` (chat/embedding) and per-model `pricing`, filterable via `?type=`.
 - **Response cache** — Redis-backed with an automatic in-memory fallback. Identical requests are served instantly and for free.
 - **Cost awareness** — each response carries an estimated USD cost; cumulative spend is exposed at `/v1/usage`.
 - **BYOK** — users supply their own provider key per request (`X-Provider-Key`); keys are never persisted.
-- **Rate limiting** — simple per-client token bucket out of the box.
-- **Embeddings** — `/v1/embeddings` with the same routing, caching, and BYOK (echo + OpenAI-compatible).
+- **Rate limiting** — per-client token bucket with `Retry-After` and `X-RateLimit-*` headers; oversized bodies are rejected with 413.
+- **Observability** — structured text or JSON logging, per-request `X-Request-ID`/`X-Response-Time-Ms`/`X-RekAI-Version` headers, and a Prometheus-style `/metrics` endpoint.
 - **OpenAPI** — auto-generated docs at `/docs` and a machine-readable schema at `/openapi.json`.
-- **Observability** — structured logging and a Prometheus-style `/metrics` endpoint.
+- **SDKs** — official Python (`rekai-client`) and JS/TS (`@rekai/client`) clients.
 - **Chat UI** — a Next.js front-end to try it all in the browser.
 
 ## 🏗️ Architecture
@@ -38,7 +41,7 @@ RekAI sits between your application and multiple LLM providers (OpenAI, Ollama, 
                          │  ├───────────┤  │
                          │  │  Cache    │  │ ──▶ Redis / memory
                          │  ├───────────┤  │
-                         │  │ Providers │  │ ──▶ OpenAI · Ollama · Echo
+                         │  │ Providers │  │ ──▶ OpenAI · Anthropic · Gemini · Ollama · Echo
                          │  └───────────┘  │
                          └─────────────────┘
 ```

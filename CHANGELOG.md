@@ -6,6 +6,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Refreshed the README and architecture docs to reflect the 1.1.0 feature set
+  (all five providers, tool calling, embeddings, model discovery + pricing,
+  rate-limit headers, JSON logging, SDKs).
+
 ## [1.1.0] - 2026-06-29
 
 A backward-compatible feature release building on 1.0.0: text embeddings across
