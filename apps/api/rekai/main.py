@@ -44,7 +44,7 @@ access_logger = get_logger("rekai.access")
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.log_level, settings.log_format)
 
     metrics_store = build_metrics_store(settings)
 
@@ -145,6 +145,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response.status_code,
             elapsed_ms,
             request_id,
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "status": response.status_code,
+                "duration_ms": round(elapsed_ms, 1),
+                "request_id": request_id,
+            },
         )
         return response
 

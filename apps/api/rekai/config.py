@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     app_name: str = "RekAI"
     environment: str = "development"
     log_level: str = "INFO"
+    log_format: str = "text"  # "text" (human-readable) or "json" (structured)
 
     # Routing
     default_provider: str = "echo"

@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Structured JSON logging** — set `REKAI_LOG_FORMAT=json` to emit one JSON
+  object per log line (`ts`, `level`, `logger`, `message`, plus any `extra=`
+  fields). The access log now carries structured `method`/`path`/`status`/
+  `duration_ms`/`request_id` fields, so logs are machine-parseable in
+  production. Defaults to the human-readable text format.
 - **`/v1/models?type=` filter** — fetch only `chat` or only `embedding` models
   server-side (invalid values are rejected with 422). The web Embeddings page
   uses it directly instead of filtering client-side.
