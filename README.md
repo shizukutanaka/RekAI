@@ -19,6 +19,7 @@ RekAI sits between your application and multiple LLM providers (OpenAI, Ollama, 
 - **Cost awareness** — each response carries an estimated USD cost; cumulative spend is exposed at `/v1/usage`.
 - **BYOK** — users supply their own provider key per request (`X-Provider-Key`); keys are never persisted.
 - **Rate limiting** — simple per-client token bucket out of the box.
+- **Embeddings** — `/v1/embeddings` with the same routing, caching, and BYOK (echo + OpenAI-compatible).
 - **OpenAPI** — auto-generated docs at `/docs` and a machine-readable schema at `/openapi.json`.
 - **Observability** — structured logging and a Prometheus-style `/metrics` endpoint.
 - **Chat UI** — a Next.js front-end to try it all in the browser.

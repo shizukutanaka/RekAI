@@ -8,7 +8,13 @@ from collections.abc import AsyncIterator
 import httpx
 
 from rekai.config import get_settings
-from rekai.providers.base import Provider, ProviderError, ProviderResult, StreamEvent
+from rekai.providers.base import (
+    EmbeddingResult,
+    Provider,
+    ProviderError,
+    ProviderResult,
+    StreamEvent,
+)
 from rekai.schemas import ChatRequest, Usage
 
 
@@ -135,6 +141,36 @@ class OpenAIProvider(Provider):
         if tool_calls_acc:
             assembled = [tool_calls_acc[i] for i in sorted(tool_calls_acc)]
             yield StreamEvent(tool_calls=assembled)
+
+    async def embed(self, inputs: list[str], model: str, api_key: str | None) -> EmbeddingResult:
+        settings = get_settings()
+        key = self._resolve_key(api_key)
+        url = f"{self._base_url().rstrip('/')}/embeddings"
+        try:
+            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
+                resp = await client.post(
+                    url,
+                    json={"model": model, "input": inputs},
+                    headers={"Authorization": f"Bearer {key}"},
+                )
+        except httpx.HTTPError as exc:
+            raise ProviderError(f"{self.name} embeddings request failed: {exc}") from exc
+        if resp.status_code >= 400:
+            raise ProviderError(
+                f"{self.name} returned {resp.status_code}: {resp.text[:200]}",
+                status_code=resp.status_code if resp.status_code < 500 else 502,
+            )
+        data = resp.json()
+        rows = sorted(data.get("data", []), key=lambda d: d.get("index", 0))
+        usage = data.get("usage", {})
+        return EmbeddingResult(
+            embeddings=[r["embedding"] for r in rows],
+            model=data.get("model", model),
+            usage=Usage(
+                prompt_tokens=usage.get("prompt_tokens", 0),
+                total_tokens=usage.get("total_tokens", 0),
+            ),
+        )
 
     async def list_models(self, api_key: str | None) -> list[str]:
         # Static, commonly-available models; avoids an extra network round-trip.

@@ -26,6 +26,7 @@ uvicorn rekai.main:app --reload
 | GET    | `/v1/models`  | Known models per provider                |
 | POST   | `/v1/chat`    | Chat completion (router + cache + BYOK)  |
 | POST   | `/v1/chat/stream` | Streaming chat completion (SSE)      |
+| POST   | `/v1/embeddings` | Text embeddings (router + cache + BYOK) |
 
 ### Example
 

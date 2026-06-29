@@ -21,6 +21,7 @@ _MODEL_PREFIX_RULES: tuple[tuple[str, str], ...] = (
     ("o3", "openai"),
     ("claude", "anthropic"),
     ("gemini", "gemini"),
+    ("text-embedding", "openai"),
     ("llama", "ollama"),
     ("mistral", "ollama"),
     ("qwen", "ollama"),
@@ -30,14 +31,19 @@ _MODEL_PREFIX_RULES: tuple[tuple[str, str], ...] = (
 )
 
 
-def resolve_provider_name(request: ChatRequest, settings: Settings) -> str:
-    if request.provider:
-        return request.provider
-    model = request.model.lower()
-    for prefix, provider in _MODEL_PREFIX_RULES:
-        if model.startswith(prefix):
-            return provider
+def resolve_provider(provider: str | None, model: str, settings: Settings) -> str:
+    """Resolve a provider name from an explicit choice, model prefix, or default."""
+    if provider:
+        return provider
+    model_lower = model.lower()
+    for prefix, name in _MODEL_PREFIX_RULES:
+        if model_lower.startswith(prefix):
+            return name
     return settings.default_provider
+
+
+def resolve_provider_name(request: ChatRequest, settings: Settings) -> str:
+    return resolve_provider(request.provider, request.model, settings)
 
 
 def select_provider(request: ChatRequest, settings: Settings) -> tuple[str, Provider]:

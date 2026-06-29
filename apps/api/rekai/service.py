@@ -7,15 +7,21 @@ import time
 import uuid
 from dataclasses import dataclass
 
-from rekai.cache import CacheBackend, cache_key
+from rekai.cache import CacheBackend, cache_key, embedding_cache_key
 from rekai.config import Settings
 from rekai.logging_config import get_logger
 from rekai.metrics import metrics
 from rekai.pricing import estimate_cost
 from rekai.providers import Provider, get_provider
 from rekai.providers.base import ProviderError
-from rekai.router import select_provider
-from rekai.schemas import ChatRequest, ChatResponse, Usage
+from rekai.router import resolve_provider, select_provider
+from rekai.schemas import (
+    ChatRequest,
+    ChatResponse,
+    EmbeddingsRequest,
+    EmbeddingsResponse,
+    Usage,
+)
 
 logger = get_logger("rekai.service")
 
@@ -133,3 +139,43 @@ async def handle_chat(
     # Exhausted all attempts.
     assert last_error is not None
     raise last_error
+
+
+async def handle_embeddings(
+    request: EmbeddingsRequest,
+    api_key: str | None,
+    settings: Settings,
+    cache: CacheBackend,
+) -> EmbeddingsResponse:
+    provider_name = resolve_provider(request.provider, request.model, settings)
+    provider = get_provider(provider_name)
+    if provider is None:
+        raise ProviderError(f"Unknown provider '{provider_name}'.", status_code=400)
+    metrics.record_request(provider_name)
+
+    inputs = [request.input] if isinstance(request.input, str) else list(request.input)
+    if not inputs:
+        raise ProviderError("'input' must not be empty.", status_code=422)
+
+    use_cache = settings.cache_enabled and request.cache
+    key = embedding_cache_key(provider_name, request.model, inputs)
+    if use_cache:
+        cached_raw = await cache.get(key)
+        if cached_raw is not None:
+            metrics.record_cache(hit=True)
+            return EmbeddingsResponse(**{**json.loads(cached_raw), "cached": True})
+        metrics.record_cache(hit=False)
+
+    result = await provider.embed(inputs, request.model, api_key)
+    metrics.record_tokens(result.usage.total_tokens)
+    response = EmbeddingsResponse(
+        provider=provider_name,
+        model=result.model,
+        embeddings=result.embeddings,
+        usage=result.usage,
+        cached=False,
+    )
+    if use_cache:
+        await cache.set(key, response.model_dump_json(), settings.cache_ttl_seconds)
+    logger.info("embeddings ok provider=%s model=%s n=%s", provider_name, result.model, len(inputs))
+    return response

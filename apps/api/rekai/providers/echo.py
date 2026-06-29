@@ -6,15 +6,24 @@ without any external API or credentials.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import AsyncIterator
 
-from rekai.providers.base import Provider, ProviderResult, StreamEvent
+from rekai.providers.base import EmbeddingResult, Provider, ProviderResult, StreamEvent
 from rekai.schemas import ChatRequest, Usage
+
+_EMBED_DIM = 16
 
 
 def _count_tokens(text: str) -> int:
     # Deliberately naive — good enough for a demo provider.
     return max(1, len(text.split()))
+
+
+def _embed_text(text: str, dim: int = _EMBED_DIM) -> list[float]:
+    """A deterministic pseudo-embedding from a hash — no model needed for demos/tests."""
+    digest = hashlib.sha256(text.encode()).digest()
+    return [digest[i % len(digest)] / 255.0 for i in range(dim)]
 
 
 class EchoProvider(Provider):
@@ -54,6 +63,14 @@ class EchoProvider(Provider):
             yield StreamEvent(delta=word if i == 0 else " " + word)
         # echo computes exact usage, so report it (not an estimate).
         yield StreamEvent(usage=result.usage)
+
+    async def embed(self, inputs: list[str], model: str, api_key: str | None) -> EmbeddingResult:
+        tokens = sum(_count_tokens(t) for t in inputs)
+        return EmbeddingResult(
+            embeddings=[_embed_text(t) for t in inputs],
+            model=model,
+            usage=Usage(prompt_tokens=tokens, total_tokens=tokens),
+        )
 
     async def list_models(self, api_key: str | None) -> list[str]:
         return ["echo"]

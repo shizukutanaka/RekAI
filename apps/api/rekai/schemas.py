@@ -77,6 +77,21 @@ class ChatResponse(BaseModel):
     created: int
 
 
+class EmbeddingsRequest(BaseModel):
+    model: str = Field(..., description="Embedding model, e.g. 'text-embedding-3-small' or 'echo'.")
+    input: str | list[str] = Field(..., description="A string or list of strings to embed.")
+    provider: str | None = Field(default=None, description="Force a provider (else routed).")
+    cache: bool = Field(default=True)
+
+
+class EmbeddingsResponse(BaseModel):
+    provider: str
+    model: str
+    embeddings: list[list[float]]
+    usage: Usage
+    cached: bool = False
+
+
 class ModelInfo(BaseModel):
     id: str
     provider: str

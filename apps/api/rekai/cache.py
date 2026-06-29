@@ -28,6 +28,13 @@ def cache_key(request: ChatRequest, provider: str) -> str:
     return "rekai:chat:" + hashlib.sha256(raw.encode()).hexdigest()
 
 
+def embedding_cache_key(provider: str, model: str, inputs: list[str]) -> str:
+    """A deterministic key for an embeddings request."""
+    payload = {"provider": provider, "model": model, "inputs": inputs}
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return "rekai:embed:" + hashlib.sha256(raw.encode()).hexdigest()
+
+
 class CacheBackend(Protocol):
     async def get(self, key: str) -> str | None: ...
     async def set(self, key: str, value: str, ttl: int) -> None: ...

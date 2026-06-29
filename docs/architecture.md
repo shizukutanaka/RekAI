@@ -150,6 +150,14 @@ header is present.
 or a server-side key is configured) or `byok_only` (needs an `X-Provider-Key`).
 Key-requiring providers override `server_key_configured()` to check their key.
 
+## Embeddings
+
+`POST /v1/embeddings` mirrors the chat path: route → cache → `provider.embed()`.
+It accepts a string or list of strings, returns one vector per input, and is
+cached (keyed by provider/model/inputs). Echo returns deterministic hash-based
+vectors so the endpoint works with no key; OpenAI and OpenAI-compatible backends
+call the real `/embeddings` API. Providers opt in by overriding `embed()`.
+
 ## Adding a provider
 
 1. Subclass `rekai.providers.base.Provider` and implement `chat()`.

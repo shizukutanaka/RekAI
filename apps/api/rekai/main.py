@@ -28,6 +28,8 @@ from rekai.router import select_provider
 from rekai.schemas import (
     ChatRequest,
     ChatResponse,
+    EmbeddingsRequest,
+    EmbeddingsResponse,
     ErrorResponse,
     HealthResponse,
     ModelInfo,
@@ -35,7 +37,7 @@ from rekai.schemas import (
     Usage,
     UsageSummary,
 )
-from rekai.service import handle_chat
+from rekai.service import handle_chat, handle_embeddings
 
 access_logger = get_logger("rekai.access")
 
@@ -187,6 +189,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         cache_backend: CacheBackend = Depends(get_cache),
     ) -> ChatResponse:
         return await handle_chat(request, x_provider_key, config, cache_backend)
+
+    @app.post(
+        "/v1/embeddings",
+        response_model=EmbeddingsResponse,
+        tags=["embeddings"],
+        responses={
+            400: {"model": ErrorResponse},
+            401: {"model": ErrorResponse},
+            429: {"model": ErrorResponse},
+            502: {"model": ErrorResponse},
+        },
+    )
+    async def embeddings(
+        request: EmbeddingsRequest,
+        x_provider_key: str | None = Header(default=None, alias="X-Provider-Key"),
+        config: Settings = Depends(get_config),
+        cache_backend: CacheBackend = Depends(get_cache),
+    ) -> EmbeddingsResponse:
+        return await handle_embeddings(request, x_provider_key, config, cache_backend)
 
     @app.post(
         "/v1/chat/stream",

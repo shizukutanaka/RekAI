@@ -38,6 +38,10 @@ check "stream emits [DONE]" bash -c \
      -d '{\"model\":\"echo\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}' \
    | grep -q '\[DONE\]'"
 
+check "embeddings (echo) return vectors" bash -c \
+  "curl -fsS '$BASE_URL/v1/embeddings' -H 'Content-Type: application/json' \
+     -d '{\"model\":\"echo\",\"input\":\"hello\"}' | grep -q 'embeddings'"
+
 check "usage exposes counters" bash -c \
   "curl -fsS '$BASE_URL/v1/usage' | grep -q 'requests_total'"
 

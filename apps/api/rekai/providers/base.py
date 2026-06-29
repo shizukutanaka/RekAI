@@ -35,6 +35,13 @@ class ProviderResult:
 
 
 @dataclass
+class EmbeddingResult:
+    embeddings: list[list[float]]
+    model: str
+    usage: Usage = field(default_factory=Usage)
+
+
+@dataclass
 class StreamEvent:
     """One event from a streaming completion: a text ``delta``, and/or (yielded
     once at the end when available) provider-reported ``usage`` and assembled
@@ -88,6 +95,10 @@ class Provider(ABC):
         to check their configured key.
         """
         return not self.requires_key
+
+    async def embed(self, inputs: list[str], model: str, api_key: str | None) -> EmbeddingResult:
+        """Embed one or more texts. Providers that support embeddings override this."""
+        raise ProviderError(f"{self.name} does not support embeddings.", status_code=400)
 
     async def list_models(self, api_key: str | None) -> list[str]:
         """Return known model ids. Override when the backend can enumerate them."""
