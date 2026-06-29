@@ -111,15 +111,25 @@ curl -s http://localhost:8000/v1/chat \
   -d '{"provider":"openai","model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'
 ```
 
-Runnable client snippets (curl, Python, JavaScript) live in
-[`examples/`](./examples), and there's an installable Python client in
-[`packages/python-sdk`](./packages/python-sdk):
+Embeddings work the same way (keyless on `echo`):
+
+```bash
+curl -s http://localhost:8000/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"echo","input":["hello","world"]}' | jq '.embeddings | length'
+```
+
+Runnable client snippets (curl, Python incl. streaming/tools/embeddings,
+JavaScript) live in [`examples/`](./examples), and there are installable
+clients — Python [`packages/python-sdk`](./packages/python-sdk) and
+JS/TS [`packages/js-sdk`](./packages/js-sdk):
 
 ```python
 from rekai_client import RekAIClient
 
 client = RekAIClient("http://localhost:8000")
 print(client.chat("echo", "Hello!").content)
+print(len(client.embeddings("echo", ["semantic", "search"]).embeddings))
 ```
 
 ## 📦 Monorepo layout
