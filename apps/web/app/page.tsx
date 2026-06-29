@@ -94,13 +94,10 @@ export default function ChatPage() {
     }
   }
 
-  async function send() {
-    const content = input.trim();
-    if (!content || loading) return;
+  // Run a completion for a conversation ending in a user message, appending the
+  // assistant reply. Shared by send() and regenerate().
+  async function runChat(history: DisplayMessage[]) {
     setError("");
-    const history: DisplayMessage[] = [...messages, { role: "user", content }];
-    setMessages(history);
-    setInput("");
     setLoading(true);
 
     const convo = history.map(({ role, content }) => ({ role, content }));
@@ -189,6 +186,30 @@ export default function ChatPage() {
       setLoading(false);
     }
   }
+
+  async function send() {
+    const content = input.trim();
+    if (!content || loading) return;
+    const history: DisplayMessage[] = [...messages, { role: "user", content }];
+    setMessages(history);
+    setInput("");
+    await runChat(history);
+  }
+
+  function regenerate() {
+    if (loading) return;
+    // Drop the last assistant reply and re-run from the last user message.
+    const lastUserIdx = messages.map((m) => m.role).lastIndexOf("user");
+    if (lastUserIdx === -1) return;
+    const history = messages.slice(0, lastUserIdx + 1);
+    setMessages(history);
+    runChat(history);
+  }
+
+  const canRegenerate =
+    !loading &&
+    messages.length > 0 &&
+    messages[messages.length - 1].role === "assistant";
 
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -297,6 +318,11 @@ export default function ChatPage() {
           </div>
         ))}
         {loading && !streaming && <div className="msg assistant">…</div>}
+        {canRegenerate && (
+          <button className="ghost regenerate" onClick={regenerate}>
+            ↻ Regenerate
+          </button>
+        )}
         <div ref={bottomRef} />
       </div>
 

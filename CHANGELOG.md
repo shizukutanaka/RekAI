@@ -7,6 +7,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Regenerate** — re-run the last user turn for a fresh assistant reply,
+  without duplicating messages.
 - **Max tokens control** — the chat Options panel now exposes a `max_tokens`
   cap (forwarded on both the streaming and non-streaming requests).
 - **Streaming usage/cost** — `POST /v1/chat/stream` now emits a final

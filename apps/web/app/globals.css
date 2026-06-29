@@ -145,6 +145,13 @@ button.ghost:hover {
   animation: blink 1s step-start infinite;
 }
 
+button.regenerate {
+  align-self: center;
+  margin-top: 4px;
+  font-size: 13px;
+  padding: 5px 12px;
+}
+
 @keyframes blink {
   50% {
     opacity: 0;
