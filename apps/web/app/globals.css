@@ -226,6 +226,14 @@ button:disabled {
   cursor: not-allowed;
 }
 
+button.stop {
+  background: #6b2b34;
+}
+
+button.stop:hover {
+  background: #813340;
+}
+
 .error {
   margin: 0 20px 12px;
   padding: 10px 12px;

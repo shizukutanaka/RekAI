@@ -31,8 +31,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Redis (when configured) so `/v1/usage` totals survive restarts; in-memory and
   no-op otherwise.
 - **Web UI** — chat with model selector, streaming toggle, an **Options** panel
-  (system prompt + temperature), and cache/provider/token/cost indicators; a
-  live **usage dashboard** at `/usage`; a settings page for BYOK keys.
+  (system prompt + temperature), a **Stop** button to cancel a stream,
+  conversation persistence across reloads, and cache/provider/token/cost
+  indicators; a live **usage dashboard** at `/usage`; a settings page for BYOK
+  keys.
+
+### Fixed
+- Web `output: standalone` is now gated behind `NEXT_OUTPUT=standalone` (set by
+  the Dockerfile) so local `next start` works and the app hydrates correctly.
 - **Examples** — runnable curl, Python (incl. streaming), and JavaScript
   clients.
 - **Python SDK** — installable `rekai-client` package (`packages/python-sdk`)

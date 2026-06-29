@@ -31,16 +31,49 @@ export default function ChatPage() {
   const [showOptions, setShowOptions] = useState(false);
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const HISTORY_KEY = "rekai.conversation";
 
   useEffect(() => {
     fetchModels().then((m) => {
       if (m.length) setModels(m);
     });
+    // Restore a previous conversation, if any.
+    try {
+      const saved = window.localStorage.getItem(HISTORY_KEY);
+      if (saved) setMessages(JSON.parse(saved));
+    } catch {
+      /* ignore malformed history */
+    }
   }, []);
+
+  // Persist the conversation (skip while a stream is mid-flight).
+  useEffect(() => {
+    if (loading) return;
+    try {
+      window.localStorage.setItem(HISTORY_KEY, JSON.stringify(messages));
+    } catch {
+      /* ignore quota errors */
+    }
+  }, [messages, loading]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  function stop() {
+    abortRef.current?.abort();
+  }
+
+  function clearConversation() {
+    setMessages([]);
+    try {
+      window.localStorage.removeItem(HISTORY_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
 
   async function send() {
     const content = input.trim();
@@ -62,21 +95,38 @@ export default function ChatPage() {
       if (streaming) {
         // Append a placeholder assistant bubble and fill it as deltas arrive.
         setMessages([...history, { role: "assistant", content: "", streaming: true }]);
-        await streamChat({ model, messages: wire, providerKey, temperature }, (delta) => {
-          setMessages((prev) => {
-            const next = [...prev];
-            const last = next[next.length - 1];
-            if (last?.role === "assistant") {
-              next[next.length - 1] = { ...last, content: last.content + delta };
-            }
-            return next;
-          });
-        });
+        const controller = new AbortController();
+        abortRef.current = controller;
+        try {
+          await streamChat(
+            { model, messages: wire, providerKey, temperature },
+            (delta) => {
+              setMessages((prev) => {
+                const next = [...prev];
+                const last = next[next.length - 1];
+                if (last?.role === "assistant") {
+                  next[next.length - 1] = { ...last, content: last.content + delta };
+                }
+                return next;
+              });
+            },
+            controller.signal,
+          );
+        } catch (e) {
+          // A user-initiated stop is not an error — keep what streamed so far.
+          if (!(e instanceof DOMException && e.name === "AbortError")) throw e;
+        }
+        // Finalize the bubble (mark complete; note if it was stopped early).
+        const wasAborted = controller.signal.aborted;
         setMessages((prev) => {
           const next = [...prev];
           const last = next[next.length - 1];
           if (last?.role === "assistant") {
-            next[next.length - 1] = { ...last, streaming: false, provider: model };
+            next[next.length - 1] = {
+              ...last,
+              streaming: false,
+              provider: wasAborted ? `${model} · stopped` : model,
+            };
           }
           return next;
         });
@@ -101,6 +151,7 @@ export default function ChatPage() {
       );
       setError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
+      abortRef.current = null;
       setLoading(false);
     }
   }
@@ -143,7 +194,7 @@ export default function ChatPage() {
           Options {showOptions ? "▲" : "▼"}
         </button>
         {messages.length > 0 && (
-          <button onClick={() => setMessages([])} style={{ marginLeft: "auto" }}>
+          <button onClick={clearConversation} style={{ marginLeft: "auto" }}>
             Clear
           </button>
         )}
@@ -213,9 +264,15 @@ export default function ChatPage() {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
         />
-        <button onClick={send} disabled={loading || !input.trim()}>
-          Send
-        </button>
+        {loading && streaming ? (
+          <button onClick={stop} className="stop">
+            Stop
+          </button>
+        ) : (
+          <button onClick={send} disabled={loading || !input.trim()}>
+            Send
+          </button>
+        )}
       </div>
     </>
   );

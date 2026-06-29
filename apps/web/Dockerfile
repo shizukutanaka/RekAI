@@ -7,6 +7,7 @@ RUN npm install --no-audit --no-fund
 # --- build ---
 FROM node:20-slim AS build
 WORKDIR /app
+ENV NEXT_OUTPUT=standalone
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
