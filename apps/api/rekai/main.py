@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import time
+import uuid
 
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +13,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from rekai import __version__
 from rekai.cache import CacheBackend, build_cache
 from rekai.config import Settings, get_settings
-from rekai.logging_config import configure_logging
+from rekai.logging_config import configure_logging, get_logger
 from rekai.metrics import metrics
 from rekai.providers import provider_names
 from rekai.providers.base import ProviderError
@@ -27,6 +29,8 @@ from rekai.schemas import (
     UsageSummary,
 )
 from rekai.service import handle_chat
+
+access_logger = get_logger("rekai.access")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -80,6 +84,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     ).model_dump(),
                 )
         return await call_next(request)
+
+    # --- middleware: request id + latency (outermost) --------------------
+    @app.middleware("http")
+    async def _request_context(request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+        request.state.request_id = request_id
+        start = time.perf_counter()
+        response = await call_next(request)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        response.headers["X-Request-ID"] = request_id
+        response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
+        access_logger.info(
+            "%s %s -> %s %.1fms id=%s",
+            request.method,
+            request.url.path,
+            response.status_code,
+            elapsed_ms,
+            request_id,
+        )
+        return response
 
     # --- routes -----------------------------------------------------------
     @app.get("/health", response_model=HealthResponse, tags=["system"])

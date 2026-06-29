@@ -24,8 +24,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Fallback / failover** — ordered `(provider, model)` chain retried on
   upstream (5xx) errors; 4xx client errors are terminal.
 - **Rate limiting** — per-client token bucket on `/v1/*`.
-- **Observability** — structured logging, Prometheus-style `/metrics`,
-  `/v1/usage`, and auto-generated OpenAPI at `/docs`.
+- **Observability** — structured logging, per-request `X-Request-ID` +
+  `X-Response-Time-Ms` headers with access logging, Prometheus-style
+  `/metrics`, `/v1/usage`, and auto-generated OpenAPI at `/docs`.
 - **Web UI** — chat with model selector, streaming toggle, and cache/provider/
   token/cost indicators; a live **usage dashboard** at `/usage`; a settings
   page for BYOK keys.

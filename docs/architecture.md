@@ -9,6 +9,9 @@ flows through the system and how the pieces fit together.
 POST /v1/chat
    │
    ▼
+[ request ctx ]   ── assigns/propagates X-Request-ID, times the request
+   │
+   ▼
 [ rate limiter ]  ── 429 if the client exceeds its budget
    │
    ▼
@@ -81,6 +84,14 @@ messages)` tuple, so identical requests collapse to one upstream call. Backends:
 - **Null** when caching is disabled.
 
 A client can opt a single request out with `"cache": false`.
+
+## Request context & observability
+
+The outermost middleware assigns each request an `X-Request-ID` (or propagates a
+client-supplied one), records latency, and logs an access line
+(`METHOD path -> status Nms id=...`) under the `rekai.access` logger. Both
+`X-Request-ID` and `X-Response-Time-Ms` are returned on every response,
+including errors, so requests can be traced end to end.
 
 ## Cost estimation
 
