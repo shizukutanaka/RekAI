@@ -18,6 +18,7 @@ matching model, e.g. `MODEL=gpt-4o-mini`.
 | `curl.sh`                | bash + curl    | `./curl.sh`                          |
 | `python/chat.py`         | Python 3 (stdlib) | `python python/chat.py`           |
 | `python/stream.py`       | Python 3 (stdlib) | `python python/stream.py`         |
+| `python/tools.py`        | Python 3 (stdlib) | `python python/tools.py` (needs a tool-capable model + key) |
 | `javascript/chat.mjs`    | Node 18+       | `node javascript/chat.mjs`           |
 
 ## Environment variables

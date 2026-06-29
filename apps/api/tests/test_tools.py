@@ -98,3 +98,38 @@ def test_chat_endpoint_returns_tool_calls_field(client) -> None:
     assert resp.status_code == 200
     assert "tool_calls" in resp.json()
     assert resp.json()["tool_calls"] is None
+
+
+def test_chat_endpoint_surfaces_tool_calls(client) -> None:
+    """End-to-end: a tool-returning provider's tool_calls reach the response."""
+    from rekai.providers import register_provider
+    from rekai.providers.base import Provider, ProviderResult
+    from rekai.schemas import Usage
+
+    tool_call = {
+        "id": "call_1",
+        "type": "function",
+        "function": {"name": "get_weather", "arguments": '{"city":"Tokyo"}'},
+    }
+
+    class ToolProvider(Provider):
+        name = "tool-test"
+        requires_key = False
+
+        async def chat(self, request, api_key) -> ProviderResult:
+            return ProviderResult(
+                content="", model=request.model, usage=Usage(), tool_calls=[tool_call]
+            )
+
+    register_provider(ToolProvider())
+    resp = client.post(
+        "/v1/chat",
+        json={
+            "provider": "tool-test",
+            "model": "x",
+            "messages": [{"role": "user", "content": "weather?"}],
+            "tools": [WEATHER_TOOL],
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["tool_calls"] == [tool_call]
