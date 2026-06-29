@@ -32,6 +32,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   page for BYOK keys.
 - **Examples** — runnable curl, Python (incl. streaming), and JavaScript
   clients.
+- **Python SDK** — installable `rekai-client` package (`packages/python-sdk`)
+  with `RekAIClient` (`chat`, `stream`, `models`, `usage`, `health`), BYOK,
+  and fallback support.
 - **CI** — GitHub Actions for API (ruff, mypy, pytest), web (lint, build), and
   Docker image builds.
 - **Makefile** — common developer tasks (`make help`).

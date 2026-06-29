@@ -97,7 +97,15 @@ curl -s http://localhost:8000/v1/chat \
 ```
 
 Runnable client snippets (curl, Python, JavaScript) live in
-[`examples/`](./examples).
+[`examples/`](./examples), and there's an installable Python client in
+[`packages/python-sdk`](./packages/python-sdk):
+
+```python
+from rekai_client import RekAIClient
+
+client = RekAIClient("http://localhost:8000")
+print(client.chat("echo", "Hello!").content)
+```
 
 ## 📦 Monorepo layout
 
@@ -106,6 +114,9 @@ RekAI/
 ├── apps/
 │   ├── api/   # FastAPI backend (router, cache, providers, BYOK)
 │   └── web/   # Next.js chat UI
+├── packages/
+│   └── python-sdk/   # rekai-client: official Python client
+├── examples/  # curl / Python / JavaScript snippets
 ├── docs/      # architecture & guides
 ├── docker-compose.yml
 └── .github/   # CI, issue & PR templates

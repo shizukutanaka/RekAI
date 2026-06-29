@@ -1,0 +1,63 @@
+# rekai-client
+
+Official Python client for the [RekAI](https://github.com/shizukutanaka/RekAI)
+gateway.
+
+## Install
+
+```bash
+pip install -e packages/python-sdk     # from the monorepo
+# (published to PyPI as `rekai-client` once released)
+```
+
+## Usage
+
+```python
+from rekai_client import RekAIClient
+
+client = RekAIClient("http://localhost:8000")
+
+# Simple chat (a plain string becomes a single user message)
+result = client.chat("echo", "Hello!")
+print(result.content)          # "Echo: Hello!"
+print(result.provider, result.usage["total_tokens"], result.cost_usd)
+
+# BYOK + a real provider
+result = client.chat(
+    "gpt-4o-mini",
+    [{"role": "user", "content": "Write a haiku."}],
+    provider="openai",
+    provider_key="sk-...",
+)
+
+# Streaming
+for chunk in client.stream("echo", "stream me"):
+    print(chunk, end="", flush=True)
+
+# Reliability: fall back to echo on upstream errors
+client.chat("gpt-4o-mini", "hi", fallbacks=[{"provider": "echo", "model": "echo"}])
+
+# Introspection
+client.models()   # [{"id": "...", "provider": "..."}, ...]
+client.usage()    # aggregate counters
+client.health()
+```
+
+Use it as a context manager to close the underlying HTTP connection:
+
+```python
+with RekAIClient("http://localhost:8000", provider_key="sk-...") as client:
+    print(client.chat("gpt-4o-mini", "hi").content)
+```
+
+## Errors
+
+Failed requests raise `RekAIError` with a `.status_code` attribute.
+
+## Develop
+
+```bash
+cd packages/python-sdk
+pip install -e ".[dev]"
+ruff check . && pytest
+```

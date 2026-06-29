@@ -2,6 +2,7 @@
 
 API_DIR := apps/api
 WEB_DIR := apps/web
+SDK_DIR := packages/python-sdk
 
 .DEFAULT_GOAL := help
 
@@ -14,7 +15,7 @@ help: ## Show this help
 ## --- setup ---
 
 .PHONY: install
-install: install-api install-web ## Install API and web dependencies
+install: install-api install-web install-sdk ## Install all dependencies
 
 .PHONY: install-api
 install-api: ## Install the API package with dev extras
@@ -24,14 +25,19 @@ install-api: ## Install the API package with dev extras
 install-web: ## Install web dependencies
 	cd $(WEB_DIR) && npm install
 
+.PHONY: install-sdk
+install-sdk: ## Install the Python SDK with dev extras
+	cd $(SDK_DIR) && pip install -e ".[dev]"
+
 ## --- quality ---
 
 .PHONY: check
 check: lint typecheck test web-build ## Run all checks (lint, types, tests, web build)
 
 .PHONY: lint
-lint: ## Lint the API (ruff) and web (eslint)
+lint: ## Lint the API + SDK (ruff) and web (eslint)
 	cd $(API_DIR) && ruff check . && ruff format --check .
+	cd $(SDK_DIR) && ruff check .
 	cd $(WEB_DIR) && npm run lint
 
 .PHONY: fmt
@@ -43,8 +49,9 @@ typecheck: ## Type-check the API (mypy)
 	cd $(API_DIR) && mypy rekai
 
 .PHONY: test
-test: ## Run the API test suite (pytest)
+test: ## Run the API and SDK test suites (pytest)
 	cd $(API_DIR) && pytest -q
+	cd $(SDK_DIR) && pytest -q
 
 .PHONY: web-build
 web-build: ## Build the web app
