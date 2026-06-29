@@ -95,6 +95,43 @@ textarea {
   user-select: none;
 }
 
+button.ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-weight: 500;
+  padding: 7px 12px;
+}
+
+button.ghost:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.options {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.options .field {
+  margin-bottom: 12px;
+}
+
+.options .field:last-child {
+  margin-bottom: 0;
+}
+
+.options textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.options input[type="range"] {
+  width: 100%;
+  padding: 0;
+}
+
 .toggle input {
   width: auto;
   margin: 0;

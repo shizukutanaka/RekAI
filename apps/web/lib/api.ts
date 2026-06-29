@@ -60,6 +60,7 @@ export async function sendChat(params: {
   model: string;
   messages: ChatMessage[];
   providerKey?: string;
+  temperature?: number;
 }): Promise<ChatResponse> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (params.providerKey) headers["X-Provider-Key"] = params.providerKey;
@@ -67,7 +68,11 @@ export async function sendChat(params: {
   const res = await fetch(`${API_URL}/v1/chat`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ model: params.model, messages: params.messages }),
+    body: JSON.stringify({
+      model: params.model,
+      messages: params.messages,
+      ...(params.temperature != null ? { temperature: params.temperature } : {}),
+    }),
   });
 
   if (!res.ok) {
@@ -88,7 +93,12 @@ export async function sendChat(params: {
  * Resolves when the stream completes; rejects on transport or provider errors.
  */
 export async function streamChat(
-  params: { model: string; messages: ChatMessage[]; providerKey?: string },
+  params: {
+    model: string;
+    messages: ChatMessage[];
+    providerKey?: string;
+    temperature?: number;
+  },
   onDelta: (text: string) => void,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -98,7 +108,11 @@ export async function streamChat(
   const res = await fetch(`${API_URL}/v1/chat/stream`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ model: params.model, messages: params.messages }),
+    body: JSON.stringify({
+      model: params.model,
+      messages: params.messages,
+      ...(params.temperature != null ? { temperature: params.temperature } : {}),
+    }),
     signal,
   });
 

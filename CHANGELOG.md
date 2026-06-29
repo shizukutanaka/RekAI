@@ -30,9 +30,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Persistent metrics** — write-behind persistence of the usage counters to
   Redis (when configured) so `/v1/usage` totals survive restarts; in-memory and
   no-op otherwise.
-- **Web UI** — chat with model selector, streaming toggle, and cache/provider/
-  token/cost indicators; a live **usage dashboard** at `/usage`; a settings
-  page for BYOK keys.
+- **Web UI** — chat with model selector, streaming toggle, an **Options** panel
+  (system prompt + temperature), and cache/provider/token/cost indicators; a
+  live **usage dashboard** at `/usage`; a settings page for BYOK keys.
 - **Examples** — runnable curl, Python (incl. streaming), and JavaScript
   clients.
 - **Python SDK** — installable `rekai-client` package (`packages/python-sdk`)

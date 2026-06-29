@@ -26,6 +26,9 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(true);
+  const [system, setSystem] = useState("");
+  const [temperature, setTemperature] = useState(0.7);
+  const [showOptions, setShowOptions] = useState(false);
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -48,14 +51,18 @@ export default function ChatPage() {
     setInput("");
     setLoading(true);
 
-    const wire = history.map(({ role, content }) => ({ role, content }));
+    const convo = history.map(({ role, content }) => ({ role, content }));
+    // Prepend an optional system prompt (not shown as a chat bubble).
+    const wire = system.trim()
+      ? [{ role: "system" as const, content: system.trim() }, ...convo]
+      : convo;
     const providerKey = getStoredKey();
 
     try {
       if (streaming) {
         // Append a placeholder assistant bubble and fill it as deltas arrive.
         setMessages([...history, { role: "assistant", content: "", streaming: true }]);
-        await streamChat({ model, messages: wire, providerKey }, (delta) => {
+        await streamChat({ model, messages: wire, providerKey, temperature }, (delta) => {
           setMessages((prev) => {
             const next = [...prev];
             const last = next[next.length - 1];
@@ -74,7 +81,7 @@ export default function ChatPage() {
           return next;
         });
       } else {
-        const res = await sendChat({ model, messages: wire, providerKey });
+        const res = await sendChat({ model, messages: wire, providerKey, temperature });
         setMessages([
           ...history,
           {
@@ -128,12 +135,48 @@ export default function ChatPage() {
           />
           Stream
         </label>
+        <button
+          className="ghost"
+          onClick={() => setShowOptions((v) => !v)}
+          aria-expanded={showOptions}
+        >
+          Options {showOptions ? "▲" : "▼"}
+        </button>
         {messages.length > 0 && (
           <button onClick={() => setMessages([])} style={{ marginLeft: "auto" }}>
             Clear
           </button>
         )}
       </div>
+
+      {showOptions && (
+        <div className="options">
+          <div className="field">
+            <label htmlFor="system">System prompt</label>
+            <textarea
+              id="system"
+              rows={2}
+              value={system}
+              placeholder="Optional. e.g. You are a terse assistant."
+              onChange={(e) => setSystem(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="temp">
+              Temperature: <strong>{temperature.toFixed(1)}</strong>
+            </label>
+            <input
+              id="temp"
+              type="range"
+              min={0}
+              max={2}
+              step={0.1}
+              value={temperature}
+              onChange={(e) => setTemperature(Number(e.target.value))}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="messages">
         {messages.length === 0 && (
