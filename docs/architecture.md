@@ -118,6 +118,12 @@ full tools conversation can be replayed. Providers without tool support ignore
 these fields. For **streaming**, OpenAI's tool-call deltas are accumulated by
 index and returned in the final summary event's `tool_calls`.
 
+Tools work natively on **Anthropic** too: OpenAI-style `tools`/`tool_choice` are
+translated to Anthropic's `tools`/`input_schema`/`tool_choice`, assistant
+`tool_calls` and `tool` results round-trip to Anthropic `tool_use`/`tool_result`
+content blocks, and Anthropic's `tool_use` responses map back to OpenAI-style
+`tool_calls` — so a tools conversation is portable across OpenAI and Anthropic.
+
 ## Cost estimation
 
 Each non-streamed response carries an approximate `cost_usd`, computed by

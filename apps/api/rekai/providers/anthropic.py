@@ -33,11 +33,7 @@ class AnthropicProvider(Provider):
         settings = get_settings()
         # Anthropic takes system prompts as a top-level field, not in `messages`.
         system_parts = [m.content or "" for m in request.messages if m.role == "system"]
-        chat_messages = [
-            {"role": m.role, "content": m.content or ""}
-            for m in request.messages
-            if m.role != "system"
-        ]
+        chat_messages = _translate_messages(request.messages)
         if not chat_messages:
             raise ProviderError("Anthropic requires at least one user/assistant message.", 400)
 
@@ -49,6 +45,12 @@ class AnthropicProvider(Provider):
         }
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
+        # Translate OpenAI-style tools / tool_choice into Anthropic's format.
+        if request.tools:
+            payload["tools"] = _translate_tools(request.tools)
+            choice = _translate_tool_choice(request.tool_choice)
+            if choice is not None:
+                payload["tool_choice"] = choice
         if stream:
             payload["stream"] = True
         return payload
@@ -79,18 +81,17 @@ class AnthropicProvider(Provider):
             )
 
         data = resp.json()
+        blocks = data.get("content", [])
         # content is a list of blocks; concatenate the text blocks.
-        content = "".join(
-            block.get("text", "")
-            for block in data.get("content", [])
-            if block.get("type") == "text"
-        )
+        content = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+        tool_calls = _extract_tool_calls(blocks)
         usage = data.get("usage", {})
         prompt_tokens = usage.get("input_tokens", 0)
         completion_tokens = usage.get("output_tokens", 0)
         return ProviderResult(
             content=content,
             model=data.get("model", request.model),
+            tool_calls=tool_calls,
             usage=Usage(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
@@ -183,3 +184,99 @@ def _parse_anthropic_sse_line(line: str) -> str | None:
     if event.get("type") == "content_block_delta":
         return event.get("delta", {}).get("text") or None
     return None
+
+
+# --- OpenAI <-> Anthropic tool translation ----------------------------------
+
+
+def _translate_tools(openai_tools: list[dict]) -> list[dict]:
+    """OpenAI ``{"type":"function","function":{name,description,parameters}}``
+    -> Anthropic ``{name, description, input_schema}``."""
+    out = []
+    for tool in openai_tools:
+        fn = tool.get("function", tool)
+        out.append(
+            {
+                "name": fn.get("name", ""),
+                "description": fn.get("description", ""),
+                "input_schema": fn.get("parameters") or {"type": "object", "properties": {}},
+            }
+        )
+    return out
+
+
+def _translate_tool_choice(choice: object) -> dict | None:
+    """OpenAI tool_choice -> Anthropic tool_choice (None means leave default)."""
+    if choice is None or choice == "none":
+        return None
+    if choice == "auto":
+        return {"type": "auto"}
+    if choice == "required":
+        return {"type": "any"}
+    if isinstance(choice, dict):
+        name = choice.get("function", {}).get("name") or choice.get("name")
+        if name:
+            return {"type": "tool", "name": name}
+    return None
+
+
+def _translate_messages(messages: list) -> list[dict]:
+    """Map OpenAI-style messages (incl. tool calls/results) to Anthropic blocks."""
+    out: list[dict] = []
+    for m in messages:
+        if m.role == "system":
+            continue
+        if m.role == "tool":
+            # A tool result becomes a user message with a tool_result block.
+            out.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": m.tool_call_id or "",
+                            "content": m.content or "",
+                        }
+                    ],
+                }
+            )
+        elif m.role == "assistant" and m.tool_calls:
+            blocks: list[dict] = []
+            if m.content:
+                blocks.append({"type": "text", "text": m.content})
+            for tc in m.tool_calls:
+                fn = tc.get("function", {})
+                try:
+                    args = json.loads(fn.get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                blocks.append(
+                    {
+                        "type": "tool_use",
+                        "id": tc.get("id", ""),
+                        "name": fn.get("name", ""),
+                        "input": args,
+                    }
+                )
+            out.append({"role": "assistant", "content": blocks})
+        else:
+            out.append({"role": m.role, "content": m.content or ""})
+    return out
+
+
+def _extract_tool_calls(blocks: list[dict]) -> list[dict] | None:
+    """Anthropic ``tool_use`` content blocks -> OpenAI-style ``tool_calls``."""
+    calls = []
+    for b in blocks:
+        if b.get("type") == "tool_use":
+            calls.append(
+                {
+                    "id": b.get("id", ""),
+                    "type": "function",
+                    "function": {
+                        "name": b.get("name", ""),
+                        "arguments": json.dumps(b.get("input", {})),
+                    },
+                }
+            )
+    return calls or None
