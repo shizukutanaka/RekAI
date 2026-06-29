@@ -12,7 +12,7 @@ POST /v1/chat
 [ request ctx ]   ── assigns/propagates X-Request-ID, times the request
    │
    ▼
-[ rate limiter ]  ── 429 if the client exceeds its budget
+[ rate limiter ]  ── 429 (+ Retry-After) if the client exceeds its budget
    │
    ▼
 [ router ]  ── picks a provider (explicit → model-prefix → default)

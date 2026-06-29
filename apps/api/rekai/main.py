@@ -108,12 +108,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             client = request.client.host if request.client else "anonymous"
             if not limiter.allow(client):
                 metrics.record_error()
+                retry_after = limiter.retry_after(client)
                 return JSONResponse(
                     status_code=429,
                     content=ErrorResponse(
                         error="rate_limited",
-                        detail="Too many requests. Slow down.",
+                        detail=f"Too many requests. Retry in {retry_after}s.",
                     ).model_dump(),
+                    headers={"Retry-After": str(retry_after)},
                 )
         return await call_next(request)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 
 
@@ -28,3 +29,18 @@ class RateLimiter:
             return False
         self._buckets[key] = (tokens - 1.0, now)
         return True
+
+    def retry_after(self, key: str) -> int:
+        """Whole seconds until ``key`` has a token again (>= 1; 0 if available now).
+
+        A peek — it does not consume a token — so it is safe to call right after
+        ``allow`` returns ``False`` to populate a ``Retry-After`` header.
+        """
+        now = time.time()
+        tokens, last = self._buckets.get(key, (float(self.capacity), now))
+        refill = (now - last) * (self.capacity / self.window)
+        tokens = min(self.capacity, tokens + refill)
+        if tokens >= 1.0:
+            return 0
+        seconds = (1.0 - tokens) * self.window / self.capacity
+        return max(1, math.ceil(seconds))
