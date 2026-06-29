@@ -62,10 +62,16 @@ export async function errorFromResponse(res: Response): Promise<Error> {
   return new Error(detail);
 }
 
+export interface ModelPricing {
+  input_per_1m: number;
+  output_per_1m: number;
+}
+
 export interface ModelInfo {
   id: string;
   provider: string;
   type?: "chat" | "embedding";
+  pricing?: ModelPricing | null;
 }
 
 /** Filter models by type, treating a missing `type` as "chat" (older APIs). */

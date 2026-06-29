@@ -20,7 +20,7 @@ from rekai.config import Settings, get_settings
 from rekai.logging_config import configure_logging, get_logger
 from rekai.metrics import metrics
 from rekai.metrics_store import build_metrics_store
-from rekai.pricing import estimate_cost, estimate_tokens
+from rekai.pricing import estimate_cost, estimate_tokens, price_for_model
 from rekai.providers import get_provider, provider_names
 from rekai.providers.base import ProviderError
 from rekai.rate_limit import RateLimiter
@@ -33,6 +33,7 @@ from rekai.schemas import (
     ErrorResponse,
     HealthResponse,
     ModelInfo,
+    ModelPricing,
     ModelsResponse,
     ServiceInfo,
     Usage,
@@ -230,6 +231,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             None, description="Filter by model type: 'chat' or 'embedding'."
         ),
     ) -> ModelsResponse:
+        def _info(model: str, name: str, kind: Literal["chat", "embedding"]) -> ModelInfo:
+            price = price_for_model(model)
+            pricing = (
+                ModelPricing(input_per_1m=price[0], output_per_1m=price[1])
+                if price is not None
+                else None
+            )
+            return ModelInfo(id=model, provider=name, type=kind, pricing=pricing)
+
         data: list[ModelInfo] = []
         for name in provider_names():
             provider = get_provider(name)
@@ -237,10 +247,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 continue
             if type != "embedding":
                 for model in await provider.list_models(None):
-                    data.append(ModelInfo(id=model, provider=name, type="chat"))
+                    data.append(_info(model, name, "chat"))
             if type != "chat":
                 for model in await provider.list_embedding_models(None):
-                    data.append(ModelInfo(id=model, provider=name, type="embedding"))
+                    data.append(_info(model, name, "embedding"))
         return ModelsResponse(data=data)
 
     @app.post(

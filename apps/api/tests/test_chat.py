@@ -84,3 +84,11 @@ def test_models_listing(client: TestClient) -> None:
     ids = {m["id"] for m in resp.json()["data"]}
     assert "echo" in ids
     assert "gpt-4o-mini" in ids
+
+
+def test_models_include_pricing(client: TestClient) -> None:
+    by_id = {m["id"]: m for m in client.get("/v1/models").json()["data"]}
+    # A priced model exposes its per-1M rates from the pricing table.
+    assert by_id["gpt-4o-mini"]["pricing"] == {"input_per_1m": 0.15, "output_per_1m": 0.60}
+    # An unpriced/free model reports null pricing.
+    assert by_id["echo"]["pricing"] is None

@@ -7,6 +7,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Per-model pricing in `/v1/models`** — each entry now carries an optional
+  `pricing` (`input_per_1m`/`output_per_1m` USD, or `null` when unknown) from
+  the pricing table, so clients can show cost estimates without hardcoding
+  rates. The web app and JS SDK `ModelInfo` types include it.
 - **Request body size limit** — `/v1/*` requests whose `Content-Length` exceeds
   `REKAI_MAX_BODY_BYTES` (default 1 MB; 0 disables) are rejected with
   `413 Payload Too Large` before parsing, protecting the server from oversized

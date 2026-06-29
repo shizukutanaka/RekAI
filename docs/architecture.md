@@ -148,7 +148,9 @@ tokens). Free/local providers (`echo`, `ollama`) report `0.0`; unpriced models
 report `null`. Embeddings responses carry `cost_usd` too (input-only — the
 `text-embedding-3-*` / `ada-002` models are priced). Cumulative cost is exposed at `/v1/usage` and `/metrics`
 (`rekai_cost_usd_total`). Prices are approximate and meant for budgeting, not
-billing — extend or override them with `pricing.register_price()`.
+billing — extend or override them with `pricing.register_price()`. `/v1/models`
+also reports each model's `pricing` (`input_per_1m`/`output_per_1m`, or `null`
+when unknown), so clients can build cost UIs without hardcoding rates.
 
 ## BYOK
 

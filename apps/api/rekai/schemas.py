@@ -93,10 +93,16 @@ class EmbeddingsResponse(BaseModel):
     cached: bool = False
 
 
+class ModelPricing(BaseModel):
+    input_per_1m: float
+    output_per_1m: float
+
+
 class ModelInfo(BaseModel):
     id: str
     provider: str
     type: Literal["chat", "embedding"] = "chat"
+    pricing: ModelPricing | None = None
 
 
 class ModelsResponse(BaseModel):

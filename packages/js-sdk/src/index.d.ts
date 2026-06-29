@@ -50,9 +50,16 @@ export interface ChatResult {
   fallback_used: boolean;
 }
 
+export interface ModelPricing {
+  input_per_1m: number;
+  output_per_1m: number;
+}
+
 export interface ModelInfo {
   id: string;
   provider: string;
+  type?: "chat" | "embedding";
+  pricing?: ModelPricing | null;
 }
 
 export interface EmbeddingsOptions {
