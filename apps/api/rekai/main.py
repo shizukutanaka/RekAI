@@ -215,6 +215,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         async def event_source():
             completion = []
             reported_usage: Usage | None = None
+            reported_tool_calls: list[dict] | None = None
             errored = False
             try:
                 async for event in provider.stream_events(request, x_provider_key):
@@ -223,6 +224,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         yield f"data: {json.dumps({'delta': event.delta})}\n\n"
                     if event.usage is not None:
                         reported_usage = event.usage
+                    if event.tool_calls is not None:
+                        reported_tool_calls = event.tool_calls
             except ProviderError as exc:
                 errored = True
                 metrics.record_error()
@@ -252,6 +255,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "cost_usd": cost_usd,
                     "estimated": estimated,
                 }
+                if reported_tool_calls:
+                    summary["tool_calls"] = reported_tool_calls
                 yield f"data: {json.dumps(summary)}\n\n"
             yield "data: [DONE]\n\n"
 

@@ -14,6 +14,7 @@ export interface StreamSummary {
   usage: Usage;
   cost_usd: number | null;
   estimated: boolean;
+  tool_calls?: Record<string, unknown>[];
 }
 
 export interface ChatOptions {

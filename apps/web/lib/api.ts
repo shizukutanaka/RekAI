@@ -173,6 +173,7 @@ export interface StreamSummary {
   usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
   cost_usd: number | null;
   estimated: boolean;
+  tool_calls?: Record<string, unknown>[];
 }
 
 export type SSEEvent =

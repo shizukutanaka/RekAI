@@ -294,6 +294,51 @@ async def test_openai_stream_events_surfaces_usage(monkeypatch) -> None:
     assert usage is not None and usage.total_tokens == 3
 
 
+def test_openai_tool_call_accumulator() -> None:
+    from rekai.providers.openai import _accumulate_tool_call_deltas
+
+    acc: dict = {}
+    lines = [
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1",'
+        '"type":"function","function":{"name":"get_weather","arguments":""}}]}}]}',
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,'
+        '"function":{"arguments":"{\\"ci"}}]}}]}',
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,'
+        '"function":{"arguments":"ty\\":\\"Tokyo\\"}"}}]}}]}',
+    ]
+    for ln in lines:
+        _accumulate_tool_call_deltas(ln, acc)
+    assert list(acc) == [0]
+    assert acc[0]["id"] == "call_1"
+    assert acc[0]["function"]["name"] == "get_weather"
+    assert acc[0]["function"]["arguments"] == '{"city":"Tokyo"}'
+
+
+async def test_openai_stream_events_assembles_tool_calls(monkeypatch) -> None:
+    lines = [
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1",'
+        '"type":"function","function":{"name":"get_weather","arguments":""}}]}}]}',
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,'
+        '"function":{"arguments":"{\\"city\\":\\"Tokyo\\"}"}}]}}]}',
+        'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}',
+        "data: [DONE]",
+    ]
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: _FakeClient(lines))
+
+    req = ChatRequest(
+        model="gpt-4o-mini",
+        messages=[ChatMessage(role="user", content="weather?")],
+        tools=[{"type": "function", "function": {"name": "get_weather"}}],
+    )
+    events = [e async for e in OpenAIProvider().stream_events(req, api_key="sk-test")]
+    tool_calls = next((e.tool_calls for e in events if e.tool_calls is not None), None)
+    usage = next((e.usage for e in events if e.usage is not None), None)
+    assert tool_calls is not None and len(tool_calls) == 1
+    assert tool_calls[0]["function"]["name"] == "get_weather"
+    assert tool_calls[0]["function"]["arguments"] == '{"city":"Tokyo"}'
+    assert usage is not None and usage.total_tokens == 8
+
+
 async def test_anthropic_stream_events_surfaces_usage(monkeypatch) -> None:
     from rekai.providers.anthropic import AnthropicProvider
 

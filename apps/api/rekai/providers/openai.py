@@ -107,8 +107,13 @@ class OpenAIProvider(Provider):
         }
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
+        if request.tools is not None:
+            payload["tools"] = request.tools
+        if request.tool_choice is not None:
+            payload["tool_choice"] = request.tool_choice
 
         url = f"{self._base_url().rstrip('/')}/chat/completions"
+        tool_calls_acc: dict[int, dict] = {}
         try:
             async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
                 async with client.stream(
@@ -124,8 +129,12 @@ class OpenAIProvider(Provider):
                         event = _parse_openai_sse_event(line)
                         if event is not None:
                             yield event
+                        _accumulate_tool_call_deltas(line, tool_calls_acc)
         except httpx.HTTPError as exc:
             raise ProviderError(f"{self.name} streaming request failed: {exc}") from exc
+        if tool_calls_acc:
+            assembled = [tool_calls_acc[i] for i in sorted(tool_calls_acc)]
+            yield StreamEvent(tool_calls=assembled)
 
     async def list_models(self, api_key: str | None) -> list[str]:
         # Static, commonly-available models; avoids an extra network round-trip.
@@ -164,3 +173,37 @@ def _parse_openai_sse_event(line: str) -> StreamEvent | None:
             )
         )
     return None
+
+
+def _accumulate_tool_call_deltas(line: str, acc: dict[int, dict]) -> None:
+    """Merge one SSE line's streamed tool-call fragments into ``acc`` by index.
+
+    OpenAI streams tool calls as deltas: the id/name arrive once, and the
+    function ``arguments`` string is split across chunks.
+    """
+    if not line or not line.startswith("data:"):
+        return
+    data = line[len("data:") :].strip()
+    if not data or data == "[DONE]":
+        return
+    try:
+        chunk = json.loads(data)
+    except json.JSONDecodeError:
+        return
+    choices = chunk.get("choices") or []
+    if not choices:
+        return
+    for tc in choices[0].get("delta", {}).get("tool_calls") or []:
+        idx = tc.get("index", 0)
+        slot = acc.setdefault(
+            idx, {"id": None, "type": "function", "function": {"name": "", "arguments": ""}}
+        )
+        if tc.get("id"):
+            slot["id"] = tc["id"]
+        if tc.get("type"):
+            slot["type"] = tc["type"]
+        fn = tc.get("function") or {}
+        if fn.get("name"):
+            slot["function"]["name"] += fn["name"]
+        if fn.get("arguments"):
+            slot["function"]["arguments"] += fn["arguments"]

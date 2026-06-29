@@ -115,7 +115,8 @@ providers that support them (OpenAI and OpenAI-compatible backends). The model's
 `tool_calls` are returned on `ChatResponse`. Messages carry the round-trip
 fields (`tool_calls`, `tool_call_id`, `name`) and `content` is optional, so a
 full tools conversation can be replayed. Providers without tool support ignore
-these fields. (Streaming tool calls are not yet assembled — use non-streaming.)
+these fields. For **streaming**, OpenAI's tool-call deltas are accumulated by
+index and returned in the final summary event's `tool_calls`.
 
 ## Cost estimation
 

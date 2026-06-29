@@ -36,11 +36,13 @@ class ProviderResult:
 
 @dataclass
 class StreamEvent:
-    """One event from a streaming completion: a text ``delta`` and/or final
-    provider-reported ``usage`` (yielded once at the end when available)."""
+    """One event from a streaming completion: a text ``delta``, and/or (yielded
+    once at the end when available) provider-reported ``usage`` and assembled
+    ``tool_calls``."""
 
     delta: str | None = None
     usage: Usage | None = None
+    tool_calls: list[dict] | None = None
 
 
 class Provider(ABC):
