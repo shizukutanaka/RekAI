@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Per-tenant rate limiting** — when gateway auth is on, the rate-limit bucket
+  is keyed by the API key (a non-reversible `key:<hash>` id) instead of the
+  client IP, so one tenant can't exhaust another's budget; the masked id is also
+  attached to the structured access log as `client`. Falls back to IP when
+  unauthenticated.
 - **Gateway authentication** (opt-in) — set `REKAI_API_KEYS` (comma-separated)
   to require `Authorization: Bearer <key>` on `/v1/*`, compared in constant time
   (`401` + `WWW-Authenticate: Bearer` otherwise). Checked before rate limiting so

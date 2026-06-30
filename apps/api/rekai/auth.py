@@ -9,6 +9,7 @@ the gateway is open (the default — convenient for local/echo use).
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 
 
@@ -21,6 +22,12 @@ def parse_bearer(authorization: str | None) -> str | None:
         return None
     token = token.strip()
     return token or None
+
+
+def client_id(token: str) -> str:
+    """A short, stable, non-reversible id for a key — safe to log and to use as a
+    per-tenant rate-limit bucket (never the raw key)."""
+    return "key:" + hashlib.sha256(token.encode()).hexdigest()[:12]
 
 
 def key_allowed(token: str, allowed: list[str]) -> bool:

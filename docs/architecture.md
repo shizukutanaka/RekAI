@@ -15,7 +15,10 @@ POST /v1/chat
 [ body guard ]    ── 413 if the /v1 body exceeds REKAI_MAX_BODY_BYTES
    │
    ▼
-[ rate limiter ]  ── 429 (+ Retry-After) if the client exceeds its budget
+[ auth ]          ── 401 if a configured gateway key is missing/invalid
+   │
+   ▼
+[ rate limiter ]  ── 429 (+ Retry-After) if the client (per key, else IP) exceeds its budget
    │
    ▼
 [ router ]  ── picks a provider (explicit → model-prefix → default)
@@ -218,6 +221,11 @@ RekAI*: set `REKAI_API_KEYS` (comma-separated) and `/v1/*` then requires
 open (the default). System endpoints (`/health`, `/metrics`, `/`, `/docs`) stay
 open for liveness probes and scraping. This is separate from **BYOK** below,
 which is the *upstream provider* key.
+
+Rate limiting is **per tenant**: when authenticated, the bucket is keyed by the
+API key (a non-reversible `key:<hash>` id, also attached to the structured
+access log as `client`) rather than the client IP, so one tenant's traffic can't
+exhaust another's budget. Without auth it falls back to the client IP.
 
 ## BYOK
 

@@ -108,6 +108,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def _rate_limit(request: Request, call_next):
         is_api_write = request.method != "OPTIONS" and request.url.path.startswith("/v1/")
 
+        # The rate-limit bucket: the authenticated key (per-tenant) when present,
+        # otherwise the client IP. Stashed for the access log.
+        rl_client = request.client.host if request.client else "anonymous"
+
         # Gateway auth: when keys are configured, /v1/* needs a valid Bearer key.
         # Checked first so unauthenticated traffic can't consume rate budget.
         if is_api_write and settings.api_key_list:
@@ -121,6 +125,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     ).model_dump(),
                     headers={"WWW-Authenticate": "Bearer"},
                 )
+            rl_client = auth.client_id(token)
+        request.state.client_id = rl_client
 
         # Reject oversized bodies up front (cheap Content-Length check) so a huge
         # payload can't tie up parsing or memory.
@@ -140,11 +146,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # CORS preflight (OPTIONS) must not consume budget, or the browser sees a
         # 429 on the preflight ("Failed to fetch") instead of the real response.
         if settings.rate_limit_enabled and is_api_write:
-            client = request.client.host if request.client else "anonymous"
             limit = str(settings.rate_limit_requests)
-            if not limiter.allow(client):
+            if not limiter.allow(rl_client):
                 metrics.record_error()
-                retry_after = limiter.retry_after(client)
+                retry_after = limiter.retry_after(rl_client)
                 return JSONResponse(
                     status_code=429,
                     content=ErrorResponse(
@@ -159,7 +164,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
             response = await call_next(request)
             response.headers["X-RateLimit-Limit"] = limit
-            response.headers["X-RateLimit-Remaining"] = str(limiter.remaining(client))
+            response.headers["X-RateLimit-Remaining"] = str(limiter.remaining(rl_client))
             return response
         return await call_next(request)
 
@@ -195,6 +200,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "duration_ms": round(elapsed_ms, 1),
                 "request_id": request_id,
                 "trace_id": trace_id,
+                "client": getattr(request.state, "client_id", None),
             },
         )
         return response

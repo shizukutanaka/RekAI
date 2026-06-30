@@ -4,9 +4,17 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from rekai.auth import key_allowed, parse_bearer
+from rekai.auth import client_id, key_allowed, parse_bearer
 from rekai.config import Settings
 from rekai.main import create_app
+
+
+def test_client_id_is_masked_and_stable() -> None:
+    cid = client_id("sk-secret")
+    assert cid.startswith("key:")
+    assert "sk-secret" not in cid  # never the raw key
+    assert client_id("sk-secret") == cid  # stable
+    assert client_id("sk-other") != cid
 
 
 def test_parse_bearer() -> None:
@@ -43,6 +51,22 @@ def test_requires_valid_key_when_configured() -> None:
     assert _chat(client, Authorization="Bearer sk-b").status_code == 200  # valid
     # The challenge header is present on a 401.
     assert _chat(client).headers["WWW-Authenticate"] == "Bearer"
+
+
+def test_rate_limit_is_per_key() -> None:
+    # 1 request per window; two keys should each get their own budget.
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys="sk-a,sk-b",
+        rate_limit_enabled=True,
+        rate_limit_requests=1,
+        rate_limit_window_seconds=60,
+    )
+    client = TestClient(create_app(settings))
+    assert _chat(client, Authorization="Bearer sk-a").status_code == 200  # a: 1st ok
+    assert _chat(client, Authorization="Bearer sk-a").status_code == 429  # a: over budget
+    assert _chat(client, Authorization="Bearer sk-b").status_code == 200  # b: own budget
 
 
 def test_health_stays_open_with_keys_configured() -> None:
