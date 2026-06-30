@@ -116,6 +116,37 @@ def test_stream_estimation_handles_none_content(client: TestClient) -> None:
     assert summary["usage"]["total_tokens"] > 0
 
 
+def test_stream_429_marks_cooldown(client: TestClient) -> None:
+    # A 429 seen on the streaming path must park the provider too (consistent
+    # with non-streaming), so later requests route around it.
+    from rekai.cooldown import cooldowns
+    from rekai.providers import register_provider
+    from rekai.providers.base import Provider, ProviderError, ProviderResult
+
+    class RateLimited429(Provider):
+        name = "rl429-stream"
+        requires_key = False
+
+        async def chat(self, request, api_key) -> ProviderResult:
+            raise ProviderError("upstream rate limit", status_code=429, retry_after=30)
+
+    register_provider(RateLimited429())
+    cooldowns.clear()
+    resp = client.post(
+        "/v1/chat/stream",
+        json={
+            "provider": "rl429-stream",
+            "model": "x",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+    payloads = _parse_sse(resp.text)
+    assert any("provider_error" in p for p in payloads)
+    assert payloads[-1] == "[DONE]"
+    assert cooldowns.active("rl429-stream") is True  # parked from the stream
+    cooldowns.clear()
+
+
 def test_stream_error_has_no_usage_summary(client: TestClient) -> None:
     resp = client.post(
         "/v1/chat/stream",

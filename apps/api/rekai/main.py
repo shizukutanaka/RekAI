@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from rekai import __version__, auth, guardrails, idempotency, tracing
 from rekai.cache import CacheBackend, build_cache
 from rekai.config import Settings, get_settings
+from rekai.cooldown import cooldowns
 from rekai.logging_config import configure_logging, get_logger
 from rekai.metrics import metrics
 from rekai.metrics_store import build_metrics_store
@@ -434,6 +435,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except ProviderError as exc:
                 errored = True
                 metrics.record_error()
+                # Park the provider on a 429, consistent with the non-streaming
+                # path, so later requests route around a rate-limited provider.
+                if config.provider_cooldown_enabled and exc.status_code == 429:
+                    cooldowns.mark(
+                        provider_name,
+                        exc.retry_after
+                        if exc.retry_after is not None
+                        else config.provider_cooldown_seconds,
+                    )
+                    metrics.record_cooldown()
                 payload = {"error": "provider_error", "detail": str(exc)}
                 yield f"data: {json.dumps(payload)}\n\n"
 

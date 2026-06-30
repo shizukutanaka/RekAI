@@ -65,6 +65,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `REKAI_PROVIDER_COOLDOWN_ENABLED`.
 
 ### Fixed
+- **Streaming 429 now records a provider cooldown** — a rate limit seen on the
+  streaming path is now parked like on the non-streaming path, so subsequent
+  requests route around the rate-limited provider (previously only non-streaming
+  429s did this).
 - **Streaming crash on tools conversations** — when a provider didn't report
   usage, the streaming endpoint estimated tokens over the request messages and
   crashed mid-stream on a message with `content: null` (valid in a tool
