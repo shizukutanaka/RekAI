@@ -7,6 +7,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Semantic cache** (opt-in) — `REKAI_SEMANTIC_CACHE_ENABLED=true` reuses a
+  response when a prior prompt's embedding is within
+  `REKAI_SEMANTIC_CACHE_THRESHOLD` cosine similarity (default 0.85), catching
+  paraphrases that the exact-match cache misses — the *GPT Semantic Cache*
+  approach (arXiv:2411.05276). Entries are bucketed by provider/model/params and
+  held in a bounded process-local store. Costs one embedding call per request,
+  so use a real embeddings model.
 - **Idempotency-Key** — clients can send an `Idempotency-Key` header on
   `POST /v1/chat` / `/v1/embeddings`; a repeat with the same key returns the
   stored first response (`Idempotent-Replay: true`) instead of processing again,

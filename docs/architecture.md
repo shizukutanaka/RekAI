@@ -131,6 +131,20 @@ messages)` tuple, so identical requests collapse to one upstream call. Backends:
 
 A client can opt a single request out with `"cache": false`.
 
+### Semantic cache
+
+Exact-match caching misses paraphrases ("hi" vs "hello there"), keeping hit
+rates low for natural-language prompts. With `REKAI_SEMANTIC_CACHE_ENABLED=true`,
+RekAI embeds each prompt (via `REKAI_SEMANTIC_CACHE_MODEL`) and reuses a stored
+response when an earlier prompt's embedding is within
+`REKAI_SEMANTIC_CACHE_THRESHOLD` cosine similarity (default 0.85) — the approach
+from the *GPT Semantic Cache* work (arXiv:2411.05276), which reports large
+reductions in upstream calls. Entries are scoped to a `(provider, model,
+temperature, max_tokens)` bucket so a hit never crosses model or params, held in
+a bounded process-local store (`REKAI_SEMANTIC_CACHE_MAX_ENTRIES`, FIFO). It's
+opt-in: it costs one embedding call per request and only helps with a real
+embeddings model (the keyless `echo` embeddings are hash-based, not semantic).
+
 ## Request context & observability
 
 The outermost middleware assigns each request an `X-Request-ID` (or propagates a

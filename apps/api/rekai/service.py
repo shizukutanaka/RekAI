@@ -25,6 +25,7 @@ from rekai.schemas import (
     EmbeddingsResponse,
     Usage,
 )
+from rekai.semantic_cache import semantic_cache
 
 logger = get_logger("rekai.service")
 
@@ -72,6 +73,19 @@ def _build_attempts(
     return attempts
 
 
+async def _semantic_embed(request: ChatRequest, settings: Settings) -> list[float] | None:
+    """Embed the prompt for the semantic cache (server-side key), or None."""
+    provider = get_provider(resolve_provider(None, settings.semantic_cache_model, settings))
+    if provider is None:
+        return None
+    text = "\n".join(m.content or "" for m in request.messages)
+    try:
+        result = await provider.embed([text], settings.semantic_cache_model, None)
+    except ProviderError:
+        return None  # embeddings unavailable -> just skip the semantic cache
+    return result.embeddings[0] if result.embeddings else None
+
+
 async def handle_chat(
     request: ChatRequest,
     api_key: str | None,
@@ -81,6 +95,22 @@ async def handle_chat(
     primary_name, primary = select_provider(request, settings)
     attempts = _build_attempts(request, primary_name, primary, settings)
     use_cache = settings.cache_enabled and request.cache
+
+    # Semantic cache (its own in-memory store): reuse a response for a paraphrase
+    # of an earlier prompt. Respects the per-request opt-out, independent of the
+    # content-cache backend.
+    sem_enabled = settings.semantic_cache_enabled and request.cache
+    sem_bucket = ""
+    sem_embedding: list[float] | None = None
+    if sem_enabled:
+        sem_bucket = f"{primary_name}:{request.model}:{request.temperature}:{request.max_tokens}"
+        sem_embedding = await _semantic_embed(request, settings)
+        if sem_embedding is not None:
+            hit = semantic_cache.find(sem_bucket, sem_embedding, settings.semantic_cache_threshold)
+            if hit is not None:
+                metrics.record_cache(hit=True)
+                logger.info("semantic cache hit model=%s", request.model)
+                return ChatResponse(**{**json.loads(hit), "cached": True})
 
     last_error: ProviderError | None = None
 
@@ -168,6 +198,8 @@ async def handle_chat(
 
         if use_cache:
             await cache.set(key, response.model_dump_json(), settings.cache_ttl_seconds)
+        if sem_enabled and sem_embedding is not None:
+            semantic_cache.add(sem_bucket, sem_embedding, response.model_dump_json())
 
         logger.info(
             "chat ok provider=%s model=%s tokens=%s fallback=%s",

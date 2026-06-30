@@ -61,6 +61,14 @@ class Settings(BaseSettings):
     # (needs the cache backend; a no-op when caching is disabled).
     idempotency_ttl_seconds: int = 86_400
 
+    # Semantic cache: reuse a response when a prior prompt's embedding is within
+    # the cosine threshold. Opt-in (one embedding call per request); use a real
+    # embeddings model. Process-local.
+    semantic_cache_enabled: bool = False
+    semantic_cache_model: str = "echo"
+    semantic_cache_threshold: float = 0.85
+    semantic_cache_max_entries: int = 1000
+
     # Provider defaults (server-side keys; BYOK via header overrides these)
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"
