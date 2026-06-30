@@ -155,7 +155,12 @@ record then carries `method`/`path`/`status`/`duration_ms`/`request_id` fields).
 Every response also carries `X-RekAI-Version` (the gateway version that served
 it), exposed to browser JS like the other custom headers. Both
 `X-Request-ID` and `X-Response-Time-Ms` are returned on every response,
-including errors, so requests can be traced end to end. `/v1/*` responses also
+including errors, so requests can be traced end to end. RekAI also speaks **W3C
+Trace Context**: an incoming `traceparent` is parsed and its `trace_id` is
+continued (RekAI emits a new span id) — or a fresh trace is started — returned as
+a `traceparent` response header and attached to the structured access log as
+`trace_id`, so RekAI slots into an OpenTelemetry-traced system without the SDK.
+`/v1/*` responses also
 carry `X-RateLimit-Limit`/`X-RateLimit-Remaining`, and a 429 adds `Retry-After`
 (seconds until the client's bucket refills a token). CORS is the outermost
 middleware and exposes these custom headers (`Access-Control-Expose-Headers`),

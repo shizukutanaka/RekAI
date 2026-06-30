@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI, Header, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
-from rekai import __version__, idempotency
+from rekai import __version__, idempotency, tracing
 from rekai.cache import CacheBackend, build_cache
 from rekai.config import Settings, get_settings
 from rekai.logging_config import configure_logging, get_logger
@@ -154,12 +154,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def _request_context(request: Request, call_next):
         request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
         request.state.request_id = request_id
+        # W3C trace context: continue an incoming trace or start a new one.
+        trace_id = (
+            tracing.parse_trace_id(request.headers.get("traceparent")) or tracing.new_trace_id()
+        )
+        span_id = tracing.new_span_id()
+        request.state.trace_id = trace_id
         start = time.perf_counter()
         response = await call_next(request)
         elapsed_ms = (time.perf_counter() - start) * 1000
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
         response.headers["X-RekAI-Version"] = __version__
+        response.headers["traceparent"] = tracing.format_traceparent(trace_id, span_id)
         access_logger.info(
             "%s %s -> %s %.1fms id=%s",
             request.method,
@@ -173,6 +180,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "status": response.status_code,
                 "duration_ms": round(elapsed_ms, 1),
                 "request_id": request_id,
+                "trace_id": trace_id,
             },
         )
         return response
@@ -195,6 +203,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "X-Response-Time-Ms",
             "X-RekAI-Version",
             "Idempotent-Replay",
+            "traceparent",
         ],
     )
 

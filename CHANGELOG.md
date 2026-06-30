@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **W3C Trace Context** — RekAI parses an incoming `traceparent`, continues its
+  `trace_id` (emitting a new span id) or starts a fresh trace, returns a
+  `traceparent` response header, and attaches `trace_id` to the structured
+  access log — so it participates in distributed traces in an OpenTelemetry
+  system, dependency-free.
 - **Resilience metrics** — `rekai_retries_total` (transient failures retried in
   place) and `rekai_cooldowns_total` (providers parked after a 429) are now
   counted in `/metrics` and `/v1/usage`, and shown on the web usage dashboard,
