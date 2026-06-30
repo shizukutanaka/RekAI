@@ -154,6 +154,7 @@ async def handle_chat(
                 attempts=settings.retry_max_attempts,
                 base_delay=settings.retry_base_delay_seconds,
                 max_delay=settings.retry_max_delay_seconds,
+                on_retry=metrics.record_retry,
             )
         except ProviderError as exc:
             last_error = exc
@@ -165,6 +166,7 @@ async def handle_chat(
                     if exc.retry_after is not None
                     else settings.provider_cooldown_seconds,
                 )
+                metrics.record_cooldown()
             # Fall through on upstream failures and rate limits (after in-place
             # retries), but not on other client (4xx) errors.
             transient = exc.status_code >= 500 or exc.status_code == 429
@@ -245,6 +247,7 @@ async def handle_embeddings(
         attempts=settings.retry_max_attempts,
         base_delay=settings.retry_base_delay_seconds,
         max_delay=settings.retry_max_delay_seconds,
+        on_retry=metrics.record_retry,
     )
     metrics.record_tokens(result.usage.total_tokens)
     cost_usd = estimate_cost(provider_name, result.model, result.usage)

@@ -35,10 +35,26 @@ def test_snapshot_seed_roundtrip() -> None:
     m.record_request("echo")
     m.record_tokens(10)
     m.record_cost(0.25)
+    m.record_retry()
+    m.record_cooldown()
     snap = m.snapshot()
     m2 = Metrics()
     m2.seed(snap)
     assert m2.snapshot() == snap
+
+
+def test_retry_and_cooldown_counters() -> None:
+    m = Metrics()
+    m.record_retry()
+    m.record_retry()
+    m.record_cooldown()
+    snap = m.snapshot()
+    assert snap["retries_total"] == 2
+    assert snap["cooldowns_total"] == 1
+    # Surfaced in the Prometheus exposition too.
+    text = m.render()
+    assert "rekai_retries_total 2" in text
+    assert "rekai_cooldowns_total 1" in text
 
 
 async def test_null_store_is_noop() -> None:

@@ -13,6 +13,8 @@ class Metrics:
         self.cache_misses_total = 0
         self.errors_total = 0
         self.fallbacks_total = 0
+        self.retries_total = 0
+        self.cooldowns_total = 0
         self.tokens_total = 0
         self.cost_usd_total = 0.0
         self.requests_by_provider: dict[str, int] = {}
@@ -37,6 +39,14 @@ class Metrics:
         with self._lock:
             self.fallbacks_total += 1
 
+    def record_retry(self) -> None:
+        with self._lock:
+            self.retries_total += 1
+
+    def record_cooldown(self) -> None:
+        with self._lock:
+            self.cooldowns_total += 1
+
     def record_tokens(self, count: int) -> None:
         with self._lock:
             self.tokens_total += count
@@ -54,6 +64,8 @@ class Metrics:
             self.cache_misses_total = snapshot.get("cache_misses_total", 0)
             self.errors_total = snapshot.get("errors_total", 0)
             self.fallbacks_total = snapshot.get("fallbacks_total", 0)
+            self.retries_total = snapshot.get("retries_total", 0)
+            self.cooldowns_total = snapshot.get("cooldowns_total", 0)
             self.tokens_total = snapshot.get("tokens_total", 0)
             self.cost_usd_total = snapshot.get("cost_usd_total", 0.0)
             self.requests_by_provider = dict(snapshot.get("requests_by_provider", {}))
@@ -67,6 +79,8 @@ class Metrics:
                 "cache_misses_total": self.cache_misses_total,
                 "errors_total": self.errors_total,
                 "fallbacks_total": self.fallbacks_total,
+                "retries_total": self.retries_total,
+                "cooldowns_total": self.cooldowns_total,
                 "tokens_total": self.tokens_total,
                 "cost_usd_total": round(self.cost_usd_total, 6),
                 "requests_by_provider": dict(self.requests_by_provider),
@@ -90,6 +104,12 @@ class Metrics:
             "# HELP rekai_fallbacks_total Times a fallback provider was attempted.",
             "# TYPE rekai_fallbacks_total counter",
             f"rekai_fallbacks_total {self.fallbacks_total}",
+            "# HELP rekai_retries_total Transient upstream failures retried in place.",
+            "# TYPE rekai_retries_total counter",
+            f"rekai_retries_total {self.retries_total}",
+            "# HELP rekai_cooldowns_total Times a provider was parked after a 429.",
+            "# TYPE rekai_cooldowns_total counter",
+            f"rekai_cooldowns_total {self.cooldowns_total}",
             "# HELP rekai_tokens_total Total tokens accounted across responses.",
             "# TYPE rekai_tokens_total counter",
             f"rekai_tokens_total {self.tokens_total}",

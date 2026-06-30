@@ -48,6 +48,8 @@ export default function UsagePage() {
           value: `$${usage.cost_usd_total.toFixed(4)}`,
         },
         { label: "Fallbacks", value: usage.fallbacks_total.toLocaleString() },
+        { label: "Retries", value: (usage.retries_total ?? 0).toLocaleString() },
+        { label: "Cooldowns", value: (usage.cooldowns_total ?? 0).toLocaleString() },
         { label: "Errors", value: usage.errors_total.toLocaleString() },
       ]
     : [];

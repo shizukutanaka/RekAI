@@ -7,6 +7,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Resilience metrics** — `rekai_retries_total` (transient failures retried in
+  place) and `rekai_cooldowns_total` (providers parked after a 429) are now
+  counted in `/metrics` and `/v1/usage`, and shown on the web usage dashboard,
+  so operators can see the retry/cooldown machinery working.
 - **Semantic cache** (opt-in) — `REKAI_SEMANTIC_CACHE_ENABLED=true` reuses a
   response when a prior prompt's embedding is within
   `REKAI_SEMANTIC_CACHE_THRESHOLD` cosine similarity (default 0.85), catching

@@ -120,6 +120,27 @@ async def test_429_without_header_uses_backoff() -> None:
     assert slept == [0.5]  # fell back to backoff
 
 
+async def test_on_retry_callback_fires_per_retry() -> None:
+    calls = {"n": 0, "retries": 0}
+
+    async def fn() -> str:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise ProviderError("blip", status_code=503)
+        return "ok"
+
+    async def fake_sleep(_: float) -> None:
+        return None
+
+    def on_retry() -> None:
+        calls["retries"] += 1
+
+    await call_with_retry(
+        fn, attempts=3, base_delay=0.1, max_delay=1.0, sleep=fake_sleep, on_retry=on_retry
+    )
+    assert calls["retries"] == 2  # fired once before each of the two retries
+
+
 async def test_attempts_one_disables_retry() -> None:
     calls = {"n": 0}
 

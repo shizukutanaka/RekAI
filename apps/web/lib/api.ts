@@ -96,6 +96,8 @@ export interface UsageSummary {
   cache_misses_total: number;
   errors_total: number;
   fallbacks_total: number;
+  retries_total: number;
+  cooldowns_total: number;
   tokens_total: number;
   cost_usd_total: number;
   requests_by_provider: Record<string, number>;

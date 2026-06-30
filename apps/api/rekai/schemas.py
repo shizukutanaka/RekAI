@@ -123,6 +123,8 @@ class UsageSummary(BaseModel):
     cache_misses_total: int
     errors_total: int
     fallbacks_total: int
+    retries_total: int = 0
+    cooldowns_total: int = 0
     tokens_total: int
     cost_usd_total: float
     requests_by_provider: dict[str, int]

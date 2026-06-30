@@ -163,10 +163,14 @@ so even a short-circuit 429 is readable by browser JS; preflight `OPTIONS`
 requests don't consume rate-limit budget.
 
 Counters live in memory for a fast, lock-protected request path (the standard
-per-instance model for Prometheus `/metrics`). When `REKAI_REDIS_URL` is set,
-they are **persisted write-behind**: a baseline is loaded on startup and the
-snapshot is flushed to Redis periodically and on shutdown, so `/v1/usage`
-totals survive restarts. Without Redis the store is a no-op.
+per-instance model for Prometheus `/metrics`). Alongside requests, cache
+hits/misses, errors, tokens and cost, RekAI tracks `fallbacks_total`,
+`retries_total` (transient failures retried in place) and `cooldowns_total`
+(providers parked after a 429), so the resilience machinery is observable. When
+`REKAI_REDIS_URL` is set, they are **persisted write-behind**: a baseline is
+loaded on startup and the snapshot is flushed to Redis periodically and on
+shutdown, so `/v1/usage` totals survive restarts. Without Redis the store is a
+no-op.
 
 ## Tool / function calling
 

@@ -38,6 +38,7 @@ async def call_with_retry(
     max_delay: float,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     rand: Callable[[], float] = random.random,
+    on_retry: Callable[[], None] | None = None,
 ) -> T:
     """Call ``fn`` up to ``attempts`` times, retrying only transient (5xx) errors.
 
@@ -57,6 +58,8 @@ async def call_with_retry(
             delay = _retry_delay(exc, i, base_delay, max_delay, rand)
             if delay is None:
                 raise  # not retryable (4xx, or a 429 asking us to wait too long)
+            if on_retry is not None:
+                on_retry()
             await sleep(delay)
     assert last is not None  # unreachable: the loop body always returns or raises
     raise last
