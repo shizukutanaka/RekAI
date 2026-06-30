@@ -92,9 +92,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(ProviderError)
     async def _provider_error_handler(_: Request, exc: ProviderError) -> JSONResponse:
         metrics.record_error()
+        headers: dict[str, str] = {}
+        # Pass an upstream rate-limit's Retry-After through to the client so its
+        # SDK can back off by the amount the provider asked for.
+        if exc.status_code == 429 and exc.retry_after is not None:
+            headers["Retry-After"] = str(int(exc.retry_after))
         return JSONResponse(
             status_code=exc.status_code,
             content=ErrorResponse(error="provider_error", detail=str(exc)).model_dump(),
+            headers=headers or None,
         )
 
     # --- middleware: rate limiting ---------------------------------------

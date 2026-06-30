@@ -67,13 +67,19 @@ bounded by `REKAI_RETRY_BASE_DELAY_SECONDS` / `REKAI_RETRY_MAX_DELAY_SECONDS`.
 Full jitter keeps concurrent clients from synchronising their retries onto a
 recovering upstream. **4xx** client errors are never retried.
 
+A **429** (upstream rate limit) is also retried, but **honours the provider's
+`Retry-After`**: RekAI waits exactly that long when it is no longer than
+`max_delay`; when it is longer, RekAI gives up and **passes the `Retry-After`
+header through to the client** so its SDK can back off precisely (rather than
+blocking the gateway). A 429 with no header falls back to jittered backoff.
+
 Only after a target's retries are exhausted does RekAI move on. A request may
 carry an ordered `fallbacks` list of `(provider, model)` targets; alternatively
 a server-wide chain is set via `REKAI_FALLBACK_ENABLED` +
-`REKAI_FALLBACK_TARGETS`. The serving provider is reflected in the response
-`provider` field and `fallback_used` is set when a non-primary target answered.
-Each fallback attempt increments `rekai_fallbacks_total`. Retries apply to
-embeddings too.
+`REKAI_FALLBACK_TARGETS`; both 5xx and 429 trigger failover. The serving
+provider is reflected in the response `provider` field and `fallback_used` is
+set when a non-primary target answered. Each fallback attempt increments
+`rekai_fallbacks_total`. Retry and failover apply to embeddings too.
 
 ## Streaming
 

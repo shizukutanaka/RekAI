@@ -75,6 +75,7 @@ async def test_chat_propagates_http_error(monkeypatch) -> None:
     class FakeResponse:
         status_code = 400
         text = "bad request"
+        headers: dict = {}
 
         def json(self) -> dict:  # pragma: no cover - not reached
             return {}

@@ -78,6 +78,7 @@ async def test_chat_propagates_http_error(monkeypatch) -> None:
     class FakeResponse:
         status_code = 429
         text = "rate limited"
+        headers = {"Retry-After": "12"}
 
         def json(self) -> dict:  # pragma: no cover
             return {}
@@ -99,6 +100,7 @@ async def test_chat_propagates_http_error(monkeypatch) -> None:
     with pytest.raises(ProviderError) as exc:
         await GeminiProvider().chat(_req(), api_key="g-key")
     assert exc.value.status_code == 429
+    assert exc.value.retry_after == 12.0  # captured from the upstream header
 
 
 @pytest.mark.parametrize(

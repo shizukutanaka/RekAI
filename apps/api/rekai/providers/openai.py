@@ -14,6 +14,7 @@ from rekai.providers.base import (
     ProviderError,
     ProviderResult,
     StreamEvent,
+    provider_http_error,
 )
 from rekai.schemas import ChatRequest, Usage
 
@@ -73,10 +74,7 @@ class OpenAIProvider(Provider):
             raise ProviderError(f"{self.name} request failed: {exc}") from exc
 
         if resp.status_code >= 400:
-            raise ProviderError(
-                f"{self.name} returned {resp.status_code}: {resp.text[:200]}",
-                status_code=resp.status_code if resp.status_code < 500 else 502,
-            )
+            raise provider_http_error(self.name, resp.status_code, resp.text, resp.headers)
 
         data = resp.json()
         message = data["choices"][0]["message"]
@@ -156,10 +154,7 @@ class OpenAIProvider(Provider):
         except httpx.HTTPError as exc:
             raise ProviderError(f"{self.name} embeddings request failed: {exc}") from exc
         if resp.status_code >= 400:
-            raise ProviderError(
-                f"{self.name} returned {resp.status_code}: {resp.text[:200]}",
-                status_code=resp.status_code if resp.status_code < 500 else 502,
-            )
+            raise provider_http_error(self.name, resp.status_code, resp.text, resp.headers)
         data = resp.json()
         rows = sorted(data.get("data", []), key=lambda d: d.get("index", 0))
         usage = data.get("usage", {})

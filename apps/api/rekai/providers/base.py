@@ -8,7 +8,7 @@ implementing this small interface and registering it.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 
 from rekai.schemas import ChatRequest, Usage
@@ -18,12 +18,49 @@ class ProviderError(Exception):
     """Raised when a provider cannot fulfil a request.
 
     ``status_code`` is surfaced to the HTTP layer so client errors (e.g. a
-    missing BYOK key) are not reported as 500s.
+    missing BYOK key) are not reported as 500s. ``retry_after`` carries the
+    upstream ``Retry-After`` value (seconds) on a 429 so the gateway can wait the
+    requested time and pass it on to the client.
     """
 
-    def __init__(self, message: str, status_code: int = 502) -> None:
+    def __init__(
+        self, message: str, status_code: int = 502, retry_after: float | None = None
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.retry_after = retry_after
+
+
+def parse_retry_after(headers: Mapping[str, str]) -> float | None:
+    """Read a ``Retry-After`` header as whole seconds, if present and numeric.
+
+    Only the delta-seconds form is supported (the form OpenAI/Anthropic/Gemini
+    use); an HTTP-date value returns ``None``.
+    """
+    value = headers.get("retry-after") or headers.get("Retry-After")
+    if value is None:
+        return None
+    try:
+        seconds = float(value.strip())
+    except ValueError:
+        return None
+    return seconds if seconds >= 0 else None
+
+
+def provider_http_error(
+    name: str, status_code: int, body: str, headers: Mapping[str, str] | None = None
+) -> ProviderError:
+    """Build a ProviderError from an upstream HTTP error response.
+
+    5xx are normalised to 502 (bad gateway); a 429 captures ``Retry-After``.
+    """
+    retry_after = parse_retry_after(headers) if headers and status_code == 429 else None
+    code = status_code if status_code < 500 else 502
+    return ProviderError(
+        f"{name} returned {status_code}: {body[:200]}",
+        status_code=code,
+        retry_after=retry_after,
+    )
 
 
 @dataclass

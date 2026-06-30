@@ -3,8 +3,38 @@ from fastapi.testclient import TestClient
 
 from rekai.config import Settings
 from rekai.main import create_app
+from rekai.providers import register_provider
+from rekai.providers.base import Provider, ProviderError
 from rekai.rate_limit import RateLimiter
 from rekai.security import KeyCipher, generate_key, mask_key
+
+
+def test_upstream_429_retry_after_propagated_to_client() -> None:
+    class RateLimitedProvider(Provider):
+        name = "upstream_rl"
+        requires_key = False
+
+        async def chat(self, request, api_key):
+            raise ProviderError("upstream rate limit", status_code=429, retry_after=15)
+
+    register_provider(RateLimitedProvider())
+    # retry off (surface immediately) and rate limiting off (isolate the path).
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        retry_max_attempts=1,
+        rate_limit_enabled=False,
+    )
+    client = TestClient(create_app(settings))
+    body = {
+        "model": "x",
+        "provider": "upstream_rl",
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+    resp = client.post("/v1/chat", json=body)
+    assert resp.status_code == 429
+    # The upstream's Retry-After is passed through so the client can back off.
+    assert resp.headers["Retry-After"] == "15"
 
 
 def test_cipher_roundtrip() -> None:

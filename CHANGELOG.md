@@ -14,6 +14,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   are never retried. Applies to chat and embeddings. (A resilience pattern
   widely recommended for LLM API clients — retry transient errors with jittered
   exponential backoff rather than failing or hammering a recovering upstream.)
+- **Upstream rate-limit (429) handling** — a provider 429 is now retried
+  honouring its `Retry-After` (waiting that long when it's within `max_delay`),
+  triggers failover to the next target, and — when ultimately surfaced — its
+  `Retry-After` is **passed through to the client** so the caller's SDK backs
+  off by the amount the provider asked for (previously 429 was terminal and the
+  header was dropped). `ProviderError` gained `retry_after`.
 
 ### Fixed
 - **Cache correctness with tools** — the chat cache key now includes `tools`

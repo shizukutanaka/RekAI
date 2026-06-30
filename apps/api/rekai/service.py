@@ -113,8 +113,10 @@ async def handle_chat(
             )
         except ProviderError as exc:
             last_error = exc
-            # Only fall through on upstream/network failures, not client errors.
-            if exc.status_code >= 500 and index + 1 < len(attempts):
+            # Fall through on upstream failures and rate limits (after in-place
+            # retries), but not on other client (4xx) errors.
+            transient = exc.status_code >= 500 or exc.status_code == 429
+            if transient and index + 1 < len(attempts):
                 metrics.record_error()
                 logger.warning(
                     "provider %s failed (%s); trying fallback",

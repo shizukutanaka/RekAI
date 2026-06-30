@@ -8,7 +8,13 @@ from collections.abc import AsyncIterator
 import httpx
 
 from rekai.config import get_settings
-from rekai.providers.base import Provider, ProviderError, ProviderResult, StreamEvent
+from rekai.providers.base import (
+    Provider,
+    ProviderError,
+    ProviderResult,
+    StreamEvent,
+    provider_http_error,
+)
 from rekai.schemas import ChatRequest, Usage
 
 
@@ -75,10 +81,7 @@ class AnthropicProvider(Provider):
             raise ProviderError(f"Anthropic request failed: {exc}") from exc
 
         if resp.status_code >= 400:
-            raise ProviderError(
-                f"Anthropic returned {resp.status_code}: {resp.text[:200]}",
-                status_code=resp.status_code if resp.status_code < 500 else 502,
-            )
+            raise provider_http_error("Anthropic", resp.status_code, resp.text, resp.headers)
 
         data = resp.json()
         blocks = data.get("content", [])

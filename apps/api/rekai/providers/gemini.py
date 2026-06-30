@@ -14,6 +14,7 @@ from rekai.providers.base import (
     ProviderError,
     ProviderResult,
     StreamEvent,
+    provider_http_error,
 )
 from rekai.schemas import ChatRequest, Usage
 
@@ -72,10 +73,7 @@ class GeminiProvider(Provider):
             raise ProviderError(f"Gemini request failed: {exc}") from exc
 
         if resp.status_code >= 400:
-            raise ProviderError(
-                f"Gemini returned {resp.status_code}: {resp.text[:200]}",
-                status_code=resp.status_code if resp.status_code < 500 else 502,
-            )
+            raise provider_http_error("Gemini", resp.status_code, resp.text, resp.headers)
 
         data = resp.json()
         content = _extract_text(data)
@@ -111,10 +109,7 @@ class GeminiProvider(Provider):
         except httpx.HTTPError as exc:
             raise ProviderError(f"Gemini embeddings request failed: {exc}") from exc
         if resp.status_code >= 400:
-            raise ProviderError(
-                f"Gemini returned {resp.status_code}: {resp.text[:200]}",
-                status_code=resp.status_code if resp.status_code < 500 else 502,
-            )
+            raise provider_http_error("Gemini", resp.status_code, resp.text, resp.headers)
         data = resp.json()
         embeddings = [row.get("values", []) for row in data.get("embeddings", [])]
         return EmbeddingResult(embeddings=embeddings, model=model)

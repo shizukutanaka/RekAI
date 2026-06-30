@@ -45,14 +45,38 @@ async def call_with_retry(
     ``ProviderError`` is re-raised immediately; the last error is raised once the
     budget is exhausted.
     """
+    total = max(1, attempts)
     last: ProviderError | None = None
-    for i in range(max(1, attempts)):
+    for i in range(total):
         try:
             return await fn()
         except ProviderError as exc:
             last = exc
-            if exc.status_code < 500 or i + 1 >= max(1, attempts):
-                raise
-            await sleep(backoff_delay(i, base_delay, max_delay, rand))
+            if i + 1 >= total:
+                raise  # out of attempts
+            delay = _retry_delay(exc, i, base_delay, max_delay, rand)
+            if delay is None:
+                raise  # not retryable (4xx, or a 429 asking us to wait too long)
+            await sleep(delay)
     assert last is not None  # unreachable: the loop body always returns or raises
     raise last
+
+
+def _retry_delay(
+    exc: ProviderError, attempt: int, base_delay: float, max_delay: float, rand: Callable[[], float]
+) -> float | None:
+    """How long to wait before retrying ``exc``, or ``None`` if it shouldn't be.
+
+    - 5xx (incl. timeouts) → jittered exponential backoff.
+    - 429 → honour the upstream ``Retry-After`` when present and not longer than
+      ``max_delay`` (otherwise surface it so the client backs off); fall back to
+      backoff when no header was sent.
+    - 4xx → never retried.
+    """
+    if exc.status_code == 429:
+        if exc.retry_after is None:
+            return backoff_delay(attempt, base_delay, max_delay, rand)
+        return exc.retry_after if exc.retry_after <= max_delay else None
+    if exc.status_code >= 500:
+        return backoff_delay(attempt, base_delay, max_delay, rand)
+    return None

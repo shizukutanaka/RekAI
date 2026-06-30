@@ -14,6 +14,7 @@ from rekai.providers.base import (
     ProviderError,
     ProviderResult,
     StreamEvent,
+    provider_http_error,
 )
 from rekai.schemas import ChatRequest, Usage
 
@@ -40,10 +41,7 @@ class OllamaProvider(Provider):
             ) from exc
 
         if resp.status_code >= 400:
-            raise ProviderError(
-                f"Ollama returned {resp.status_code}: {resp.text[:200]}",
-                status_code=resp.status_code if resp.status_code < 500 else 502,
-            )
+            raise provider_http_error("Ollama", resp.status_code, resp.text, resp.headers)
 
         data = resp.json()
         content = data.get("message", {}).get("content", "")
@@ -71,10 +69,7 @@ class OllamaProvider(Provider):
                 f"(is it running at {settings.ollama_base_url}?): {exc}"
             ) from exc
         if resp.status_code >= 400:
-            raise ProviderError(
-                f"Ollama returned {resp.status_code}: {resp.text[:200]}",
-                status_code=resp.status_code if resp.status_code < 500 else 502,
-            )
+            raise provider_http_error("Ollama", resp.status_code, resp.text, resp.headers)
         data = resp.json()
         prompt_tokens = data.get("prompt_eval_count", 0)
         return EmbeddingResult(
