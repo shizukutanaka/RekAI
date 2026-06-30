@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     # Reject /v1/* request bodies larger than this many bytes (0 disables).
     max_body_bytes: int = 1_000_000
 
+    # Retry transient (5xx/timeout) upstream failures with exponential backoff +
+    # jitter before falling over. attempts is the total tries per target (1 = off).
+    retry_max_attempts: int = 2
+    retry_base_delay_seconds: float = 0.5
+    retry_max_delay_seconds: float = 8.0
+
     # Provider defaults (server-side keys; BYOK via header overrides these)
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"

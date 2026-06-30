@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from rekai.cache import CacheBackend, cache_key, embedding_cache_key
@@ -13,7 +14,8 @@ from rekai.logging_config import get_logger
 from rekai.metrics import metrics
 from rekai.pricing import estimate_cost
 from rekai.providers import Provider, get_provider
-from rekai.providers.base import ProviderError
+from rekai.providers.base import ProviderError, ProviderResult
+from rekai.retry import call_with_retry
 from rekai.router import resolve_provider, select_provider
 from rekai.schemas import (
     ChatRequest,
@@ -31,6 +33,17 @@ class _Attempt:
     provider_name: str
     provider: Provider
     model: str
+
+
+def _chat_factory(
+    provider: Provider, request: ChatRequest, api_key: str | None
+) -> Callable[[], Awaitable[ProviderResult]]:
+    """A zero-arg coroutine factory bound to one attempt (so retry can re-call it)."""
+
+    async def _do() -> ProviderResult:
+        return await provider.chat(request, api_key)
+
+    return _do
 
 
 def _build_attempts(
@@ -92,7 +105,12 @@ async def handle_chat(
             metrics.record_cache(hit=False)
 
         try:
-            result = await attempt.provider.chat(attempt_request, api_key)
+            result = await call_with_retry(
+                _chat_factory(attempt.provider, attempt_request, api_key),
+                attempts=settings.retry_max_attempts,
+                base_delay=settings.retry_base_delay_seconds,
+                max_delay=settings.retry_max_delay_seconds,
+            )
         except ProviderError as exc:
             last_error = exc
             # Only fall through on upstream/network failures, not client errors.
@@ -166,7 +184,12 @@ async def handle_embeddings(
             return EmbeddingsResponse(**{**json.loads(cached_raw), "cached": True})
         metrics.record_cache(hit=False)
 
-    result = await provider.embed(inputs, request.model, api_key)
+    result = await call_with_retry(
+        lambda: provider.embed(inputs, request.model, api_key),
+        attempts=settings.retry_max_attempts,
+        base_delay=settings.retry_base_delay_seconds,
+        max_delay=settings.retry_max_delay_seconds,
+    )
     metrics.record_tokens(result.usage.total_tokens)
     cost_usd = estimate_cost(provider_name, result.model, result.usage)
     metrics.record_cost(cost_usd)

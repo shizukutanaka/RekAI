@@ -57,16 +57,23 @@ ChatResponse
    `llama*`, `mistral*`, `qwen*`, `gemma*`, `phi*` → Ollama; `echo` → Echo).
 3. Otherwise the configured `REKAI_DEFAULT_PROVIDER` is used.
 
-## Fallback / failover
+## Retry & fallback / failover
 
-A request may carry an ordered `fallbacks` list of `(provider, model)` targets;
-alternatively a server-wide chain is set via `REKAI_FALLBACK_ENABLED` +
-`REKAI_FALLBACK_TARGETS`. When an attempt raises a **5xx** `ProviderError`
-(upstream or network failure), RekAI moves to the next target. **4xx** client
-errors (bad request, missing BYOK key) are terminal and never trigger a
-fallback. The serving provider is reflected in the response `provider` field and
-`fallback_used` is set when a non-primary target answered. Each fallback attempt
-increments `rekai_fallbacks_total`.
+Each target is first **retried in place** on transient failures: a **5xx**
+`ProviderError` (upstream error or network timeout) is retried up to
+`REKAI_RETRY_MAX_ATTEMPTS` times (default 2 — one retry; set 1 to disable) with
+**exponential backoff and full jitter** — `uniform(0, min(max, base · 2ⁿ))`,
+bounded by `REKAI_RETRY_BASE_DELAY_SECONDS` / `REKAI_RETRY_MAX_DELAY_SECONDS`.
+Full jitter keeps concurrent clients from synchronising their retries onto a
+recovering upstream. **4xx** client errors are never retried.
+
+Only after a target's retries are exhausted does RekAI move on. A request may
+carry an ordered `fallbacks` list of `(provider, model)` targets; alternatively
+a server-wide chain is set via `REKAI_FALLBACK_ENABLED` +
+`REKAI_FALLBACK_TARGETS`. The serving provider is reflected in the response
+`provider` field and `fallback_used` is set when a non-primary target answered.
+Each fallback attempt increments `rekai_fallbacks_total`. Retries apply to
+embeddings too.
 
 ## Streaming
 

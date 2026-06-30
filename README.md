@@ -13,7 +13,7 @@ RekAI sits between your application and multiple LLM providers (OpenAI, Anthropi
 
 - **Provider abstraction** — one API, many backends (`openai`, `anthropic`, `gemini`, `ollama`, plus an `echo` provider for local dev/tests). Point at **any OpenAI-compatible endpoint** (Groq, Together, OpenRouter, Mistral, vLLM, LM Studio…) with one env var.
 - **Smart routing** — pick a provider explicitly, or let RekAI choose by model name / configured default.
-- **Fallback / failover** — on an upstream error, retry down a configured chain of `(provider, model)` targets.
+- **Resilience** — transient upstream errors (5xx/timeouts) are retried in place with exponential backoff + jitter, then fall over down a configured chain of `(provider, model)` targets.
 - **Streaming** — Server-Sent Events at `/v1/chat/stream` for token-by-token responses, with accurate provider-reported usage.
 - **Tool / function calling** — OpenAI-style `tools`/`tool_choice` that work uniformly across OpenAI, Anthropic, and Gemini (RekAI translates the formats per provider).
 - **Embeddings** — `/v1/embeddings` across echo, OpenAI, Gemini, and Ollama, with the same routing, caching, BYOK, and cost; a web playground shows vectors and cosine similarity.

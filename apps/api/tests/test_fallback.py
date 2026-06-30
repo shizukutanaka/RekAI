@@ -38,6 +38,8 @@ def _req(**kwargs) -> ChatRequest:
 
 def _settings(**kwargs) -> Settings:
     kwargs.setdefault("default_provider", "echo")
+    # These tests exercise fallback, not retry — keep a single try per target.
+    kwargs.setdefault("retry_max_attempts", 1)
     return Settings(**kwargs)
 
 
@@ -98,3 +100,36 @@ async def test_primary_success_no_fallback() -> None:
     resp = await handle_chat(request, None, _settings(), NullCache())
     assert resp.provider == "echo"
     assert resp.fallback_used is False
+
+
+class RecoveringProvider(Provider):
+    """Fails with a 5xx the first call, then succeeds — simulating a transient blip."""
+
+    name = "recovering"
+    requires_key = False
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def chat(self, request, api_key) -> ProviderResult:
+        self.calls += 1
+        if self.calls == 1:
+            raise ProviderError("transient", status_code=503)
+        return ProviderResult(content="recovered", model=request.model)
+
+
+async def test_retry_recovers_without_fallback(monkeypatch) -> None:
+    import rekai.retry
+
+    async def _no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(rekai.retry.asyncio, "sleep", _no_sleep)
+    provider = RecoveringProvider()
+    register_provider(provider)
+
+    request = _req(model="m", provider="recovering")
+    resp = await handle_chat(request, None, _settings(retry_max_attempts=2), NullCache())
+    assert resp.content == "recovered"
+    assert resp.fallback_used is False  # recovered on the same target, no fallback
+    assert provider.calls == 2  # one failure + one successful retry

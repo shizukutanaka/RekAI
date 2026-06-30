@@ -6,6 +6,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Automatic retry with backoff + jitter** — transient upstream failures
+  (5xx / network timeouts) are now retried in place before falling over, with
+  exponential backoff and full jitter (`REKAI_RETRY_MAX_ATTEMPTS`, default 2;
+  `REKAI_RETRY_BASE_DELAY_SECONDS`, `REKAI_RETRY_MAX_DELAY_SECONDS`). 4xx errors
+  are never retried. Applies to chat and embeddings. (A resilience pattern
+  widely recommended for LLM API clients — retry transient errors with jittered
+  exponential backoff rather than failing or hammering a recovering upstream.)
+
 ### Fixed
 - **Cache correctness with tools** — the chat cache key now includes `tools`
   and `tool_choice`. Previously two requests with identical messages but
