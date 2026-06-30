@@ -443,7 +443,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if reported_usage is not None:
                     usage = reported_usage
                 else:
-                    prompt_tokens = sum(estimate_tokens(m.content) for m in request.messages)
+                    prompt_tokens = sum(estimate_tokens(m.content or "") for m in request.messages)
                     completion_tokens = estimate_tokens("".join(completion))
                     usage = Usage(
                         prompt_tokens=prompt_tokens,

@@ -70,6 +70,52 @@ def test_stream_endpoint_emits_usage_summary(client: TestClient) -> None:
     assert after > before
 
 
+def test_stream_estimation_handles_none_content(client: TestClient) -> None:
+    # Regression: a tools conversation carries messages with content=None. When
+    # the provider doesn't report usage, the streaming path estimates tokens over
+    # the messages — which must not crash on a None content.
+    from rekai.providers import register_provider
+    from rekai.providers.base import Provider, ProviderResult
+    from rekai.schemas import Usage
+
+    class NoUsageStream(Provider):
+        name = "nousage-stream"
+        requires_key = False
+
+        async def chat(self, request, api_key) -> ProviderResult:
+            # Base stream_events() wraps this and reports no usage.
+            return ProviderResult(content="streamed reply", model=request.model, usage=Usage())
+
+    register_provider(NoUsageStream())
+    resp = client.post(
+        "/v1/chat/stream",
+        json={
+            "provider": "nousage-stream",
+            "model": "x",
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "type": "function",
+                            "function": {"name": "f", "arguments": "{}"},
+                        }
+                    ],
+                },
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    payloads = _parse_sse(resp.text)
+    assert payloads[-1] == "[DONE]"  # stream completed (no crash)
+    summary = json.loads(payloads[-2])
+    assert summary["estimated"] is True  # no provider usage -> estimated
+    assert summary["usage"]["total_tokens"] > 0
+
+
 def test_stream_error_has_no_usage_summary(client: TestClient) -> None:
     resp = client.post(
         "/v1/chat/stream",

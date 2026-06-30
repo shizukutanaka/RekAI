@@ -65,6 +65,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `REKAI_PROVIDER_COOLDOWN_ENABLED`.
 
 ### Fixed
+- **Streaming crash on tools conversations** — when a provider didn't report
+  usage, the streaming endpoint estimated tokens over the request messages and
+  crashed mid-stream on a message with `content: null` (valid in a tool
+  round-trip). It now treats null content as empty, so the stream completes with
+  an estimated usage summary.
 - **Cache correctness with tools** — the chat cache key now includes `tools`
   and `tool_choice`. Previously two requests with identical messages but
   different tools collided, so a tool-less reply could be served for a tools
