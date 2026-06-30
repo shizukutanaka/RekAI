@@ -133,3 +133,40 @@ async def test_retry_recovers_without_fallback(monkeypatch) -> None:
     assert resp.content == "recovered"
     assert resp.fallback_used is False  # recovered on the same target, no fallback
     assert provider.calls == 2  # one failure + one successful retry
+
+
+class Always429(Provider):
+    """Always rate-limited, with an upstream Retry-After."""
+
+    name = "always429"
+    requires_key = False
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def chat(self, request, api_key) -> ProviderResult:
+        self.calls += 1
+        raise ProviderError("rate limited", status_code=429, retry_after=30)
+
+
+async def test_cooldown_skips_rate_limited_provider() -> None:
+    from rekai.cooldown import cooldowns
+
+    cooldowns.clear()
+    provider = Always429()
+    register_provider(provider)
+    request = _req(
+        model="x", provider="always429", fallbacks=[{"provider": "echo", "model": "echo"}]
+    )
+    settings = _settings(retry_max_attempts=1)  # no in-place retry; cooldown on by default
+
+    # First request: always429 429s -> fails over to echo, and is parked.
+    r1 = await handle_chat(request, None, settings, NullCache())
+    assert r1.provider == "echo" and r1.fallback_used is True
+    assert provider.calls == 1
+
+    # Second request: always429 is cooling down -> skipped entirely; echo serves.
+    r2 = await handle_chat(request, None, settings, NullCache())
+    assert r2.provider == "echo"
+    assert provider.calls == 1  # not called again while cooling down
+    cooldowns.clear()

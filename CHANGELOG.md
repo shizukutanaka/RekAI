@@ -20,6 +20,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Retry-After` is **passed through to the client** so the caller's SDK backs
   off by the amount the provider asked for (previously 429 was terminal and the
   header was dropped). `ProviderError` gained `retry_after`.
+- **Provider cooldown** — after a 429 a provider is parked for its `Retry-After`
+  (or `REKAI_PROVIDER_COOLDOWN_SECONDS`, default 30s) and routing skips it in
+  favour of a healthy fallback while it cools down, so RekAI stops hammering a
+  rate-limited provider across requests. Toggle with
+  `REKAI_PROVIDER_COOLDOWN_ENABLED`.
 
 ### Fixed
 - **Cache correctness with tools** — the chat cache key now includes `tools`

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from rekai.cache import CacheBackend, cache_key, embedding_cache_key
 from rekai.config import Settings
+from rekai.cooldown import cooldowns
 from rekai.logging_config import get_logger
 from rekai.metrics import metrics
 from rekai.pricing import estimate_cost
@@ -85,6 +86,19 @@ async def handle_chat(
 
     for index, attempt in enumerate(attempts):
         is_fallback = index > 0
+        # Skip a provider that's cooling down from a recent 429 — unless it's the
+        # only target left (better to try than to fail).
+        if (
+            settings.provider_cooldown_enabled
+            and cooldowns.active(attempt.provider_name)
+            and index + 1 < len(attempts)
+        ):
+            logger.info(
+                "skipping %s (cooling down %.0fs)",
+                attempt.provider_name,
+                cooldowns.remaining(attempt.provider_name),
+            )
+            continue
         attempt_request = (
             request
             if attempt.model == request.model
@@ -113,6 +127,14 @@ async def handle_chat(
             )
         except ProviderError as exc:
             last_error = exc
+            # A 429 parks this provider so later requests route around it.
+            if settings.provider_cooldown_enabled and exc.status_code == 429:
+                cooldowns.mark(
+                    attempt.provider_name,
+                    exc.retry_after
+                    if exc.retry_after is not None
+                    else settings.provider_cooldown_seconds,
+                )
             # Fall through on upstream failures and rate limits (after in-place
             # retries), but not on other client (4xx) errors.
             transient = exc.status_code >= 500 or exc.status_code == 429

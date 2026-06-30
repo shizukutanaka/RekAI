@@ -81,6 +81,15 @@ provider is reflected in the response `provider` field and `fallback_used` is
 set when a non-primary target answered. Each fallback attempt increments
 `rekai_fallbacks_total`. Retry and failover apply to embeddings too.
 
+### Provider cooldown
+
+When a provider 429s, it is **parked** (process-locally) for the upstream
+`Retry-After`, or `REKAI_PROVIDER_COOLDOWN_SECONDS` (default 30s) when no header
+was sent. While a provider is cooling down, routing **skips it** in favour of a
+healthy fallback — unless it's the only target left, in which case it's still
+tried. This stops RekAI from repeatedly hammering a provider that has already
+asked it to back off, and is disabled with `REKAI_PROVIDER_COOLDOWN_ENABLED=false`.
+
 ## Streaming
 
 `POST /v1/chat/stream` returns `text/event-stream`. Each `Provider` implements

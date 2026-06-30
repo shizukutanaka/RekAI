@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     retry_base_delay_seconds: float = 0.5
     retry_max_delay_seconds: float = 8.0
 
+    # After a provider 429s, skip it for a while (its Retry-After, else this
+    # default) so requests route to a healthy fallback instead of hammering it.
+    provider_cooldown_enabled: bool = True
+    provider_cooldown_seconds: float = 30.0
+
     # Provider defaults (server-side keys; BYOK via header overrides these)
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"
