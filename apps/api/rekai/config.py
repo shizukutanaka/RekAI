@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     # Gateway auth: comma-separated client API keys. When set, /v1/* requires
     # `Authorization: Bearer <key>`. Empty = open (no client auth).
     api_keys: str = ""
+
+    # Prompt-injection guardrail (OWASP LLM01). Heuristic, opt-in. "block"
+    # rejects a flagged request with 403; "flag" adds an X-Guardrail-Flag header.
+    guardrails_enabled: bool = False
+    guardrails_action: str = "block"  # "block" | "flag"
     log_format: str = "text"  # "text" (human-readable) or "json" (structured)
 
     # Routing

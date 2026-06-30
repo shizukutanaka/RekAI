@@ -212,6 +212,18 @@ billing — extend or override them with `pricing.register_price()`. `/v1/models
 also reports each model's `pricing` (`input_per_1m`/`output_per_1m`, or `null`
 when unknown), so clients can build cost UIs without hardcoding rates.
 
+## Guardrails
+
+With `REKAI_GUARDRAILS_ENABLED=true`, RekAI scans the **user** messages of a
+chat / chat-stream request for common prompt-injection / jailbreak phrasings
+("ignore previous instructions", "reveal your system prompt", "developer mode
+enabled", …) before calling a provider. `REKAI_GUARDRAILS_ACTION=block` (default)
+rejects a flagged request with `403 guardrail_blocked`; `flag` lets it through
+with an `X-Guardrail-Flag: <pattern>` header so a caller can decide. This is a
+**heuristic first layer** (OWASP LLM01), not a security boundary — obfuscated or
+encoded attacks evade regexes (arXiv:2504.11168), so keep tools least-privileged
+and add a classifier-based guardrail where assurance matters. Off by default.
+
 ## Gateway authentication
 
 Two distinct keys are in play. The **gateway** key authenticates the *client to

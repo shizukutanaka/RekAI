@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI, Header, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
-from rekai import __version__, auth, idempotency, tracing
+from rekai import __version__, auth, guardrails, idempotency, tracing
 from rekai.cache import CacheBackend, build_cache
 from rekai.config import Settings, get_settings
 from rekai.logging_config import configure_logging, get_logger
@@ -26,6 +26,7 @@ from rekai.providers.base import ProviderError
 from rekai.rate_limit import RateLimiter
 from rekai.router import select_provider
 from rekai.schemas import (
+    ChatMessage,
     ChatRequest,
     ChatResponse,
     EmbeddingsRequest,
@@ -42,6 +43,28 @@ from rekai.schemas import (
 from rekai.service import handle_chat, handle_embeddings
 
 access_logger = get_logger("rekai.access")
+
+
+def _guardrail_response(
+    messages: list[ChatMessage], settings: Settings, response: Response
+) -> JSONResponse | None:
+    """Run the prompt-injection guardrail. Returns a 403 response when a flagged
+    request should be blocked; otherwise sets an X-Guardrail-Flag header (flag
+    mode) and returns None so the request proceeds."""
+    hit = guardrails.scan_messages(messages, settings.guardrails_enabled)
+    if hit is None:
+        return None
+    if settings.guardrails_action == "block":
+        metrics.record_error()
+        return JSONResponse(
+            status_code=403,
+            content=ErrorResponse(
+                error="guardrail_blocked",
+                detail=f"Request blocked by prompt-injection guardrail ({hit}).",
+            ).model_dump(),
+        )
+    response.headers["X-Guardrail-Flag"] = hit
+    return None
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -224,6 +247,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "X-RekAI-Version",
             "Idempotent-Replay",
             "traceparent",
+            "X-Guardrail-Flag",
         ],
     )
 
@@ -295,6 +319,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tags=["chat"],
         responses={
             401: {"model": ErrorResponse},
+            403: {"model": ErrorResponse},
             413: {"model": ErrorResponse},
             429: {"model": ErrorResponse},
             502: {"model": ErrorResponse},
@@ -307,7 +332,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         config: Settings = Depends(get_config),
         cache_backend: CacheBackend = Depends(get_cache),
-    ) -> ChatResponse:
+    ):
+        blocked = _guardrail_response(request.messages, config, response)
+        if blocked is not None:
+            return blocked
         if idempotency_key:
             stored = await idempotency.get(cache_backend, idempotency_key)
             if stored is not None:
@@ -364,22 +392,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         responses={
             200: {"content": {"text/event-stream": {}}},
             401: {"model": ErrorResponse},
+            403: {"model": ErrorResponse},
             413: {"model": ErrorResponse},
             429: {"model": ErrorResponse},
             502: {"model": ErrorResponse},
         },
     )
     async def chat_stream(
+        response: Response,
         request: ChatRequest,
         x_provider_key: str | None = Header(default=None, alias="X-Provider-Key"),
         config: Settings = Depends(get_config),
-    ) -> StreamingResponse:
+    ):
         """Stream a chat completion as Server-Sent Events.
 
         Emits ``data: {"delta": "..."}`` events, then a final
         ``data: {"usage": {...}, "cost_usd": ..., "estimated": true}`` summary,
         then a terminating ``data: [DONE]``. Streaming responses are not cached.
         """
+        blocked = _guardrail_response(request.messages, config, response)
+        if blocked is not None:
+            return blocked
+        guardrail_flag = response.headers.get("X-Guardrail-Flag")
         provider_name, provider = select_provider(request, config)
         metrics.record_request(provider_name)
 
@@ -431,14 +465,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 yield f"data: {json.dumps(summary)}\n\n"
             yield "data: [DONE]\n\n"
 
+        stream_headers = {
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "X-RekAI-Provider": provider_name,
+        }
+        if guardrail_flag:
+            stream_headers["X-Guardrail-Flag"] = guardrail_flag
         return StreamingResponse(
             event_source(),
             media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-                "X-RekAI-Provider": provider_name,
-            },
+            headers=stream_headers,
         )
 
     return app

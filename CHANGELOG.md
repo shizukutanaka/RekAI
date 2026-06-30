@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Prompt-injection guardrail** (opt-in, OWASP LLM01) —
+  `REKAI_GUARDRAILS_ENABLED=true` scans user messages on `/v1/chat[/stream]` for
+  common injection/jailbreak phrasings; `block` (default) rejects with `403`,
+  `flag` adds an `X-Guardrail-Flag` header. A heuristic first layer (not a
+  security boundary) — see arXiv:2504.11168 on evasion. Off by default.
 - **Per-tenant rate limiting** — when gateway auth is on, the rate-limit bucket
   is keyed by the API key (a non-reversible `key:<hash>` id) instead of the
   client IP, so one tenant can't exhaust another's budget; the masked id is also
