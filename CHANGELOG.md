@@ -7,6 +7,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Idempotency-Key** — clients can send an `Idempotency-Key` header on
+  `POST /v1/chat` / `/v1/embeddings`; a repeat with the same key returns the
+  stored first response (`Idempotent-Replay: true`) instead of processing again,
+  so a network blip or automatic retry can't double-process. Keyed by the
+  client id (not the body), works with `"cache": false`, TTL
+  `REKAI_IDEMPOTENCY_TTL_SECONDS` (default 24h).
 - **Automatic retry with backoff + jitter** — transient upstream failures
   (5xx / network timeouts) are now retried in place before falling over, with
   exponential backoff and full jitter (`REKAI_RETRY_MAX_ATTEMPTS`, default 2;

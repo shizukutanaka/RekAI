@@ -108,6 +108,18 @@ requests. Errors are delivered as a
 `data: {"error": ...}` event rather than an HTTP status, since the stream has
 already started. Streamed responses are not cached.
 
+## Idempotency
+
+A client can send an `Idempotency-Key` header (a unique id, e.g. a UUID) on
+`POST /v1/chat` or `/v1/embeddings`. The first call's response is stored under
+that key; a repeat with the **same key returns the stored response** (with
+`Idempotent-Replay: true`) without processing again — so a network blip or an
+automatic client retry can't double-process. Unlike the content cache, it is
+keyed by the client-supplied id (not the request body) and works even with
+`"cache": false`. Keys live in the cache backend under a separate namespace for
+`REKAI_IDEMPOTENCY_TTL_SECONDS` (default 24h); it is a no-op when caching is
+disabled. (Streaming responses are not covered.)
+
 ## Caching
 
 The cache key is a SHA-256 of the `(provider, model, temperature, max_tokens,

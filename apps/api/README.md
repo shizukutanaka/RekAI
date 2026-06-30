@@ -40,6 +40,10 @@ curl -s http://localhost:8000/v1/chat \
 BYOK: pass the upstream provider key with the `X-Provider-Key` header. It is
 used transiently and never stored.
 
+Idempotency: pass a unique `Idempotency-Key` header to safely retry a `POST` —
+a repeat with the same key replays the first response (`Idempotent-Replay: true`)
+instead of processing again.
+
 ## Configuration
 
 All settings are environment variables prefixed `REKAI_` (see `.env.example`).

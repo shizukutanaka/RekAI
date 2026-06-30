@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     provider_cooldown_enabled: bool = True
     provider_cooldown_seconds: float = 30.0
 
+    # Idempotency-Key: replay the stored response for a repeated key for this long
+    # (needs the cache backend; a no-op when caching is disabled).
+    idempotency_ttl_seconds: int = 86_400
+
     # Provider defaults (server-side keys; BYOK via header overrides these)
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"

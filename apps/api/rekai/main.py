@@ -10,11 +10,11 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Literal
 
-from fastapi import Depends, FastAPI, Header, Query, Request
+from fastapi import Depends, FastAPI, Header, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
-from rekai import __version__
+from rekai import __version__, idempotency
 from rekai.cache import CacheBackend, build_cache
 from rekai.config import Settings, get_settings
 from rekai.logging_config import configure_logging, get_logger
@@ -194,6 +194,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "X-Request-ID",
             "X-Response-Time-Ms",
             "X-RekAI-Version",
+            "Idempotent-Replay",
         ],
     )
 
@@ -271,12 +272,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         },
     )
     async def chat(
+        response: Response,
         request: ChatRequest,
         x_provider_key: str | None = Header(default=None, alias="X-Provider-Key"),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         config: Settings = Depends(get_config),
         cache_backend: CacheBackend = Depends(get_cache),
     ) -> ChatResponse:
-        return await handle_chat(request, x_provider_key, config, cache_backend)
+        if idempotency_key:
+            stored = await idempotency.get(cache_backend, idempotency_key)
+            if stored is not None:
+                response.headers["Idempotent-Replay"] = "true"
+                return ChatResponse(**stored)
+        result = await handle_chat(request, x_provider_key, config, cache_backend)
+        if idempotency_key:
+            await idempotency.store(
+                cache_backend,
+                idempotency_key,
+                result.model_dump_json(),
+                config.idempotency_ttl_seconds,
+            )
+        return result
 
     @app.post(
         "/v1/embeddings",
@@ -291,12 +307,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         },
     )
     async def embeddings(
+        response: Response,
         request: EmbeddingsRequest,
         x_provider_key: str | None = Header(default=None, alias="X-Provider-Key"),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         config: Settings = Depends(get_config),
         cache_backend: CacheBackend = Depends(get_cache),
     ) -> EmbeddingsResponse:
-        return await handle_embeddings(request, x_provider_key, config, cache_backend)
+        if idempotency_key:
+            stored = await idempotency.get(cache_backend, idempotency_key)
+            if stored is not None:
+                response.headers["Idempotent-Replay"] = "true"
+                return EmbeddingsResponse(**stored)
+        result = await handle_embeddings(request, x_provider_key, config, cache_backend)
+        if idempotency_key:
+            await idempotency.store(
+                cache_backend,
+                idempotency_key,
+                result.model_dump_json(),
+                config.idempotency_ttl_seconds,
+            )
+        return result
 
     @app.post(
         "/v1/chat/stream",
