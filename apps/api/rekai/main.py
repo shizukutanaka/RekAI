@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI, Header, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
-from rekai import __version__, idempotency, tracing
+from rekai import __version__, auth, idempotency, tracing
 from rekai.cache import CacheBackend, build_cache
 from rekai.config import Settings, get_settings
 from rekai.logging_config import configure_logging, get_logger
@@ -103,10 +103,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers=headers or None,
         )
 
-    # --- middleware: rate limiting ---------------------------------------
+    # --- middleware: auth + body size + rate limiting (the /v1 gate) ------
     @app.middleware("http")
     async def _rate_limit(request: Request, call_next):
         is_api_write = request.method != "OPTIONS" and request.url.path.startswith("/v1/")
+
+        # Gateway auth: when keys are configured, /v1/* needs a valid Bearer key.
+        # Checked first so unauthenticated traffic can't consume rate budget.
+        if is_api_write and settings.api_key_list:
+            token = auth.parse_bearer(request.headers.get("authorization"))
+            if token is None or not auth.key_allowed(token, settings.api_key_list):
+                metrics.record_error()
+                return JSONResponse(
+                    status_code=401,
+                    content=ErrorResponse(
+                        error="unauthorized", detail="Missing or invalid API key."
+                    ).model_dump(),
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
 
         # Reject oversized bodies up front (cheap Content-Length check) so a huge
         # payload can't tie up parsing or memory.

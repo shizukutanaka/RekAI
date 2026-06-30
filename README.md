@@ -20,7 +20,7 @@ RekAI sits between your application and multiple LLM providers (OpenAI, Anthropi
 - **Model discovery** — `/v1/models` lists every model with its `type` (chat/embedding) and per-model `pricing`, filterable via `?type=`.
 - **Response cache** — Redis-backed with an automatic in-memory fallback. Identical requests are served instantly and for free.
 - **Cost awareness** — each response carries an estimated USD cost; cumulative spend is exposed at `/v1/usage`.
-- **BYOK** — users supply their own provider key per request (`X-Provider-Key`); keys are never persisted.
+- **Auth & BYOK** — optionally gate the gateway with client API keys (`Authorization: Bearer`, constant-time); users supply their own upstream provider key per request (`X-Provider-Key`), never persisted.
 - **Rate limiting** — per-client token bucket with `Retry-After` and `X-RateLimit-*` headers; oversized bodies are rejected with 413.
 - **Observability** — structured text or JSON logging, per-request `X-Request-ID`/`X-Response-Time-Ms`/`X-RekAI-Version` headers, and a Prometheus-style `/metrics` endpoint.
 - **OpenAPI** — auto-generated docs at `/docs` and a machine-readable schema at `/openapi.json`.

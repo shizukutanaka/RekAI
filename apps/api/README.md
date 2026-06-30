@@ -37,6 +37,9 @@ curl -s http://localhost:8000/v1/chat \
   -d '{"model":"echo","messages":[{"role":"user","content":"hello"}]}'
 ```
 
+Auth: set `REKAI_API_KEYS` (comma-separated) to require
+`Authorization: Bearer <key>` on `/v1/*` (constant-time check; open by default).
+
 BYOK: pass the upstream provider key with the `X-Provider-Key` header. It is
 used transiently and never stored.
 

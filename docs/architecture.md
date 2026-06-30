@@ -209,6 +209,16 @@ billing — extend or override them with `pricing.register_price()`. `/v1/models
 also reports each model's `pricing` (`input_per_1m`/`output_per_1m`, or `null`
 when unknown), so clients can build cost UIs without hardcoding rates.
 
+## Gateway authentication
+
+Two distinct keys are in play. The **gateway** key authenticates the *client to
+RekAI*: set `REKAI_API_KEYS` (comma-separated) and `/v1/*` then requires
+`Authorization: Bearer <key>`, compared in constant time; missing/invalid →
+`401` with `WWW-Authenticate: Bearer`. With no keys configured the gateway is
+open (the default). System endpoints (`/health`, `/metrics`, `/`, `/docs`) stay
+open for liveness probes and scraping. This is separate from **BYOK** below,
+which is the *upstream provider* key.
+
 ## BYOK
 
 Provider keys arrive per request via the `X-Provider-Key` header. They are

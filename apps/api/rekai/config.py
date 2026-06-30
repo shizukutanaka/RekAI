@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     app_name: str = "RekAI"
     environment: str = "development"
     log_level: str = "INFO"
+
+    # Gateway auth: comma-separated client API keys. When set, /v1/* requires
+    # `Authorization: Bearer <key>`. Empty = open (no client auth).
+    api_keys: str = ""
     log_format: str = "text"  # "text" (human-readable) or "json" (structured)
 
     # Routing
@@ -95,6 +99,10 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def api_key_list(self) -> list[str]:
+        return [k.strip() for k in self.api_keys.split(",") if k.strip()]
 
     @property
     def custom_model_list(self) -> list[str]:

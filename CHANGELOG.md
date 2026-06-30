@@ -7,6 +7,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Gateway authentication** (opt-in) — set `REKAI_API_KEYS` (comma-separated)
+  to require `Authorization: Bearer <key>` on `/v1/*`, compared in constant time
+  (`401` + `WWW-Authenticate: Bearer` otherwise). Checked before rate limiting so
+  unauthenticated traffic can't consume budget; system endpoints (`/health`,
+  `/metrics`) stay open. Distinct from BYOK (the upstream provider key). Empty by
+  default (open).
 - **W3C Trace Context** — RekAI parses an incoming `traceparent`, continues its
   `trace_id` (emitting a new span id) or starts a fresh trace, returns a
   `traceparent` response header, and attaches `trace_id` to the structured
