@@ -232,6 +232,22 @@ with an `X-Guardrail-Flag: <pattern>` header so a caller can decide. This is a
 encoded attacks evade regexes (arXiv:2504.11168), so keep tools least-privileged
 and add a classifier-based guardrail where assurance matters. Off by default.
 
+### Output redaction
+
+With `REKAI_OUTPUT_REDACTION_ENABLED=true`, RekAI scans the assistant's
+**response** on non-streamed `POST /v1/chat` for common secret/API-key formats
+(OpenAI/Anthropic/Stripe/GitHub/Slack keys, AWS access key ids, `Bearer` tokens,
+PEM private-key blocks) — the case where a provider echoes back something
+sensitive it was handed in a tool result or RAG context (OWASP LLM02). Matches
+are replaced with `[REDACTED:<pattern>]` and the response carries an
+`X-Redacted: <pattern1,pattern2,…>` header; the redaction happens before the
+response is cached or stored for `Idempotency-Key` replay, so every later hit is
+already scrubbed. As with the input guardrail, this is a **heuristic**, not a
+security boundary. It is **not applied to `/v1/chat/stream`**: redacting a
+pattern that may span multiple already-sent SSE chunks isn't possible without
+buffering the whole reply first, which would defeat streaming — a known,
+documented gap rather than a silently-incomplete implementation. Off by default.
+
 ## Gateway authentication
 
 Two distinct keys are in play. The **gateway** key authenticates the *client to

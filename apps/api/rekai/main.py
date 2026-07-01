@@ -68,6 +68,20 @@ def _guardrail_response(
     return None
 
 
+def _redact_output(result: ChatResponse, settings: Settings, response: Response) -> ChatResponse:
+    """Scrub common secret/API-key patterns from the assistant's content
+    (OWASP LLM02). Sets X-Redacted (comma-separated pattern names) when
+    anything was redacted; returns ``result`` unchanged otherwise or when
+    disabled."""
+    if not settings.output_redaction_enabled or not result.content:
+        return result
+    redacted, hits = guardrails.redact_secrets(result.content)
+    if not hits:
+        return result
+    response.headers["X-Redacted"] = ",".join(hits)
+    return result.model_copy(update={"content": redacted})
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level, settings.log_format)
@@ -249,6 +263,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "Idempotent-Replay",
             "traceparent",
             "X-Guardrail-Flag",
+            "X-Redacted",
         ],
     )
 
@@ -343,6 +358,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 response.headers["Idempotent-Replay"] = "true"
                 return ChatResponse(**stored)
         result = await handle_chat(request, x_provider_key, config, cache_backend)
+        result = _redact_output(result, config, response)
         if idempotency_key:
             await idempotency.store(
                 cache_backend,

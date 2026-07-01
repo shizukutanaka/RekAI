@@ -7,6 +7,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Output redaction** (opt-in, OWASP LLM02) —
+  `REKAI_OUTPUT_REDACTION_ENABLED=true` scrubs common secret/API-key patterns
+  (OpenAI/Anthropic/Stripe/GitHub/Slack keys, AWS access key ids, `Bearer`
+  tokens, PEM private-key blocks) from the assistant's reply on non-streamed
+  `/v1/chat`, before it's cached or stored for idempotency replay. Sets
+  `X-Redacted: <pattern,...>` when it fires. A heuristic (not a security
+  boundary); intentionally not applied to `/v1/chat/stream` (see
+  `docs/architecture.md`).
 - **Redis-shared provider cooldown** — when `REKAI_REDIS_URL` is set, a
   provider's 429 cooldown is written through to and read from Redis (in
   addition to the local, zero-latency check), so a rate limit discovered by one

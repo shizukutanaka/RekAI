@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     # rejects a flagged request with 403; "flag" adds an X-Guardrail-Flag header.
     guardrails_enabled: bool = False
     guardrails_action: Literal["block", "flag"] = "block"
+
+    # Output redaction (OWASP LLM02). Heuristic, opt-in: scrubs common secret/
+    # API-key patterns from the assistant's `content` on non-streamed /v1/chat
+    # responses before they reach the client (and before caching/idempotency
+    # storage). Not applied to /v1/chat/stream — see docs/architecture.md.
+    output_redaction_enabled: bool = False
+
     log_format: Literal["text", "json"] = "text"
 
     # Routing
