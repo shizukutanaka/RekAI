@@ -5,22 +5,27 @@ import {
   API_URL,
   HealthResponse,
   fetchHealth,
+  getStoredGatewayKey,
   getStoredKey,
+  setStoredGatewayKey,
   setStoredKey,
 } from "@/lib/api";
 
 export default function SettingsPage() {
   const [key, setKey] = useState("");
+  const [gatewayKey, setGatewayKey] = useState("");
   const [saved, setSaved] = useState(false);
   const [health, setHealth] = useState<HealthResponse | null>(null);
 
   useEffect(() => {
     setKey(getStoredKey());
+    setGatewayKey(getStoredGatewayKey());
     fetchHealth().then(setHealth);
   }, []);
 
   function save() {
     setStoredKey(key.trim());
+    setStoredGatewayKey(gatewayKey.trim());
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
@@ -41,6 +46,23 @@ export default function SettingsPage() {
         <p className="hint">
           Stored only in your browser&apos;s local storage and sent to the API as the{" "}
           <code>X-Provider-Key</code> header. RekAI never persists it server-side.
+        </p>
+      </div>
+
+      <div className="field">
+        <label htmlFor="gatewayKey">Gateway API key</label>
+        <input
+          id="gatewayKey"
+          type="password"
+          value={gatewayKey}
+          placeholder="sk-rekai-..."
+          onChange={(e) => setGatewayKey(e.target.value)}
+        />
+        <p className="hint">
+          Only needed if this RekAI deployment has <code>REKAI_API_KEYS</code>{" "}
+          configured. Sent as an <code>Authorization: Bearer</code> header. Different
+          from the provider key above — this authenticates you to the gateway
+          itself, not to an upstream provider like OpenAI.
         </p>
       </div>
 

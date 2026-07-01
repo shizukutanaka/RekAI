@@ -10,6 +10,7 @@ import {
   fetchHealth,
   fetchModels,
   formatCost,
+  getStoredGatewayKey,
   getStoredKey,
   modelsOfType,
   sendChat,
@@ -45,7 +46,7 @@ export default function ChatPage() {
   const HISTORY_KEY = "rekai.conversation";
 
   useEffect(() => {
-    fetchModels().then((m) => {
+    fetchModels(undefined, getStoredGatewayKey() || undefined).then((m) => {
       if (m.length) setModels(m);
     });
     fetchHealth().then(setHealth);
@@ -111,6 +112,7 @@ export default function ChatPage() {
       ? [{ role: "system" as const, content: system.trim() }, ...convo]
       : convo;
     const providerKey = getStoredKey();
+    const gatewayKey = getStoredGatewayKey() || undefined;
     const mt = parseInt(maxTokens, 10);
     const maxTokensNum = Number.isFinite(mt) && mt > 0 ? mt : undefined;
 
@@ -127,6 +129,7 @@ export default function ChatPage() {
               model,
               messages: wire,
               providerKey,
+              gatewayKey,
               temperature,
               maxTokens: maxTokensNum,
               provider: selectedProvider,
@@ -173,6 +176,7 @@ export default function ChatPage() {
           model,
           messages: wire,
           providerKey,
+          gatewayKey,
           temperature,
           maxTokens: maxTokensNum,
           provider: selectedProvider,

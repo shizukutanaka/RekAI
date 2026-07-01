@@ -303,6 +303,16 @@ bounds *cumulative cost*.
 IP isn't a stable tenant identity); a deployment that needs different caps per
 tenant should have gateway auth enabled.
 
+### Web app support
+
+The web app (`apps/web`) stores two distinct keys in `localStorage`, both only
+in the browser and never persisted server-side: the BYOK provider key
+(`rekai.providerKey`, sent as `X-Provider-Key`) under Settings, and, separately,
+a gateway key (`rekai.gatewayKey`, sent as `Authorization: Bearer`) for
+deployments with `REKAI_API_KEYS` configured. Every `/v1/*` call from the app
+(`chat`, `chat/stream`, `embeddings`, `models`, `usage`) attaches the gateway
+key when one is set; without it, enabling gateway auth would 401 every page.
+
 ## BYOK
 
 Provider keys arrive per request via the `X-Provider-Key` header. They are

@@ -126,16 +126,44 @@ export function setStoredKey(value: string): void {
   }
 }
 
+// Distinct from the BYOK provider key above: this is the *gateway's own*
+// REKAI_API_KEYS credential, sent as `Authorization: Bearer <key>` so the web
+// app keeps working once an operator turns on gateway auth.
+const GATEWAY_KEY_STORAGE = "rekai.gatewayKey";
+
+export function getStoredGatewayKey(): string {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(GATEWAY_KEY_STORAGE) || "";
+}
+
+export function setStoredGatewayKey(value: string): void {
+  if (typeof window === "undefined") return;
+  if (value) {
+    window.localStorage.setItem(GATEWAY_KEY_STORAGE, value);
+  } else {
+    window.localStorage.removeItem(GATEWAY_KEY_STORAGE);
+  }
+}
+
+/** Build the `Authorization` header for a gateway key, or {} when unset. */
+export function gatewayAuthHeaders(gatewayKey?: string): Record<string, string> {
+  return gatewayKey ? { Authorization: `Bearer ${gatewayKey}` } : {};
+}
+
 export async function sendChat(params: {
   model: string;
   messages: ChatMessage[];
   providerKey?: string;
+  gatewayKey?: string;
   temperature?: number;
   maxTokens?: number;
   provider?: string;
   onRateLimit?: (info: RateLimitInfo) => void;
 }): Promise<ChatResponse> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...gatewayAuthHeaders(params.gatewayKey),
+  };
   if (params.providerKey) headers["X-Provider-Key"] = params.providerKey;
 
   const res = await fetch(`${API_URL}/v1/chat`, {
@@ -166,6 +194,7 @@ export async function streamChat(
     model: string;
     messages: ChatMessage[];
     providerKey?: string;
+    gatewayKey?: string;
     temperature?: number;
     maxTokens?: number;
     provider?: string;
@@ -175,7 +204,10 @@ export async function streamChat(
   signal?: AbortSignal,
   onSummary?: (summary: StreamSummary) => void,
 ): Promise<void> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...gatewayAuthHeaders(params.gatewayKey),
+  };
   if (params.providerKey) headers["X-Provider-Key"] = params.providerKey;
 
   const res = await fetch(`${API_URL}/v1/chat/stream`, {
@@ -268,9 +300,13 @@ export async function sendEmbeddings(params: {
   model: string;
   input: string[];
   providerKey?: string;
+  gatewayKey?: string;
   provider?: string;
 }): Promise<EmbeddingsResponse> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...gatewayAuthHeaders(params.gatewayKey),
+  };
   if (params.providerKey) headers["X-Provider-Key"] = params.providerKey;
 
   const res = await fetch(`${API_URL}/v1/embeddings`, {
@@ -304,10 +340,13 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-export async function fetchModels(type?: "chat" | "embedding"): Promise<ModelInfo[]> {
+export async function fetchModels(
+  type?: "chat" | "embedding",
+  gatewayKey?: string,
+): Promise<ModelInfo[]> {
   try {
     const url = type ? `${API_URL}/v1/models?type=${type}` : `${API_URL}/v1/models`;
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: gatewayAuthHeaders(gatewayKey) });
     if (!res.ok) return [];
     const body = await res.json();
     return body.data ?? [];
@@ -316,9 +355,12 @@ export async function fetchModels(type?: "chat" | "embedding"): Promise<ModelInf
   }
 }
 
-export async function fetchUsage(): Promise<UsageSummary> {
-  const res = await fetch(`${API_URL}/v1/usage`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Could not load usage (${res.status})`);
+export async function fetchUsage(gatewayKey?: string): Promise<UsageSummary> {
+  const res = await fetch(`${API_URL}/v1/usage`, {
+    cache: "no-store",
+    headers: gatewayAuthHeaders(gatewayKey),
+  });
+  if (!res.ok) throw await errorFromResponse(res);
   return res.json();
 }
 

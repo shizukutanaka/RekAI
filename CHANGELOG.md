@@ -124,6 +124,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   10k), so a flood of distinct client keys can't grow memory without bound.
 - **Memory cache bound** — `MemoryCache` drops expired entries before growing
   past `max_entries` (default 10k), instead of only evicting on read.
+- **Web app couldn't use gateway auth at all** — enabling `REKAI_API_KEYS`
+  broke the entire web app (chat, embeddings, and the usage dashboard all got
+  silent or opaque `401`s), because it only ever sent the upstream BYOK
+  provider key (`X-Provider-Key`), never a gateway `Authorization: Bearer`
+  token. Settings now has a separate "Gateway API key" field, stored and sent
+  alongside the provider key on every `/v1/*` call; the usage page also
+  surfaces a clear "set the gateway key" hint on `401`.
 
 ### Changed
 - Refreshed the README and architecture docs to reflect the 1.1.0 feature set

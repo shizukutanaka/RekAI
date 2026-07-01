@@ -7,6 +7,7 @@ import {
   cosineSimilarity,
   fetchModels,
   formatCost,
+  getStoredGatewayKey,
   getStoredKey,
   sendEmbeddings,
 } from "@/lib/api";
@@ -24,7 +25,7 @@ export default function EmbeddingsPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    fetchModels("embedding").then((m) => {
+    fetchModels("embedding", getStoredGatewayKey() || undefined).then((m) => {
       if (m.length) setModels(m);
     });
   }, []);
@@ -46,6 +47,7 @@ export default function EmbeddingsPage() {
         input: inputs,
         provider: selectedProvider,
         providerKey: getStoredKey() || undefined,
+        gatewayKey: getStoredGatewayKey() || undefined,
       });
       setResult(data);
     } catch (e) {

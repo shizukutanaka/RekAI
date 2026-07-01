@@ -3,6 +3,7 @@ import {
   cosineSimilarity,
   errorFromResponse,
   formatCost,
+  gatewayAuthHeaders,
   modelsOfType,
   parseRateLimit,
   parseSSEFrame,
@@ -63,6 +64,19 @@ describe("modelsOfType", () => {
 
   it("treats a missing type as chat", () => {
     expect(modelsOfType(models, "chat").map((m) => m.id)).toEqual(["gpt-4o", "legacy"]);
+  });
+});
+
+describe("gatewayAuthHeaders", () => {
+  it("returns an empty object when no key is set", () => {
+    expect(gatewayAuthHeaders()).toEqual({});
+    expect(gatewayAuthHeaders("")).toEqual({});
+  });
+
+  it("returns a Bearer Authorization header when a key is set", () => {
+    expect(gatewayAuthHeaders("sk-rekai-abc")).toEqual({
+      Authorization: "Bearer sk-rekai-abc",
+    });
   });
 });
 

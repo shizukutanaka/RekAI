@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { UsageSummary, fetchUsage } from "@/lib/api";
+import { UsageSummary, fetchUsage, getStoredGatewayKey } from "@/lib/api";
 
 function pct(part: number, whole: number): string {
   if (whole <= 0) return "—";
@@ -15,7 +15,7 @@ export default function UsagePage() {
 
   const load = useCallback(async () => {
     try {
-      const data = await fetchUsage();
+      const data = await fetchUsage(getStoredGatewayKey() || undefined);
       setUsage(data);
       setError("");
       setUpdatedAt(new Date().toLocaleTimeString());
@@ -72,7 +72,17 @@ export default function UsagePage() {
         </div>
       </div>
 
-      {error && <div className="error">{error}</div>}
+      {error && (
+        <div className="error">
+          {error}
+          {error.toLowerCase().includes("api key") && (
+            <>
+              {" "}
+              Set the gateway key under <a href="/settings">Settings</a>.
+            </>
+          )}
+        </div>
+      )}
 
       {!usage && !error && <p className="hint">Loading…</p>}
 

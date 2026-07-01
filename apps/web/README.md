@@ -26,7 +26,10 @@ Open http://localhost:3000.
   (auto-refreshes every 5s).
 - **/settings** — store your provider API key (BYOK; lives only in browser local
   storage, sent as the `X-Provider-Key` header) and see per-provider readiness
-  (which providers work out of the box vs. need a key).
+  (which providers work out of the box vs. need a key). Also has a separate
+  **gateway API key** field (sent as `Authorization: Bearer`) for deployments
+  where the API has `REKAI_API_KEYS` configured — without it every page would
+  get a `401`.
 
 ## Configuration
 
