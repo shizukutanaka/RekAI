@@ -288,6 +288,12 @@ in `usage_by_client`); an operator lifts it by resetting metrics or raising the
 limit. Distinct from rate limiting: rate limiting bounds *request rate*, this
 bounds *cumulative cost*.
 
+`REKAI_CLIENT_BUDGETS_USD` overrides the global cap per API key (e.g.
+`"sk-a:5.00,sk-b:20.00"`) — a key not listed falls back to
+`REKAI_CLIENT_BUDGET_USD`. There's no per-IP override (only per-key, since an
+IP isn't a stable tenant identity); a deployment that needs different caps per
+tenant should have gateway auth enabled.
+
 ## BYOK
 
 Provider keys arrive per request via the `X-Provider-Key` header. They are

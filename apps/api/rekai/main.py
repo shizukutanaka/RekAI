@@ -169,6 +169,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # The rate-limit bucket: the authenticated key (per-tenant) when present,
         # otherwise the client IP. Stashed for the access log.
         rl_client = request.client.host if request.client else "anonymous"
+        token: str | None = None
 
         # Gateway auth: when keys are configured, /v1/* needs a valid Bearer key.
         # Checked first so unauthenticated traffic can't consume rate budget.
@@ -188,18 +189,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         # Per-client spend cap: once exceeded, block before doing any real work
         # (parsing, provider calls) so an over-budget client can't rack up more.
-        if is_api_write and settings.client_budget_usd is not None:
+        # A per-key override (client_budgets_usd) wins over the global default.
+        budget = settings.client_budget_usd
+        if token is not None and token in settings.client_budget_overrides:
+            budget = settings.client_budget_overrides[token]
+        if is_api_write and budget is not None:
             spent = metrics.client_cost_usd(rl_client)
-            if spent >= settings.client_budget_usd:
+            if spent >= budget:
                 metrics.record_error()
                 return JSONResponse(
                     status_code=402,
                     content=ErrorResponse(
                         error="budget_exceeded",
-                        detail=(
-                            f"Client budget of ${settings.client_budget_usd:.2f} exceeded "
-                            f"(spent ${spent:.4f})."
-                        ),
+                        detail=f"Client budget of ${budget:.2f} exceeded (spent ${spent:.4f}).",
                     ).model_dump(),
                     headers={"X-Budget-Remaining": "0"},
                 )

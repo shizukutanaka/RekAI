@@ -249,3 +249,45 @@ def test_client_budget_unset_disables_check() -> None:
         assert client.post("/v1/chat", json=body).status_code == 200
     finally:
         main_module.metrics.seed({})
+
+
+def test_client_budget_overrides_parses_key_amount_pairs() -> None:
+    settings = Settings(client_budgets_usd="sk-a:5.00, sk-b:20.5")
+    assert settings.client_budget_overrides == {"sk-a": 5.00, "sk-b": 20.5}
+
+
+def test_client_budget_overrides_skips_malformed_entries() -> None:
+    settings = Settings(client_budgets_usd="sk-a:oops, no-colon-here, :5.00, sk-b:1.0")
+    assert settings.client_budget_overrides == {"sk-b": 1.0}
+
+
+def test_client_budget_override_beats_global_default() -> None:
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys="sk-override-tight,sk-override-loose",
+        rate_limit_enabled=False,
+        client_budget_usd=100.0,  # generous global default
+        client_budgets_usd="sk-override-tight:0.5",  # this one key gets a tight cap
+    )
+    client = TestClient(create_app(settings))
+    try:
+        main_module.metrics.record_client_usage(
+            client_id("sk-override-tight"), tokens=100, cost_usd=1.0
+        )
+        main_module.metrics.record_client_usage(
+            client_id("sk-override-loose"), tokens=100, cost_usd=1.0
+        )
+        body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+        tight = client.post(
+            "/v1/chat", json=body, headers={"Authorization": "Bearer sk-override-tight"}
+        )
+        loose = client.post(
+            "/v1/chat", json=body, headers={"Authorization": "Bearer sk-override-loose"}
+        )
+        # Same $1.0 spend: the overridden key is over its $0.5 cap, the other
+        # is still well under the $100 global default.
+        assert tight.status_code == 402
+        assert loose.status_code == 200
+    finally:
+        main_module.metrics.seed({})

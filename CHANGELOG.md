@@ -12,6 +12,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   once a client's cumulative cost reaches it, further `/v1/*` requests from
   that client get `402 Payment Required` (`X-Budget-Remaining: 0`), checked
   before any provider call is made. Unset (default) = no cap.
+  `REKAI_CLIENT_BUDGETS_USD` (e.g. `"sk-a:5.00,sk-b:20.00"`) overrides the cap
+  per API key, falling back to the global default for unlisted keys — needed
+  for a multi-tenant deployment where different clients need different caps.
 - **Per-client usage metrics** — `/v1/usage` and `/metrics` now break down
   requests, tokens, and cost per client (`usage_by_client` /
   `rekai_client_*_total{client="…"}`), keyed by the same masked `key:<hash>` id

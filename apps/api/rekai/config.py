@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     # client get 402 until an operator resets metrics. Unset = no cap.
     client_budget_usd: float | None = Field(default=None, ge=0.0)
 
+    # Per-key overrides for the above, e.g. "sk-a:5.00,sk-b:20.00". A key not
+    # listed here falls back to client_budget_usd. Only meaningful when that
+    # key also appears in api_keys (there's no per-IP override).
+    client_budgets_usd: str = ""
+
     # Retry transient (5xx/timeout) upstream failures with exponential backoff +
     # jitter before falling over. attempts is the total tries per target (1 = off).
     retry_max_attempts: int = Field(default=2, ge=1)
@@ -122,6 +127,26 @@ class Settings(BaseSettings):
     @property
     def api_key_list(self) -> list[str]:
         return [k.strip() for k in self.api_keys.split(",") if k.strip()]
+
+    @property
+    def client_budget_overrides(self) -> dict[str, float]:
+        """Parse ``client_budgets_usd`` into ``{raw_key: usd_cap}``, keyed by the
+        raw API key (not the masked client id) since that's how operators set it.
+        Malformed entries (no ``:``, non-numeric amount) are skipped."""
+        overrides: dict[str, float] = {}
+        for raw in self.client_budgets_usd.split(","):
+            raw = raw.strip()
+            if not raw or ":" not in raw:
+                continue
+            key, _, amount = raw.partition(":")
+            key = key.strip()
+            if not key:
+                continue
+            try:
+                overrides[key] = float(amount.strip())
+            except ValueError:
+                continue
+        return overrides
 
     @property
     def custom_model_list(self) -> list[str]:
