@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     # Reject /v1/* request bodies larger than this many bytes (0 disables).
     max_body_bytes: int = Field(default=1_000_000, ge=0)
 
+    # Per-client spend cap (opt-in). Once a client's cumulative cost_usd_total
+    # (tracked in usage_by_client) reaches this, further /v1/* requests from that
+    # client get 402 until an operator resets metrics. Unset = no cap.
+    client_budget_usd: float | None = Field(default=None, ge=0.0)
+
     # Retry transient (5xx/timeout) upstream failures with exponential backoff +
     # jitter before falling over. attempts is the total tries per target (1 = off).
     retry_max_attempts: int = Field(default=2, ge=1)

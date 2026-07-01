@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 import rekai.main as main_module
@@ -53,6 +54,14 @@ def test_record_client_usage_accumulates_per_client() -> None:
     snap = m.snapshot()
     assert snap["usage_by_client"]["key:aaa"] == {"requests": 2, "tokens": 15, "cost_usd": 0.03}
     assert snap["usage_by_client"]["key:bbb"] == {"requests": 1, "tokens": 100, "cost_usd": 0.5}
+
+
+def test_client_cost_usd_reads_accumulated_spend() -> None:
+    m = Metrics()
+    assert m.client_cost_usd("key:never-seen") == 0.0
+    m.record_client_usage("key:aaa", tokens=10, cost_usd=0.01)
+    m.record_client_usage("key:aaa", tokens=5, cost_usd=0.02)
+    assert m.client_cost_usd("key:aaa") == pytest.approx(0.03)
 
 
 def test_record_client_usage_tolerates_none_cost() -> None:

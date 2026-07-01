@@ -275,6 +275,19 @@ RekAI's own upstream spend and don't double-count a cache hit). This is the
 per-tenant spend visibility a multi-key deployment needs, without ever
 persisting or logging a raw key.
 
+### Per-client budget cap
+
+`REKAI_CLIENT_BUDGET_USD` (opt-in, unset by default) turns that same
+`usage_by_client` cost figure into an enforceable spend cap: once a client's
+cumulative cost reaches the configured USD amount, further `/v1/*` requests
+from that client get `402 Payment Required` (`X-Budget-Remaining: 0`) — checked
+in the same middleware pass as auth and rate limiting, before any provider call
+is made, so an over-budget client can't rack up more spend. The cap is
+lifetime-until-reset (there's no time-bucketing, matching every other counter
+in `usage_by_client`); an operator lifts it by resetting metrics or raising the
+limit. Distinct from rate limiting: rate limiting bounds *request rate*, this
+bounds *cumulative cost*.
+
 ## BYOK
 
 Provider keys arrive per request via the `X-Provider-Key` header. They are

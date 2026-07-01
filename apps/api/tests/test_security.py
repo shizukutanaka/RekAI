@@ -1,6 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
+import rekai.main as main_module
+from rekai.auth import client_id
 from rekai.config import Settings
 from rekai.main import create_app
 from rekai.providers import register_provider
@@ -164,3 +166,86 @@ def test_endpoint_429_sets_retry_after() -> None:
     assert blocked.headers["access-control-allow-origin"] == "*"
     # Retry-After is exposed to browser JS (not CORS-safelisted by default).
     assert "retry-after" in blocked.headers["access-control-expose-headers"].lower()
+
+
+def test_client_budget_exceeded_returns_402() -> None:
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys="sk-budget-a",
+        rate_limit_enabled=False,
+        client_budget_usd=0.5,
+    )
+    client = TestClient(create_app(settings))
+    try:
+        # Simulate prior spend past the cap (echo itself is free, so seed it directly).
+        main_module.metrics.record_client_usage(client_id("sk-budget-a"), tokens=100, cost_usd=1.0)
+        body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+        resp = client.post(
+            "/v1/chat",
+            json=body,
+            headers={
+                "Authorization": "Bearer sk-budget-a",
+                "Origin": "http://localhost:3000",
+            },
+        )
+        assert resp.status_code == 402
+        assert resp.json()["error"] == "budget_exceeded"
+        assert resp.headers["X-Budget-Remaining"] == "0"
+        # CORS is outermost, so this short-circuit 402 is browser-readable too.
+        assert "x-budget-remaining" in resp.headers["access-control-expose-headers"].lower()
+    finally:
+        main_module.metrics.seed({})
+
+
+def test_client_budget_allows_requests_under_the_cap() -> None:
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys="sk-budget-b",
+        rate_limit_enabled=False,
+        client_budget_usd=10.0,
+    )
+    client = TestClient(create_app(settings))
+    try:
+        body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+        resp = client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-budget-b"})
+        assert resp.status_code == 200
+    finally:
+        main_module.metrics.seed({})
+
+
+def test_client_budget_is_per_client() -> None:
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys="sk-budget-over,sk-budget-under",
+        rate_limit_enabled=False,
+        client_budget_usd=0.5,
+    )
+    client = TestClient(create_app(settings))
+    try:
+        main_module.metrics.record_client_usage(
+            client_id("sk-budget-over"), tokens=100, cost_usd=1.0
+        )
+        body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+        over = client.post(
+            "/v1/chat", json=body, headers={"Authorization": "Bearer sk-budget-over"}
+        )
+        under = client.post(
+            "/v1/chat", json=body, headers={"Authorization": "Bearer sk-budget-under"}
+        )
+        assert over.status_code == 402
+        assert under.status_code == 200
+    finally:
+        main_module.metrics.seed({})
+
+
+def test_client_budget_unset_disables_check() -> None:
+    settings = Settings(environment="test", default_provider="echo", rate_limit_enabled=False)
+    client = TestClient(create_app(settings))
+    try:
+        body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+        assert client.post("/v1/chat", json=body).status_code == 200
+    finally:
+        main_module.metrics.seed({})

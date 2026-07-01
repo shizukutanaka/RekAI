@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Per-client budget cap** (opt-in) — `REKAI_CLIENT_BUDGET_USD` turns the
+  per-client cost tracked in `usage_by_client` into an enforceable spend cap:
+  once a client's cumulative cost reaches it, further `/v1/*` requests from
+  that client get `402 Payment Required` (`X-Budget-Remaining: 0`), checked
+  before any provider call is made. Unset (default) = no cap.
 - **Per-client usage metrics** — `/v1/usage` and `/metrics` now break down
   requests, tokens, and cost per client (`usage_by_client` /
   `rekai_client_*_total{client="…"}`), keyed by the same masked `key:<hash>` id

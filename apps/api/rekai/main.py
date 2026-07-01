@@ -186,6 +186,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             rl_client = auth.client_id(token)
         request.state.client_id = rl_client
 
+        # Per-client spend cap: once exceeded, block before doing any real work
+        # (parsing, provider calls) so an over-budget client can't rack up more.
+        if is_api_write and settings.client_budget_usd is not None:
+            spent = metrics.client_cost_usd(rl_client)
+            if spent >= settings.client_budget_usd:
+                metrics.record_error()
+                return JSONResponse(
+                    status_code=402,
+                    content=ErrorResponse(
+                        error="budget_exceeded",
+                        detail=(
+                            f"Client budget of ${settings.client_budget_usd:.2f} exceeded "
+                            f"(spent ${spent:.4f})."
+                        ),
+                    ).model_dump(),
+                    headers={"X-Budget-Remaining": "0"},
+                )
+
         # Reject oversized bodies up front (cheap Content-Length check) so a huge
         # payload can't tie up parsing or memory.
         if is_api_write and settings.max_body_bytes > 0:
@@ -284,6 +302,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "traceparent",
             "X-Guardrail-Flag",
             "X-Redacted",
+            "X-Budget-Remaining",
         ],
     )
 

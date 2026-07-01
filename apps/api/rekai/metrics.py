@@ -71,6 +71,12 @@ class Metrics:
             if cost_usd:
                 usage["cost_usd"] += cost_usd
 
+    def client_cost_usd(self, client_id: str) -> float:
+        """Read a client's cumulative cost so far (0.0 if never recorded)."""
+        with self._lock:
+            usage = self.usage_by_client.get(client_id)
+            return usage["cost_usd"] if usage else 0.0
+
     def seed(self, snapshot: dict) -> None:
         """Set counters from a persisted snapshot (used on startup)."""
         with self._lock:
