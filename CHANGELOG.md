@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Redis-shared provider cooldown** — when `REKAI_REDIS_URL` is set, a
+  provider's 429 cooldown is written through to and read from Redis (in
+  addition to the local, zero-latency check), so a rate limit discovered by one
+  worker/node is honoured by the others instead of each rediscovering it
+  independently. No Redis configured → unchanged, process-local behaviour.
 - **Prompt-injection guardrail** (opt-in, OWASP LLM01) —
   `REKAI_GUARDRAILS_ENABLED=true` scans user messages on `/v1/chat[/stream]` for
   common injection/jailbreak phrasings; `block` (default) rejects with `403`,

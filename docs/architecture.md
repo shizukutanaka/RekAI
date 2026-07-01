@@ -86,12 +86,20 @@ set when a non-primary target answered. Each fallback attempt increments
 
 ### Provider cooldown
 
-When a provider 429s, it is **parked** (process-locally) for the upstream
-`Retry-After`, or `REKAI_PROVIDER_COOLDOWN_SECONDS` (default 30s) when no header
-was sent. While a provider is cooling down, routing **skips it** in favour of a
-healthy fallback — unless it's the only target left, in which case it's still
-tried. This stops RekAI from repeatedly hammering a provider that has already
-asked it to back off, and is disabled with `REKAI_PROVIDER_COOLDOWN_ENABLED=false`.
+When a provider 429s, it is **parked** for the upstream `Retry-After`, or
+`REKAI_PROVIDER_COOLDOWN_SECONDS` (default 30s) when no header was sent. While a
+provider is cooling down, routing **skips it** in favour of a healthy fallback —
+unless it's the only target left, in which case it's still tried. This stops
+RekAI from repeatedly hammering a provider that has already asked it to back
+off, and is disabled with `REKAI_PROVIDER_COOLDOWN_ENABLED=false`.
+
+The cooldown is checked and recorded locally first (zero-latency, in-process),
+and — when `REKAI_REDIS_URL` is set — also written through to and read from
+Redis. So a single process still works with no external services, but in a
+multi-worker or multi-node deployment a 429 seen by one worker is honoured by
+the others too, instead of each worker rediscovering the rate limit on its own
+first request. Without Redis, cooldowns (like the rate limiter and metrics) are
+per-process.
 
 ## Streaming
 

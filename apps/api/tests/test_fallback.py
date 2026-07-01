@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from rekai.cache import NullCache
+from rekai.cache import MemoryCache, NullCache
 from rekai.config import Settings
 from rekai.providers import register_provider
 from rekai.providers.base import Provider, ProviderError, ProviderResult
@@ -169,4 +169,32 @@ async def test_cooldown_skips_rate_limited_provider() -> None:
     r2 = await handle_chat(request, None, settings, NullCache())
     assert r2.provider == "echo"
     assert provider.calls == 1  # not called again while cooling down
+    cooldowns.clear()
+
+
+async def test_cooldown_shared_via_cache_across_workers() -> None:
+    """A cooldown recorded while handling one request is visible to a request
+    handled by a "different worker" (an empty local dict) that shares the same
+    cache backend — the scenario a Redis-backed cache is meant to fix."""
+    from rekai.cooldown import cooldowns
+
+    cooldowns.clear()
+    shared_cache = MemoryCache()  # stands in for a shared Redis instance
+    provider = Always429()
+    register_provider(provider)
+    request = _req(
+        model="x", provider="always429", fallbacks=[{"provider": "echo", "model": "echo"}]
+    )
+    settings = _settings(retry_max_attempts=1)
+
+    r1 = await handle_chat(request, None, settings, shared_cache)
+    assert r1.provider == "echo"
+    assert provider.calls == 1
+
+    # Simulate a second worker process: its local cooldown dict never saw the
+    # 429 from the first request, but it shares the same cache backend.
+    cooldowns._until.clear()
+    r2 = await handle_chat(request, None, settings, shared_cache)
+    assert r2.provider == "echo"
+    assert provider.calls == 1  # skipped via the shared cache, not called again
     cooldowns.clear()

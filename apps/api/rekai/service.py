@@ -117,11 +117,12 @@ async def handle_chat(
     for index, attempt in enumerate(attempts):
         is_fallback = index > 0
         # Skip a provider that's cooling down from a recent 429 — unless it's the
-        # only target left (better to try than to fail).
+        # only target left (better to try than to fail). Consults the shared
+        # (Redis) backend too, so a cooldown set by another worker/node is honored.
         if (
             settings.provider_cooldown_enabled
-            and cooldowns.active(attempt.provider_name)
             and index + 1 < len(attempts)
+            and await cooldowns.active_shared(cache, attempt.provider_name)
         ):
             logger.info(
                 "skipping %s (cooling down %.0fs)",
@@ -158,9 +159,12 @@ async def handle_chat(
             )
         except ProviderError as exc:
             last_error = exc
-            # A 429 parks this provider so later requests route around it.
+            # A 429 parks this provider (locally and in the shared backend, when
+            # configured) so later requests — including on other workers/nodes —
+            # route around it.
             if settings.provider_cooldown_enabled and exc.status_code == 429:
-                cooldowns.mark(
+                await cooldowns.mark_shared(
+                    cache,
                     attempt.provider_name,
                     exc.retry_after
                     if exc.retry_after is not None

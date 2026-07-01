@@ -404,6 +404,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: ChatRequest,
         x_provider_key: str | None = Header(default=None, alias="X-Provider-Key"),
         config: Settings = Depends(get_config),
+        cache_backend: CacheBackend = Depends(get_cache),
     ):
         """Stream a chat completion as Server-Sent Events.
 
@@ -436,9 +437,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 errored = True
                 metrics.record_error()
                 # Park the provider on a 429, consistent with the non-streaming
-                # path, so later requests route around a rate-limited provider.
+                # path, so later requests — including on other workers/nodes —
+                # route around a rate-limited provider.
                 if config.provider_cooldown_enabled and exc.status_code == 429:
-                    cooldowns.mark(
+                    await cooldowns.mark_shared(
+                        cache_backend,
                         provider_name,
                         exc.retry_after
                         if exc.retry_after is not None

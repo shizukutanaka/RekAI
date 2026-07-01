@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from rekai.cache import MemoryCache
 from rekai.cooldown import Cooldown
 
 
@@ -32,3 +33,37 @@ def test_ignores_nonpositive() -> None:
     cd.mark("p", 0)
     cd.mark("p", -5)
     assert cd.active("p") is False
+
+
+async def test_shared_cooldown_visible_to_another_worker() -> None:
+    # Two independent Cooldown instances (simulating two worker processes) share
+    # one cache backend (simulating Redis). A cooldown marked by worker A must be
+    # visible to worker B even though its local dict never saw it.
+    shared_cache = MemoryCache()
+    worker_a = Cooldown()
+    worker_b = Cooldown()
+
+    assert await worker_b.active_shared(shared_cache, "openai") is False
+    await worker_a.mark_shared(shared_cache, "openai", seconds=10)
+
+    assert worker_a.active("openai") is True  # local fast path
+    assert "openai" not in worker_b._until  # worker B's local dict is untouched
+    assert await worker_b.active_shared(shared_cache, "openai") is True  # ...but sees it via cache
+
+
+async def test_shared_mark_is_noop_write_for_nonpositive_seconds() -> None:
+    shared_cache = MemoryCache()
+    cd = Cooldown()
+    await cd.mark_shared(shared_cache, "p", 0)
+    assert await cd.active_shared(shared_cache, "p") is False
+
+
+async def test_active_shared_checks_local_before_cache() -> None:
+    # Local-active short-circuits without touching the cache at all.
+    class ExplodingCache(MemoryCache):
+        async def get(self, key: str):
+            raise AssertionError("should not be called when local cooldown is active")
+
+    cd = Cooldown()
+    cd.mark("p", 10)
+    assert await cd.active_shared(ExplodingCache(), "p") is True
