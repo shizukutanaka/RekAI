@@ -12,7 +12,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `rekai_client_*_total{client="…"}`), keyed by the same masked `key:<hash>` id
   used for per-tenant rate limiting (or the client IP with no gateway auth).
   Covers chat, streaming, and embeddings, including cached/idempotent-replay
-  responses. The raw key is never stored or logged.
+  responses. The raw key is never stored or logged. `usage_by_client` round-trips
+  through the write-behind metrics store like every other counter — seeded on
+  startup, accumulated live, flushed on shutdown — and is covered by a
+  dedicated persistence test.
 - **Output redaction** (opt-in, OWASP LLM02) —
   `REKAI_OUTPUT_REDACTION_ENABLED=true` scrubs common secret/API-key patterns
   (OpenAI/Anthropic/Stripe/GitHub/Slack keys, AWS access key ids, `Bearer`

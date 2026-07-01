@@ -154,3 +154,48 @@ def test_usage_by_client_tracked_per_key() -> None:
         assert "sk-usage-b" not in usage
     finally:
         main_module.metrics.seed({})
+
+
+def test_usage_by_client_survives_seed_accumulate_flush(monkeypatch) -> None:
+    from rekai.auth import client_id
+
+    preexisting = client_id("sk-usage-persisted")
+    baseline = {
+        "requests_total": 5,
+        "usage_by_client": {preexisting: {"requests": 5, "tokens": 50, "cost_usd": 0.1}},
+    }
+    fake = _FakeStore(baseline)
+    monkeypatch.setattr(main_module, "build_metrics_store", lambda settings: fake)
+
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys="sk-usage-persisted,sk-usage-new",
+        rate_limit_enabled=False,
+        metrics_persist_interval_seconds=3600,
+    )
+    try:
+        with TestClient(create_app(settings)) as client:
+            # Seeded baseline is visible immediately on startup.
+            usage = client.get(
+                "/v1/usage", headers={"Authorization": "Bearer sk-usage-persisted"}
+            ).json()["usage_by_client"]
+            assert usage[preexisting]["requests"] == 5
+
+            # A live request from a different client accumulates on top of the seed.
+            body = {
+                "model": "echo",
+                "messages": [{"role": "user", "content": "hi"}],
+                "cache": False,
+            }
+            client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-usage-new"})
+
+        # Shutdown flushes the merged state: the seeded client plus the new one.
+        assert fake.saved is not None
+        flushed = fake.saved["usage_by_client"]
+        new_client = client_id("sk-usage-new")
+        assert flushed[preexisting]["requests"] == 5
+        assert flushed[new_client]["requests"] == 1
+        assert flushed[new_client]["tokens"] > 0
+    finally:
+        main_module.metrics.seed({})
