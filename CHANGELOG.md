@@ -65,6 +65,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `REKAI_PROVIDER_COOLDOWN_ENABLED`.
 
 ### Fixed
+- **Fail-fast config validation** — enum-like settings (`REKAI_LOG_FORMAT`,
+  `REKAI_GUARDRAILS_ACTION`) are now `Literal`-typed and numeric ones carry
+  bounds (`SEMANTIC_CACHE_THRESHOLD` in [0,1], `RETRY_MAX_ATTEMPTS`/rate limits
+  ≥ 1, TTL/body-size ≥ 0), so a typo or out-of-range value raises a clear error
+  at startup instead of silently falling back to wrong behaviour.
 - **Streaming 429 now records a provider cooldown** — a rate limit seen on the
   streaming path is now parked like on the non-streaming path, so subsequent
   requests route around the rate-limited provider (previously only non-streaming
