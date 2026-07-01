@@ -156,3 +156,17 @@ class HealthResponse(BaseModel):
 class ErrorResponse(BaseModel):
     error: str
     detail: str | None = None
+
+
+class AdminKeyRequest(BaseModel):
+    key: str = Field(..., min_length=1, description="The raw API key to add.")
+
+
+class AdminKeyList(BaseModel):
+    static: list[str] = Field(description="Masked REKAI_API_KEYS entries.")
+    dynamic: list[str] = Field(description="Masked runtime-added keys.")
+
+
+class AdminKeyResponse(BaseModel):
+    status: Literal["added", "revoked"]
+    key: str

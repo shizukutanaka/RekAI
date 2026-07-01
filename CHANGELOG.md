@@ -7,6 +7,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Dynamic API key management** (opt-in) — `REKAI_DYNAMIC_KEYS_ENABLED` adds a
+  runtime-managed set of keys on top of the static `REKAI_API_KEYS`, so an
+  operator can onboard or cut off a tenant without a redeploy: `GET/POST
+  /admin/keys` and `DELETE /admin/keys/{key}`, guarded by a separate
+  `REKAI_ADMIN_KEY` (the admin routes aren't registered at all unless it's
+  set). Dynamically-added keys work everywhere a static one does — rate
+  limiting, per-client usage, budget caps. Stored via the existing cache
+  backend (Redis if configured, else process-local).
 - **`REKAI_METRICS_REQUIRE_AUTH`** (opt-in) — `/metrics` is open by default
   (so Prometheus can scrape without a token) even when `REKAI_API_KEYS` gates
   `/v1/*`, but it now carries a per-client cost breakdown. This flag locks it

@@ -28,6 +28,8 @@ uvicorn rekai.main:app --reload
 | POST   | `/v1/chat`    | Chat completion (router + cache + BYOK)  |
 | POST   | `/v1/chat/stream` | Streaming chat completion (SSE)      |
 | POST   | `/v1/embeddings` | Text embeddings (router + cache + BYOK) |
+| GET/POST | `/admin/keys` | List / add runtime API keys (needs `REKAI_ADMIN_KEY`) |
+| DELETE | `/admin/keys/{key}` | Revoke a runtime API key |
 
 ### Example
 
@@ -39,6 +41,9 @@ curl -s http://localhost:8000/v1/chat \
 
 Auth: set `REKAI_API_KEYS` (comma-separated) to require
 `Authorization: Bearer <key>` on `/v1/*` (constant-time check; open by default).
+Set `REKAI_DYNAMIC_KEYS_ENABLED=true` and `REKAI_ADMIN_KEY` to also manage keys
+at runtime via `/admin/keys` instead of a redeploy — see
+[docs/architecture.md](../../docs/architecture.md#dynamic-key-management).
 
 BYOK: pass the upstream provider key with the `X-Provider-Key` header. It is
 used transiently and never stored.

@@ -331,3 +331,123 @@ def test_metrics_require_auth_is_noop_without_configured_keys() -> None:
     settings = Settings(environment="test", rate_limit_enabled=False, metrics_require_auth=True)
     client = TestClient(create_app(settings))
     assert client.get("/metrics").status_code == 200
+
+
+def test_admin_routes_absent_without_admin_key() -> None:
+    settings = Settings(environment="test", rate_limit_enabled=False)
+    client = TestClient(create_app(settings))
+    # Not registered at all — a plain 404, not a 401 (no admin surface to probe).
+    assert client.get("/admin/keys").status_code == 404
+
+
+def test_admin_rejects_missing_or_wrong_key() -> None:
+    settings = Settings(environment="test", rate_limit_enabled=False, admin_key="sk-admin-1")
+    client = TestClient(create_app(settings))
+    assert client.get("/admin/keys").status_code == 401
+    resp = client.get("/admin/keys", headers={"Authorization": "Bearer wrong"})
+    assert resp.status_code == 401
+    assert resp.headers["WWW-Authenticate"] == "Bearer"
+
+
+def test_admin_add_disabled_without_dynamic_keys_enabled() -> None:
+    settings = Settings(environment="test", rate_limit_enabled=False, admin_key="sk-admin-1")
+    client = TestClient(create_app(settings))
+    resp = client.post(
+        "/admin/keys",
+        json={"key": "sk-new"},
+        headers={"Authorization": "Bearer sk-admin-1"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "dynamic_keys_disabled"
+
+
+def test_admin_list_keys_masks_static_and_dynamic() -> None:
+    settings = Settings(
+        environment="test",
+        rate_limit_enabled=False,
+        admin_key="sk-admin-1",
+        dynamic_keys_enabled=True,
+        api_keys="sk-rekai-abc123",
+    )
+    client = TestClient(create_app(settings))
+    headers = {"Authorization": "Bearer sk-admin-1"}
+    client.post("/admin/keys", json={"key": "sk-dyn-longenough"}, headers=headers)
+    body = client.get("/admin/keys", headers=headers).json()
+    assert body["static"] == ["sk-r…c123"]
+    assert body["dynamic"] == ["sk-d…ough"]
+    # The raw keys are never returned anywhere.
+    assert "sk-rekai-abc123" not in str(body)
+    assert "sk-dyn-longenough" not in str(body)
+
+
+def test_admin_add_key_grants_gateway_access() -> None:
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        rate_limit_enabled=False,
+        admin_key="sk-admin-1",
+        dynamic_keys_enabled=True,
+        # No static api_keys: gateway auth is driven entirely by admin-added keys.
+    )
+    client = TestClient(create_app(settings))
+    body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+
+    # Before the key is added, gateway auth is on (dynamic_keys_enabled) and
+    # nothing is allowed yet.
+    assert client.post("/v1/chat", json=body).status_code == 401
+
+    add = client.post(
+        "/admin/keys",
+        json={"key": "sk-runtime-key"},
+        headers={"Authorization": "Bearer sk-admin-1"},
+    )
+    assert add.status_code == 201
+    assert add.json() == {"status": "added", "key": "sk-r…-key"}
+
+    resp = client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-runtime-key"})
+    assert resp.status_code == 200
+
+
+def test_admin_revoke_key_removes_gateway_access() -> None:
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        rate_limit_enabled=False,
+        admin_key="sk-admin-1",
+        dynamic_keys_enabled=True,
+    )
+    client = TestClient(create_app(settings))
+    admin_headers = {"Authorization": "Bearer sk-admin-1"}
+    client.post("/admin/keys", json={"key": "sk-runtime-key"}, headers=admin_headers)
+    body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+    assert (
+        client.post(
+            "/v1/chat", json=body, headers={"Authorization": "Bearer sk-runtime-key"}
+        ).status_code
+        == 200
+    )
+
+    revoke = client.delete("/admin/keys/sk-runtime-key", headers=admin_headers)
+    assert revoke.status_code == 200
+    assert revoke.json() == {"status": "revoked", "key": "sk-r…-key"}
+
+    assert (
+        client.post(
+            "/v1/chat", json=body, headers={"Authorization": "Bearer sk-runtime-key"}
+        ).status_code
+        == 401
+    )
+
+
+def test_admin_revoke_unknown_key_returns_404() -> None:
+    settings = Settings(
+        environment="test",
+        rate_limit_enabled=False,
+        admin_key="sk-admin-1",
+        dynamic_keys_enabled=True,
+    )
+    client = TestClient(create_app(settings))
+    resp = client.delete(
+        "/admin/keys/sk-never-added", headers={"Authorization": "Bearer sk-admin-1"}
+    )
+    assert resp.status_code == 404

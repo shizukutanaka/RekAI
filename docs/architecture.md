@@ -313,6 +313,29 @@ deployments with `REKAI_API_KEYS` configured. Every `/v1/*` call from the app
 (`chat`, `chat/stream`, `embeddings`, `models`, `usage`) attaches the gateway
 key when one is set; without it, enabling gateway auth would 401 every page.
 
+### Dynamic key management
+
+`REKAI_API_KEYS` is static — changing it needs a redeploy. `REKAI_DYNAMIC_KEYS_ENABLED`
+adds a second, runtime-managed set of keys an operator can add or revoke
+through an admin API instead, e.g. to onboard a new tenant or cut off one
+that's misbehaving without restarting the process:
+
+- `GET /admin/keys` — list static and dynamic keys, masked (`sk-a…b123`).
+- `POST /admin/keys {"key": "..."}` — add a key (`201`).
+- `DELETE /admin/keys/{key}` — revoke a key (`200`, or `404` if unknown).
+
+All three require `Authorization: Bearer <REKAI_ADMIN_KEY>` — a credential
+distinct from any tenant key. **The admin API is only registered at all when
+`REKAI_ADMIN_KEY` is set** (unset = the routes don't exist, not just
+unauthenticated), and it lives outside `/v1/*` so it isn't subject to the
+tenant gateway-auth gate above. Requests using a dynamically-added key work
+exactly like a static one everywhere else (rate limiting, per-client usage,
+budget caps). Dynamic keys are stored via the same cache backend as the
+response cache (Redis when `REKAI_REDIS_URL` is set — shared across
+workers/nodes — else the process-local `MemoryCache`, same caveat as the rate
+limiter and idempotency store without Redis). There's no dedicated rate
+limiting on `/admin/*` yet, so put it behind a firewall or VPN in production.
+
 ## BYOK
 
 Provider keys arrive per request via the `X-Provider-Key` header. They are

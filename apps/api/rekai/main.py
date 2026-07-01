@@ -18,6 +18,7 @@ from rekai import __version__, auth, guardrails, idempotency, tracing
 from rekai.cache import CacheBackend, build_cache
 from rekai.config import Settings, get_settings
 from rekai.cooldown import cooldowns
+from rekai.keystore import DynamicKeyStore
 from rekai.logging_config import configure_logging, get_logger
 from rekai.metrics import metrics
 from rekai.metrics_store import build_metrics_store
@@ -27,6 +28,9 @@ from rekai.providers.base import ProviderError
 from rekai.rate_limit import RateLimiter
 from rekai.router import select_provider
 from rekai.schemas import (
+    AdminKeyList,
+    AdminKeyRequest,
+    AdminKeyResponse,
     ChatMessage,
     ChatRequest,
     ChatResponse,
@@ -41,6 +45,7 @@ from rekai.schemas import (
     Usage,
     UsageSummary,
 )
+from rekai.security import mask_key
 from rekai.service import handle_chat, handle_embeddings
 
 access_logger = get_logger("rekai.access")
@@ -138,6 +143,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     cache: CacheBackend = build_cache(settings)
     limiter = RateLimiter(settings.rate_limit_requests, settings.rate_limit_window_seconds)
+    key_store = DynamicKeyStore(cache) if settings.dynamic_keys_enabled else None
+    if settings.dynamic_keys_enabled and not settings.cache_enabled:
+        access_logger.warning(
+            "REKAI_DYNAMIC_KEYS_ENABLED is set but REKAI_CACHE_ENABLED=false, so "
+            "added/revoked keys won't persist between requests (NullCache never stores)."
+        )
+
+    async def _allowed_keys() -> list[str]:
+        """Static REKAI_API_KEYS plus any runtime-added keys, if enabled."""
+        if key_store is None:
+            return settings.api_key_list
+        return settings.api_key_list + await key_store.list_keys()
 
     # --- dependencies -----------------------------------------------------
     def get_cache() -> CacheBackend:
@@ -171,11 +188,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         rl_client = request.client.host if request.client else "anonymous"
         token: str | None = None
 
-        # Gateway auth: when keys are configured, /v1/* needs a valid Bearer key.
-        # Checked first so unauthenticated traffic can't consume rate budget.
-        if is_api_write and settings.api_key_list:
+        # Gateway auth: when keys are configured (static or dynamic), /v1/*
+        # needs a valid Bearer key. Checked first so unauthenticated traffic
+        # can't consume rate budget.
+        if is_api_write and (settings.api_key_list or key_store is not None):
             token = auth.parse_bearer(request.headers.get("authorization"))
-            if token is None or not auth.key_allowed(token, settings.api_key_list):
+            if token is None or not auth.key_allowed(token, await _allowed_keys()):
                 metrics.record_error()
                 return JSONResponse(
                     status_code=401,
@@ -340,9 +358,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # token), but it carries a per-client cost/token breakdown once gateway
         # auth is in use — REKAI_METRICS_REQUIRE_AUTH locks it behind the same
         # Bearer key for operators who consider that sensitive.
-        if settings.metrics_require_auth and settings.api_key_list:
+        if settings.metrics_require_auth and (settings.api_key_list or key_store is not None):
             token = auth.parse_bearer(request.headers.get("authorization"))
-            if token is None or not auth.key_allowed(token, settings.api_key_list):
+            if token is None or not auth.key_allowed(token, await _allowed_keys()):
                 metrics.record_error()
                 response.status_code = 401
                 response.headers["WWW-Authenticate"] = "Bearer"
@@ -354,6 +372,71 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/v1/usage", response_model=UsageSummary, tags=["system"])
     async def usage_summary() -> UsageSummary:
         return UsageSummary(**metrics.snapshot())
+
+    # --- admin: runtime key management (only registered when configured) --
+    # Deliberately outside /v1/*, so it's governed solely by REKAI_ADMIN_KEY —
+    # not the tenant gateway-auth gate above. No dedicated rate limiting yet;
+    # put it behind a firewall/VPN in production, same as any admin surface.
+    if settings.admin_key:
+        admin_key = settings.admin_key
+
+        def _admin_authorized(request: Request) -> bool:
+            token = auth.parse_bearer(request.headers.get("authorization"))
+            return token is not None and auth.key_allowed(token, [admin_key])
+
+        def _admin_auth_error() -> JSONResponse:
+            return JSONResponse(
+                status_code=401,
+                content=ErrorResponse(
+                    error="unauthorized", detail="Missing or invalid admin key."
+                ).model_dump(),
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        def _dynamic_keys_disabled_error() -> JSONResponse:
+            return JSONResponse(
+                status_code=400,
+                content=ErrorResponse(
+                    error="dynamic_keys_disabled",
+                    detail="Set REKAI_DYNAMIC_KEYS_ENABLED=true to manage keys at runtime.",
+                ).model_dump(),
+            )
+
+        @app.get("/admin/keys", response_model=AdminKeyList, tags=["admin"])
+        async def list_admin_keys(request: Request):
+            if not _admin_authorized(request):
+                return _admin_auth_error()
+            dynamic = await key_store.list_keys() if key_store is not None else []
+            return AdminKeyList(
+                static=[mask_key(k) for k in settings.api_key_list],
+                dynamic=[mask_key(k) for k in dynamic],
+            )
+
+        @app.post("/admin/keys", response_model=AdminKeyResponse, tags=["admin"], status_code=201)
+        async def add_admin_key(payload: AdminKeyRequest, request: Request):
+            if not _admin_authorized(request):
+                return _admin_auth_error()
+            if key_store is None:
+                return _dynamic_keys_disabled_error()
+            await key_store.add(payload.key)
+            return AdminKeyResponse(status="added", key=mask_key(payload.key))
+
+        @app.delete("/admin/keys/{key}", response_model=AdminKeyResponse, tags=["admin"])
+        async def revoke_admin_key(key: str, request: Request):
+            if not _admin_authorized(request):
+                return _admin_auth_error()
+            if key_store is None:
+                return _dynamic_keys_disabled_error()
+            removed = await key_store.revoke(key)
+            if not removed:
+                return JSONResponse(
+                    status_code=404,
+                    content=ErrorResponse(
+                        error="not_found",
+                        detail="Key not found among dynamically-added keys.",
+                    ).model_dump(),
+                )
+            return AdminKeyResponse(status="revoked", key=mask_key(key))
 
     @app.get("/v1/models", response_model=ModelsResponse, tags=["chat"])
     async def list_models(

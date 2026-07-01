@@ -27,6 +27,16 @@ class Settings(BaseSettings):
     # `Authorization: Bearer <key>`. Empty = open (no client auth).
     api_keys: str = ""
 
+    # Runtime-managed keys on top of the static list above, added/revoked via
+    # the admin API without a redeploy. Stored in the configured cache backend
+    # (Redis if set, else process-local) — see rekai/keystore.py.
+    dynamic_keys_enabled: bool = False
+
+    # Shared secret for /admin/* (key management). Unset (default) = the admin
+    # API isn't registered at all. Distinct from api_keys: an admin credential,
+    # not a tenant one.
+    admin_key: str | None = None
+
     # Prompt-injection guardrail (OWASP LLM01). Heuristic, opt-in. "block"
     # rejects a flagged request with 403; "flag" adds an X-Guardrail-Flag header.
     guardrails_enabled: bool = False
