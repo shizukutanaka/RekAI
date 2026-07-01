@@ -336,6 +336,17 @@ workers/nodes — else the process-local `MemoryCache`, same caveat as the rate
 limiter and idempotency store without Redis). There's no dedicated rate
 limiting on `/admin/*` yet, so put it behind a firewall or VPN in production.
 
+Unlike BYOK below (transient, never stored), dynamic keys *are* persisted
+server-side, so `REKAI_DYNAMIC_KEYS_ENCRYPTION_KEY` (a Fernet key from
+`rekai.security.generate_key()`) encrypts the blob at rest using the same
+`KeyCipher` helper BYOK-vault deployments already have available — useful if
+`REKAI_REDIS_URL` points at shared infra the operator doesn't fully trust.
+Unset (default) stores plaintext, unchanged from before this existed. A blob
+that fails to decrypt (wrong/rotated key, or a plaintext blob predating
+encryption being turned on) is treated as empty rather than crashing every
+request that checks auth — an operator sees the keys "disappear" and knows to
+re-add them, rather than the gateway falling over.
+
 ## BYOK
 
 Provider keys arrive per request via the `X-Provider-Key` header. They are

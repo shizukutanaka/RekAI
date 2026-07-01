@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from rekai.cache import MemoryCache, NullCache
 from rekai.keystore import DynamicKeyStore
+from rekai.security import KeyCipher, generate_key
 
 
 async def test_list_keys_empty_by_default() -> None:
@@ -47,3 +48,39 @@ async def test_null_cache_backend_never_persists() -> None:
     store = DynamicKeyStore(NullCache())
     await store.add("sk-dyn-a")
     assert await store.list_keys() == []
+
+
+async def test_encrypted_store_roundtrips() -> None:
+    cache = MemoryCache()
+    cipher = KeyCipher(generate_key())
+    store = DynamicKeyStore(cache, cipher)
+    await store.add("sk-dyn-a")
+    await store.add("sk-dyn-b")
+    assert sorted(await store.list_keys()) == ["sk-dyn-a", "sk-dyn-b"]
+
+
+async def test_encrypted_blob_is_not_plaintext_in_the_cache() -> None:
+    cache = MemoryCache()
+    cipher = KeyCipher(generate_key())
+    store = DynamicKeyStore(cache, cipher)
+    await store.add("sk-super-secret")
+    raw = await cache.get("rekai:api_keys:dynamic")
+    assert raw is not None
+    assert "sk-super-secret" not in raw
+
+
+async def test_wrong_decryption_key_degrades_to_empty_not_a_crash() -> None:
+    cache = MemoryCache()
+    await DynamicKeyStore(cache, KeyCipher(generate_key())).add("sk-dyn-a")
+    reader = DynamicKeyStore(cache, KeyCipher(generate_key()))  # different key
+    assert await reader.list_keys() == []
+
+
+async def test_reading_a_plaintext_blob_with_a_cipher_degrades_to_empty() -> None:
+    # Simulates turning encryption on after keys were already stored in
+    # plaintext — the old blob doesn't decrypt, so it's treated as empty
+    # rather than crashing every request that checks auth.
+    cache = MemoryCache()
+    await DynamicKeyStore(cache).add("sk-dyn-a")  # no cipher -> plaintext
+    reader = DynamicKeyStore(cache, KeyCipher(generate_key()))
+    assert await reader.list_keys() == []

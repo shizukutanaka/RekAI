@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     # (Redis if set, else process-local) — see rekai/keystore.py.
     dynamic_keys_enabled: bool = False
 
+    # Optional Fernet key (rekai.security.generate_key()) to encrypt dynamic
+    # keys at rest — they're persisted (unlike transient BYOK keys), so an
+    # operator using a shared Redis they don't fully trust may want this.
+    # Unset (default) = stored as plaintext, same as before this existed.
+    dynamic_keys_encryption_key: str | None = None
+
     # Shared secret for /admin/* (key management). Unset (default) = the admin
     # API isn't registered at all. Distinct from api_keys: an admin credential,
     # not a tenant one.

@@ -15,6 +15,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   set). Dynamically-added keys work everywhere a static one does — rate
   limiting, per-client usage, budget caps. Stored via the existing cache
   backend (Redis if configured, else process-local).
+  `REKAI_DYNAMIC_KEYS_ENCRYPTION_KEY` (a Fernet key) encrypts that storage at
+  rest, since unlike BYOK these keys are actually persisted server-side; unset
+  (default) stores plaintext as before.
 - **`REKAI_METRICS_REQUIRE_AUTH`** (opt-in) — `/metrics` is open by default
   (so Prometheus can scrape without a token) even when `REKAI_API_KEYS` gates
   `/v1/*`, but it now carries a per-client cost breakdown. This flag locks it

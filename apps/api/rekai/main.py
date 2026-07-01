@@ -45,7 +45,7 @@ from rekai.schemas import (
     Usage,
     UsageSummary,
 )
-from rekai.security import mask_key
+from rekai.security import KeyCipher, mask_key
 from rekai.service import handle_chat, handle_embeddings
 
 access_logger = get_logger("rekai.access")
@@ -143,7 +143,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     cache: CacheBackend = build_cache(settings)
     limiter = RateLimiter(settings.rate_limit_requests, settings.rate_limit_window_seconds)
-    key_store = DynamicKeyStore(cache) if settings.dynamic_keys_enabled else None
+    key_cipher = (
+        KeyCipher(settings.dynamic_keys_encryption_key)
+        if settings.dynamic_keys_encryption_key
+        else None
+    )
+    key_store = DynamicKeyStore(cache, key_cipher) if settings.dynamic_keys_enabled else None
     if settings.dynamic_keys_enabled and not settings.cache_enabled:
         access_logger.warning(
             "REKAI_DYNAMIC_KEYS_ENABLED is set but REKAI_CACHE_ENABLED=false, so "

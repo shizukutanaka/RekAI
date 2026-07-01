@@ -451,3 +451,25 @@ def test_admin_revoke_unknown_key_returns_404() -> None:
         "/admin/keys/sk-never-added", headers={"Authorization": "Bearer sk-admin-1"}
     )
     assert resp.status_code == 404
+
+
+def test_dynamic_keys_encrypted_at_rest_still_grant_access() -> None:
+    from rekai.security import generate_key
+
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        rate_limit_enabled=False,
+        admin_key="sk-admin-1",
+        dynamic_keys_enabled=True,
+        dynamic_keys_encryption_key=generate_key(),
+    )
+    client = TestClient(create_app(settings))
+    client.post(
+        "/admin/keys",
+        json={"key": "sk-encrypted-demo"},
+        headers={"Authorization": "Bearer sk-admin-1"},
+    )
+    body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+    resp = client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-encrypted-demo"})
+    assert resp.status_code == 200
