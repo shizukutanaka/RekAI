@@ -37,10 +37,41 @@ def test_snapshot_seed_roundtrip() -> None:
     m.record_cost(0.25)
     m.record_retry()
     m.record_cooldown()
+    m.record_client_usage("key:abc123", 10, 0.25)
     snap = m.snapshot()
     m2 = Metrics()
     m2.seed(snap)
     assert m2.snapshot() == snap
+
+
+def test_record_client_usage_accumulates_per_client() -> None:
+    m = Metrics()
+    m.record_client_usage("key:aaa", tokens=10, cost_usd=0.01)
+    m.record_client_usage("key:aaa", tokens=5, cost_usd=0.02)
+    m.record_client_usage("key:bbb", tokens=100, cost_usd=0.5)
+
+    snap = m.snapshot()
+    assert snap["usage_by_client"]["key:aaa"] == {"requests": 2, "tokens": 15, "cost_usd": 0.03}
+    assert snap["usage_by_client"]["key:bbb"] == {"requests": 1, "tokens": 100, "cost_usd": 0.5}
+
+
+def test_record_client_usage_tolerates_none_cost() -> None:
+    m = Metrics()
+    m.record_client_usage("key:ccc", tokens=3, cost_usd=None)
+    assert m.snapshot()["usage_by_client"]["key:ccc"] == {
+        "requests": 1,
+        "tokens": 3,
+        "cost_usd": 0.0,
+    }
+
+
+def test_client_usage_surfaced_in_prometheus_render() -> None:
+    m = Metrics()
+    m.record_client_usage("key:abc123", tokens=42, cost_usd=0.007)
+    text = m.render()
+    assert 'rekai_client_requests_total{client="key:abc123"} 1' in text
+    assert 'rekai_client_tokens_total{client="key:abc123"} 42' in text
+    assert 'rekai_client_cost_usd_total{client="key:abc123"} 0.007' in text
 
 
 def test_retry_and_cooldown_counters() -> None:
@@ -91,4 +122,35 @@ def test_lifespan_seeds_and_persists(monkeypatch) -> None:
         assert fake.saved["requests_total"] >= 1000
     finally:
         # Restore the shared singleton so other tests are unaffected.
+        main_module.metrics.seed({})
+
+
+def test_usage_by_client_tracked_per_key() -> None:
+    from rekai.auth import client_id
+
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys="sk-usage-a,sk-usage-b",
+        rate_limit_enabled=False,
+    )
+    client = TestClient(create_app(settings))
+    try:
+        body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}], "cache": False}
+        client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-usage-a"})
+        client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-usage-a"})
+        client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-usage-b"})
+
+        # /v1/usage is also gated by gateway auth when keys are configured.
+        usage = client.get("/v1/usage", headers={"Authorization": "Bearer sk-usage-a"}).json()[
+            "usage_by_client"
+        ]
+        key_a, key_b = client_id("sk-usage-a"), client_id("sk-usage-b")
+        assert usage[key_a]["requests"] == 2
+        assert usage[key_b]["requests"] == 1
+        assert usage[key_a]["tokens"] > 0
+        # The raw keys never appear as dict keys — only their masked ids.
+        assert "sk-usage-a" not in usage
+        assert "sk-usage-b" not in usage
+    finally:
         main_module.metrics.seed({})

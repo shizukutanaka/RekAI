@@ -90,6 +90,12 @@ export interface HealthResponse {
   cache: string;
 }
 
+export interface ClientUsage {
+  requests: number;
+  tokens: number;
+  cost_usd: number;
+}
+
 export interface UsageSummary {
   requests_total: number;
   cache_hits_total: number;
@@ -101,6 +107,7 @@ export interface UsageSummary {
   tokens_total: number;
   cost_usd_total: number;
   requests_by_provider: Record<string, number>;
+  usage_by_client: Record<string, ClientUsage>;
 }
 
 const KEY_STORAGE = "rekai.providerKey";

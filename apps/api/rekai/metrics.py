@@ -18,6 +18,9 @@ class Metrics:
         self.tokens_total = 0
         self.cost_usd_total = 0.0
         self.requests_by_provider: dict[str, int] = {}
+        # Per-tenant usage, keyed by the masked "key:<hash>" client id (or the
+        # client IP when the gateway has no auth configured).
+        self.usage_by_client: dict[str, dict[str, float]] = {}
 
     def record_request(self, provider: str) -> None:
         with self._lock:
@@ -56,6 +59,18 @@ class Metrics:
             with self._lock:
                 self.cost_usd_total += cost_usd
 
+    def record_client_usage(self, client_id: str, tokens: int, cost_usd: float | None) -> None:
+        """Attribute one request's tokens/cost to a client (API key or IP), so
+        per-tenant spend is observable without leaking the raw key anywhere."""
+        with self._lock:
+            usage = self.usage_by_client.setdefault(
+                client_id, {"requests": 0, "tokens": 0, "cost_usd": 0.0}
+            )
+            usage["requests"] += 1
+            usage["tokens"] += tokens
+            if cost_usd:
+                usage["cost_usd"] += cost_usd
+
     def seed(self, snapshot: dict) -> None:
         """Set counters from a persisted snapshot (used on startup)."""
         with self._lock:
@@ -69,6 +84,9 @@ class Metrics:
             self.tokens_total = snapshot.get("tokens_total", 0)
             self.cost_usd_total = snapshot.get("cost_usd_total", 0.0)
             self.requests_by_provider = dict(snapshot.get("requests_by_provider", {}))
+            self.usage_by_client = {
+                client: dict(usage) for client, usage in snapshot.get("usage_by_client", {}).items()
+            }
 
     def snapshot(self) -> dict:
         """Return a copy of the current counters as plain data."""
@@ -84,6 +102,9 @@ class Metrics:
                 "tokens_total": self.tokens_total,
                 "cost_usd_total": round(self.cost_usd_total, 6),
                 "requests_by_provider": dict(self.requests_by_provider),
+                "usage_by_client": {
+                    client: dict(usage) for client, usage in self.usage_by_client.items()
+                },
             }
 
     def render(self) -> str:
@@ -119,6 +140,29 @@ class Metrics:
         ]
         for provider, count in sorted(self.requests_by_provider.items()):
             lines.append(f'rekai_requests_total{{provider="{provider}"}} {count}')
+
+        lines += [
+            "# HELP rekai_client_requests_total Requests per client (API key or IP).",
+            "# TYPE rekai_client_requests_total counter",
+        ]
+        for client, usage in sorted(self.usage_by_client.items()):
+            lines.append(
+                f'rekai_client_requests_total{{client="{client}"}} {int(usage["requests"])}'
+            )
+        lines += [
+            "# HELP rekai_client_tokens_total Tokens accounted per client.",
+            "# TYPE rekai_client_tokens_total counter",
+        ]
+        for client, usage in sorted(self.usage_by_client.items()):
+            lines.append(f'rekai_client_tokens_total{{client="{client}"}} {int(usage["tokens"])}')
+        lines += [
+            "# HELP rekai_client_cost_usd_total Approximate cumulative USD cost per client.",
+            "# TYPE rekai_client_cost_usd_total counter",
+        ]
+        for client, usage in sorted(self.usage_by_client.items()):
+            cost = round(usage["cost_usd"], 6)
+            lines.append(f'rekai_client_cost_usd_total{{client="{client}"}} {cost}')
+
         return "\n".join(lines) + "\n"
 
 

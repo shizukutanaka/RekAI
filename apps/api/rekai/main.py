@@ -8,7 +8,7 @@ import json
 import time
 import uuid
 from collections.abc import AsyncIterator
-from typing import Literal
+from typing import Literal, Protocol
 
 from fastapi import Depends, FastAPI, Header, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -80,6 +80,26 @@ def _redact_output(result: ChatResponse, settings: Settings, response: Response)
         return result
     response.headers["X-Redacted"] = ",".join(hits)
     return result.model_copy(update={"content": redacted})
+
+
+class _HasUsageAndCost(Protocol):
+    @property
+    def usage(self) -> Usage: ...
+    @property
+    def cost_usd(self) -> float | None: ...
+
+
+def _record_client_usage(http_request: Request, result: _HasUsageAndCost) -> None:
+    """Attribute a chat/embeddings response's tokens and cost to the requesting
+    client (the masked API-key id, or the client IP with no gateway auth).
+
+    Counted for every response the client receives — including one served from
+    the content cache or replayed via Idempotency-Key — since this tracks what
+    the *client* consumed, not RekAI's own upstream spend (that distinction is
+    exactly why the cache/idempotency paths don't re-run this on the same
+    request; per-client counting intentionally does, once per HTTP call)."""
+    client_id = getattr(http_request.state, "client_id", None) or "anonymous"
+    metrics.record_client_usage(client_id, result.usage.total_tokens, result.cost_usd)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -344,6 +364,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def chat(
         response: Response,
         request: ChatRequest,
+        http_request: Request,
         x_provider_key: str | None = Header(default=None, alias="X-Provider-Key"),
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         config: Settings = Depends(get_config),
@@ -356,9 +377,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             stored = await idempotency.get(cache_backend, idempotency_key)
             if stored is not None:
                 response.headers["Idempotent-Replay"] = "true"
-                return ChatResponse(**stored)
+                replayed = ChatResponse(**stored)
+                _record_client_usage(http_request, replayed)
+                return replayed
         result = await handle_chat(request, x_provider_key, config, cache_backend)
         result = _redact_output(result, config, response)
+        _record_client_usage(http_request, result)
         if idempotency_key:
             await idempotency.store(
                 cache_backend,
@@ -383,6 +407,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def embeddings(
         response: Response,
         request: EmbeddingsRequest,
+        http_request: Request,
         x_provider_key: str | None = Header(default=None, alias="X-Provider-Key"),
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         config: Settings = Depends(get_config),
@@ -392,8 +417,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             stored = await idempotency.get(cache_backend, idempotency_key)
             if stored is not None:
                 response.headers["Idempotent-Replay"] = "true"
-                return EmbeddingsResponse(**stored)
+                replayed = EmbeddingsResponse(**stored)
+                _record_client_usage(http_request, replayed)
+                return replayed
         result = await handle_embeddings(request, x_provider_key, config, cache_backend)
+        _record_client_usage(http_request, result)
         if idempotency_key:
             await idempotency.store(
                 cache_backend,
@@ -418,6 +446,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def chat_stream(
         response: Response,
         request: ChatRequest,
+        http_request: Request,
         x_provider_key: str | None = Header(default=None, alias="X-Provider-Key"),
         config: Settings = Depends(get_config),
         cache_backend: CacheBackend = Depends(get_cache),
@@ -432,6 +461,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if blocked is not None:
             return blocked
         guardrail_flag = response.headers.get("X-Guardrail-Flag")
+        client_id = getattr(http_request.state, "client_id", None) or "anonymous"
         provider_name, provider = select_provider(request, config)
         metrics.record_request(provider_name)
 
@@ -483,6 +513,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 cost_usd = estimate_cost(provider_name, request.model, usage)
                 metrics.record_tokens(usage.total_tokens)
                 metrics.record_cost(cost_usd)
+                metrics.record_client_usage(client_id, usage.total_tokens, cost_usd)
                 summary = {
                     "provider": provider_name,
                     "model": request.model,

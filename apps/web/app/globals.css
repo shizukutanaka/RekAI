@@ -331,6 +331,16 @@ button.stop:hover {
   gap: 10px;
 }
 
+/* Client ids (masked keys / IPs) and their "N req · M tok · $cost" summary
+   need more room than a plain count, so widen both side columns. */
+.bar-row.client-usage {
+  grid-template-columns: 160px 1fr 170px;
+}
+
+.bar-row.client-usage .bar-count {
+  white-space: nowrap;
+}
+
 .bar-label {
   color: var(--text);
   font-size: 14px;

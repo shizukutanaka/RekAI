@@ -58,6 +58,10 @@ export default function UsagePage() {
     ? Object.entries(usage.requests_by_provider).sort((a, b) => b[1] - a[1])
     : [];
 
+  const clients = usage
+    ? Object.entries(usage.usage_by_client ?? {}).sort((a, b) => b[1].requests - a[1].requests)
+    : [];
+
   return (
     <div className="page">
       <div className="page-head">
@@ -102,6 +106,36 @@ export default function UsagePage() {
                 </div>
               ))}
             </div>
+          )}
+
+          <h3 className="section">Usage by client</h3>
+          {clients.length === 0 ? (
+            <p className="hint">No requests yet.</p>
+          ) : (
+            <>
+              <p className="hint">
+                One row per gateway API key (masked, never the raw key) — or per client
+                IP when no <code>REKAI_API_KEYS</code> are configured.
+              </p>
+              <div className="bars">
+                {clients.map(([id, u]) => (
+                  <div key={id} className="bar-row client-usage">
+                    <span className="bar-label" title={id}>
+                      {id}
+                    </span>
+                    <div className="bar-track">
+                      <div
+                        className="bar-fill"
+                        style={{ width: pct(u.requests, usage.requests_total) }}
+                      />
+                    </div>
+                    <span className="bar-count">
+                      {u.requests} req · {u.tokens} tok · ${u.cost_usd.toFixed(4)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
         </>
       )}

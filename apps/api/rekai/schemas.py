@@ -117,6 +117,12 @@ class ServiceInfo(BaseModel):
     health: str
 
 
+class ClientUsage(BaseModel):
+    requests: int
+    tokens: int
+    cost_usd: float
+
+
 class UsageSummary(BaseModel):
     requests_total: int
     cache_hits_total: int
@@ -128,6 +134,11 @@ class UsageSummary(BaseModel):
     tokens_total: int
     cost_usd_total: float
     requests_by_provider: dict[str, int]
+    usage_by_client: dict[str, ClientUsage] = Field(
+        default_factory=dict,
+        description="Per-tenant usage keyed by a masked client id ('key:<hash>' "
+        "when gateway auth is on, else the client IP).",
+    )
 
 
 class HealthResponse(BaseModel):

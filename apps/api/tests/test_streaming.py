@@ -70,6 +70,22 @@ def test_stream_endpoint_emits_usage_summary(client: TestClient) -> None:
     assert after > before
 
 
+def test_stream_endpoint_records_per_client_usage(client: TestClient) -> None:
+    before = client.get("/v1/usage").json()["usage_by_client"]
+    before_total_requests = sum(u["requests"] for u in before.values())
+
+    client.post(
+        "/v1/chat/stream",
+        json={"model": "echo", "messages": [{"role": "user", "content": "gamma delta"}]},
+    )
+
+    after = client.get("/v1/usage").json()["usage_by_client"]
+    after_total_requests = sum(u["requests"] for u in after.values())
+    after_total_tokens = sum(u["tokens"] for u in after.values())
+    assert after_total_requests == before_total_requests + 1
+    assert after_total_tokens > 0
+
+
 def test_stream_estimation_handles_none_content(client: TestClient) -> None:
     # Regression: a tools conversation carries messages with content=None. When
     # the provider doesn't report usage, the streaming path estimates tokens over

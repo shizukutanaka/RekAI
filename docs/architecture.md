@@ -263,6 +263,18 @@ API key (a non-reversible `key:<hash>` id, also attached to the structured
 access log as `client`) rather than the client IP, so one tenant's traffic can't
 exhaust another's budget. Without auth it falls back to the client IP.
 
+### Per-client usage
+
+`/v1/usage` and `/metrics` also break down requests, tokens, and cost **per
+client** (`usage_by_client` / `rekai_client_*_total{client="…"}`), keyed by the
+same masked id used for rate limiting. This covers `/v1/chat`, `/v1/chat/stream`,
+and `/v1/embeddings` — including responses served from the content cache or
+replayed via `Idempotency-Key` (per-client accounting reflects what the client
+received, whereas the global `tokens_total`/`cost_usd_total` counters reflect
+RekAI's own upstream spend and don't double-count a cache hit). This is the
+per-tenant spend visibility a multi-key deployment needs, without ever
+persisting or logging a raw key.
+
 ## BYOK
 
 Provider keys arrive per request via the `X-Provider-Key` header. They are
