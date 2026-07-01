@@ -255,8 +255,10 @@ RekAI*: set `REKAI_API_KEYS` (comma-separated) and `/v1/*` then requires
 `Authorization: Bearer <key>`, compared in constant time; missing/invalid →
 `401` with `WWW-Authenticate: Bearer`. With no keys configured the gateway is
 open (the default). System endpoints (`/health`, `/metrics`, `/`, `/docs`) stay
-open for liveness probes and scraping. This is separate from **BYOK** below,
-which is the *upstream provider* key.
+open for liveness probes and scraping — except `/metrics`, which can
+optionally be locked behind the same Bearer key too (see below), since it
+carries a per-client cost breakdown that scraping doesn't need to be public.
+This is separate from **BYOK** below, which is the *upstream provider* key.
 
 Rate limiting is **per tenant**: when authenticated, the bucket is keyed by the
 API key (a non-reversible `key:<hash>` id, also attached to the structured
@@ -274,6 +276,13 @@ received, whereas the global `tokens_total`/`cost_usd_total` counters reflect
 RekAI's own upstream spend and don't double-count a cache hit). This is the
 per-tenant spend visibility a multi-key deployment needs, without ever
 persisting or logging a raw key.
+
+`/metrics` is open by default even when `REKAI_API_KEYS` is set, so Prometheus
+can scrape without a token — but since it now exposes that same per-client
+breakdown, `REKAI_METRICS_REQUIRE_AUTH=true` requires the same Bearer key there
+too. A no-op if no keys are configured (open either way, same fallback as
+`/v1/*`). `/v1/usage` is unaffected by this flag — it's under `/v1/*` already,
+so it's gated by `REKAI_API_KEYS` like any other endpoint there.
 
 ### Per-client budget cap
 

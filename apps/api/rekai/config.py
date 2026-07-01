@@ -74,6 +74,12 @@ class Settings(BaseSettings):
     # key also appears in api_keys (there's no per-IP override).
     client_budgets_usd: str = ""
 
+    # /metrics is open by default (so Prometheus can scrape without a token),
+    # even when api_keys gates /v1/*. It carries a per-client cost/token
+    # breakdown (usage_by_client), so an operator who considers that sensitive
+    # can require the same Bearer key here too. No-op when api_keys is empty.
+    metrics_require_auth: bool = False
+
     # Retry transient (5xx/timeout) upstream failures with exponential backoff +
     # jitter before falling over. attempts is the total tries per target (1 = off).
     retry_max_attempts: int = Field(default=2, ge=1)

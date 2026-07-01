@@ -291,3 +291,43 @@ def test_client_budget_override_beats_global_default() -> None:
         assert loose.status_code == 200
     finally:
         main_module.metrics.seed({})
+
+
+def test_metrics_open_by_default_even_with_gateway_auth() -> None:
+    settings = Settings(environment="test", api_keys="sk-metrics", rate_limit_enabled=False)
+    client = TestClient(create_app(settings))
+    assert client.get("/metrics").status_code == 200
+
+
+def test_metrics_require_auth_rejects_missing_key() -> None:
+    settings = Settings(
+        environment="test",
+        api_keys="sk-metrics",
+        rate_limit_enabled=False,
+        metrics_require_auth=True,
+    )
+    client = TestClient(create_app(settings))
+    resp = client.get("/metrics")
+    assert resp.status_code == 401
+    assert resp.headers["WWW-Authenticate"] == "Bearer"
+
+
+def test_metrics_require_auth_allows_valid_key() -> None:
+    settings = Settings(
+        environment="test",
+        api_keys="sk-metrics",
+        rate_limit_enabled=False,
+        metrics_require_auth=True,
+    )
+    client = TestClient(create_app(settings))
+    resp = client.get("/metrics", headers={"Authorization": "Bearer sk-metrics"})
+    assert resp.status_code == 200
+    assert "rekai_requests_total" in resp.text
+
+
+def test_metrics_require_auth_is_noop_without_configured_keys() -> None:
+    # Nothing to check a Bearer token against, so /metrics stays open — same
+    # fallback behaviour as /v1/* with no api_keys configured.
+    settings = Settings(environment="test", rate_limit_enabled=False, metrics_require_auth=True)
+    client = TestClient(create_app(settings))
+    assert client.get("/metrics").status_code == 200

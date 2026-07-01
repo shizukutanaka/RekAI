@@ -7,6 +7,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`REKAI_METRICS_REQUIRE_AUTH`** (opt-in) — `/metrics` is open by default
+  (so Prometheus can scrape without a token) even when `REKAI_API_KEYS` gates
+  `/v1/*`, but it now carries a per-client cost breakdown. This flag locks it
+  behind the same Bearer key for operators who consider that sensitive; a
+  no-op when no keys are configured. `/v1/usage` was already gated (it's under
+  `/v1/*`) — this closes the one endpoint that wasn't.
 - **Per-client budget cap** (opt-in) — `REKAI_CLIENT_BUDGET_USD` turns the
   per-client cost tracked in `usage_by_client` into an enforceable spend cap:
   once a client's cumulative cost reaches it, further `/v1/*` requests from

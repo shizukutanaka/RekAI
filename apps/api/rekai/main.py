@@ -335,7 +335,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.get("/metrics", tags=["system"], response_class=PlainTextResponse)
-    async def metrics_endpoint() -> str:
+    async def metrics_endpoint(request: Request, response: Response) -> str:
+        # /metrics is open by default (so Prometheus can scrape without a
+        # token), but it carries a per-client cost/token breakdown once gateway
+        # auth is in use — REKAI_METRICS_REQUIRE_AUTH locks it behind the same
+        # Bearer key for operators who consider that sensitive.
+        if settings.metrics_require_auth and settings.api_key_list:
+            token = auth.parse_bearer(request.headers.get("authorization"))
+            if token is None or not auth.key_allowed(token, settings.api_key_list):
+                metrics.record_error()
+                response.status_code = 401
+                response.headers["WWW-Authenticate"] = "Bearer"
+                return ErrorResponse(
+                    error="unauthorized", detail="Missing or invalid API key."
+                ).model_dump_json()
         return metrics.render()
 
     @app.get("/v1/usage", response_model=UsageSummary, tags=["system"])
