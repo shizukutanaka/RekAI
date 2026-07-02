@@ -96,6 +96,14 @@ class Settings(BaseSettings):
     # can require the same Bearer key here too. No-op when api_keys is empty.
     metrics_require_auth: bool = False
 
+    # Override or extend rekai/pricing.py's built-in table without a code
+    # change or redeploy, e.g. "gpt-4o:2.00:8.00,my-model:0.50:1.50" (USD per
+    # 1M tokens, input:output). An entry for an existing prefix replaces it;
+    # a new prefix prices an otherwise-unknown model. Every cost estimate,
+    # budget cap, and /v1/models pricing field is driven by this table, so
+    # this is how an operator keeps it current between RekAI releases.
+    pricing_overrides: str = ""
+
     # Retry transient (5xx/timeout) upstream failures with exponential backoff +
     # jitter before falling over. attempts is the total tries per target (1 = off).
     retry_max_attempts: int = Field(default=2, ge=1)
@@ -172,6 +180,29 @@ class Settings(BaseSettings):
                 continue
             try:
                 overrides[key] = float(amount.strip())
+            except ValueError:
+                continue
+        return overrides
+
+    @property
+    def pricing_override_dict(self) -> dict[str, tuple[float, float]]:
+        """Parse ``pricing_overrides`` into ``{model_prefix: (input, output)}``
+        USD-per-1M pairs, for :func:`rekai.pricing.price_for_model`. Entries
+        missing the ``prefix:input:output`` shape, or with a non-numeric price,
+        are skipped rather than raising — a typo shouldn't take the gateway down."""
+        overrides: dict[str, tuple[float, float]] = {}
+        for raw in self.pricing_overrides.split(","):
+            raw = raw.strip()
+            if not raw:
+                continue
+            parts = raw.split(":")
+            if len(parts) != 3:
+                continue
+            prefix, input_str, output_str = (p.strip() for p in parts)
+            if not prefix:
+                continue
+            try:
+                overrides[prefix.lower()] = (float(input_str), float(output_str))
             except ValueError:
                 continue
         return overrides

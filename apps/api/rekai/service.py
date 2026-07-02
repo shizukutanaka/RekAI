@@ -197,7 +197,9 @@ async def handle_chat(
 
         consecutive_failures.record_success(attempt.provider_name)
         usage = result.usage or Usage()
-        cost_usd = estimate_cost(attempt.provider_name, result.model, usage)
+        cost_usd = estimate_cost(
+            attempt.provider_name, result.model, usage, settings.pricing_override_dict
+        )
         metrics.record_tokens(usage.total_tokens)
         metrics.record_cost(cost_usd)
 
@@ -266,7 +268,9 @@ async def handle_embeddings(
         on_retry=metrics.record_retry,
     )
     metrics.record_tokens(result.usage.total_tokens)
-    cost_usd = estimate_cost(provider_name, result.model, result.usage)
+    cost_usd = estimate_cost(
+        provider_name, result.model, result.usage, settings.pricing_override_dict
+    )
     metrics.record_cost(cost_usd)
     response = EmbeddingsResponse(
         provider=provider_name,

@@ -451,7 +451,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ),
     ) -> ModelsResponse:
         def _info(model: str, name: str, kind: Literal["chat", "embedding"]) -> ModelInfo:
-            price = price_for_model(model)
+            price = price_for_model(model, settings.pricing_override_dict)
             pricing = (
                 ModelPricing(input_per_1m=price[0], output_per_1m=price[1])
                 if price is not None
@@ -643,7 +643,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         completion_tokens=completion_tokens,
                         total_tokens=prompt_tokens + completion_tokens,
                     )
-                cost_usd = estimate_cost(provider_name, request.model, usage)
+                cost_usd = estimate_cost(
+                    provider_name, request.model, usage, config.pricing_override_dict
+                )
                 metrics.record_tokens(usage.total_tokens)
                 metrics.record_cost(cost_usd)
                 metrics.record_client_usage(client_id, usage.total_tokens, cost_usd)

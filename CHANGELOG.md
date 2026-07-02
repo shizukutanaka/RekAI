@@ -7,6 +7,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`REKAI_PRICING_OVERRIDES`** — override or extend the built-in per-model
+  price table without a code change or redeploy, e.g.
+  `"gpt-4o:2.00:8.00,my-model:0.50:1.50"`. Config-driven (scoped to one
+  `Settings` instance, doesn't mutate shared global state like
+  `pricing.register_price()` does) and read by every cost estimate, budget
+  cap, and the `pricing` field in `/v1/models` — closing the gap where a
+  stale/wrong price, once shipped, needed a code change to fix.
 - **Circuit breaker for repeated 5xx** — a 429 already parked a provider
   immediately (an explicit "back off" signal); a bare 5xx did not, so a
   provider stuck returning 500s paid for a full retry-with-backoff cycle on

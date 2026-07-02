@@ -232,9 +232,23 @@ tokens). Free/local providers (`echo`, `ollama`) report `0.0`; unpriced models
 report `null`. Embeddings responses carry `cost_usd` too (input-only — the
 `text-embedding-3-*` / `ada-002` models are priced). Cumulative cost is exposed at `/v1/usage` and `/metrics`
 (`rekai_cost_usd_total`). Prices are approximate and meant for budgeting, not
-billing — extend or override them with `pricing.register_price()`. `/v1/models`
-also reports each model's `pricing` (`input_per_1m`/`output_per_1m`, or `null`
-when unknown), so clients can build cost UIs without hardcoding rates.
+billing. `/v1/models` also reports each model's `pricing`
+(`input_per_1m`/`output_per_1m`, or `null` when unknown), so clients can build
+cost UIs without hardcoding rates.
+
+There are two ways to override or extend the table:
+
+- `pricing.register_price()` mutates the built-in table directly — process-wide,
+  for a plugin or code that runs once at import time.
+- `REKAI_PRICING_OVERRIDES` (e.g. `"gpt-4o:2.00:8.00,my-model:0.50:1.50"`) is a
+  config-driven override scoped to one `Settings` instance, without touching
+  shared global state. This is the one to reach for as an operator: it fixes a
+  stale or wrong price, or prices a custom/self-hosted model, **without a code
+  change or redeploy** — every cost estimate, budget cap (`REKAI_CLIENT_BUDGET_USD`),
+  and the `/v1/models` `pricing` field all read from it. An entry for an
+  existing prefix replaces it; a new prefix prices an otherwise-unknown model
+  (though it still needs to be a model the provider itself accepts — this only
+  affects pricing, not model discovery/routing).
 
 ## Guardrails
 

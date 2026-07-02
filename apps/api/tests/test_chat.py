@@ -92,3 +92,21 @@ def test_models_include_pricing(client: TestClient) -> None:
     assert by_id["gpt-4o-mini"]["pricing"] == {"input_per_1m": 0.15, "output_per_1m": 0.60}
     # An unpriced/free model reports null pricing.
     assert by_id["echo"]["pricing"] is None
+
+
+def test_pricing_overrides_flow_through_to_v1_models() -> None:
+    from rekai.config import Settings
+    from rekai.main import create_app
+
+    settings = Settings(
+        environment="test",
+        rate_limit_enabled=False,
+        pricing_overrides="gpt-4o-mini:1.00:2.00",
+    )
+    local_client = TestClient(create_app(settings))
+    by_id = {m["id"]: m for m in local_client.get("/v1/models").json()["data"]}
+    # Overriding an existing prefix replaces its price for this deployment...
+    assert by_id["gpt-4o-mini"]["pricing"] == {"input_per_1m": 1.00, "output_per_1m": 2.00}
+    # ...without touching the global table other Settings instances (and other
+    # models in this same response) see.
+    assert by_id["gpt-4o"]["pricing"] == {"input_per_1m": 2.50, "output_per_1m": 10.00}
