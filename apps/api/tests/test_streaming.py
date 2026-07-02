@@ -163,6 +163,44 @@ def test_stream_429_marks_cooldown(client: TestClient) -> None:
     cooldowns.clear()
 
 
+def test_stream_5xx_trips_circuit_breaker_after_threshold() -> None:
+    # A 429 parks immediately; a bare 5xx on the streaming path should need
+    # circuit_breaker_threshold consecutive failures first (consistent with
+    # the non-streaming path), tracked in the shared consecutive_failures
+    # counter even though streaming itself has no fallback chain to reroute to.
+    from rekai.circuit_breaker import consecutive_failures
+    from rekai.config import Settings
+    from rekai.cooldown import cooldowns
+    from rekai.main import create_app
+    from rekai.providers import register_provider
+    from rekai.providers.base import Provider, ProviderError, ProviderResult
+
+    class Flaky5xxStream(Provider):
+        name = "flaky5xx-stream"
+        requires_key = False
+
+        async def chat(self, request, api_key) -> ProviderResult:
+            raise ProviderError("upstream down", status_code=503)
+
+    register_provider(Flaky5xxStream())
+    cooldowns.clear()
+    consecutive_failures.clear()
+    settings = Settings(environment="test", rate_limit_enabled=False, circuit_breaker_threshold=2)
+    local_client = TestClient(create_app(settings))
+
+    body = {
+        "provider": "flaky5xx-stream",
+        "model": "x",
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+    local_client.post("/v1/chat/stream", json=body)
+    assert cooldowns.active("flaky5xx-stream") is False  # 1st failure -> not parked yet
+    local_client.post("/v1/chat/stream", json=body)
+    assert cooldowns.active("flaky5xx-stream") is True  # 2nd failure trips it
+    cooldowns.clear()
+    consecutive_failures.clear()
+
+
 def test_stream_error_has_no_usage_summary(client: TestClient) -> None:
     resp = client.post(
         "/v1/chat/stream",

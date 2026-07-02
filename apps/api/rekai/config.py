@@ -107,6 +107,12 @@ class Settings(BaseSettings):
     provider_cooldown_enabled: bool = True
     provider_cooldown_seconds: float = Field(default=30.0, ge=0.0)
 
+    # A 429 parks a provider immediately (see above); a 5xx needs this many
+    # consecutive failures (across separate requests, resets on any success)
+    # before it's parked the same way — a lightweight circuit breaker so a
+    # persistently failing provider stops being retried on every request.
+    circuit_breaker_threshold: int = Field(default=3, ge=1)
+
     # Idempotency-Key: replay the stored response for a repeated key for this long
     # (needs the cache backend; a no-op when caching is disabled).
     idempotency_ttl_seconds: int = Field(default=86_400, ge=0)

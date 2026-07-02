@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from rekai import __version__, auth, guardrails, idempotency, tracing
 from rekai.cache import CacheBackend, build_cache
+from rekai.circuit_breaker import consecutive_failures
 from rekai.config import Settings, get_settings
 from rekai.cooldown import cooldowns
 from rekai.keystore import DynamicKeyStore
@@ -604,9 +605,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except ProviderError as exc:
                 errored = True
                 metrics.record_error()
-                # Park the provider on a 429, consistent with the non-streaming
-                # path, so later requests — including on other workers/nodes —
-                # route around a rate-limited provider.
+                # Park the provider consistent with the non-streaming path, so
+                # later requests — including on other workers/nodes, and other
+                # non-streaming requests checking cooldown — route around it.
+                # There's no fallback chain here (single provider, no rerouting
+                # within this request), so this only benefits subsequent calls.
                 if config.provider_cooldown_enabled and exc.status_code == 429:
                     await cooldowns.mark_shared(
                         cache_backend,
@@ -616,10 +619,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         else config.provider_cooldown_seconds,
                     )
                     metrics.record_cooldown()
+                elif config.provider_cooldown_enabled and exc.status_code >= 500:
+                    failures = consecutive_failures.record_failure(provider_name)
+                    if failures >= config.circuit_breaker_threshold:
+                        await cooldowns.mark_shared(
+                            cache_backend, provider_name, config.provider_cooldown_seconds
+                        )
+                        metrics.record_cooldown()
                 payload = {"error": "provider_error", "detail": str(exc)}
                 yield f"data: {json.dumps(payload)}\n\n"
 
             if not errored:
+                consecutive_failures.record_success(provider_name)
                 # Prefer provider-reported usage; otherwise estimate from text.
                 estimated = reported_usage is None
                 if reported_usage is not None:

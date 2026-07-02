@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from rekai.cache import CacheBackend, cache_key, embedding_cache_key
+from rekai.circuit_breaker import consecutive_failures
 from rekai.config import Settings
 from rekai.cooldown import cooldowns
 from rekai.logging_config import get_logger
@@ -159,10 +160,10 @@ async def handle_chat(
             )
         except ProviderError as exc:
             last_error = exc
-            # A 429 parks this provider (locally and in the shared backend, when
-            # configured) so later requests — including on other workers/nodes —
-            # route around it.
             if settings.provider_cooldown_enabled and exc.status_code == 429:
+                # An explicit "back off" signal — park this provider immediately
+                # (locally and in the shared backend, when configured) so later
+                # requests, including on other workers/nodes, route around it.
                 await cooldowns.mark_shared(
                     cache,
                     attempt.provider_name,
@@ -171,6 +172,16 @@ async def handle_chat(
                     else settings.provider_cooldown_seconds,
                 )
                 metrics.record_cooldown()
+            elif settings.provider_cooldown_enabled and exc.status_code >= 500:
+                # No explicit signal here, so require a few consecutive failures
+                # (across separate requests) before parking — a lightweight
+                # circuit breaker, not an overreaction to one bad request.
+                failures = consecutive_failures.record_failure(attempt.provider_name)
+                if failures >= settings.circuit_breaker_threshold:
+                    await cooldowns.mark_shared(
+                        cache, attempt.provider_name, settings.provider_cooldown_seconds
+                    )
+                    metrics.record_cooldown()
             # Fall through on upstream failures and rate limits (after in-place
             # retries), but not on other client (4xx) errors.
             transient = exc.status_code >= 500 or exc.status_code == 429
@@ -184,6 +195,7 @@ async def handle_chat(
                 continue
             raise
 
+        consecutive_failures.record_success(attempt.provider_name)
         usage = result.usage or Usage()
         cost_usd = estimate_cost(attempt.provider_name, result.model, usage)
         metrics.record_tokens(usage.total_tokens)

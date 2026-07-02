@@ -198,3 +198,138 @@ async def test_cooldown_shared_via_cache_across_workers() -> None:
     assert r2.provider == "echo"
     assert provider.calls == 1  # skipped via the shared cache, not called again
     cooldowns.clear()
+
+
+class Always5xx(Provider):
+    """Always fails with a 5xx (no explicit Retry-After, unlike a 429)."""
+
+    name = "always5xx"
+    requires_key = False
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def chat(self, request, api_key) -> ProviderResult:
+        self.calls += 1
+        raise ProviderError("upstream down", status_code=503)
+
+
+async def test_circuit_breaker_parks_after_threshold_consecutive_5xx() -> None:
+    from rekai.circuit_breaker import consecutive_failures
+    from rekai.cooldown import cooldowns
+
+    cooldowns.clear()
+    consecutive_failures.clear()
+    provider = Always5xx()
+    register_provider(provider)
+    request = _req(
+        model="x", provider="always5xx", fallbacks=[{"provider": "echo", "model": "echo"}]
+    )
+    settings = _settings(retry_max_attempts=1, circuit_breaker_threshold=3)
+
+    # First 3 requests: always5xx fails every time (below/at threshold), falls
+    # over to echo, and is actually called each time — not yet parked.
+    for _ in range(3):
+        resp = await handle_chat(request, None, settings, NullCache())
+        assert resp.provider == "echo"
+    assert provider.calls == 3
+
+    # The 3rd failure tripped the breaker: the 4th request skips it entirely.
+    resp = await handle_chat(request, None, settings, NullCache())
+    assert resp.provider == "echo"
+    assert provider.calls == 3  # not called again while cooling down
+    cooldowns.clear()
+    consecutive_failures.clear()
+
+
+class FailTwiceThenRecover(Provider):
+    """Fails with a 5xx on its first two calls, then succeeds from then on."""
+
+    name = "fail_twice_recover"
+    requires_key = False
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def chat(self, request, api_key) -> ProviderResult:
+        self.calls += 1
+        if self.calls <= 2:
+            raise ProviderError("transient", status_code=503)
+        return ProviderResult(content="recovered", model=request.model)
+
+
+async def test_circuit_breaker_resets_on_success() -> None:
+    from rekai.circuit_breaker import consecutive_failures
+    from rekai.cooldown import cooldowns
+
+    cooldowns.clear()
+    consecutive_failures.clear()
+    provider = FailTwiceThenRecover()
+    register_provider(provider)
+    request = _req(model="x", provider="fail_twice_recover")
+    # retry off (in-place retry would recover within one request); threshold 3
+    # so 2 failures alone wouldn't trip it anyway — the point is the reset.
+    settings = _settings(retry_max_attempts=1, circuit_breaker_threshold=3)
+
+    # Two failing requests, then a successful one resets the count to zero.
+    with pytest.raises(ProviderError):
+        await handle_chat(request, None, settings, NullCache())
+    with pytest.raises(ProviderError):
+        await handle_chat(request, None, settings, NullCache())
+    resp = await handle_chat(request, None, settings, NullCache())
+    assert resp.content == "recovered"
+
+    # Two more failures now (not three) should NOT trip the breaker, since the
+    # success above reset the count back to zero.
+    provider.calls = 0  # let it fail on the next two calls again
+    with pytest.raises(ProviderError):
+        await handle_chat(request, None, settings, NullCache())
+    with pytest.raises(ProviderError):
+        await handle_chat(request, None, settings, NullCache())
+    assert consecutive_failures.record_failure("fail_twice_recover") == 3  # 2 + this probe
+    cooldowns.clear()
+    consecutive_failures.clear()
+
+
+async def test_circuit_breaker_disabled_by_provider_cooldown_enabled_flag() -> None:
+    from rekai.circuit_breaker import consecutive_failures
+    from rekai.cooldown import cooldowns
+
+    cooldowns.clear()
+    consecutive_failures.clear()
+    provider = Always5xx()
+    register_provider(provider)
+    request = _req(
+        model="x", provider="always5xx", fallbacks=[{"provider": "echo", "model": "echo"}]
+    )
+    settings = _settings(
+        retry_max_attempts=1, circuit_breaker_threshold=1, provider_cooldown_enabled=False
+    )
+
+    for _ in range(5):
+        resp = await handle_chat(request, None, settings, NullCache())
+        assert resp.provider == "echo"
+    assert provider.calls == 5  # never parked -> called on every request
+    cooldowns.clear()
+    consecutive_failures.clear()
+
+
+async def test_circuit_breaker_threshold_of_one_parks_immediately() -> None:
+    from rekai.circuit_breaker import consecutive_failures
+    from rekai.cooldown import cooldowns
+
+    cooldowns.clear()
+    consecutive_failures.clear()
+    provider = Always5xx()
+    register_provider(provider)
+    request = _req(
+        model="x", provider="always5xx", fallbacks=[{"provider": "echo", "model": "echo"}]
+    )
+    settings = _settings(retry_max_attempts=1, circuit_breaker_threshold=1)
+
+    await handle_chat(request, None, settings, NullCache())
+    assert provider.calls == 1
+    await handle_chat(request, None, settings, NullCache())
+    assert provider.calls == 1  # parked after just one failure
+    cooldowns.clear()
+    consecutive_failures.clear()

@@ -7,6 +7,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Circuit breaker for repeated 5xx** — a 429 already parked a provider
+  immediately (an explicit "back off" signal); a bare 5xx did not, so a
+  provider stuck returning 500s paid for a full retry-with-backoff cycle on
+  *every* request before falling over to a fallback. `REKAI_CIRCUIT_BREAKER_THRESHOLD`
+  (default 3) now parks a provider the same way after that many *consecutive*
+  5xx failures across separate requests (any success resets the count) —
+  covers the fallback-chain path and the streaming path.
 - **Redis-shared rate limiting** — with `REKAI_REDIS_URL` set, the per-tenant
   rate limit is enforced with a fixed-window Redis `INCR` counter shared by
   all workers/nodes, instead of each process keeping its own token bucket
