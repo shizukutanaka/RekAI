@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Admin API audit log** — every `/admin/keys` request (add, revoke, list,
+  and unauthorized attempts) is now written to a dedicated `rekai.admin`
+  logger with the action, masked key, and caller IP — the key issuance/
+  revocation operations previously left no record beyond the generic access
+  log line. The raw key is never logged.
 - **`REKAI_PRICING_OVERRIDES`** — override or extend the built-in per-model
   price table without a code change or redeploy, e.g.
   `"gpt-4o:2.00:8.00,my-model:0.50:1.50"`. Config-driven (scoped to one

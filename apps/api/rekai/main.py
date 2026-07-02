@@ -50,6 +50,7 @@ from rekai.security import KeyCipher, mask_key
 from rekai.service import handle_chat, handle_embeddings
 
 access_logger = get_logger("rekai.access")
+admin_logger = get_logger("rekai.admin")
 
 
 def _guardrail_response(
@@ -383,12 +384,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Deliberately outside /v1/*, so it's governed solely by REKAI_ADMIN_KEY —
     # not the tenant gateway-auth gate above. No dedicated rate limiting yet;
     # put it behind a firewall/VPN in production, same as any admin surface.
+    # Every attempt (successful, unauthorized, or not-found) is written to a
+    # dedicated audit log (admin_logger) with the masked key and caller IP —
+    # this operation has no distinct per-admin identity beyond the shared
+    # secret, so IP is the best attribution available.
     if settings.admin_key:
         admin_key = settings.admin_key
 
+        def _admin_ip(request: Request) -> str:
+            return request.client.host if request.client else "unknown"
+
         def _admin_authorized(request: Request) -> bool:
             token = auth.parse_bearer(request.headers.get("authorization"))
-            return token is not None and auth.key_allowed(token, [admin_key])
+            ok = token is not None and auth.key_allowed(token, [admin_key])
+            if not ok:
+                admin_logger.warning(
+                    "admin auth failed method=%s path=%s ip=%s",
+                    request.method,
+                    request.url.path,
+                    _admin_ip(request),
+                    extra={
+                        "admin_action": "auth_failed",
+                        "method": request.method,
+                        "path": request.url.path,
+                        "ip": _admin_ip(request),
+                    },
+                )
+            return ok
 
         def _admin_auth_error() -> JSONResponse:
             return JSONResponse(
@@ -413,6 +435,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if not _admin_authorized(request):
                 return _admin_auth_error()
             dynamic = await key_store.list_keys() if key_store is not None else []
+            admin_logger.info(
+                "admin listed keys ip=%s",
+                _admin_ip(request),
+                extra={"admin_action": "list_keys", "ip": _admin_ip(request)},
+            )
             return AdminKeyList(
                 static=[mask_key(k) for k in settings.api_key_list],
                 dynamic=[mask_key(k) for k in dynamic],
@@ -425,7 +452,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if key_store is None:
                 return _dynamic_keys_disabled_error()
             await key_store.add(payload.key)
-            return AdminKeyResponse(status="added", key=mask_key(payload.key))
+            masked = mask_key(payload.key)
+            admin_logger.info(
+                "admin added key=%s ip=%s",
+                masked,
+                _admin_ip(request),
+                extra={"admin_action": "add_key", "key": masked, "ip": _admin_ip(request)},
+            )
+            return AdminKeyResponse(status="added", key=masked)
 
         @app.delete("/admin/keys/{key}", response_model=AdminKeyResponse, tags=["admin"])
         async def revoke_admin_key(key: str, request: Request):
@@ -434,7 +468,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if key_store is None:
                 return _dynamic_keys_disabled_error()
             removed = await key_store.revoke(key)
+            masked = mask_key(key)
             if not removed:
+                admin_logger.warning(
+                    "admin revoke failed (not found) key=%s ip=%s",
+                    masked,
+                    _admin_ip(request),
+                    extra={
+                        "admin_action": "revoke_key_not_found",
+                        "key": masked,
+                        "ip": _admin_ip(request),
+                    },
+                )
                 return JSONResponse(
                     status_code=404,
                     content=ErrorResponse(
@@ -442,7 +487,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         detail="Key not found among dynamically-added keys.",
                     ).model_dump(),
                 )
-            return AdminKeyResponse(status="revoked", key=mask_key(key))
+            admin_logger.info(
+                "admin revoked key=%s ip=%s",
+                masked,
+                _admin_ip(request),
+                extra={"admin_action": "revoke_key", "key": masked, "ip": _admin_ip(request)},
+            )
+            return AdminKeyResponse(status="revoked", key=masked)
 
     @app.get("/v1/models", response_model=ModelsResponse, tags=["chat"])
     async def list_models(

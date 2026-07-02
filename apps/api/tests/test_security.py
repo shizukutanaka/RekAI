@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -549,3 +551,83 @@ def test_dynamic_keys_encrypted_at_rest_still_grant_access() -> None:
     body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
     resp = client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-encrypted-demo"})
     assert resp.status_code == 200
+
+
+@pytest.fixture
+def admin_audit_log(caplog):
+    """Attach caplog's handler directly to the ``rekai.admin`` logger.
+
+    create_app() -> configure_logging() clears the *root* logger's handlers on
+    every call (by design, so repeated app creation in a long-lived process
+    doesn't stack handlers) — which also strips pytest's caplog handler if it
+    was attached there. Attaching directly to the named logger sidesteps that.
+    """
+    logger = logging.getLogger("rekai.admin")
+    logger.addHandler(caplog.handler)
+    logger.setLevel(logging.DEBUG)
+    try:
+        yield caplog
+    finally:
+        logger.removeHandler(caplog.handler)
+
+
+def test_admin_audit_log_records_auth_failure(admin_audit_log) -> None:
+    settings = Settings(environment="test", rate_limit_enabled=False, admin_key="sk-admin-1")
+    client = TestClient(create_app(settings))
+    client.get("/admin/keys", headers={"Authorization": "Bearer wrong"})
+    records = [r for r in admin_audit_log.records if r.name == "rekai.admin"]
+    assert len(records) == 1
+    assert records[0].admin_action == "auth_failed"
+    assert records[0].path == "/admin/keys"
+    # The wrong key itself is never logged, only the fact that auth failed.
+    assert "wrong" not in admin_audit_log.text
+
+
+def test_admin_audit_log_records_add_with_masked_key(admin_audit_log) -> None:
+    settings = Settings(
+        environment="test",
+        rate_limit_enabled=False,
+        admin_key="sk-admin-1",
+        dynamic_keys_enabled=True,
+    )
+    client = TestClient(create_app(settings))
+    client.post(
+        "/admin/keys",
+        json={"key": "sk-audit-secret-value"},
+        headers={"Authorization": "Bearer sk-admin-1"},
+    )
+    records = [r for r in admin_audit_log.records if r.name == "rekai.admin"]
+    assert len(records) == 1
+    assert records[0].admin_action == "add_key"
+    assert records[0].key == "sk-a…alue"
+    # The raw key is never written to the audit log.
+    assert "sk-audit-secret-value" not in admin_audit_log.text
+
+
+def test_admin_audit_log_records_revoke_and_not_found(admin_audit_log) -> None:
+    settings = Settings(
+        environment="test",
+        rate_limit_enabled=False,
+        admin_key="sk-admin-1",
+        dynamic_keys_enabled=True,
+    )
+    client = TestClient(create_app(settings))
+    admin_headers = {"Authorization": "Bearer sk-admin-1"}
+    client.post("/admin/keys", json={"key": "sk-to-revoke"}, headers=admin_headers)
+
+    client.delete("/admin/keys/sk-to-revoke", headers=admin_headers)
+    client.delete("/admin/keys/sk-never-existed", headers=admin_headers)
+
+    records = [r for r in admin_audit_log.records if r.name == "rekai.admin"]
+    actions = [r.admin_action for r in records]
+    assert "revoke_key" in actions
+    assert "revoke_key_not_found" in actions
+
+
+def test_admin_audit_log_records_list(admin_audit_log) -> None:
+    settings = Settings(environment="test", rate_limit_enabled=False, admin_key="sk-admin-1")
+    client = TestClient(create_app(settings))
+    client.get("/admin/keys", headers={"Authorization": "Bearer sk-admin-1"})
+    records = [r for r in admin_audit_log.records if r.name == "rekai.admin"]
+    assert len(records) == 1
+    assert records[0].admin_action == "list_keys"

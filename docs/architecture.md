@@ -376,6 +376,15 @@ workers/nodes — else the process-local `MemoryCache`, same caveat as the rate
 limiter and idempotency store without Redis). There's no dedicated rate
 limiting on `/admin/*` yet, so put it behind a firewall or VPN in production.
 
+Every admin request — successful, unauthorized, or a revoke of an unknown key
+— is written to a dedicated audit log (`rekai.admin`, distinct from the general
+`rekai.access` log), with the masked key, the action (`add_key`/`revoke_key`/
+`revoke_key_not_found`/`list_keys`/`auth_failed`), and the caller's IP. There's
+no per-admin identity beyond the shared `REKAI_ADMIN_KEY` secret, so IP is the
+best attribution available — but every mutation is traceable after the fact,
+including failed-auth probes against the endpoint. The raw key is never
+logged, only its masked form.
+
 Unlike BYOK below (transient, never stored), dynamic keys *are* persisted
 server-side, so `REKAI_DYNAMIC_KEYS_ENCRYPTION_KEY` (a Fernet key from
 `rekai.security.generate_key()`) encrypts the blob at rest using the same
