@@ -1,9 +1,29 @@
-"""A simple in-memory token-bucket rate limiter, keyed per client."""
+"""Per-client rate limiting.
+
+Two implementations behind one async interface:
+
+- :class:`LocalRateLimiter` — the in-process token bucket (wraps
+  :class:`RateLimiter`). Zero-latency, but each worker/node counts
+  independently, so a multi-worker deployment effectively multiplies the limit.
+- :class:`RedisRateLimiter` — a fixed-window counter using Redis ``INCR``
+  (atomic across workers/nodes), chosen by :func:`build_rate_limiter` when
+  ``REKAI_REDIS_URL`` is set. Counting needs atomic increments, which the
+  generic ``CacheBackend`` (get/set only) can't provide race-free — hence a
+  dedicated Redis client here, mirroring ``metrics_store.py``. If Redis errors
+  at runtime the limiter **fails open** (allows the request) so a Redis outage
+  degrades to "no rate limiting" rather than "no service".
+"""
 
 from __future__ import annotations
 
 import math
 import time
+from typing import Any, Protocol
+
+from rekai.config import Settings
+from rekai.logging_config import get_logger
+
+logger = get_logger("rekai.rate_limit")
 
 
 class RateLimiter:
@@ -61,3 +81,106 @@ class RateLimiter:
             return 0
         seconds = (1.0 - tokens) * self.window / self.capacity
         return max(1, math.ceil(seconds))
+
+
+class AsyncRateLimiter(Protocol):
+    """What the request middleware needs from a rate limiter."""
+
+    async def allow(self, key: str) -> bool: ...
+    async def remaining(self, key: str) -> int: ...
+    async def retry_after(self, key: str) -> int: ...
+    @property
+    def label(self) -> str: ...
+
+
+class LocalRateLimiter:
+    """Async facade over the in-process token bucket."""
+
+    def __init__(self, capacity: int, window: float) -> None:
+        self._limiter = RateLimiter(capacity, window)
+
+    async def allow(self, key: str) -> bool:
+        return self._limiter.allow(key)
+
+    async def remaining(self, key: str) -> int:
+        return self._limiter.remaining(key)
+
+    async def retry_after(self, key: str) -> int:
+        return self._limiter.retry_after(key)
+
+    @property
+    def label(self) -> str:
+        return "local"
+
+
+class RedisRateLimiter:
+    """Fixed-window counter shared across workers/nodes via Redis ``INCR``.
+
+    The window is identified by ``int(now / window)`` baked into the key, so a
+    new window starts atomically for every worker at the same instant; the key
+    expires shortly after its window ends to avoid accumulating counters.
+    Semantics differ slightly from the local token bucket (counts reset at the
+    window edge instead of refilling continuously) — same limit, same headers.
+    """
+
+    def __init__(self, url: str, capacity: int, window: float, client: Any = None) -> None:
+        if client is None:
+            import redis.asyncio as redis  # lazy so redis stays optional
+
+            client = redis.from_url(url, decode_responses=True)
+        self._client = client
+        self.capacity = capacity
+        self.window = window
+
+    def _window_key(self, key: str, now: float) -> str:
+        return f"rekai:rl:{key}:{int(now / self.window)}"
+
+    def _seconds_left_in_window(self, now: float) -> int:
+        return max(1, math.ceil(self.window - (now % self.window)))
+
+    async def allow(self, key: str) -> bool:
+        now = time.time()
+        try:
+            count = await self._client.incr(self._window_key(key, now))
+            if count == 1:
+                # Keep the counter one window past its end so a straggling
+                # remaining()/retry_after() peek still sees it.
+                await self._client.expire(self._window_key(key, now), int(self.window * 2))
+            return int(count) <= self.capacity
+        except Exception as exc:
+            logger.warning("rate limiter failing open (redis error: %s)", exc)
+            return True
+
+    async def remaining(self, key: str) -> int:
+        now = time.time()
+        try:
+            raw = await self._client.get(self._window_key(key, now))
+        except Exception as exc:
+            logger.warning("rate limiter failing open (redis error: %s)", exc)
+            return self.capacity
+        used = int(raw) if raw else 0
+        return max(0, self.capacity - used)
+
+    async def retry_after(self, key: str) -> int:
+        # A fixed window admits new requests only when the window rolls over.
+        if await self.remaining(key) > 0:
+            return 0
+        return self._seconds_left_in_window(time.time())
+
+    @property
+    def label(self) -> str:
+        return "redis"
+
+
+def build_rate_limiter(settings: Settings) -> AsyncRateLimiter:
+    """Redis-shared when ``REKAI_REDIS_URL`` is set, else process-local."""
+    if settings.redis_url:
+        try:
+            return RedisRateLimiter(
+                settings.redis_url,
+                settings.rate_limit_requests,
+                settings.rate_limit_window_seconds,
+            )
+        except Exception:  # pragma: no cover - fall back if redis client init fails
+            pass
+    return LocalRateLimiter(settings.rate_limit_requests, settings.rate_limit_window_seconds)

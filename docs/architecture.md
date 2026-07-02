@@ -265,6 +265,16 @@ API key (a non-reversible `key:<hash>` id, also attached to the structured
 access log as `client`) rather than the client IP, so one tenant's traffic can't
 exhaust another's budget. Without auth it falls back to the client IP.
 
+It is also **shared across workers/nodes when `REKAI_REDIS_URL` is set**: the
+limiter switches from the in-process token bucket to a fixed-window counter
+using Redis `INCR` (atomic — a plain get/set cache can't count race-free), so
+the limit means what it says instead of silently multiplying by the worker
+count. Same limit and same `X-RateLimit-*`/`Retry-After` headers either way;
+the only semantic difference is that the shared window resets at its edge
+rather than refilling continuously. If Redis errors at runtime the limiter
+**fails open** (allows the request, logs a warning) — an outage degrades to
+"no rate limiting", not "no service".
+
 ### Per-client usage
 
 `/v1/usage` and `/metrics` also break down requests, tokens, and cost **per

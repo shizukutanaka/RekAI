@@ -7,6 +7,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Redis-shared rate limiting** — with `REKAI_REDIS_URL` set, the per-tenant
+  rate limit is enforced with a fixed-window Redis `INCR` counter shared by
+  all workers/nodes, instead of each process keeping its own token bucket
+  (which silently multiplied the effective limit by the worker count). Same
+  headers (`X-RateLimit-*`, `Retry-After`); fails open on a Redis outage so
+  rate limiting degrades before availability does. Verified live with two
+  uvicorn workers: exactly 5 of 10 requests pass at a limit of 5.
 - **Dynamic API key management** (opt-in) — `REKAI_DYNAMIC_KEYS_ENABLED` adds a
   runtime-managed set of keys on top of the static `REKAI_API_KEYS`, so an
   operator can onboard or cut off a tenant without a redeploy: `GET/POST

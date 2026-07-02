@@ -7,7 +7,7 @@ from rekai.config import Settings
 from rekai.main import create_app
 from rekai.providers import register_provider
 from rekai.providers.base import Provider, ProviderError
-from rekai.rate_limit import RateLimiter
+from rekai.rate_limit import RateLimiter, RedisRateLimiter, build_rate_limiter
 from rekai.security import KeyCipher, generate_key, mask_key
 
 
@@ -107,6 +107,82 @@ def test_rate_limiter_remaining() -> None:
     assert limiter.remaining("client") == 3  # still full (peek)
     limiter.allow("client")
     assert limiter.remaining("client") == 2
+
+
+class _FakeRedis:
+    """Just enough of redis.asyncio for the rate limiter: INCR/EXPIRE/GET."""
+
+    def __init__(self) -> None:
+        self.counts: dict[str, int] = {}
+        self.ttls: dict[str, int] = {}
+        self.fail = False
+
+    async def incr(self, key: str) -> int:
+        if self.fail:
+            raise ConnectionError("redis down")
+        self.counts[key] = self.counts.get(key, 0) + 1
+        return self.counts[key]
+
+    async def expire(self, key: str, seconds: int) -> None:
+        if self.fail:
+            raise ConnectionError("redis down")
+        self.ttls[key] = seconds
+
+    async def get(self, key: str) -> str | None:
+        if self.fail:
+            raise ConnectionError("redis down")
+        return str(self.counts[key]) if key in self.counts else None
+
+
+async def test_redis_rate_limiter_blocks_after_capacity() -> None:
+    fake = _FakeRedis()
+    limiter = RedisRateLimiter("redis://unused", capacity=2, window=60, client=fake)
+    assert await limiter.allow("client") is True
+    assert await limiter.allow("client") is True
+    assert await limiter.allow("client") is False
+    # A different client has its own counter.
+    assert await limiter.allow("other") is True
+    # The window counter got a TTL so it can't accumulate forever.
+    assert all(ttl > 0 for ttl in fake.ttls.values())
+
+
+async def test_redis_rate_limiter_counts_are_shared_via_the_store() -> None:
+    # Two limiter instances (≈ two workers) over one Redis see one budget.
+    fake = _FakeRedis()
+    worker_a = RedisRateLimiter("redis://unused", capacity=2, window=60, client=fake)
+    worker_b = RedisRateLimiter("redis://unused", capacity=2, window=60, client=fake)
+    assert await worker_a.allow("client") is True
+    assert await worker_b.allow("client") is True
+    assert await worker_a.allow("client") is False
+    assert await worker_b.allow("client") is False
+
+
+async def test_redis_rate_limiter_remaining_and_retry_after() -> None:
+    fake = _FakeRedis()
+    limiter = RedisRateLimiter("redis://unused", capacity=2, window=60, client=fake)
+    assert await limiter.remaining("client") == 2
+    assert await limiter.retry_after("client") == 0
+    await limiter.allow("client")
+    await limiter.allow("client")
+    assert await limiter.remaining("client") == 0
+    # Blocked until the fixed window rolls over.
+    assert 1 <= await limiter.retry_after("client") <= 60
+
+
+async def test_redis_rate_limiter_fails_open_when_redis_is_down() -> None:
+    fake = _FakeRedis()
+    limiter = RedisRateLimiter("redis://unused", capacity=1, window=60, client=fake)
+    fake.fail = True
+    # Redis outage degrades to "no rate limiting", not "no service".
+    assert await limiter.allow("client") is True
+    assert await limiter.allow("client") is True
+    assert await limiter.remaining("client") == 1
+    assert await limiter.retry_after("client") == 0
+
+
+def test_build_rate_limiter_is_local_without_redis() -> None:
+    settings = Settings(environment="test", rate_limit_enabled=True)
+    assert build_rate_limiter(settings).label == "local"
 
 
 def test_endpoint_sets_ratelimit_headers() -> None:

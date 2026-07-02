@@ -25,7 +25,7 @@ from rekai.metrics_store import build_metrics_store
 from rekai.pricing import estimate_cost, estimate_tokens, price_for_model
 from rekai.providers import get_provider, provider_names
 from rekai.providers.base import ProviderError
-from rekai.rate_limit import RateLimiter
+from rekai.rate_limit import build_rate_limiter
 from rekai.router import select_provider
 from rekai.schemas import (
     AdminKeyList,
@@ -142,7 +142,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     cache: CacheBackend = build_cache(settings)
-    limiter = RateLimiter(settings.rate_limit_requests, settings.rate_limit_window_seconds)
+    limiter = build_rate_limiter(settings)
     key_cipher = (
         KeyCipher(settings.dynamic_keys_encryption_key)
         if settings.dynamic_keys_encryption_key
@@ -248,9 +248,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # 429 on the preflight ("Failed to fetch") instead of the real response.
         if settings.rate_limit_enabled and is_api_write:
             limit = str(settings.rate_limit_requests)
-            if not limiter.allow(rl_client):
+            if not await limiter.allow(rl_client):
                 metrics.record_error()
-                retry_after = limiter.retry_after(rl_client)
+                retry_after = await limiter.retry_after(rl_client)
                 return JSONResponse(
                     status_code=429,
                     content=ErrorResponse(
@@ -265,7 +265,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
             response = await call_next(request)
             response.headers["X-RateLimit-Limit"] = limit
-            response.headers["X-RateLimit-Remaining"] = str(limiter.remaining(rl_client))
+            response.headers["X-RateLimit-Remaining"] = str(await limiter.remaining(rl_client))
             return response
         return await call_next(request)
 
