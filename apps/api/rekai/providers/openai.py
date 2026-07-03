@@ -15,6 +15,7 @@ from rekai.providers.base import (
     ProviderResult,
     StreamEvent,
     provider_http_error,
+    trace_headers,
 )
 from rekai.schemas import ChatRequest, Usage
 
@@ -68,7 +69,7 @@ class OpenAIProvider(Provider):
                 resp = await client.post(
                     url,
                     json=payload,
-                    headers={"Authorization": f"Bearer {key}"},
+                    headers={**trace_headers(), "Authorization": f"Bearer {key}"},
                 )
         except httpx.HTTPError as exc:  # network-level failure
             raise ProviderError(f"{self.name} request failed: {exc}") from exc
@@ -121,7 +122,10 @@ class OpenAIProvider(Provider):
         try:
             async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
                 async with client.stream(
-                    "POST", url, json=payload, headers={"Authorization": f"Bearer {key}"}
+                    "POST",
+                    url,
+                    json=payload,
+                    headers={**trace_headers(), "Authorization": f"Bearer {key}"},
                 ) as resp:
                     if resp.status_code >= 400:
                         body = (await resp.aread()).decode()[:200]
@@ -149,7 +153,7 @@ class OpenAIProvider(Provider):
                 resp = await client.post(
                     url,
                     json={"model": model, "input": inputs},
-                    headers={"Authorization": f"Bearer {key}"},
+                    headers={**trace_headers(), "Authorization": f"Bearer {key}"},
                 )
         except httpx.HTTPError as exc:
             raise ProviderError(f"{self.name} embeddings request failed: {exc}") from exc

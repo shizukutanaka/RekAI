@@ -12,6 +12,16 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 
 from rekai.schemas import ChatRequest, Usage
+from rekai.tracing import current_traceparent
+
+
+def trace_headers() -> dict[str, str]:
+    """``{"traceparent": ...}`` for the outbound HTTP call a provider is about
+    to make, or ``{}`` outside a request context — so distributed tracing
+    doesn't stop at RekAI's edge. Merge into a provider's request headers,
+    e.g. ``{**trace_headers(), "Authorization": ...}``."""
+    traceparent = current_traceparent()
+    return {"traceparent": traceparent} if traceparent else {}
 
 
 class ProviderError(Exception):

@@ -170,7 +170,7 @@ async def test_ollama_embeddings_parsed(monkeypatch) -> None:
         async def __aexit__(self, *a):
             return False
 
-        async def post(self, url, json):
+        async def post(self, url, json, headers):
             captured["url"] = url
             captured["json"] = json
             return FakeResponse()

@@ -7,6 +7,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`traceparent` forwarded upstream** — RekAI parsed and returned W3C Trace
+  Context, but the trace stopped at its edge: the outbound HTTP call to the
+  actual provider (OpenAI/Anthropic/Gemini/Ollama/custom; chat, streaming, and
+  embeddings) never carried a `traceparent`, so a distributed trace couldn't
+  follow the request into whichever provider served it. Now every provider
+  call attaches a `traceparent` continuing the request's trace with a fresh
+  span id, via an ambient `ContextVar` set by the request middleware — no
+  `trace_id` parameter threading required down through the call stack.
 - **Admin API audit log** — every `/admin/keys` request (add, revoke, list,
   and unauthorized attempts) is now written to a dedicated `rekai.admin`
   logger with the action, masked key, and caller IP — the key issuance/

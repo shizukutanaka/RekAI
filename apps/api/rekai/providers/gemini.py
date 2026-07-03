@@ -15,6 +15,7 @@ from rekai.providers.base import (
     ProviderResult,
     StreamEvent,
     provider_http_error,
+    trace_headers,
 )
 from rekai.schemas import ChatRequest, Usage
 
@@ -68,7 +69,9 @@ class GeminiProvider(Provider):
         url = f"{settings.gemini_base_url.rstrip('/')}/models/{request.model}:generateContent"
         try:
             async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                resp = await client.post(url, json=payload, headers={"x-goog-api-key": key})
+                resp = await client.post(
+                    url, json=payload, headers={**trace_headers(), "x-goog-api-key": key}
+                )
         except httpx.HTTPError as exc:
             raise ProviderError(f"Gemini request failed: {exc}") from exc
 
@@ -105,7 +108,9 @@ class GeminiProvider(Provider):
         url = f"{settings.gemini_base_url.rstrip('/')}/{qualified}:batchEmbedContents"
         try:
             async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                resp = await client.post(url, json=payload, headers={"x-goog-api-key": key})
+                resp = await client.post(
+                    url, json=payload, headers={**trace_headers(), "x-goog-api-key": key}
+                )
         except httpx.HTTPError as exc:
             raise ProviderError(f"Gemini embeddings request failed: {exc}") from exc
         if resp.status_code >= 400:
@@ -135,7 +140,7 @@ class GeminiProvider(Provider):
         try:
             async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
                 async with client.stream(
-                    "POST", url, json=payload, headers={"x-goog-api-key": key}
+                    "POST", url, json=payload, headers={**trace_headers(), "x-goog-api-key": key}
                 ) as resp:
                     if resp.status_code >= 400:
                         body = (await resp.aread()).decode()[:200]

@@ -15,6 +15,7 @@ from rekai.providers.base import (
     ProviderResult,
     StreamEvent,
     provider_http_error,
+    trace_headers,
 )
 from rekai.schemas import ChatRequest, Usage
 
@@ -34,7 +35,7 @@ class OllamaProvider(Provider):
         url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
         try:
             async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                resp = await client.post(url, json=payload)
+                resp = await client.post(url, json=payload, headers=trace_headers())
         except httpx.HTTPError as exc:
             raise ProviderError(
                 f"Ollama request failed (is it running at {settings.ollama_base_url}?): {exc}"
@@ -62,7 +63,9 @@ class OllamaProvider(Provider):
         url = f"{settings.ollama_base_url.rstrip('/')}/api/embed"
         try:
             async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                resp = await client.post(url, json={"model": model, "input": inputs})
+                resp = await client.post(
+                    url, json={"model": model, "input": inputs}, headers=trace_headers()
+                )
         except httpx.HTTPError as exc:
             raise ProviderError(
                 f"Ollama embeddings request failed "
@@ -96,7 +99,9 @@ class OllamaProvider(Provider):
         url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
         try:
             async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                async with client.stream("POST", url, json=payload) as resp:
+                async with client.stream(
+                    "POST", url, json=payload, headers=trace_headers()
+                ) as resp:
                     if resp.status_code >= 400:
                         body = (await resp.aread()).decode()[:200]
                         raise ProviderError(

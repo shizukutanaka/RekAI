@@ -14,6 +14,7 @@ from rekai.providers.base import (
     ProviderResult,
     StreamEvent,
     provider_http_error,
+    trace_headers,
 )
 from rekai.schemas import ChatRequest, Usage
 
@@ -63,6 +64,7 @@ class AnthropicProvider(Provider):
 
     def _headers(self, key: str) -> dict[str, str]:
         return {
+            **trace_headers(),
             "x-api-key": key,
             "anthropic-version": get_settings().anthropic_version,
             "content-type": "application/json",

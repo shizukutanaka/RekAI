@@ -187,6 +187,21 @@ Trace Context**: an incoming `traceparent` is parsed and its `trace_id` is
 continued (RekAI emits a new span id) — or a fresh trace is started — returned as
 a `traceparent` response header and attached to the structured access log as
 `trace_id`, so RekAI slots into an OpenTelemetry-traced system without the SDK.
+
+The same `trace_id` is also forwarded to the **upstream provider** — every
+provider's outbound HTTP call (OpenAI, Anthropic, Gemini, Ollama, and any
+OpenAI-compatible backend; chat, streaming, and embeddings) carries its own
+`traceparent`, continuing the request's trace with a fresh span id rather than
+reusing the one already returned to the client. Previously the trace stopped at
+RekAI's edge — a distributed trace couldn't follow the request into the
+provider that actually served it. This works without threading a `trace_id`
+parameter through every function from the route handler down to the HTTP call:
+the request middleware sets an ambient trace id in a `contextvars.ContextVar`
+(`rekai/tracing.py`), and `rekai/providers/base.py`'s `trace_headers()` reads it
+at the point of the outbound call. A `ContextVar` rather than a plain module
+global so concurrent requests can't leak into each other's trace; outside a
+request (e.g. a provider invoked directly in a unit test) it's unset, and no
+`traceparent` header is sent at all rather than a synthetic one.
 `/v1/*` responses also
 carry `X-RateLimit-Limit`/`X-RateLimit-Remaining`, and a 429 adds `Retry-After`
 (seconds until the client's bucket refills a token). CORS is the outermost

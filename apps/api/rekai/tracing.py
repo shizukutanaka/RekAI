@@ -10,9 +10,40 @@ without taking on the full SDK.
 from __future__ import annotations
 
 import uuid
+from contextvars import ContextVar, Token
 
 _ZERO_TRACE = "0" * 32
 _ZERO_SPAN = "0" * 16
+
+# The current request's trace id, so a provider deep in the call stack can
+# attach a traceparent to its outbound HTTP call without every function from
+# the route handler down needing a trace_id parameter threaded through it.
+# Set by main.py's request-context middleware for the lifetime of one request;
+# a ContextVar (not a plain module global) so concurrent requests don't leak
+# into each other's trace — Starlette awaits the handler in the same task the
+# middleware set it in, so the value is visible all the way down, and each
+# request gets its own copy of the context.
+_current_trace_id: ContextVar[str | None] = ContextVar("rekai_trace_id", default=None)
+
+
+def set_current_trace_id(trace_id: str | None) -> Token[str | None]:
+    """Set the ambient trace id for this request; returns a token for reset_current_trace_id."""
+    return _current_trace_id.set(trace_id)
+
+
+def reset_current_trace_id(token: Token[str | None]) -> None:
+    _current_trace_id.reset(token)
+
+
+def current_traceparent() -> str | None:
+    """A fresh ``traceparent`` (new span id, same ambient trace id) for an
+    outbound provider call — or ``None`` outside a request context (e.g. a
+    provider invoked directly in a unit test), in which case callers should
+    omit the header entirely rather than send a synthetic/zero trace id."""
+    trace_id = _current_trace_id.get()
+    if trace_id is None:
+        return None
+    return format_traceparent(trace_id, new_span_id())
 
 
 def parse_trace_id(traceparent: str | None) -> str | None:

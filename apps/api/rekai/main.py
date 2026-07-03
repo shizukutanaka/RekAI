@@ -282,8 +282,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         span_id = tracing.new_span_id()
         request.state.trace_id = trace_id
+        # Ambient trace id for this request, so a provider's outbound HTTP call
+        # (deep in the handler call stack) can attach its own traceparent
+        # without threading trace_id through every function signature down to
+        # it. Reset unconditionally so it can't leak into an unrelated request.
+        trace_token = tracing.set_current_trace_id(trace_id)
         start = time.perf_counter()
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        finally:
+            tracing.reset_current_trace_id(trace_token)
         elapsed_ms = (time.perf_counter() - start) * 1000
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
