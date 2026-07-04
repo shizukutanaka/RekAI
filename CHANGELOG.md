@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Web UI for dynamic key management** — `/admin` in the web app wraps the
+  API's `/admin/keys` (add/revoke/list runtime keys, `REKAI_DYNAMIC_KEYS_ENABLED`)
+  in a page instead of curl-only access, with its own admin-key field
+  (local storage, distinct from the gateway/provider keys) and a clear notice
+  when `REKAI_ADMIN_KEY` isn't configured server-side.
 - **`traceparent` forwarded upstream** — RekAI parsed and returned W3C Trace
   Context, but the trace stopped at its edge: the outbound HTTP call to the
   actual provider (OpenAI/Anthropic/Gemini/Ollama/custom; chat, streaming, and

@@ -379,6 +379,16 @@ that's misbehaving without restarting the process:
 - `POST /admin/keys {"key": "..."}` — add a key (`201`).
 - `DELETE /admin/keys/{key}` — revoke a key (`200`, or `404` if unknown).
 
+The web app's `/admin` page wraps all three in a form instead of curl-only
+access — its own admin-key field (`rekai.adminKey` in `localStorage`, a third
+credential distinct from the provider and gateway keys above), a masked
+static/dynamic key list, and add/revoke forms. Since only a key's masked form
+is ever returned, revoking one from the page still needs the raw key typed
+back in — the UI can't offer a "click to revoke" from the masked list, because
+the backend genuinely never has the raw value to offer back. If
+`REKAI_ADMIN_KEY` isn't configured, the page shows a notice instead of the
+forms (a `404`, since the routes aren't registered — see below — not a `401`).
+
 All three require `Authorization: Bearer <REKAI_ADMIN_KEY>` — a credential
 distinct from any tenant key. **The admin API is only registered at all when
 `REKAI_ADMIN_KEY` is set** (unset = the routes don't exist, not just

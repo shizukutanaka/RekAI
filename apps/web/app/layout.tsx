@@ -20,6 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/">Chat</Link>
               <Link href="/embeddings">Embeddings</Link>
               <Link href="/usage">Usage</Link>
+              <Link href="/admin">Admin</Link>
               <Link href="/settings">Settings</Link>
             </nav>
           </header>

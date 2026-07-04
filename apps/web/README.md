@@ -30,6 +30,13 @@ Open http://localhost:3000.
   **gateway API key** field (sent as `Authorization: Bearer`) for deployments
   where the API has `REKAI_API_KEYS` configured — without it every page would
   get a `401`.
+- **/admin** — add or revoke gateway API keys at runtime, without a redeploy
+  (`REKAI_DYNAMIC_KEYS_ENABLED`), via the API's `/admin/keys`. Needs a separate
+  **admin key** (`REKAI_ADMIN_KEY`, its own local-storage field) — distinct
+  from the gateway/provider keys above. Only a key's masked form is ever shown,
+  so revoking one needs the raw key typed back in; keep a record of it when you
+  add one. If `REKAI_ADMIN_KEY` isn't configured on the API, the page shows a
+  clear notice instead of the key-management forms.
 
 ## Configuration
 

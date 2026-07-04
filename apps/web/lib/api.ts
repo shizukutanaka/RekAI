@@ -150,6 +150,68 @@ export function gatewayAuthHeaders(gatewayKey?: string): Record<string, string> 
   return gatewayKey ? { Authorization: `Bearer ${gatewayKey}` } : {};
 }
 
+// A third, distinct credential: REKAI_ADMIN_KEY, for the /admin/keys runtime
+// key-management API. Never the same secret as the gateway or provider keys.
+const ADMIN_KEY_STORAGE = "rekai.adminKey";
+
+export function getStoredAdminKey(): string {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(ADMIN_KEY_STORAGE) || "";
+}
+
+export function setStoredAdminKey(value: string): void {
+  if (typeof window === "undefined") return;
+  if (value) {
+    window.localStorage.setItem(ADMIN_KEY_STORAGE, value);
+  } else {
+    window.localStorage.removeItem(ADMIN_KEY_STORAGE);
+  }
+}
+
+export interface AdminKeyList {
+  static: string[];
+  dynamic: string[];
+}
+
+export interface AdminKeyActionResponse {
+  status: "added" | "revoked";
+  key: string;
+}
+
+export async function fetchAdminKeys(adminKey: string): Promise<AdminKeyList> {
+  const res = await fetch(`${API_URL}/admin/keys`, {
+    cache: "no-store",
+    headers: gatewayAuthHeaders(adminKey),
+  });
+  if (!res.ok) throw await errorFromResponse(res);
+  return res.json();
+}
+
+export async function addAdminKey(
+  adminKey: string,
+  key: string,
+): Promise<AdminKeyActionResponse> {
+  const res = await fetch(`${API_URL}/admin/keys`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...gatewayAuthHeaders(adminKey) },
+    body: JSON.stringify({ key }),
+  });
+  if (!res.ok) throw await errorFromResponse(res);
+  return res.json();
+}
+
+export async function revokeAdminKey(
+  adminKey: string,
+  key: string,
+): Promise<AdminKeyActionResponse> {
+  const res = await fetch(`${API_URL}/admin/keys/${encodeURIComponent(key)}`, {
+    method: "DELETE",
+    headers: gatewayAuthHeaders(adminKey),
+  });
+  if (!res.ok) throw await errorFromResponse(res);
+  return res.json();
+}
+
 export async function sendChat(params: {
   model: string;
   messages: ChatMessage[];
