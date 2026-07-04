@@ -7,6 +7,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`/admin/*` rate limiting** — on by default whenever `REKAI_ADMIN_KEY` is
+  set (`REKAI_ADMIN_RATE_LIMIT_*`, 20 requests/60s), sized and keyed
+  separately from the tenant rate limit (by IP, since there's no per-admin
+  identity). Deliberately checked *before* the admin-key check — the opposite
+  order from the tenant gateway-auth gate — so a wrong-key guess still
+  consumes budget: the threat here is brute-forcing the one shared secret, not
+  fairness between tenants. A firewall/VPN in front of `/admin/*` remains the
+  primary control; this is a backstop.
 - **Web UI for dynamic key management** — `/admin` in the web app wraps the
   API's `/admin/keys` (add/revoke/list runtime keys, `REKAI_DYNAMIC_KEYS_ENABLED`)
   in a page instead of curl-only access, with its own admin-key field

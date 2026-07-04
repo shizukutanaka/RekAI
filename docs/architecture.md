@@ -398,15 +398,29 @@ exactly like a static one everywhere else (rate limiting, per-client usage,
 budget caps). Dynamic keys are stored via the same cache backend as the
 response cache (Redis when `REKAI_REDIS_URL` is set — shared across
 workers/nodes — else the process-local `MemoryCache`, same caveat as the rate
-limiter and idempotency store without Redis). There's no dedicated rate
-limiting on `/admin/*` yet, so put it behind a firewall or VPN in production.
+limiter and idempotency store without Redis).
 
-Every admin request — successful, unauthorized, or a revoke of an unknown key
-— is written to a dedicated audit log (`rekai.admin`, distinct from the general
-`rekai.access` log), with the masked key, the action (`add_key`/`revoke_key`/
-`revoke_key_not_found`/`list_keys`/`auth_failed`), and the caller's IP. There's
-no per-admin identity beyond the shared `REKAI_ADMIN_KEY` secret, so IP is the
-best attribution available — but every mutation is traceable after the fact,
+`/admin/*` also has its own rate limit (`REKAI_ADMIN_RATE_LIMIT_*`, on by
+default whenever `REKAI_ADMIN_KEY` is set — 20 requests/60s), built the same
+way as the tenant limiter (Redis-shared when configured, else process-local,
+fails open on a Redis error) but keyed by client IP and sized separately, since
+admin traffic and tenant traffic shouldn't share one budget. The check order is
+the opposite of the tenant gateway-auth gate above, deliberately: the tenant
+gate checks auth *before* consuming rate-limit budget (so a guesser can't burn
+a real tenant's allowance), but the admin gate checks rate limit *before* the
+key check, so a wrong guess still counts. There's one shared secret to defend
+here, not many tenant-specific ones, so the threat is brute-forcing it — a
+guess that doesn't consume budget wouldn't be throttled at all. A firewall/VPN
+in front of `/admin/*` is still the primary control; this is a backstop for
+when that's not in place (or is bypassed from inside the network).
+
+Every admin request — successful, unauthorized, rate-limited, or a revoke of
+an unknown key — is written to a dedicated audit log (`rekai.admin`, distinct
+from the general `rekai.access` log), with the masked key, the action
+(`add_key`/`revoke_key`/`revoke_key_not_found`/`list_keys`/`auth_failed`/
+`rate_limited`), and the caller's IP. There's no per-admin identity beyond the
+shared `REKAI_ADMIN_KEY` secret, so IP is the best attribution available — but
+every mutation is traceable after the fact,
 including failed-auth probes against the endpoint. The raw key is never
 logged, only its masked form.
 

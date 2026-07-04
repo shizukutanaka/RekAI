@@ -184,7 +184,7 @@ async def test_redis_rate_limiter_fails_open_when_redis_is_down() -> None:
 
 def test_build_rate_limiter_is_local_without_redis() -> None:
     settings = Settings(environment="test", rate_limit_enabled=True)
-    assert build_rate_limiter(settings).label == "local"
+    assert build_rate_limiter(settings, 60, 60).label == "local"
 
 
 def test_endpoint_sets_ratelimit_headers() -> None:
@@ -631,3 +631,56 @@ def test_admin_audit_log_records_list(admin_audit_log) -> None:
     records = [r for r in admin_audit_log.records if r.name == "rekai.admin"]
     assert len(records) == 1
     assert records[0].admin_action == "list_keys"
+
+
+def test_admin_rate_limit_blocks_after_capacity() -> None:
+    settings = Settings(
+        environment="test",
+        rate_limit_enabled=False,
+        admin_key="sk-admin-1",
+        admin_rate_limit_requests=2,
+        admin_rate_limit_window_seconds=60,
+    )
+    client = TestClient(create_app(settings))
+    headers = {"Authorization": "Bearer sk-admin-1"}
+    assert client.get("/admin/keys", headers=headers).status_code == 200
+    assert client.get("/admin/keys", headers=headers).status_code == 200
+    blocked = client.get("/admin/keys", headers=headers)
+    assert blocked.status_code == 429
+    assert int(blocked.headers["Retry-After"]) >= 1
+
+
+def test_admin_rate_limit_counts_failed_auth_attempts() -> None:
+    # Unlike the tenant gateway-auth gate (auth checked before rate limiting,
+    # so a guesser can't burn a real tenant's budget), the admin gate counts
+    # every attempt — right or wrong key — since the threat here is
+    # brute-forcing the one shared secret, not fairness between tenants.
+    settings = Settings(
+        environment="test",
+        rate_limit_enabled=False,
+        admin_key="sk-admin-1",
+        admin_rate_limit_requests=2,
+        admin_rate_limit_window_seconds=60,
+    )
+    client = TestClient(create_app(settings))
+    wrong = {"Authorization": "Bearer wrong-guess"}
+    assert client.get("/admin/keys", headers=wrong).status_code == 401
+    assert client.get("/admin/keys", headers=wrong).status_code == 401
+    # The 3rd attempt is rate limited even with the *correct* key now, because
+    # the two wrong guesses already consumed the shared IP budget.
+    resp = client.get("/admin/keys", headers={"Authorization": "Bearer sk-admin-1"})
+    assert resp.status_code == 429
+
+
+def test_admin_rate_limit_can_be_disabled() -> None:
+    settings = Settings(
+        environment="test",
+        rate_limit_enabled=False,
+        admin_key="sk-admin-1",
+        admin_rate_limit_enabled=False,
+        admin_rate_limit_requests=1,
+    )
+    client = TestClient(create_app(settings))
+    headers = {"Authorization": "Bearer sk-admin-1"}
+    for _ in range(5):
+        assert client.get("/admin/keys", headers=headers).status_code == 200

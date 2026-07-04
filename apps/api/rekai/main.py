@@ -144,7 +144,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     cache: CacheBackend = build_cache(settings)
-    limiter = build_rate_limiter(settings)
+    limiter = build_rate_limiter(
+        settings, settings.rate_limit_requests, settings.rate_limit_window_seconds
+    )
+    admin_limiter = (
+        build_rate_limiter(
+            settings, settings.admin_rate_limit_requests, settings.admin_rate_limit_window_seconds
+        )
+        if settings.admin_key
+        else None
+    )
     key_cipher = (
         KeyCipher(settings.dynamic_keys_encryption_key)
         if settings.dynamic_keys_encryption_key
@@ -390,17 +399,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # --- admin: runtime key management (only registered when configured) --
     # Deliberately outside /v1/*, so it's governed solely by REKAI_ADMIN_KEY —
-    # not the tenant gateway-auth gate above. No dedicated rate limiting yet;
-    # put it behind a firewall/VPN in production, same as any admin surface.
-    # Every attempt (successful, unauthorized, or not-found) is written to a
-    # dedicated audit log (admin_logger) with the masked key and caller IP —
-    # this operation has no distinct per-admin identity beyond the shared
-    # secret, so IP is the best attribution available.
+    # not the tenant gateway-auth gate above. Every attempt (successful,
+    # unauthorized, rate-limited, or not-found) is written to a dedicated
+    # audit log (admin_logger) with the masked key and caller IP — this
+    # operation has no distinct per-admin identity beyond the shared secret,
+    # so IP is the best attribution available.
     if settings.admin_key:
         admin_key = settings.admin_key
 
         def _admin_ip(request: Request) -> str:
             return request.client.host if request.client else "unknown"
+
+        async def _admin_rate_limited(request: Request) -> JSONResponse | None:
+            # Checked *before* the admin-key check (opposite order from the
+            # tenant gateway-auth gate above) — there's one shared secret here,
+            # not a per-tenant one, so the threat is brute-forcing it, and
+            # every attempt (right or wrong key) needs to count toward the
+            # budget for that defence to mean anything.
+            if not settings.admin_rate_limit_enabled or admin_limiter is None:
+                return None
+            ip = _admin_ip(request)
+            if await admin_limiter.allow(ip):
+                return None
+            retry_after = await admin_limiter.retry_after(ip)
+            admin_logger.warning(
+                "admin rate limited ip=%s",
+                ip,
+                extra={"admin_action": "rate_limited", "ip": ip},
+            )
+            return JSONResponse(
+                status_code=429,
+                content=ErrorResponse(
+                    error="rate_limited",
+                    detail=f"Too many admin requests. Retry in {retry_after}s.",
+                ).model_dump(),
+                headers={"Retry-After": str(retry_after)},
+            )
 
         def _admin_authorized(request: Request) -> bool:
             token = auth.parse_bearer(request.headers.get("authorization"))
@@ -440,6 +474,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         @app.get("/admin/keys", response_model=AdminKeyList, tags=["admin"])
         async def list_admin_keys(request: Request):
+            rate_limited = await _admin_rate_limited(request)
+            if rate_limited is not None:
+                return rate_limited
             if not _admin_authorized(request):
                 return _admin_auth_error()
             dynamic = await key_store.list_keys() if key_store is not None else []
@@ -455,6 +492,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         @app.post("/admin/keys", response_model=AdminKeyResponse, tags=["admin"], status_code=201)
         async def add_admin_key(payload: AdminKeyRequest, request: Request):
+            rate_limited = await _admin_rate_limited(request)
+            if rate_limited is not None:
+                return rate_limited
             if not _admin_authorized(request):
                 return _admin_auth_error()
             if key_store is None:
@@ -471,6 +511,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         @app.delete("/admin/keys/{key}", response_model=AdminKeyResponse, tags=["admin"])
         async def revoke_admin_key(key: str, request: Request):
+            rate_limited = await _admin_rate_limited(request)
+            if rate_limited is not None:
+                return rate_limited
             if not _admin_authorized(request):
                 return _admin_auth_error()
             if key_store is None:

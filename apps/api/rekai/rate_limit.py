@@ -172,15 +172,15 @@ class RedisRateLimiter:
         return "redis"
 
 
-def build_rate_limiter(settings: Settings) -> AsyncRateLimiter:
-    """Redis-shared when ``REKAI_REDIS_URL`` is set, else process-local."""
+def build_rate_limiter(settings: Settings, capacity: int, window: float) -> AsyncRateLimiter:
+    """Redis-shared when ``REKAI_REDIS_URL`` is set, else process-local.
+
+    ``capacity``/``window`` are passed explicitly (rather than read directly
+    off ``settings.rate_limit_*``) so the same factory builds both the tenant
+    limiter and a separately-sized one for ``/admin/*``."""
     if settings.redis_url:
         try:
-            return RedisRateLimiter(
-                settings.redis_url,
-                settings.rate_limit_requests,
-                settings.rate_limit_window_seconds,
-            )
+            return RedisRateLimiter(settings.redis_url, capacity, window)
         except Exception:  # pragma: no cover - fall back if redis client init fails
             pass
-    return LocalRateLimiter(settings.rate_limit_requests, settings.rate_limit_window_seconds)
+    return LocalRateLimiter(capacity, window)

@@ -43,6 +43,16 @@ class Settings(BaseSettings):
     # not a tenant one.
     admin_key: str | None = None
 
+    # /admin/* has no per-tenant identity (one shared secret for the whole
+    # deployment), so this is checked *before* the admin-key check, keyed by
+    # client IP — unlike the tenant gateway auth gate, where checking auth
+    # first is the point (so a guesser can't burn a real tenant's budget).
+    # Here, every attempt (right or wrong key) should count, since the threat
+    # is brute-forcing the one shared secret. Only active when admin_key is set.
+    admin_rate_limit_enabled: bool = True
+    admin_rate_limit_requests: int = Field(default=20, ge=1)
+    admin_rate_limit_window_seconds: int = Field(default=60, ge=1)
+
     # Prompt-injection guardrail (OWASP LLM01). Heuristic, opt-in. "block"
     # rejects a flagged request with 403; "flag" adds an X-Guardrail-Flag header.
     guardrails_enabled: bool = False
