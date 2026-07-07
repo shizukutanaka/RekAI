@@ -346,17 +346,35 @@ so it's gated by `REKAI_API_KEYS` like any other endpoint there.
 cumulative cost reaches the configured USD amount, further `/v1/*` requests
 from that client get `402 Payment Required` (`X-Budget-Remaining: 0`) — checked
 in the same middleware pass as auth and rate limiting, before any provider call
-is made, so an over-budget client can't rack up more spend. The cap is
-lifetime-until-reset (there's no time-bucketing, matching every other counter
-in `usage_by_client`); an operator lifts it by resetting metrics or raising the
-limit. Distinct from rate limiting: rate limiting bounds *request rate*, this
-bounds *cumulative cost*.
+is made, so an over-budget client can't rack up more spend. By default the cap
+is lifetime-until-reset (matching `usage_by_client`'s own lifetime counters);
+an operator lifts it by resetting metrics or raising the limit, or see
+`REKAI_CLIENT_BUDGET_WINDOW_SECONDS` below for a cap that resets on its own.
+Distinct from rate limiting: rate limiting bounds *request rate*, this bounds
+*cumulative cost*.
 
 `REKAI_CLIENT_BUDGETS_USD` overrides the global cap per API key (e.g.
 `"sk-a:5.00,sk-b:20.00"`) — a key not listed falls back to
 `REKAI_CLIENT_BUDGET_USD`. There's no per-IP override (only per-key, since an
 IP isn't a stable tenant identity); a deployment that needs different caps per
 tenant should have gateway auth enabled.
+
+`REKAI_CLIENT_BUDGET_WINDOW_SECONDS` (opt-in, unset by default) time-boxes the
+cap instead of leaving it lifetime-cumulative: once set, the spend compared
+against the cap is only what a client has spent in the *current* fixed window
+(e.g. `86400` = daily, `2592000` = 30 days), using the same epoch-aligned
+`int(now / window)` bucketing `RedisRateLimiter` uses for rate-limit windows —
+not a rolling window counted from a client's first request. This is tracked in
+a structure separate from `usage_by_client` (which stays lifetime for
+`/v1/usage` and `/metrics` observability, so a window rollover never erases
+those historical totals), and — unlike `usage_by_client` — is **not**
+persisted across a restart: the current window's spend starts back at $0 after
+a restart. That's the same "approximate, not exact billing" tradeoff already
+applied elsewhere in RekAI (see cost estimation above), and budget enforcement
+was already process-local/best-effort across workers even without this
+feature, so nothing that worked before regresses. When a window is configured,
+a 402 also carries an `X-Budget-Reset` header (the unix timestamp of the next
+window boundary), so a client knows exactly when it can retry.
 
 ### Web app support
 

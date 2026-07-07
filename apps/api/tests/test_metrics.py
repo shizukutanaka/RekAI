@@ -64,6 +64,55 @@ def test_client_cost_usd_reads_accumulated_spend() -> None:
     assert m.client_cost_usd("key:aaa") == pytest.approx(0.03)
 
 
+def test_record_client_budget_usage_accumulates_within_window() -> None:
+    m = Metrics()
+    m.record_client_budget_usage("key:aaa", 0.10, window_seconds=100, now=1000.0)
+    m.record_client_budget_usage("key:aaa", 0.20, window_seconds=100, now=1050.0)
+    assert m.client_budget_window_cost("key:aaa", window_seconds=100, now=1090.0) == pytest.approx(
+        0.30
+    )
+
+
+def test_record_client_budget_usage_resets_on_window_rollover() -> None:
+    m = Metrics()
+    m.record_client_budget_usage("key:aaa", 5.0, window_seconds=100, now=1000.0)  # window 10
+    assert m.client_budget_window_cost("key:aaa", window_seconds=100, now=1005.0) == 5.0
+    # A new request arrives in the next window (11) — its cost should not
+    # carry the previous window's spend forward.
+    m.record_client_budget_usage("key:aaa", 1.0, window_seconds=100, now=1105.0)
+    assert m.client_budget_window_cost("key:aaa", window_seconds=100, now=1105.0) == 1.0
+    # Merely reading (no new spend) after rollover also reports 0, not stale spend.
+    m2 = Metrics()
+    m2.record_client_budget_usage("key:bbb", 5.0, window_seconds=100, now=1000.0)
+    assert m2.client_budget_window_cost("key:bbb", window_seconds=100, now=1200.0) == 0.0
+
+
+def test_client_budget_window_cost_unset_client_returns_zero() -> None:
+    m = Metrics()
+    assert m.client_budget_window_cost("key:never-seen", window_seconds=100, now=1000.0) == 0.0
+
+
+def test_record_client_budget_usage_tolerates_none_and_zero_cost() -> None:
+    m = Metrics()
+    m.record_client_budget_usage("key:ccc", None, window_seconds=100, now=1000.0)
+    m.record_client_budget_usage("key:ccc", 0.0, window_seconds=100, now=1000.0)
+    assert m.client_budget_window_cost("key:ccc", window_seconds=100, now=1000.0) == 0.0
+
+
+def test_seed_resets_budget_window_usage() -> None:
+    m = Metrics()
+    m.record_client_budget_usage("key:aaa", 5.0, window_seconds=100, now=1000.0)
+    m.seed({})
+    assert m.client_budget_window_cost("key:aaa", window_seconds=100, now=1000.0) == 0.0
+
+
+def test_snapshot_excludes_budget_window_usage() -> None:
+    m = Metrics()
+    m.record_client_budget_usage("key:aaa", 5.0, window_seconds=100, now=1000.0)
+    assert "_budget_window_usage" not in m.snapshot()
+    assert "budget_window_usage" not in m.snapshot()
+
+
 def test_record_client_usage_tolerates_none_cost() -> None:
     m = Metrics()
     m.record_client_usage("key:ccc", tokens=3, cost_usd=None)

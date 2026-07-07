@@ -96,7 +96,9 @@ class _HasUsageAndCost(Protocol):
     def cost_usd(self) -> float | None: ...
 
 
-def _record_client_usage(http_request: Request, result: _HasUsageAndCost) -> None:
+def _record_client_usage(
+    http_request: Request, result: _HasUsageAndCost, settings: Settings
+) -> None:
     """Attribute a chat/embeddings response's tokens and cost to the requesting
     client (the masked API-key id, or the client IP with no gateway auth).
 
@@ -104,9 +106,16 @@ def _record_client_usage(http_request: Request, result: _HasUsageAndCost) -> Non
     the content cache or replayed via Idempotency-Key — since this tracks what
     the *client* consumed, not RekAI's own upstream spend (that distinction is
     exactly why the cache/idempotency paths don't re-run this on the same
-    request; per-client counting intentionally does, once per HTTP call)."""
+    request; per-client counting intentionally does, once per HTTP call).
+
+    When REKAI_CLIENT_BUDGET_WINDOW_SECONDS is set, this also updates the
+    current window's bucket used by the budget-cap check."""
     client_id = getattr(http_request.state, "client_id", None) or "anonymous"
     metrics.record_client_usage(client_id, result.usage.total_tokens, result.cost_usd)
+    if settings.client_budget_window_seconds is not None:
+        metrics.record_client_budget_usage(
+            client_id, result.cost_usd, settings.client_budget_window_seconds, time.time()
+        )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -228,16 +237,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if token is not None and token in settings.client_budget_overrides:
             budget = settings.client_budget_overrides[token]
         if is_api_write and budget is not None:
-            spent = metrics.client_cost_usd(rl_client)
+            window = settings.client_budget_window_seconds
+            if window is not None:
+                spent = metrics.client_budget_window_cost(rl_client, window, time.time())
+            else:
+                spent = metrics.client_cost_usd(rl_client)
             if spent >= budget:
                 metrics.record_error()
+                headers = {"X-Budget-Remaining": "0"}
+                if window is not None:
+                    headers["X-Budget-Reset"] = str((int(time.time() / window) + 1) * window)
                 return JSONResponse(
                     status_code=402,
                     content=ErrorResponse(
                         error="budget_exceeded",
                         detail=f"Client budget of ${budget:.2f} exceeded (spent ${spent:.4f}).",
                     ).model_dump(),
-                    headers={"X-Budget-Remaining": "0"},
+                    headers=headers,
                 )
 
         # Reject oversized bodies up front (cheap Content-Length check) so a huge
@@ -347,6 +363,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "X-Guardrail-Flag",
             "X-Redacted",
             "X-Budget-Remaining",
+            "X-Budget-Reset",
         ],
     )
 
@@ -603,11 +620,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if stored is not None:
                 response.headers["Idempotent-Replay"] = "true"
                 replayed = ChatResponse(**stored)
-                _record_client_usage(http_request, replayed)
+                _record_client_usage(http_request, replayed, config)
                 return replayed
         result = await handle_chat(request, x_provider_key, config, cache_backend)
         result = _redact_output(result, config, response)
-        _record_client_usage(http_request, result)
+        _record_client_usage(http_request, result, config)
         if idempotency_key:
             await idempotency.store(
                 cache_backend,
@@ -643,10 +660,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if stored is not None:
                 response.headers["Idempotent-Replay"] = "true"
                 replayed = EmbeddingsResponse(**stored)
-                _record_client_usage(http_request, replayed)
+                _record_client_usage(http_request, replayed, config)
                 return replayed
         result = await handle_embeddings(request, x_provider_key, config, cache_backend)
-        _record_client_usage(http_request, result)
+        _record_client_usage(http_request, result, config)
         if idempotency_key:
             await idempotency.store(
                 cache_backend,
@@ -751,6 +768,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 metrics.record_tokens(usage.total_tokens)
                 metrics.record_cost(cost_usd)
                 metrics.record_client_usage(client_id, usage.total_tokens, cost_usd)
+                if config.client_budget_window_seconds is not None:
+                    metrics.record_client_budget_usage(
+                        client_id, cost_usd, config.client_budget_window_seconds, time.time()
+                    )
                 summary = {
                     "provider": provider_name,
                     "model": request.model,

@@ -7,6 +7,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Time-boxed per-client budget windows** — `REKAI_CLIENT_BUDGET_WINDOW_SECONDS`
+  turns `REKAI_CLIENT_BUDGET_USD` from a lifetime-until-reset cap into a fixed
+  window (e.g. `86400` for daily, `2592000` for 30 days), using the same
+  epoch-aligned `int(now / window)` bucketing `RedisRateLimiter` uses. Unset
+  (default) = today's lifetime-cumulative behavior, unchanged. The 402
+  response gets a new `X-Budget-Reset` header (next window boundary) when a
+  window is configured. Tracked separately from `usage_by_client` and not
+  persisted across restarts — see docs/architecture.md. Closes the last
+  open item from this session's feature-triage list.
 - **`/admin/*` rate limiting** — on by default whenever `REKAI_ADMIN_KEY` is
   set (`REKAI_ADMIN_RATE_LIMIT_*`, 20 requests/60s), sized and keyed
   separately from the tenant rate limit (by IP, since there's no per-admin

@@ -26,8 +26,13 @@ def test_valid_settings_load() -> None:
         {"rate_limit_requests": 0},
         {"max_body_bytes": -1},
         {"provider_cooldown_seconds": -5},
+        {"client_budget_window_seconds": 0},
     ],
 )
 def test_invalid_settings_are_rejected(kwargs: dict) -> None:
     with pytest.raises(ValidationError):
         Settings(**kwargs)
+
+
+def test_client_budget_window_seconds_defaults_to_none() -> None:
+    assert Settings().client_budget_window_seconds is None

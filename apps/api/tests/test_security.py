@@ -293,6 +293,63 @@ def test_client_budget_allows_requests_under_the_cap() -> None:
         main_module.metrics.seed({})
 
 
+def test_client_budget_window_seconds_enforces_cap_within_window(monkeypatch) -> None:
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys="sk-budget-w",
+        rate_limit_enabled=False,
+        client_budget_usd=0.5,
+        client_budget_window_seconds=100,
+    )
+    client = TestClient(create_app(settings))
+    try:
+        monkeypatch.setattr(main_module.time, "time", lambda: 1000.0)
+        # Prior spend recorded in the same window the check will read.
+        main_module.metrics.record_client_budget_usage(
+            client_id("sk-budget-w"), 1.0, window_seconds=100, now=1000.0
+        )
+        body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+        resp = client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-budget-w"})
+        assert resp.status_code == 402
+        # Window 10 spans [1000, 1100) -> resets at 1100.
+        assert resp.headers["X-Budget-Reset"] == "1100"
+    finally:
+        main_module.metrics.seed({})
+
+
+def test_client_budget_window_seconds_resets_after_rollover(monkeypatch) -> None:
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys="sk-budget-w2",
+        rate_limit_enabled=False,
+        client_budget_usd=0.5,
+        client_budget_window_seconds=100,
+    )
+    client = TestClient(create_app(settings))
+    try:
+        monkeypatch.setattr(main_module.time, "time", lambda: 1000.0)
+        main_module.metrics.record_client_budget_usage(
+            client_id("sk-budget-w2"), 1.0, window_seconds=100, now=1000.0
+        )
+        body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+        blocked = client.post(
+            "/v1/chat", json=body, headers={"Authorization": "Bearer sk-budget-w2"}
+        )
+        assert blocked.status_code == 402
+
+        # Move past the window boundary (1100) -> the prior window's spend no
+        # longer applies, so the same client is allowed again.
+        monkeypatch.setattr(main_module.time, "time", lambda: 1105.0)
+        allowed = client.post(
+            "/v1/chat", json=body, headers={"Authorization": "Bearer sk-budget-w2"}
+        )
+        assert allowed.status_code == 200
+    finally:
+        main_module.metrics.seed({})
+
+
 def test_client_budget_is_per_client() -> None:
     settings = Settings(
         environment="test",

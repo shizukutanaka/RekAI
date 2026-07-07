@@ -100,6 +100,18 @@ class Settings(BaseSettings):
     # key also appears in api_keys (there's no per-IP override).
     client_budgets_usd: str = ""
 
+    # Time-box the cap above to a fixed calendar window instead of lifetime
+    # spend, e.g. 86400 for "$X per day" or 2_592_000 for "$X per 30 days".
+    # Unset (default) = lifetime-cumulative, today's behavior. Windows are
+    # fixed (epoch-aligned via int(now / window), the same idiom
+    # RedisRateLimiter uses for its windows), not rolling from a client's
+    # first request. Tracked separately from usage_by_client (which stays
+    # lifetime for /v1/usage and /metrics observability) so a window rollover
+    # clears enforcement without erasing historical totals — and, since it's
+    # kept outside the persisted metrics snapshot, a restart resets the
+    # current window's accumulated spend (see docs/architecture.md).
+    client_budget_window_seconds: int | None = Field(default=None, ge=1)
+
     # /metrics is open by default (so Prometheus can scrape without a token),
     # even when api_keys gates /v1/*. It carries a per-client cost/token
     # breakdown (usage_by_client), so an operator who considers that sensitive

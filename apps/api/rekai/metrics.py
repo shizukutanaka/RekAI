@@ -21,6 +21,19 @@ class Metrics:
         # Per-tenant usage, keyed by the masked "key:<hash>" client id (or the
         # client IP when the gateway has no auth configured).
         self.usage_by_client: dict[str, dict[str, float]] = {}
+        # Per-client cost within the *current* budget window only (see
+        # record_client_budget_usage) — client_id -> (window_index, cost in
+        # that window). Deliberately separate from usage_by_client (lifetime,
+        # for /v1/usage and /metrics) and deliberately NOT part of
+        # seed()/snapshot(): a window index only means something relative to
+        # a `now`, and reconciling that across a restart gap of unknown
+        # length isn't worth the complexity for an enforcement-only
+        # structure. A restart simply starts the current window at $0 — the
+        # same "approximate, not billing" tradeoff already applied elsewhere
+        # (rekai/pricing.py's estimates; budget enforcement in general is
+        # already process-local best-effort across workers even without
+        # this feature — see docs/architecture.md).
+        self._budget_window_usage: dict[str, tuple[int, float]] = {}
 
     def record_request(self, provider: str) -> None:
         with self._lock:
@@ -77,9 +90,35 @@ class Metrics:
             usage = self.usage_by_client.get(client_id)
             return usage["cost_usd"] if usage else 0.0
 
+    def record_client_budget_usage(
+        self, client_id: str, cost_usd: float | None, window_seconds: int, now: float
+    ) -> None:
+        """Attribute cost to a client within the current fixed budget window
+        (REKAI_CLIENT_BUDGET_WINDOW_SECONDS), separate from usage_by_client's
+        lifetime total. ``now`` (typically ``time.time()``) is supplied by the
+        caller rather than read internally, so tests can exercise window
+        rollover deterministically without a clock dependency on Metrics."""
+        if not cost_usd:
+            return
+        with self._lock:
+            window_index = int(now / window_seconds)
+            prev = self._budget_window_usage.get(client_id)
+            base = prev[1] if prev is not None and prev[0] == window_index else 0.0
+            self._budget_window_usage[client_id] = (window_index, base + cost_usd)
+
+    def client_budget_window_cost(self, client_id: str, window_seconds: int, now: float) -> float:
+        """Read a client's cost accumulated in the current fixed window (0.0
+        if never recorded, including immediately after a rollover)."""
+        with self._lock:
+            entry = self._budget_window_usage.get(client_id)
+            if entry is None:
+                return 0.0
+            return entry[1] if entry[0] == int(now / window_seconds) else 0.0
+
     def seed(self, snapshot: dict) -> None:
         """Set counters from a persisted snapshot (used on startup)."""
         with self._lock:
+            self._budget_window_usage = {}
             self.requests_total = snapshot.get("requests_total", 0)
             self.cache_hits_total = snapshot.get("cache_hits_total", 0)
             self.cache_misses_total = snapshot.get("cache_misses_total", 0)
