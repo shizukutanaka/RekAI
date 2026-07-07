@@ -7,6 +7,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Web security headers** — `apps/web/next.config.js` now sets
+  `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+  `Referrer-Policy: strict-origin-when-cross-origin`, and a `Content-Security-Policy`
+  (`connect-src` includes `NEXT_PUBLIC_API_URL` so API calls aren't blocked).
+  Verified live: all 5 pages load and a real chat round-trip completes with
+  zero CSP violations in the browser console.
+- **Non-root Docker users** — both Dockerfiles now drop root before running
+  the server (`rekai` for the API image, the built-in `node` user for the
+  web image); the web image's `deps` stage also switched from `npm install`
+  to `npm ci` for reproducible builds. Reviewed for correctness (standard,
+  well-documented patterns) but not build-verified in this session — the
+  sandbox's Docker daemon isn't available (`dockerd` fails to start here);
+  `docker compose config` validates cleanly.
 - **Web E2E suite** — `apps/web/e2e/` (Playwright) promotes three flows
   hand-verified ad-hoc throughout development into committed regression
   tests: sending a chat message, gateway auth locking out the app until a

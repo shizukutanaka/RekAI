@@ -10,6 +10,10 @@ COPY pyproject.toml README.md ./
 COPY rekai ./rekai
 RUN pip install --no-cache-dir .
 
+# Don't run the server as root.
+RUN useradd --system --no-create-home --uid 1000 rekai
+USER rekai
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
