@@ -50,3 +50,11 @@ Open http://localhost:3000.
 npm run lint
 npm run build
 ```
+
+## E2E tests
+
+```bash
+npm run e2e
+```
+
+Playwright specs in `e2e/` — see [`e2e/README.md`](./e2e/README.md).

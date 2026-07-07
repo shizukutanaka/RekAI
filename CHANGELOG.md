@@ -7,6 +7,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Web E2E suite** — `apps/web/e2e/` (Playwright) promotes three flows
+  hand-verified ad-hoc throughout development into committed regression
+  tests: sending a chat message, gateway auth locking out the app until a
+  key is saved in Settings, and the `/admin` runtime key-management UI
+  (wrong key errors, add/revoke). Each spec starts/stops its own API process
+  with the `REKAI_*` env it needs (fixed ports, so specs run serially — see
+  `apps/web/e2e/README.md`). `npm run e2e`.
 - **Time-boxed per-client budget windows** — `REKAI_CLIENT_BUDGET_WINDOW_SECONDS`
   turns `REKAI_CLIENT_BUDGET_USD` from a lifetime-until-reset cap into a fixed
   window (e.g. `86400` for daily, `2592000` for 30 days), using the same
