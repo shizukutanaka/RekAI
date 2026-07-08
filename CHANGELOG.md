@@ -7,6 +7,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Custom error and 404 pages** — `apps/web/app/error.tsx` (client-side error
+  boundary with a "Try again" reset button) and `apps/web/app/not-found.tsx`
+  (styled 404 matching the rest of the app) replace Next.js's generic
+  defaults.
 - **Web security headers** — `apps/web/next.config.js` now sets
   `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
   `Referrer-Policy: strict-origin-when-cross-origin`, and a `Content-Security-Policy`
