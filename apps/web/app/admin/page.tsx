@@ -47,7 +47,8 @@ export default function AdminPage() {
     if (stored) load(stored);
   }, [load]);
 
-  function save() {
+  function save(e: React.FormEvent) {
+    e.preventDefault();
     const trimmed = adminKey.trim();
     setStoredAdminKey(trimmed);
     setSaved(true);
@@ -55,7 +56,8 @@ export default function AdminPage() {
     load(trimmed);
   }
 
-  async function handleAdd() {
+  async function handleAdd(e: React.FormEvent) {
+    e.preventDefault();
     if (!newKey.trim() || !adminKey) return;
     setBusy(true);
     setError("");
@@ -72,7 +74,8 @@ export default function AdminPage() {
     }
   }
 
-  async function handleRevoke() {
+  async function handleRevoke(e: React.FormEvent) {
+    e.preventDefault();
     if (!revokeKeyValue.trim() || !adminKey) return;
     setBusy(true);
     setError("");
@@ -99,22 +102,25 @@ export default function AdminPage() {
         or provider key.
       </p>
 
-      <div className="field">
-        <label htmlFor="adminKey">Admin key</label>
-        <input
-          id="adminKey"
-          type="password"
-          value={adminKey}
-          placeholder="sk-rekai-admin-..."
-          onChange={(e) => setAdminKey(e.target.value)}
-        />
-        <p className="hint">Stored only in your browser&apos;s local storage.</p>
-      </div>
+      <form onSubmit={save}>
+        <div className="field">
+          <label htmlFor="adminKey">Admin key</label>
+          <input
+            id="adminKey"
+            type="password"
+            autoComplete="off"
+            value={adminKey}
+            placeholder="sk-rekai-admin-..."
+            onChange={(e) => setAdminKey(e.target.value)}
+          />
+          <p className="hint">Stored only in your browser&apos;s local storage.</p>
+        </div>
 
-      <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 32 }}>
-        <button onClick={save}>Save &amp; Refresh</button>
-        {saved && <span className="saved">Saved ✓</span>}
-      </div>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 32 }}>
+          <button type="submit">Save &amp; Refresh</button>
+          {saved && <span className="saved">Saved ✓</span>}
+        </div>
+      </form>
 
       {notConfigured && (
         <div className="notice">
@@ -159,17 +165,17 @@ export default function AdminPage() {
 
           <div className="field">
             <label htmlFor="newKey">Add a key</label>
-            <div style={{ display: "flex", gap: 8 }}>
+            <form onSubmit={handleAdd} style={{ display: "flex", gap: 8 }}>
               <input
                 id="newKey"
                 value={newKey}
                 placeholder="sk-rekai-new-tenant-key"
                 onChange={(e) => setNewKey(e.target.value)}
               />
-              <button onClick={handleAdd} disabled={busy || !newKey.trim()}>
+              <button type="submit" disabled={busy || !newKey.trim()}>
                 Add
               </button>
-            </div>
+            </form>
           </div>
 
           <div className="field">
@@ -178,17 +184,17 @@ export default function AdminPage() {
               Only a key&apos;s masked form is ever shown above, so revoking needs the
               raw key — keep a record of it when you add one.
             </p>
-            <div style={{ display: "flex", gap: 8 }}>
+            <form onSubmit={handleRevoke} style={{ display: "flex", gap: 8 }}>
               <input
                 id="revokeKey"
                 value={revokeKeyValue}
                 placeholder="sk-rekai-key-to-revoke"
                 onChange={(e) => setRevokeKeyValue(e.target.value)}
               />
-              <button onClick={handleRevoke} disabled={busy || !revokeKeyValue.trim()}>
+              <button type="submit" disabled={busy || !revokeKeyValue.trim()}>
                 Revoke
               </button>
-            </div>
+            </form>
           </div>
         </>
       )}

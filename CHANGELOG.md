@@ -188,6 +188,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `REKAI_PROVIDER_COOLDOWN_ENABLED`.
 
 ### Fixed
+- **Password fields wrapped in `<form>`** — the Settings and Admin pages'
+  password/credential inputs (provider key, gateway key, admin key, add/revoke
+  runtime key) previously used bare `onClick` handlers, which browsers warn
+  about ("password field is not contained in a form") and which break
+  Enter-to-submit and password-manager integration. Each is now inside its own
+  `<form onSubmit>`.
 - **Fail-fast config validation** — enum-like settings (`REKAI_LOG_FORMAT`,
   `REKAI_GUARDRAILS_ACTION`) are now `Literal`-typed and numeric ones carry
   bounds (`SEMANTIC_CACHE_THRESHOLD` in [0,1], `RETRY_MAX_ATTEMPTS`/rate limits

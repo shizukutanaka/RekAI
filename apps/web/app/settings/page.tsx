@@ -23,7 +23,8 @@ export default function SettingsPage() {
     fetchHealth().then(setHealth);
   }, []);
 
-  function save() {
+  function save(e: React.FormEvent) {
+    e.preventDefault();
     setStoredKey(key.trim());
     setStoredGatewayKey(gatewayKey.trim());
     setSaved(true);
@@ -34,42 +35,48 @@ export default function SettingsPage() {
     <div className="page">
       <h2>Settings</h2>
 
-      <div className="field">
-        <label htmlFor="key">Provider API key (BYOK)</label>
-        <input
-          id="key"
-          type="password"
-          value={key}
-          placeholder="sk-..."
-          onChange={(e) => setKey(e.target.value)}
-        />
-        <p className="hint">
-          Stored only in your browser&apos;s local storage and sent to the API as the{" "}
-          <code>X-Provider-Key</code> header. RekAI never persists it server-side.
-        </p>
-      </div>
+      {/* A real <form> (not bare inputs) so password managers behave sanely and
+          Enter submits — browsers warn about password fields outside a form. */}
+      <form onSubmit={save}>
+        <div className="field">
+          <label htmlFor="key">Provider API key (BYOK)</label>
+          <input
+            id="key"
+            type="password"
+            autoComplete="off"
+            value={key}
+            placeholder="sk-..."
+            onChange={(e) => setKey(e.target.value)}
+          />
+          <p className="hint">
+            Stored only in your browser&apos;s local storage and sent to the API as the{" "}
+            <code>X-Provider-Key</code> header. RekAI never persists it server-side.
+          </p>
+        </div>
 
-      <div className="field">
-        <label htmlFor="gatewayKey">Gateway API key</label>
-        <input
-          id="gatewayKey"
-          type="password"
-          value={gatewayKey}
-          placeholder="sk-rekai-..."
-          onChange={(e) => setGatewayKey(e.target.value)}
-        />
-        <p className="hint">
-          Only needed if this RekAI deployment has <code>REKAI_API_KEYS</code>{" "}
-          configured. Sent as an <code>Authorization: Bearer</code> header. Different
-          from the provider key above — this authenticates you to the gateway
-          itself, not to an upstream provider like OpenAI.
-        </p>
-      </div>
+        <div className="field">
+          <label htmlFor="gatewayKey">Gateway API key</label>
+          <input
+            id="gatewayKey"
+            type="password"
+            autoComplete="off"
+            value={gatewayKey}
+            placeholder="sk-rekai-..."
+            onChange={(e) => setGatewayKey(e.target.value)}
+          />
+          <p className="hint">
+            Only needed if this RekAI deployment has <code>REKAI_API_KEYS</code>{" "}
+            configured. Sent as an <code>Authorization: Bearer</code> header. Different
+            from the provider key above — this authenticates you to the gateway
+            itself, not to an upstream provider like OpenAI.
+          </p>
+        </div>
 
-      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-        <button onClick={save}>Save</button>
-        {saved && <span className="saved">Saved ✓</span>}
-      </div>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <button type="submit">Save</button>
+          {saved && <span className="saved">Saved ✓</span>}
+        </div>
+      </form>
 
       {health && (
         <div className="field" style={{ marginTop: 32 }}>
