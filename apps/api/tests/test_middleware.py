@@ -44,6 +44,11 @@ def test_version_header(client: TestClient) -> None:
     assert resp.headers["X-RekAI-Version"] == __version__
 
 
+def test_nosniff_header(client: TestClient) -> None:
+    resp = client.get("/health")
+    assert resp.headers["X-Content-Type-Options"] == "nosniff"
+
+
 def test_request_id_propagated(client: TestClient) -> None:
     resp = client.get("/health", headers={"X-Request-ID": "my-trace-123"})
     assert resp.headers["X-Request-ID"] == "my-trace-123"

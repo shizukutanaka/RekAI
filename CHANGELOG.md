@@ -7,6 +7,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`X-Content-Type-Options: nosniff` on all API responses** — set in the
+  existing `_request_context` middleware alongside `X-Request-ID` /
+  `X-RekAI-Version`, closing the gap where the web app got security headers
+  but the API itself didn't.
 - **Favicon** — `apps/web/app/icon.svg`; the app previously shipped no icon at
   all, so browsers requested a nonexistent `/favicon.ico`. Uses Next.js's
   built-in `app/icon.svg` convention (auto-linked in `<head>`, no other

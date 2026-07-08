@@ -322,6 +322,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
         response.headers["X-RekAI-Version"] = __version__
         response.headers["traceparent"] = tracing.format_traceparent(trace_id, span_id)
+        response.headers["X-Content-Type-Options"] = "nosniff"
         access_logger.info(
             "%s %s -> %s %.1fms id=%s",
             request.method,
