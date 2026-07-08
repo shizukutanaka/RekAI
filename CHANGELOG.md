@@ -7,6 +7,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Favicon** — `apps/web/app/icon.svg`; the app previously shipped no icon at
+  all, so browsers requested a nonexistent `/favicon.ico`. Uses Next.js's
+  built-in `app/icon.svg` convention (auto-linked in `<head>`, no other
+  wiring needed).
 - **Custom error and 404 pages** — `apps/web/app/error.tsx` (client-side error
   boundary with a "Try again" reset button) and `apps/web/app/not-found.tsx`
   (styled 404 matching the rest of the app) replace Next.js's generic
