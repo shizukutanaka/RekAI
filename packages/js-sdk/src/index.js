@@ -21,18 +21,27 @@ function normalize(messages) {
 export class RekAIClient {
   /**
    * @param {string} [baseUrl]
-   * @param {{ providerKey?: string }} [options]
+   * @param {{ providerKey?: string, gatewayKey?: string }} [options]
    */
   constructor(baseUrl = "http://localhost:8000", options = {}) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.providerKey = options.providerKey;
+    this.gatewayKey = options.gatewayKey;
   }
 
-  /** @param {string} [providerKey] */
-  _headers(providerKey) {
+  /**
+   * @param {string} [providerKey]
+   * @param {string} [gatewayKey]
+   */
+  _headers(providerKey, gatewayKey) {
     const headers = { "Content-Type": "application/json" };
     const key = providerKey || this.providerKey;
     if (key) headers["X-Provider-Key"] = key;
+    // The gateway key authenticates this client to RekAI (REKAI_API_KEYS);
+    // distinct from the provider key above, which is BYOK for the upstream
+    // provider. Required on /v1/* whenever the deployment has keys configured.
+    const bearer = gatewayKey || this.gatewayKey;
+    if (bearer) headers["Authorization"] = `Bearer ${bearer}`;
     return headers;
   }
 
@@ -73,7 +82,7 @@ export class RekAIClient {
   async chat(model, messages, opts = {}) {
     const res = await fetch(`${this.baseUrl}/v1/chat`, {
       method: "POST",
-      headers: this._headers(opts.providerKey),
+      headers: this._headers(opts.providerKey, opts.gatewayKey),
       body: JSON.stringify(this._payload(model, messages, opts)),
     });
     await this._raiseForStatus(res);
@@ -91,7 +100,7 @@ export class RekAIClient {
   async *stream(model, messages, opts = {}) {
     const res = await fetch(`${this.baseUrl}/v1/chat/stream`, {
       method: "POST",
-      headers: this._headers(opts.providerKey),
+      headers: this._headers(opts.providerKey, opts.gatewayKey),
       body: JSON.stringify(this._payload(model, messages, opts)),
     });
     await this._raiseForStatus(res);
@@ -139,23 +148,33 @@ export class RekAIClient {
     if (opts.provider != null) payload.provider = opts.provider;
     const res = await fetch(`${this.baseUrl}/v1/embeddings`, {
       method: "POST",
-      headers: this._headers(opts.providerKey),
+      headers: this._headers(opts.providerKey, opts.gatewayKey),
       body: JSON.stringify(payload),
     });
     await this._raiseForStatus(res);
     return res.json();
   }
 
-  /** @returns {Promise<Array<{id:string,provider:string}>>} */
-  async models() {
-    const res = await fetch(`${this.baseUrl}/v1/models`);
+  /**
+   * @param {{ gatewayKey?: string }} [opts]
+   * @returns {Promise<Array<{id:string,provider:string}>>}
+   */
+  async models(opts = {}) {
+    const res = await fetch(`${this.baseUrl}/v1/models`, {
+      headers: this._headers(undefined, opts.gatewayKey),
+    });
     await this._raiseForStatus(res);
     return (await res.json()).data ?? [];
   }
 
-  /** @returns {Promise<object>} */
-  async usage() {
-    const res = await fetch(`${this.baseUrl}/v1/usage`);
+  /**
+   * @param {{ gatewayKey?: string }} [opts]
+   * @returns {Promise<object>}
+   */
+  async usage(opts = {}) {
+    const res = await fetch(`${this.baseUrl}/v1/usage`, {
+      headers: this._headers(undefined, opts.gatewayKey),
+    });
     await this._raiseForStatus(res);
     return res.json();
   }

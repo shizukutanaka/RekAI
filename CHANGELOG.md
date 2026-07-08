@@ -7,6 +7,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Gateway-key support in both SDKs** — the Python and JS clients only ever
+  sent the BYOK provider key (`X-Provider-Key`); neither could authenticate to
+  a gateway with `REKAI_API_KEYS` configured, since that needs a separate
+  `Authorization: Bearer` header. Both now accept a `gateway_key`/`gatewayKey`
+  (constructor default, overridable per call) and send it on every `/v1/*`
+  call (`chat`, `stream`, `embeddings`, `models`, `usage`).
 - **`X-Content-Type-Options: nosniff` on all API responses** — set in the
   existing `_request_context` middleware alongside `X-Request-ID` /
   `X-RekAI-Version`, closing the gap where the web app got security headers

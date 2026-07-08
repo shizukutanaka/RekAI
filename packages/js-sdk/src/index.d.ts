@@ -24,6 +24,7 @@ export interface ChatOptions {
   cache?: boolean;
   fallbacks?: FallbackTarget[];
   providerKey?: string;
+  gatewayKey?: string;
   /** OpenAI-style tool/function definitions, passed through. */
   tools?: Record<string, unknown>[];
   /** Tool choice ('auto' | 'none' | 'required' | object), passed through. */
@@ -66,6 +67,7 @@ export interface EmbeddingsOptions {
   provider?: string;
   cache?: boolean;
   providerKey?: string;
+  gatewayKey?: string;
 }
 
 export interface EmbeddingsResult {
@@ -97,11 +99,13 @@ export type Messages = string | ChatMessage[];
 
 export interface RekAIClientOptions {
   providerKey?: string;
+  gatewayKey?: string;
 }
 
 export class RekAIClient {
   baseUrl: string;
   providerKey?: string;
+  gatewayKey?: string;
   constructor(baseUrl?: string, options?: RekAIClientOptions);
   chat(model: string, messages: Messages, opts?: ChatOptions): Promise<ChatResult>;
   stream(model: string, messages: Messages, opts?: ChatOptions): AsyncGenerator<string>;
@@ -110,8 +114,8 @@ export class RekAIClient {
     input: string | string[],
     opts?: EmbeddingsOptions,
   ): Promise<EmbeddingsResult>;
-  models(): Promise<ModelInfo[]>;
-  usage(): Promise<UsageSummary>;
+  models(opts?: { gatewayKey?: string }): Promise<ModelInfo[]>;
+  usage(opts?: { gatewayKey?: string }): Promise<UsageSummary>;
   health(): Promise<Record<string, unknown>>;
 }
 

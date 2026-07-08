@@ -30,6 +30,11 @@ result = client.chat(
     provider_key="sk-...",
 )
 
+# Gateway auth: if the deployment has REKAI_API_KEYS configured, pass the
+# gateway key too — distinct from provider_key above (that's BYOK for the
+# upstream provider; this authenticates you to RekAI itself).
+client = RekAIClient("http://localhost:8000", gateway_key="sk-rekai-...")
+
 # Streaming (with optional usage/cost callback)
 for chunk in client.stream("echo", "stream me", on_usage=lambda s: print("\n", s)):
     print(chunk, end="", flush=True)

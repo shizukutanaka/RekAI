@@ -112,6 +112,24 @@ test("chat forwards tools and returns tool_calls", async () => {
   assert.deepEqual(result.tool_calls, [{ id: "c1" }]);
 });
 
+test("chat forwards gateway key as a Bearer header", async () => {
+  const client = new RekAIClient(baseUrl, { gatewayKey: "sk-rekai-default" });
+  await client.chat("echo", "hi");
+  assert.equal(lastRequest.headers["authorization"], "Bearer sk-rekai-default");
+
+  await client.chat("echo", "hi", { gatewayKey: "sk-rekai-override" });
+  assert.equal(lastRequest.headers["authorization"], "Bearer sk-rekai-override");
+});
+
+test("models and usage forward the gateway key", async () => {
+  const client = new RekAIClient(baseUrl);
+  await client.models({ gatewayKey: "sk-rekai-1" });
+  assert.equal(lastRequest.headers["authorization"], "Bearer sk-rekai-1");
+
+  await client.usage({ gatewayKey: "sk-rekai-2" });
+  assert.equal(lastRequest.headers["authorization"], "Bearer sk-rekai-2");
+});
+
 test("chat raises RekAIError on error status", async () => {
   const client = new RekAIClient(baseUrl, { providerKey: "bad" });
   await assert.rejects(

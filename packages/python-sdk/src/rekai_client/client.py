@@ -95,9 +95,11 @@ class RekAIClient:
         base_url: str = "http://localhost:8000",
         *,
         provider_key: str | None = None,
+        gateway_key: str | None = None,
         timeout: float = 60.0,
     ) -> None:
         self._provider_key = provider_key
+        self._gateway_key = gateway_key
         self._client = httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout)
 
     # -- lifecycle ---------------------------------------------------------
@@ -111,11 +113,19 @@ class RekAIClient:
         self.close()
 
     # -- helpers -----------------------------------------------------------
-    def _headers(self, provider_key: str | None) -> dict[str, str]:
+    def _headers(
+        self, provider_key: str | None, gateway_key: str | None = None
+    ) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
         key = provider_key or self._provider_key
         if key:
             headers["X-Provider-Key"] = key
+        # The gateway key authenticates this client to RekAI (REKAI_API_KEYS);
+        # distinct from the provider key above, which is BYOK for the upstream
+        # provider. Required on /v1/* whenever the deployment has keys configured.
+        bearer = gateway_key or self._gateway_key
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
         return headers
 
     def _payload(
@@ -174,11 +184,14 @@ class RekAIClient:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any | None = None,
         provider_key: str | None = None,
+        gateway_key: str | None = None,
     ) -> ChatResult:
         payload = self._payload(
             model, messages, provider, temperature, max_tokens, cache, fallbacks, tools, tool_choice
         )
-        resp = self._client.post("/v1/chat", json=payload, headers=self._headers(provider_key))
+        resp = self._client.post(
+            "/v1/chat", json=payload, headers=self._headers(provider_key, gateway_key)
+        )
         self._raise_for_status(resp)
         return ChatResult.from_dict(resp.json())
 
@@ -191,6 +204,7 @@ class RekAIClient:
         temperature: float = 0.7,
         max_tokens: int | None = None,
         provider_key: str | None = None,
+        gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], None] | None = None,
     ) -> Iterator[str]:
         """Yield response text chunks from the streaming endpoint.
@@ -201,7 +215,10 @@ class RekAIClient:
         """
         payload = self._payload(model, messages, provider, temperature, max_tokens, True, None)
         with self._client.stream(
-            "POST", "/v1/chat/stream", json=payload, headers=self._headers(provider_key)
+            "POST",
+            "/v1/chat/stream",
+            json=payload,
+            headers=self._headers(provider_key, gateway_key),
         ) as resp:
             self._raise_for_status(resp)
             for line in resp.iter_lines():
@@ -230,24 +247,25 @@ class RekAIClient:
         provider: str | None = None,
         cache: bool = True,
         provider_key: str | None = None,
+        gateway_key: str | None = None,
     ) -> EmbeddingsResult:
         """Create embeddings for a string or list of strings."""
         payload: dict[str, Any] = {"model": model, "input": input, "cache": cache}
         if provider is not None:
             payload["provider"] = provider
         resp = self._client.post(
-            "/v1/embeddings", json=payload, headers=self._headers(provider_key)
+            "/v1/embeddings", json=payload, headers=self._headers(provider_key, gateway_key)
         )
         self._raise_for_status(resp)
         return EmbeddingsResult.from_dict(resp.json())
 
-    def models(self) -> list[dict[str, str]]:
-        resp = self._client.get("/v1/models")
+    def models(self, *, gateway_key: str | None = None) -> list[dict[str, str]]:
+        resp = self._client.get("/v1/models", headers=self._headers(None, gateway_key))
         self._raise_for_status(resp)
         return resp.json().get("data", [])
 
-    def usage(self) -> dict[str, Any]:
-        resp = self._client.get("/v1/usage")
+    def usage(self, *, gateway_key: str | None = None) -> dict[str, Any]:
+        resp = self._client.get("/v1/usage", headers=self._headers(None, gateway_key))
         self._raise_for_status(resp)
         return resp.json()
 

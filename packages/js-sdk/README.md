@@ -65,6 +65,14 @@ Set a default BYOK key for every request:
 const client = new RekAIClient("http://localhost:8000", { providerKey: "sk-..." });
 ```
 
+If the deployment has `REKAI_API_KEYS` configured, pass the gateway key too —
+distinct from `providerKey` above (that's BYOK for the upstream provider; this
+authenticates you to RekAI itself):
+
+```js
+const client = new RekAIClient("http://localhost:8000", { gatewayKey: "sk-rekai-..." });
+```
+
 ## Errors
 
 Failed requests throw `RekAIError` with a `.statusCode` property.

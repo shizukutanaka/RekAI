@@ -110,6 +110,51 @@ def test_chat_forwards_tools_and_returns_tool_calls() -> None:
     assert result.tool_calls == [tool_call]
 
 
+def test_chat_forwards_gateway_key_as_bearer_header() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["auth"] = request.headers.get("Authorization")
+        return httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "provider": "echo",
+                "model": "echo",
+                "content": "ok",
+                "usage": {},
+                "cost_usd": None,
+                "cached": False,
+                "fallback_used": False,
+            },
+        )
+
+    client = make_client(handler)
+    client._gateway_key = "sk-rekai-default"
+    client.chat("echo", "hi")
+    assert captured["auth"] == "Bearer sk-rekai-default"
+
+    client.chat("echo", "hi", gateway_key="sk-rekai-override")
+    assert captured["auth"] == "Bearer sk-rekai-override"
+
+
+def test_models_and_usage_forward_gateway_key() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["auth"] = request.headers.get("Authorization")
+        if request.url.path == "/v1/models":
+            return httpx.Response(200, json={"data": []})
+        return httpx.Response(200, json={"requests_total": 0})
+
+    client = make_client(handler)
+    client.models(gateway_key="sk-rekai-1")
+    assert captured["auth"] == "Bearer sk-rekai-1"
+
+    client.usage(gateway_key="sk-rekai-2")
+    assert captured["auth"] == "Bearer sk-rekai-2"
+
+
 def test_chat_raises_on_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"error": "provider_error", "detail": "no key"})
