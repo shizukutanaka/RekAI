@@ -7,6 +7,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Gateway-key support in `examples/`** — `curl.sh` and all 7 Python/JS
+  example scripts only ever sent the BYOK provider key; none could reach a
+  gateway with `REKAI_API_KEYS` configured. All now read a `REKAI_GATEWAY_KEY`
+  env var and send it as `Authorization: Bearer`, matching the SDK fix above.
 - **Documented `REKAI_APP_NAME` and `REKAI_REQUEST_TIMEOUT_SECONDS` in
   `.env.example`** — both are real, active `Settings` fields (the latter
   controls every outbound HTTP timeout to a provider — chat, streaming,

@@ -8,6 +8,8 @@ Environment:
     REKAI_API_URL        API base URL (default http://localhost:8000)
     MODEL                model to request (default "echo")
     REKAI_PROVIDER_KEY   optional BYOK key, sent as X-Provider-Key
+    REKAI_GATEWAY_KEY    optional gateway key, sent as Authorization: Bearer
+                         (only needed if the deployment has REKAI_API_KEYS set)
 """
 
 from __future__ import annotations
@@ -30,6 +32,9 @@ def chat(prompt: str) -> dict:
     key = os.environ.get("REKAI_PROVIDER_KEY")
     if key:
         headers["X-Provider-Key"] = key
+    gateway_key = os.environ.get("REKAI_GATEWAY_KEY")
+    if gateway_key:
+        headers["Authorization"] = f"Bearer {gateway_key}"
 
     req = urllib.request.Request(f"{API_URL}/v1/chat", data=body, headers=headers)
     try:

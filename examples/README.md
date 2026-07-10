@@ -11,7 +11,10 @@ docker compose up --build      # from the repo root
 
 All examples default to the keyless `echo` provider, so they work with no
 credentials. To use a real provider, set `REKAI_PROVIDER_KEY` (BYOK) and pass a
-matching model, e.g. `MODEL=gpt-4o-mini`.
+matching model, e.g. `MODEL=gpt-4o-mini`. If the RekAI deployment itself
+requires client auth (`REKAI_API_KEYS`), also set `REKAI_GATEWAY_KEY` — a
+separate key from `REKAI_PROVIDER_KEY` above: that one is BYOK for the
+upstream provider, this one authenticates you to RekAI.
 
 | File                     | Runtime        | Run                                  |
 |--------------------------|----------------|--------------------------------------|
@@ -31,3 +34,4 @@ matching model, e.g. `MODEL=gpt-4o-mini`.
 | `REKAI_API_URL`        | `http://localhost:8000` | API base URL                  |
 | `MODEL`                | `echo`                  | Model to request              |
 | `REKAI_PROVIDER_KEY`   | _(unset)_               | BYOK key (`X-Provider-Key`)   |
+| `REKAI_GATEWAY_KEY`    | _(unset)_               | Gateway key (`Authorization: Bearer`), only needed if `REKAI_API_KEYS` is set |

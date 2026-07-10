@@ -49,6 +49,9 @@ def chat(messages: list[dict], tools=None) -> dict:
     key = os.environ.get("REKAI_PROVIDER_KEY")
     if key:
         headers["X-Provider-Key"] = key
+    gateway_key = os.environ.get("REKAI_GATEWAY_KEY")
+    if gateway_key:
+        headers["Authorization"] = f"Bearer {gateway_key}"
     req = urllib.request.Request(f"{API_URL}/v1/chat", data=json.dumps(body).encode(), headers=headers)
     with urllib.request.urlopen(req) as resp:
         return json.load(resp)

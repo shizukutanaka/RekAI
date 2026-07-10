@@ -8,6 +8,8 @@
 //   REKAI_API_URL        API base URL (default http://localhost:8000)
 //   MODEL                model to request (default "echo")
 //   REKAI_PROVIDER_KEY   optional BYOK key, sent as X-Provider-Key
+//   REKAI_GATEWAY_KEY    optional gateway key, sent as Authorization: Bearer
+//                        (only needed if the deployment has REKAI_API_KEYS set)
 
 const API_URL = process.env.REKAI_API_URL || "http://localhost:8000";
 const MODEL = process.env.MODEL || "echo";
@@ -16,6 +18,9 @@ async function chat(prompt) {
   const headers = { "Content-Type": "application/json" };
   if (process.env.REKAI_PROVIDER_KEY) {
     headers["X-Provider-Key"] = process.env.REKAI_PROVIDER_KEY;
+  }
+  if (process.env.REKAI_GATEWAY_KEY) {
+    headers["Authorization"] = `Bearer ${process.env.REKAI_GATEWAY_KEY}`;
   }
 
   let res;
