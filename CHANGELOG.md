@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Documented `REKAI_APP_NAME` and `REKAI_REQUEST_TIMEOUT_SECONDS` in
+  `.env.example`** — both are real, active `Settings` fields (the latter
+  controls every outbound HTTP timeout to a provider — chat, streaming,
+  embeddings) that had no entry in the example file, found via a
+  config-fields-vs-`.env.example` diff. No behavior change.
 - **Gateway-key support in both SDKs** — the Python and JS clients only ever
   sent the BYOK provider key (`X-Provider-Key`); neither could authenticate to
   a gateway with `REKAI_API_KEYS` configured, since that needs a separate
