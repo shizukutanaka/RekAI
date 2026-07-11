@@ -135,6 +135,30 @@ requests. Errors are delivered as a
 `data: {"error": ...}` event rather than an HTTP status, since the stream has
 already started. Streamed responses are not cached.
 
+## OpenAI compatibility
+
+`POST /v1/chat/completions` is a drop-in for OpenAI's ChatCompletions API, so an
+OpenAI SDK (or LangChain, etc.) pointed at RekAI's base URL works unmodified. It
+is a thin translation layer (`rekai/openai_compat.py`, pure functions, no I/O)
+over the same internal pipeline as `/v1/chat` — the request is translated to the
+internal `ChatRequest`, run through the shared `_run_chat` / `handle_chat_stream`
+core (so routing, cache, retries, fallback, budgets, per-client accounting, and
+`Idempotency-Key` all apply identically), and the result translated back to the
+OpenAI shape (`chat.completion` / streamed `chat.completion.chunk`). Because the
+path is under `/v1/`, the same auth/rate-limit/budget/body-size middleware
+covers it.
+
+Two RekAI extensions select a provider (OpenAI's schema has no provider field):
+an optional `provider` body field, or an OpenRouter-style `"<provider>/<model>"`
+model string (split only when the prefix is a *registered* provider, so a custom
+backend's own slash-containing model ids are left intact). Unknown OpenAI tuning
+params are tolerated and ignored; `n > 1` is a 400; errors use OpenAI's error
+envelope. `response_format` (JSON mode / `json_schema`) is accepted on both this
+endpoint and native `/v1/chat`, and forwarded to providers that support it
+(OpenAI/OpenAI-compatible natively, Gemini best-effort via `responseMimeType`/
+`responseSchema`; Anthropic and Ollama ignore it). It is part of the cache key,
+so a JSON-mode request and a plain one never collide.
+
 ## Idempotency
 
 A client can send an `Idempotency-Key` header (a unique id, e.g. a UUID) on
@@ -179,6 +203,14 @@ client-supplied one), records latency, and logs an access line
 (`METHOD path -> status Nms id=...`) under the `rekai.access` logger. Set
 `REKAI_LOG_FORMAT=json` for structured one-object-per-line logs (the access
 record then carries `method`/`path`/`status`/`duration_ms`/`request_id` fields).
+Chat and embeddings access lines additionally carry the **OpenTelemetry GenAI
+semantic-convention** attributes — `gen_ai.operation.name`,
+`gen_ai.provider.name`, `gen_ai.request.model`, and
+`gen_ai.usage.input_tokens`/`output_tokens` — so the JSON logs feed a GenAI
+observability dashboard (Datadog, Grafana, …) directly, without a full OTel SDK.
+Streaming lines carry the model/provider fields (set before the body streams)
+but not token usage, since the access line is emitted before the stream is
+fully consumed.
 Every response also carries `X-RekAI-Version` (the gateway version that served
 it), exposed to browser JS like the other custom headers. Both
 `X-Request-ID` and `X-Response-Time-Ms` are returned on every response,

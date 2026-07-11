@@ -11,6 +11,7 @@ RekAI sits between your application and multiple LLM providers (OpenAI, Anthropi
 
 ## ✨ Features
 
+- **OpenAI-compatible API** — a drop-in `POST /v1/chat/completions` (non-streaming and streaming). Point any OpenAI SDK, LangChain, or OpenAI-format client at RekAI's base URL (`.../v1`) and it just works — no client changes. `response_format` (JSON mode / json_schema) is passed through to providers that support it.
 - **Provider abstraction** — one API, many backends (`openai`, `anthropic`, `gemini`, `ollama`, plus an `echo` provider for local dev/tests). Point at **any OpenAI-compatible endpoint** (Groq, Together, OpenRouter, Mistral, vLLM, LM Studio…) with one env var.
 - **Smart routing** — pick a provider explicitly, or let RekAI choose by model name / configured default.
 - **Resilience** — transient upstream errors (5xx/timeouts) are retried in place with exponential backoff + jitter, then fall over down a configured chain of `(provider, model)` targets.
@@ -22,7 +23,7 @@ RekAI sits between your application and multiple LLM providers (OpenAI, Anthropi
 - **Cost awareness** — each response carries an estimated USD cost; cumulative spend is exposed at `/v1/usage`.
 - **Auth & BYOK** — optionally gate the gateway with client API keys (`Authorization: Bearer`, constant-time); users supply their own upstream provider key per request (`X-Provider-Key`), never persisted.
 - **Rate limiting** — per-client token bucket with `Retry-After` and `X-RateLimit-*` headers; oversized bodies are rejected with 413.
-- **Observability** — structured text or JSON logging, per-request `X-Request-ID`/`X-Response-Time-Ms`/`X-RekAI-Version` headers, and a Prometheus-style `/metrics` endpoint.
+- **Observability** — structured text or JSON logging (with OpenTelemetry GenAI semantic-convention attributes — `gen_ai.request.model`, `gen_ai.usage.*` — on chat/embeddings log lines), per-request `X-Request-ID`/`X-Response-Time-Ms`/`X-RekAI-Version` headers, and a Prometheus-style `/metrics` endpoint.
 - **OpenAPI** — auto-generated docs at `/docs` and a machine-readable schema at `/openapi.json`.
 - **SDKs** — official Python (`rekai-client`) and JS/TS (`@rekai/client`) clients.
 - **Chat UI** — a Next.js front-end to try it all in the browser.
@@ -118,6 +119,22 @@ curl -s http://localhost:8000/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{"model":"echo","input":["hello","world"]}' | jq '.embeddings | length'
 ```
+
+Already using the OpenAI SDK? Just change the base URL — RekAI exposes a drop-in
+`POST /v1/chat/completions`:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="unused-on-echo")
+print(client.chat.completions.create(
+    model="echo", messages=[{"role": "user", "content": "hello"}]
+).choices[0].message.content)
+```
+
+Set `api_key` to your RekAI gateway key if `REKAI_API_KEYS` is configured, and
+pass a real provider model (`gpt-4o-mini`, `claude-...`, `anthropic/claude-...`)
+with `X-Provider-Key` via `default_headers` for BYOK.
 
 Runnable client snippets (curl, Python incl. streaming/tools/embeddings,
 JavaScript) live in [`examples/`](./examples), and there are installable
