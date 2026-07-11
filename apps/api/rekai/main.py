@@ -16,14 +16,12 @@ from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 from rekai import __version__, auth, guardrails, idempotency, tracing
 from rekai.cache import CacheBackend, build_cache
-from rekai.circuit_breaker import consecutive_failures
 from rekai.config import Settings, get_settings
-from rekai.cooldown import cooldowns
 from rekai.keystore import DynamicKeyStore
 from rekai.logging_config import configure_logging, get_logger
 from rekai.metrics import metrics
 from rekai.metrics_store import build_metrics_store
-from rekai.pricing import estimate_cost, estimate_tokens, price_for_model
+from rekai.pricing import price_for_model
 from rekai.providers import get_provider, provider_names
 from rekai.providers.base import ProviderError
 from rekai.rate_limit import build_rate_limiter
@@ -47,7 +45,7 @@ from rekai.schemas import (
     UsageSummary,
 )
 from rekai.security import KeyCipher, mask_key
-from rekai.service import handle_chat, handle_embeddings
+from rekai.service import handle_chat, handle_chat_stream, handle_embeddings
 
 access_logger = get_logger("rekai.access")
 admin_logger = get_logger("rekai.admin")
@@ -116,6 +114,45 @@ def _record_client_usage(
         metrics.record_client_budget_usage(
             client_id, result.cost_usd, settings.client_budget_window_seconds, time.time()
         )
+
+
+async def _run_chat(
+    request: ChatRequest,
+    http_request: Request,
+    response: Response,
+    x_provider_key: str | None,
+    idempotency_key: str | None,
+    settings: Settings,
+    cache_backend: CacheBackend,
+) -> ChatResponse | JSONResponse:
+    """The shared non-streaming chat pipeline.
+
+    Guardrail check, Idempotency-Key replay, provider call (routing/cache/retry/
+    fallback via ``handle_chat``), output redaction, per-client accounting, then
+    idempotency store. Returns a ``ChatResponse`` normally, or a ``JSONResponse``
+    when the guardrail blocks the request. Shared by POST /v1/chat and the
+    OpenAI-compatible POST /v1/chat/completions so neither duplicates the flow."""
+    blocked = _guardrail_response(request.messages, settings, response)
+    if blocked is not None:
+        return blocked
+    if idempotency_key:
+        stored = await idempotency.get(cache_backend, idempotency_key)
+        if stored is not None:
+            response.headers["Idempotent-Replay"] = "true"
+            replayed = ChatResponse(**stored)
+            _record_client_usage(http_request, replayed, settings)
+            return replayed
+    result = await handle_chat(request, x_provider_key, settings, cache_backend)
+    result = _redact_output(result, settings, response)
+    _record_client_usage(http_request, result, settings)
+    if idempotency_key:
+        await idempotency.store(
+            cache_backend,
+            idempotency_key,
+            result.model_dump_json(),
+            settings.idempotency_ttl_seconds,
+        )
+    return result
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -613,27 +650,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         config: Settings = Depends(get_config),
         cache_backend: CacheBackend = Depends(get_cache),
     ):
-        blocked = _guardrail_response(request.messages, config, response)
-        if blocked is not None:
-            return blocked
-        if idempotency_key:
-            stored = await idempotency.get(cache_backend, idempotency_key)
-            if stored is not None:
-                response.headers["Idempotent-Replay"] = "true"
-                replayed = ChatResponse(**stored)
-                _record_client_usage(http_request, replayed, config)
-                return replayed
-        result = await handle_chat(request, x_provider_key, config, cache_backend)
-        result = _redact_output(result, config, response)
-        _record_client_usage(http_request, result, config)
-        if idempotency_key:
-            await idempotency.store(
-                cache_backend,
-                idempotency_key,
-                result.model_dump_json(),
-                config.idempotency_ttl_seconds,
-            )
-        return result
+        return await _run_chat(
+            request, http_request, response, x_provider_key, idempotency_key, config, cache_backend
+        )
 
     @app.post(
         "/v1/embeddings",
@@ -709,80 +728,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         metrics.record_request(provider_name)
 
         async def event_source():
-            completion = []
-            reported_usage: Usage | None = None
-            reported_tool_calls: list[dict] | None = None
-            errored = False
-            try:
-                async for event in provider.stream_events(request, x_provider_key):
-                    if event.delta:
-                        completion.append(event.delta)
-                        yield f"data: {json.dumps({'delta': event.delta})}\n\n"
-                    if event.usage is not None:
-                        reported_usage = event.usage
-                    if event.tool_calls is not None:
-                        reported_tool_calls = event.tool_calls
-            except ProviderError as exc:
-                errored = True
-                metrics.record_error()
-                # Park the provider consistent with the non-streaming path, so
-                # later requests — including on other workers/nodes, and other
-                # non-streaming requests checking cooldown — route around it.
-                # There's no fallback chain here (single provider, no rerouting
-                # within this request), so this only benefits subsequent calls.
-                if config.provider_cooldown_enabled and exc.status_code == 429:
-                    await cooldowns.mark_shared(
-                        cache_backend,
-                        provider_name,
-                        exc.retry_after
-                        if exc.retry_after is not None
-                        else config.provider_cooldown_seconds,
-                    )
-                    metrics.record_cooldown()
-                elif config.provider_cooldown_enabled and exc.status_code >= 500:
-                    failures = consecutive_failures.record_failure(provider_name)
-                    if failures >= config.circuit_breaker_threshold:
-                        await cooldowns.mark_shared(
-                            cache_backend, provider_name, config.provider_cooldown_seconds
-                        )
-                        metrics.record_cooldown()
-                payload = {"error": "provider_error", "detail": str(exc)}
-                yield f"data: {json.dumps(payload)}\n\n"
-
-            if not errored:
-                consecutive_failures.record_success(provider_name)
-                # Prefer provider-reported usage; otherwise estimate from text.
-                estimated = reported_usage is None
-                if reported_usage is not None:
-                    usage = reported_usage
-                else:
-                    prompt_tokens = sum(estimate_tokens(m.content or "") for m in request.messages)
-                    completion_tokens = estimate_tokens("".join(completion))
-                    usage = Usage(
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=completion_tokens,
-                        total_tokens=prompt_tokens + completion_tokens,
-                    )
-                cost_usd = estimate_cost(
-                    provider_name, request.model, usage, config.pricing_override_dict
-                )
-                metrics.record_tokens(usage.total_tokens)
-                metrics.record_cost(cost_usd)
-                metrics.record_client_usage(client_id, usage.total_tokens, cost_usd)
-                if config.client_budget_window_seconds is not None:
-                    metrics.record_client_budget_usage(
-                        client_id, cost_usd, config.client_budget_window_seconds, time.time()
-                    )
-                summary = {
-                    "provider": provider_name,
-                    "model": request.model,
-                    "usage": usage.model_dump(),
-                    "cost_usd": cost_usd,
-                    "estimated": estimated,
-                }
-                if reported_tool_calls:
-                    summary["tool_calls"] = reported_tool_calls
-                yield f"data: {json.dumps(summary)}\n\n"
+            async for ev in handle_chat_stream(
+                request, x_provider_key, config, cache_backend, provider_name, provider, client_id
+            ):
+                if ev.delta is not None:
+                    yield f"data: {json.dumps({'delta': ev.delta})}\n\n"
+                elif ev.error is not None:
+                    payload = {"error": "provider_error", "detail": str(ev.error)}
+                    yield f"data: {json.dumps(payload)}\n\n"
+                elif ev.summary is not None:
+                    s = ev.summary
+                    summary = {
+                        "provider": s.provider,
+                        "model": s.model,
+                        "usage": s.usage.model_dump(),
+                        "cost_usd": s.cost_usd,
+                        "estimated": s.estimated,
+                    }
+                    if s.tool_calls:
+                        summary["tool_calls"] = s.tool_calls
+                    yield f"data: {json.dumps(summary)}\n\n"
             yield "data: [DONE]\n\n"
 
         stream_headers = {

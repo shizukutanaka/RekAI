@@ -6,6 +6,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Streaming chat pipeline extracted to `service.handle_chat_stream`** — the
+  provider-driving loop (deltas, cooldown/circuit-breaker on error, usage
+  estimation, per-client accounting) previously lived inline in the
+  `/v1/chat/stream` route and hardcoded the SSE frame format. It now yields
+  typed `ChatStreamEvent`s and the route formats them, so a second transport
+  (the upcoming OpenAI-compatible endpoint) can reuse the exact same pipeline.
+  The non-streaming path's guardrail/idempotency/redaction/accounting wrapper
+  was likewise factored into `_run_chat`. Byte-for-byte identical output on
+  `/v1/chat` and `/v1/chat/stream`; pure refactor, no behavior change.
+
 ### Added
 - **Gateway-key support in `examples/`** — `curl.sh` and all 7 Python/JS
   example scripts only ever sent the BYOK provider key; none could reach a

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 
 from rekai.cache import CacheBackend, cache_key, embedding_cache_key
@@ -14,7 +14,7 @@ from rekai.config import Settings
 from rekai.cooldown import cooldowns
 from rekai.logging_config import get_logger
 from rekai.metrics import metrics
-from rekai.pricing import estimate_cost
+from rekai.pricing import estimate_cost, estimate_tokens
 from rekai.providers import Provider, get_provider
 from rekai.providers.base import ProviderError, ProviderResult
 from rekai.retry import call_with_retry
@@ -36,6 +36,33 @@ class _Attempt:
     provider_name: str
     provider: Provider
     model: str
+
+
+@dataclass
+class StreamSummary:
+    """The terminal accounting event of a streamed completion."""
+
+    provider: str
+    model: str
+    usage: Usage
+    cost_usd: float | None
+    estimated: bool
+    tool_calls: list[dict] | None = None
+
+
+@dataclass
+class ChatStreamEvent:
+    """One event from :func:`handle_chat_stream`.
+
+    Exactly one field is set: a text ``delta``, a terminal ``error``, or the
+    terminal ``summary``. The transport layer decides how to serialize each
+    (native SSE vs OpenAI-compatible chunks), so the pipeline stays format-
+    agnostic and is shared by both streaming endpoints.
+    """
+
+    delta: str | None = None
+    error: ProviderError | None = None
+    summary: StreamSummary | None = None
 
 
 def _chat_factory(
@@ -233,6 +260,99 @@ async def handle_chat(
     # Exhausted all attempts.
     assert last_error is not None
     raise last_error
+
+
+async def handle_chat_stream(
+    request: ChatRequest,
+    api_key: str | None,
+    settings: Settings,
+    cache: CacheBackend,
+    provider_name: str,
+    provider: Provider,
+    client_id: str,
+) -> AsyncIterator[ChatStreamEvent]:
+    """Drive a streaming completion through one provider, yielding typed events.
+
+    Emits text ``delta`` events as they arrive, then exactly one terminal event:
+    an ``error`` (with the provider parked for cooldown, consistent with the
+    non-streaming path) or a ``summary`` carrying usage/cost (provider-reported
+    when available, else estimated from the streamed text). Metrics, cooldown,
+    circuit-breaker, and per-client accounting side effects happen here so both
+    the native and OpenAI-compatible streaming routes share them. There is no
+    fallback chain on the streaming path (single provider, no in-request
+    rerouting); the cooldown only benefits subsequent requests.
+
+    ``select_provider`` and the initial ``metrics.record_request`` stay in the
+    route because the resolved provider name is needed for the response header
+    before streaming begins.
+    """
+    completion: list[str] = []
+    reported_usage: Usage | None = None
+    reported_tool_calls: list[dict] | None = None
+    errored = False
+    try:
+        async for event in provider.stream_events(request, api_key):
+            if event.delta:
+                completion.append(event.delta)
+                yield ChatStreamEvent(delta=event.delta)
+            if event.usage is not None:
+                reported_usage = event.usage
+            if event.tool_calls is not None:
+                reported_tool_calls = event.tool_calls
+    except ProviderError as exc:
+        errored = True
+        metrics.record_error()
+        if settings.provider_cooldown_enabled and exc.status_code == 429:
+            await cooldowns.mark_shared(
+                cache,
+                provider_name,
+                exc.retry_after
+                if exc.retry_after is not None
+                else settings.provider_cooldown_seconds,
+            )
+            metrics.record_cooldown()
+        elif settings.provider_cooldown_enabled and exc.status_code >= 500:
+            failures = consecutive_failures.record_failure(provider_name)
+            if failures >= settings.circuit_breaker_threshold:
+                await cooldowns.mark_shared(
+                    cache, provider_name, settings.provider_cooldown_seconds
+                )
+                metrics.record_cooldown()
+        yield ChatStreamEvent(error=exc)
+
+    if not errored:
+        consecutive_failures.record_success(provider_name)
+        estimated = reported_usage is None
+        if reported_usage is not None:
+            usage = reported_usage
+        else:
+            prompt_tokens = sum(estimate_tokens(m.content or "") for m in request.messages)
+            completion_tokens = estimate_tokens("".join(completion))
+            usage = Usage(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=prompt_tokens + completion_tokens,
+            )
+        cost_usd = estimate_cost(
+            provider_name, request.model, usage, settings.pricing_override_dict
+        )
+        metrics.record_tokens(usage.total_tokens)
+        metrics.record_cost(cost_usd)
+        metrics.record_client_usage(client_id, usage.total_tokens, cost_usd)
+        if settings.client_budget_window_seconds is not None:
+            metrics.record_client_budget_usage(
+                client_id, cost_usd, settings.client_budget_window_seconds, time.time()
+            )
+        yield ChatStreamEvent(
+            summary=StreamSummary(
+                provider=provider_name,
+                model=request.model,
+                usage=usage,
+                cost_usd=cost_usd,
+                estimated=estimated,
+                tool_calls=reported_tool_calls or None,
+            )
+        )
 
 
 async def handle_embeddings(
