@@ -7,6 +7,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **OpenTelemetry GenAI attributes in the access log** — chat and embeddings
+  requests now attach the OTel GenAI semantic-convention fields
+  (`gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`,
+  `gen_ai.usage.input_tokens`/`output_tokens`) to the structured access-log
+  line, so RekAI's JSON logs drop straight into a GenAI observability dashboard
+  (Datadog, Grafana, …) without a full OTel SDK integration. Streaming requests
+  carry the model/provider fields (set pre-stream) but not token usage (the log
+  line fires before the stream body is consumed).
 - **`response_format` passthrough (structured outputs)** — both `/v1/chat` and
   the OpenAI-compatible endpoint now accept OpenAI's `response_format`
   (`{"type": "json_object"}` or `{"type": "json_schema", ...}`) and forward it

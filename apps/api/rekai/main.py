@@ -91,13 +91,47 @@ def _redact_output(result: ChatResponse, settings: Settings, response: Response)
 
 class _HasUsageAndCost(Protocol):
     @property
+    def provider(self) -> str: ...
+    @property
+    def model(self) -> str: ...
+    @property
     def usage(self) -> Usage: ...
     @property
     def cost_usd(self) -> float | None: ...
 
 
+def _stash_gen_ai(http_request: Request, operation: str, result: _HasUsageAndCost) -> None:
+    """Attach OpenTelemetry GenAI semantic-convention attributes to the request
+    so the access-log line carries them (picked up in ``_request_context``).
+
+    These are the standard names GenAI observability tools (Datadog, Grafana,
+    …) key on, so RekAI's structured logs drop straight into a GenAI dashboard
+    without a full OTel SDK integration."""
+    http_request.state.gen_ai = {
+        "gen_ai.operation.name": operation,
+        "gen_ai.provider.name": result.provider,
+        "gen_ai.request.model": result.model,
+        "gen_ai.usage.input_tokens": result.usage.prompt_tokens,
+        "gen_ai.usage.output_tokens": result.usage.completion_tokens,
+    }
+
+
+def _stash_gen_ai_prestream(http_request: Request, provider: str, model: str) -> None:
+    """The model/provider GenAI attributes for a streaming request, set before
+    the body streams. Token usage isn't known yet (the access-log line fires
+    before the stream is consumed), so it's deliberately omitted."""
+    http_request.state.gen_ai = {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.provider.name": provider,
+        "gen_ai.request.model": model,
+    }
+
+
 def _record_client_usage(
-    http_request: Request, result: _HasUsageAndCost, settings: Settings
+    http_request: Request,
+    result: _HasUsageAndCost,
+    settings: Settings,
+    operation: str = "chat",
 ) -> None:
     """Attribute a chat/embeddings response's tokens and cost to the requesting
     client (the masked API-key id, or the client IP with no gateway auth).
@@ -116,6 +150,7 @@ def _record_client_usage(
         metrics.record_client_budget_usage(
             client_id, result.cost_usd, settings.client_budget_window_seconds, time.time()
         )
+    _stash_gen_ai(http_request, operation, result)
 
 
 async def _run_chat(
@@ -377,6 +412,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "request_id": request_id,
                 "trace_id": trace_id,
                 "client": getattr(request.state, "client_id", None),
+                # OTel GenAI semantic-convention attributes for chat/embeddings
+                # requests (set by _stash_gen_ai). Absent on non-LLM requests and
+                # on streaming (the log line fires before the stream body is
+                # consumed) — the model/provider are set pre-stream, usage isn't.
+                **getattr(request.state, "gen_ai", {}),
             },
         )
         return response
@@ -682,10 +722,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if stored is not None:
                 response.headers["Idempotent-Replay"] = "true"
                 replayed = EmbeddingsResponse(**stored)
-                _record_client_usage(http_request, replayed, config)
+                _record_client_usage(http_request, replayed, config, operation="embeddings")
                 return replayed
         result = await handle_embeddings(request, x_provider_key, config, cache_backend)
-        _record_client_usage(http_request, result, config)
+        _record_client_usage(http_request, result, config, operation="embeddings")
         if idempotency_key:
             await idempotency.store(
                 cache_backend,
@@ -728,6 +768,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         client_id = getattr(http_request.state, "client_id", None) or "anonymous"
         provider_name, provider = select_provider(request, config)
         metrics.record_request(provider_name)
+        _stash_gen_ai_prestream(http_request, provider_name, request.model)
 
         async def event_source():
             async for ev in handle_chat_stream(
@@ -854,6 +895,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 content=openai_compat.openai_error(exc.status_code, str(exc)),
             )
         metrics.record_request(provider_name)
+        _stash_gen_ai_prestream(http_request, provider_name, chat_request.model)
 
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
         created = int(time.time())

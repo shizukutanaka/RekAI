@@ -52,3 +52,33 @@ def test_configure_logging_json_format() -> None:
     # Restore the default text formatter for other tests.
     configure_logging("INFO", "text")
     assert not isinstance(logging.getLogger().handlers[0].formatter, JsonFormatter)
+
+
+def test_access_log_carries_gen_ai_attributes(client, caplog) -> None:
+    """A chat request's access-log record carries OTel GenAI attributes."""
+    with caplog.at_level(logging.INFO, logger="rekai.access"):
+        client.post(
+            "/v1/chat",
+            json={"model": "echo", "messages": [{"role": "user", "content": "hi"}]},
+        )
+    rec = next(
+        r
+        for r in caplog.records
+        if r.name == "rekai.access" and getattr(r, "path", "") == "/v1/chat"
+    )
+    assert getattr(rec, "gen_ai.operation.name") == "chat"
+    assert getattr(rec, "gen_ai.provider.name") == "echo"
+    assert getattr(rec, "gen_ai.request.model") == "echo"
+    assert getattr(rec, "gen_ai.usage.output_tokens") > 0
+
+
+def test_access_log_gen_ai_operation_for_embeddings(client, caplog) -> None:
+    with caplog.at_level(logging.INFO, logger="rekai.access"):
+        client.post("/v1/embeddings", json={"model": "echo", "input": "hello"})
+    rec = next(
+        r
+        for r in caplog.records
+        if r.name == "rekai.access" and getattr(r, "path", "") == "/v1/embeddings"
+    )
+    assert getattr(rec, "gen_ai.operation.name") == "embeddings"
+    assert getattr(rec, "gen_ai.provider.name") == "echo"
