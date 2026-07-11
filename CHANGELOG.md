@@ -7,6 +7,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`response_format` passthrough (structured outputs)** — both `/v1/chat` and
+  the OpenAI-compatible endpoint now accept OpenAI's `response_format`
+  (`{"type": "json_object"}` or `{"type": "json_schema", ...}`) and forward it
+  to providers that support it: OpenAI and OpenAI-compatible backends natively,
+  Gemini best-effort (mapped to `responseMimeType`/`responseSchema`). Anthropic
+  and Ollama have no equivalent and ignore it (logged at debug, never an error).
+  The 2026 production default for reliable JSON output, which RekAI didn't pass
+  through at all. Note: `response_format` is now part of the chat cache key (a
+  JSON-mode and a plain request must not collide), so existing cache entries are
+  invalidated once on deploy — TTL-bounded and harmless.
 - **OpenAI-compatible `POST /v1/chat/completions`** — point any OpenAI SDK,
   LangChain, or other OpenAI-format client at RekAI's base URL (`.../v1`) and it
   works as a drop-in: same request/response shapes, non-streaming and

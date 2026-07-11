@@ -29,6 +29,8 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         "messages": [m.model_dump() for m in request.messages],
         "tools": request.tools,
         "tool_choice": request.tool_choice,
+        # A JSON-mode request and a plain one must not share a cache entry.
+        "response_format": request.response_format,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "rekai:chat:" + hashlib.sha256(raw.encode()).hexdigest()

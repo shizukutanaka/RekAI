@@ -50,6 +50,16 @@ class GeminiProvider(Provider):
         if request.max_tokens is not None:
             payload["generationConfig"]["maxOutputTokens"] = request.max_tokens
 
+        # Best-effort structured output: OpenAI's response_format maps onto
+        # Gemini's generationConfig. json_object -> JSON mime type; json_schema
+        # additionally constrains the shape via responseSchema.
+        rf = request.response_format
+        if isinstance(rf, dict) and rf.get("type") in ("json_object", "json_schema"):
+            payload["generationConfig"]["responseMimeType"] = "application/json"
+            schema = (rf.get("json_schema") or {}).get("schema")
+            if schema is not None:
+                payload["generationConfig"]["responseSchema"] = schema
+
         system_parts = [m.content or "" for m in request.messages if m.role == "system"]
         if system_parts:
             payload["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}

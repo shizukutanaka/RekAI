@@ -49,6 +49,13 @@ class ChatRequest(BaseModel):
         default=None,
         description="Tool choice ('auto' | 'none' | 'required' | {...}), passed through.",
     )
+    response_format: dict[str, Any] | None = Field(
+        default=None,
+        description="OpenAI-style response_format, e.g. {'type': 'json_object'} or "
+        "{'type': 'json_schema', 'json_schema': {...}}. Passed through to providers "
+        "that support it (OpenAI/OpenAI-compatible natively, Gemini best-effort); "
+        "ignored by others.",
+    )
 
 
 class Usage(BaseModel):

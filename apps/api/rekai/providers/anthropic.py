@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from rekai.config import get_settings
+from rekai.logging_config import get_logger
 from rekai.providers.base import (
     Provider,
     ProviderError,
@@ -17,6 +18,8 @@ from rekai.providers.base import (
     trace_headers,
 )
 from rekai.schemas import ChatRequest, Usage
+
+logger = get_logger("rekai.providers.anthropic")
 
 
 class AnthropicProvider(Provider):
@@ -52,6 +55,10 @@ class AnthropicProvider(Provider):
         }
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
+        if request.response_format is not None:
+            # Anthropic has no response_format equivalent (structured output is
+            # done via forced tool use, out of scope here) — ignore, don't error.
+            logger.debug("ignoring response_format: unsupported by the anthropic provider")
         # Translate OpenAI-style tools / tool_choice into Anthropic's format.
         if request.tools:
             payload["tools"] = _translate_tools(request.tools)

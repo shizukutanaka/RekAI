@@ -62,6 +62,8 @@ class OpenAIProvider(Provider):
             payload["tools"] = request.tools
         if request.tool_choice is not None:
             payload["tool_choice"] = request.tool_choice
+        if request.response_format is not None:
+            payload["response_format"] = request.response_format
 
         url = f"{self._base_url().rstrip('/')}/chat/completions"
         try:
@@ -116,6 +118,8 @@ class OpenAIProvider(Provider):
             payload["tools"] = request.tools
         if request.tool_choice is not None:
             payload["tool_choice"] = request.tool_choice
+        if request.response_format is not None:
+            payload["response_format"] = request.response_format
 
         url = f"{self._base_url().rstrip('/')}/chat/completions"
         tool_calls_acc: dict[int, dict] = {}
