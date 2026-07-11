@@ -13,8 +13,9 @@ from typing import Literal, Protocol
 from fastapi import Depends, FastAPI, Header, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from pydantic import ValidationError
 
-from rekai import __version__, auth, guardrails, idempotency, tracing
+from rekai import __version__, auth, guardrails, idempotency, openai_compat, tracing
 from rekai.cache import CacheBackend, build_cache
 from rekai.config import Settings, get_settings
 from rekai.keystore import DynamicKeyStore
@@ -30,6 +31,7 @@ from rekai.schemas import (
     AdminKeyList,
     AdminKeyRequest,
     AdminKeyResponse,
+    ChatCompletionsRequest,
     ChatMessage,
     ChatRequest,
     ChatResponse,
@@ -748,6 +750,150 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     if s.tool_calls:
                         summary["tool_calls"] = s.tool_calls
                     yield f"data: {json.dumps(summary)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        stream_headers = {
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "X-RekAI-Provider": provider_name,
+        }
+        if guardrail_flag:
+            stream_headers["X-Guardrail-Flag"] = guardrail_flag
+        return StreamingResponse(
+            event_source(),
+            media_type="text/event-stream",
+            headers=stream_headers,
+        )
+
+    @app.post(
+        "/v1/chat/completions",
+        tags=["chat"],
+        response_model=None,
+        responses={
+            200: {"content": {"application/json": {}, "text/event-stream": {}}},
+            400: {"model": ErrorResponse},
+            401: {"model": ErrorResponse},
+            403: {"model": ErrorResponse},
+            413: {"model": ErrorResponse},
+            429: {"model": ErrorResponse},
+            502: {"model": ErrorResponse},
+        },
+    )
+    async def chat_completions(
+        response: Response,
+        request: ChatCompletionsRequest,
+        http_request: Request,
+        x_provider_key: str | None = Header(default=None, alias="X-Provider-Key"),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        config: Settings = Depends(get_config),
+        cache_backend: CacheBackend = Depends(get_cache),
+    ):
+        """OpenAI-compatible chat completions.
+
+        Point any OpenAI SDK (or LangChain, etc.) at RekAI's base URL — ``.../v1``
+        — and this behaves like ``POST /v1/chat/completions``: same request and
+        response shapes, non-streaming and ``stream: true`` both supported. It is
+        a thin translation over the same internal pipeline as ``/v1/chat`` (so
+        routing, cache, retries, fallback, budgets, and metrics all apply). RekAI
+        extensions: an optional ``provider`` field, or an OpenRouter-style
+        ``"<provider>/<model>"`` model string, forces a provider; unknown OpenAI
+        tuning params are tolerated and ignored.
+        """
+        try:
+            chat_request = openai_compat.to_chat_request(request)
+        except ProviderError as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content=openai_compat.openai_error(exc.status_code, str(exc)),
+            )
+        except ValidationError as exc:
+            return JSONResponse(status_code=400, content=openai_compat.openai_error(400, str(exc)))
+
+        if not request.stream:
+            try:
+                result = await _run_chat(
+                    chat_request,
+                    http_request,
+                    response,
+                    x_provider_key,
+                    idempotency_key,
+                    config,
+                    cache_backend,
+                )
+            except ProviderError as exc:
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content=openai_compat.openai_error(exc.status_code, str(exc)),
+                )
+            if isinstance(result, JSONResponse):
+                # Guardrail block — re-wrap RekAI's body in the OpenAI envelope.
+                return JSONResponse(
+                    status_code=result.status_code,
+                    content=openai_compat.openai_error(
+                        result.status_code, "Request blocked by prompt-injection guardrail."
+                    ),
+                )
+            return openai_compat.to_chat_completion(result)
+
+        # Streaming.
+        blocked = _guardrail_response(chat_request.messages, config, response)
+        if blocked is not None:
+            return JSONResponse(
+                status_code=blocked.status_code,
+                content=openai_compat.openai_error(
+                    blocked.status_code, "Request blocked by prompt-injection guardrail."
+                ),
+            )
+        guardrail_flag = response.headers.get("X-Guardrail-Flag")
+        client_id = getattr(http_request.state, "client_id", None) or "anonymous"
+        try:
+            provider_name, provider = select_provider(chat_request, config)
+        except ProviderError as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content=openai_compat.openai_error(exc.status_code, str(exc)),
+            )
+        metrics.record_request(provider_name)
+
+        chunk_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+        created = int(time.time())
+        model = chat_request.model
+        include_usage = request.stream_options is not None and request.stream_options.include_usage
+
+        async def event_source():
+            def sse(obj: dict) -> str:
+                return f"data: {json.dumps(obj)}\n\n"
+
+            yield sse(openai_compat.chunk_first(chunk_id, created, model))
+            finish_reason = "stop"
+            async for ev in handle_chat_stream(
+                chat_request,
+                x_provider_key,
+                config,
+                cache_backend,
+                provider_name,
+                provider,
+                client_id,
+            ):
+                if ev.delta is not None:
+                    yield sse(openai_compat.chunk_delta(chunk_id, created, model, ev.delta))
+                elif ev.error is not None:
+                    yield sse(openai_compat.openai_error(ev.error.status_code, str(ev.error)))
+                    yield "data: [DONE]\n\n"
+                    return
+                elif ev.summary is not None:
+                    if ev.summary.tool_calls:
+                        finish_reason = "tool_calls"
+                        yield sse(
+                            openai_compat.chunk_tool_calls(
+                                chunk_id, created, model, ev.summary.tool_calls
+                            )
+                        )
+                    yield sse(openai_compat.chunk_finish(chunk_id, created, model, finish_reason))
+                    if include_usage:
+                        yield sse(
+                            openai_compat.chunk_usage(chunk_id, created, model, ev.summary.usage)
+                        )
             yield "data: [DONE]\n\n"
 
         stream_headers = {

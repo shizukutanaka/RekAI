@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 Role = Literal["system", "user", "assistant", "tool"]
 
@@ -55,6 +55,79 @@ class Usage(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+
+
+# --- OpenAI-compatible /v1/chat/completions -------------------------------
+# These mirror OpenAI's ChatCompletions API so RekAI is a drop-in base_url for
+# the OpenAI SDKs, LangChain, etc. They are translated to/from the internal
+# ChatRequest/ChatResponse in rekai/openai_compat.py.
+
+
+class ContentPart(BaseModel):
+    """One element of OpenAI's content-parts array form of a message."""
+
+    type: str
+    text: str | None = None
+
+
+class OpenAIChatMessage(BaseModel):
+    role: Role
+    # OpenAI allows either a plain string or an array of typed content parts.
+    content: str | list[ContentPart] | None = None
+    name: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
+    tool_call_id: str | None = None
+
+
+class StreamOptions(BaseModel):
+    include_usage: bool = False
+
+
+class ChatCompletionsRequest(BaseModel):
+    # Tolerate unknown OpenAI tuning params (frequency_penalty, seed, logit_bias,
+    # ...) rather than 422-ing — matches vLLM/LiteLLM leniency for drop-in use.
+    model_config = ConfigDict(extra="allow")
+
+    model: str
+    messages: list[OpenAIChatMessage] = Field(..., min_length=1)
+    temperature: float | None = None
+    max_tokens: int | None = Field(default=None, ge=1)
+    max_completion_tokens: int | None = Field(default=None, ge=1)
+    stream: bool = False
+    stream_options: StreamOptions | None = None
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: Any | None = None
+    response_format: dict[str, Any] | None = None
+    user: str | None = None  # accepted, ignored
+    n: int | None = None  # 400 if n > 1 (RekAI returns a single choice)
+    provider: str | None = None  # RekAI extension: explicit provider override
+
+
+class ChatCompletionMessage(BaseModel):
+    role: Literal["assistant"] = "assistant"
+    content: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
+
+
+class ChatCompletionChoice(BaseModel):
+    index: int = 0
+    message: ChatCompletionMessage
+    finish_reason: Literal["stop", "tool_calls"] = "stop"
+
+
+class ChatCompletionResponse(BaseModel):
+    id: str
+    object: Literal["chat.completion"] = "chat.completion"
+    created: int
+    model: str
+    choices: list[ChatCompletionChoice]
+    usage: Usage  # field names already match OpenAI's
+    system_fingerprint: str | None = None
+    # RekAI extensions — OpenAI SDKs ignore unknown response fields.
+    provider: str | None = None
+    cost_usd: float | None = None
+    cached: bool = False
+    fallback_used: bool = False
 
 
 class ChatResponse(BaseModel):

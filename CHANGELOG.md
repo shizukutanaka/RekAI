@@ -6,6 +6,23 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **OpenAI-compatible `POST /v1/chat/completions`** — point any OpenAI SDK,
+  LangChain, or other OpenAI-format client at RekAI's base URL (`.../v1`) and it
+  works as a drop-in: same request/response shapes, non-streaming and
+  `stream: true` (SSE `chat.completion.chunk` frames, with
+  `stream_options.include_usage` honored). It's a thin translation
+  (`rekai/openai_compat.py`) over the same internal pipeline as `/v1/chat`, so
+  routing, cache, retries, fallback, budgets, per-client accounting, and
+  Idempotency-Key all apply unchanged. RekAI extensions: an optional `provider`
+  field or an OpenRouter-style `"<provider>/<model>"` model string forces a
+  provider; unknown OpenAI tuning params (`seed`, `frequency_penalty`, …) are
+  tolerated and ignored; `n > 1` is a 400. Errors use the OpenAI error envelope
+  so SDK error handling parses them. This is the 2026 de-facto gateway
+  interface (LiteLLM/OpenRouter/vLLM/Ollama all expose it); RekAI previously
+  had only its own custom `/v1/chat` schema. Verified end-to-end against the
+  real `openai` Python SDK (`tests/test_openai_sdk_e2e.py`, ASGITransport).
+
 ### Changed
 - **Streaming chat pipeline extracted to `service.handle_chat_stream`** — the
   provider-driving loop (deltas, cooldown/circuit-breaker on error, usage

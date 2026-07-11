@@ -26,6 +26,9 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.4",
     "mypy>=1.9",
+    # Used only by tests/test_openai_sdk_e2e.py to prove drop-in compatibility
+    # with the real OpenAI SDK; those tests skip if it isn't installed.
+    "openai>=1.40",
 ]
 
 [project.urls]
