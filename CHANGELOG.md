@@ -7,6 +7,27 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **Dynamic-key decryption failure now logs a warning instead of failing
+  silently** — a wrong or rotated `REKAI_DYNAMIC_KEYS_ENCRYPTION_KEY` made
+  `DynamicKeyStore.list_keys()` quietly return an empty list, which looks
+  identical to "all runtime-added keys were revoked" from an operator's
+  side, with nothing in the logs to explain it. Now logs at warning with the
+  likely cause, and calls out that the next `add()` (which reads the
+  existing list first) would otherwise silently overwrite the undecryptable
+  blob.
+- **Ollama silently dropped `tools` and `response_format`** — Ollama's
+  `/api/chat` has no equivalent for either, and unlike Anthropic's
+  `response_format` handling (added earlier), nothing logged that they were
+  being ignored. Now logs at debug, matching the Anthropic precedent. Also
+  added `tests/test_ollama.py` — previously the provider had only incidental
+  coverage via a fake-client embeddings test and generic router/streaming
+  tests using the `echo` provider.
+- **Documented that `Idempotency-Key` doesn't cover streaming** — neither
+  `POST /v1/chat/stream` nor `stream: true` on the OpenAI-compatible
+  endpoint accept it (a retried streaming request always re-runs), but this
+  was previously undocumented — a new integrator would only discover it by
+  reading `main.py`. Now called out in both endpoint docstrings and
+  docs/architecture.md's Idempotency section.
 - **Request body size limit is now a hard cap, not just a Content-Length
   check** — the previous check only rejected requests that sent an oversized
   `Content-Length` header; a client using chunked transfer-encoding (which

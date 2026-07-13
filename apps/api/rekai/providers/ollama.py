@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from rekai.config import get_settings
+from rekai.logging_config import get_logger
 from rekai.providers.base import (
     EmbeddingResult,
     Provider,
@@ -19,6 +20,18 @@ from rekai.providers.base import (
 )
 from rekai.schemas import ChatRequest, Usage
 
+logger = get_logger("rekai.providers.ollama")
+
+
+def _warn_unsupported_fields(request: ChatRequest) -> None:
+    """Ollama's /api/chat has no tools/response_format equivalent RekAI wires
+    up here — log at debug rather than silently dropping them (matches the
+    Anthropic response_format handling)."""
+    if request.tools is not None:
+        logger.debug("ignoring tools: unsupported by the ollama provider")
+    if request.response_format is not None:
+        logger.debug("ignoring response_format: unsupported by the ollama provider")
+
 
 class OllamaProvider(Provider):
     name = "ollama"
@@ -26,6 +39,7 @@ class OllamaProvider(Provider):
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
         settings = get_settings()
+        _warn_unsupported_fields(request)
         payload = {
             "model": request.model,
             "messages": [m.model_dump(exclude_none=True) for m in request.messages],
@@ -90,6 +104,7 @@ class OllamaProvider(Provider):
         self, request: ChatRequest, api_key: str | None
     ) -> AsyncIterator[StreamEvent]:
         settings = get_settings()
+        _warn_unsupported_fields(request)
         payload = {
             "model": request.model,
             "messages": [m.model_dump(exclude_none=True) for m in request.messages],

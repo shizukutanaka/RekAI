@@ -162,14 +162,21 @@ so a JSON-mode request and a plain one never collide.
 ## Idempotency
 
 A client can send an `Idempotency-Key` header (a unique id, e.g. a UUID) on
-`POST /v1/chat` or `/v1/embeddings`. The first call's response is stored under
-that key; a repeat with the **same key returns the stored response** (with
-`Idempotent-Replay: true`) without processing again — so a network blip or an
-automatic client retry can't double-process. Unlike the content cache, it is
-keyed by the client-supplied id (not the request body) and works even with
+`POST /v1/chat`, `/v1/embeddings`, or the non-streaming path of the
+OpenAI-compatible `/v1/chat/completions`. The first call's response is stored
+under that key; a repeat with the **same key returns the stored response**
+(with `Idempotent-Replay: true`) without processing again — so a network blip
+or an automatic client retry can't double-process. Unlike the content cache, it
+is keyed by the client-supplied id (not the request body) and works even with
 `"cache": false`. Keys live in the cache backend under a separate namespace for
 `REKAI_IDEMPOTENCY_TTL_SECONDS` (default 24h); it is a no-op when caching is
-disabled. (Streaming responses are not covered.)
+disabled.
+
+**Streaming responses are not covered** — neither `POST /v1/chat/stream` nor
+`stream: true` on `/v1/chat/completions` accept an `Idempotency-Key`. A
+retried streaming request always re-runs. A client that needs replay-safety
+on retry should use the non-streaming endpoints, or de-duplicate on its own
+side for streamed requests.
 
 ## Caching
 

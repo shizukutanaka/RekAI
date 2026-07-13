@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from rekai.cache import MemoryCache, NullCache
 from rekai.keystore import DynamicKeyStore
 from rekai.security import KeyCipher, generate_key
@@ -74,6 +76,17 @@ async def test_wrong_decryption_key_degrades_to_empty_not_a_crash() -> None:
     await DynamicKeyStore(cache, KeyCipher(generate_key())).add("sk-dyn-a")
     reader = DynamicKeyStore(cache, KeyCipher(generate_key()))  # different key
     assert await reader.list_keys() == []
+
+
+async def test_wrong_decryption_key_logs_a_warning(caplog) -> None:
+    # The degrade-to-empty path looks identical to "all keys were revoked"
+    # from the caller's side unless this is logged loudly.
+    cache = MemoryCache()
+    await DynamicKeyStore(cache, KeyCipher(generate_key())).add("sk-dyn-a")
+    reader = DynamicKeyStore(cache, KeyCipher(generate_key()))
+    with caplog.at_level(logging.WARNING, logger="rekai.keystore"):
+        await reader.list_keys()
+    assert any("decrypt" in r.message for r in caplog.records)
 
 
 async def test_reading_a_plaintext_blob_with_a_cipher_degrades_to_empty() -> None:

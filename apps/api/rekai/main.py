@@ -847,7 +847,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         Emits ``data: {"delta": "..."}`` events, then a final
         ``data: {"usage": {...}, "cost_usd": ..., "estimated": true}`` summary,
-        then a terminating ``data: [DONE]``. Streaming responses are not cached.
+        then a terminating ``data: [DONE]``. Streaming responses are not cached
+        and do not accept ``Idempotency-Key`` (unlike ``/v1/chat``) — a retried
+        streaming request always re-runs; see docs/architecture.md.
         """
         blocked = _guardrail_response(request.messages, config, response)
         if blocked is not None:
@@ -926,7 +928,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         routing, cache, retries, fallback, budgets, and metrics all apply). RekAI
         extensions: an optional ``provider`` field, or an OpenRouter-style
         ``"<provider>/<model>"`` model string, forces a provider; unknown OpenAI
-        tuning params are tolerated and ignored.
+        tuning params are tolerated and ignored. ``Idempotency-Key`` is honored
+        on the non-streaming path only — ``stream: true`` does not accept it,
+        same as ``/v1/chat/stream``; see docs/architecture.md.
         """
         try:
             chat_request = openai_compat.to_chat_request(request)

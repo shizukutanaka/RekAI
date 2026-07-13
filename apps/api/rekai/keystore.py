@@ -23,9 +23,12 @@ import json
 from typing import TYPE_CHECKING
 
 from rekai.cache import CacheBackend
+from rekai.logging_config import get_logger
 
 if TYPE_CHECKING:
     from rekai.security import KeyCipher
+
+logger = get_logger("rekai.keystore")
 
 _CACHE_KEY = "rekai:api_keys:dynamic"
 # Cache backends require a positive TTL; there's no "forever" option, so this
@@ -48,7 +51,18 @@ class DynamicKeyStore:
             except ValueError:
                 # Wrong/rotated encryption key, or a plaintext blob written
                 # before encryption was turned on — treat as empty rather than
-                # crash every request that checks auth.
+                # crash every request that checks auth. Warn loudly: this looks
+                # identical to "all dynamic keys were revoked" from the caller's
+                # side, and add()/revoke() calling list_keys() internally means
+                # the next add() would silently overwrite the undecryptable
+                # blob with a set containing only the new key.
+                logger.warning(
+                    "failed to decrypt dynamic key store — wrong or rotated "
+                    "REKAI_DYNAMIC_KEYS_ENCRYPTION_KEY? Treating as empty; "
+                    "existing dynamic keys are inaccessible until this is "
+                    "fixed (they are not lost, but the next write will "
+                    "overwrite them)."
+                )
                 return []
         try:
             data = json.loads(raw)
