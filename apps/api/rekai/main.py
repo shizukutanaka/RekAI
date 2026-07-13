@@ -53,6 +53,82 @@ access_logger = get_logger("rekai.access")
 admin_logger = get_logger("rekai.admin")
 
 
+class MaxBodySizeMiddleware:
+    """Pure-ASGI middleware enforcing a hard cap on /v1/* request bodies.
+
+    The Content-Length pre-check in ``_rate_limit`` below is only advisory — a
+    client using chunked transfer-encoding sends no Content-Length at all, so
+    FastAPI would otherwise buffer the whole body (however large) before any
+    validation runs. This buffers incoming chunks up to (and one chunk past)
+    the limit and, the moment the running total exceeds it, sends a 413
+    directly and never invokes the downstream app — bodies within the limit
+    are replayed to the app via a synthetic ``receive`` unchanged.
+
+    This has to be a plain ASGI middleware, not a `@app.middleware("http")`/
+    `BaseHTTPMiddleware` dispatch function: raising an exception while a
+    *downstream* `request.body()` call is in flight gets wrapped in an anyio
+    `ExceptionGroup` by `BaseHTTPMiddleware`'s internal receive-forwarding
+    (confirmed empirically), which loses its type before FastAPI's own
+    body-parsing code can recognize it as an `HTTPException` — so it falls
+    through to FastAPI's generic "there was an error parsing the body" 400,
+    not the intended 413. Rejecting before the app is ever invoked sidesteps
+    that translation entirely.
+    """
+
+    def __init__(self, app, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send) -> None:
+        if (
+            scope["type"] != "http"
+            or self.max_bytes <= 0
+            or not scope["path"].startswith("/v1/")
+            or scope["method"] == "OPTIONS"
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        chunks: list[dict] = []
+        total = 0
+        while True:
+            message = await receive()
+            chunks.append(message)
+            if message["type"] == "http.disconnect":
+                break
+            total += len(message.get("body", b""))
+            if total > self.max_bytes:
+                response = JSONResponse(
+                    status_code=413,
+                    content=ErrorResponse(
+                        error="payload_too_large",
+                        detail=f"Request body exceeds {self.max_bytes} bytes.",
+                    ).model_dump(),
+                )
+                await response(scope, receive, send)
+                return
+            if not message.get("more_body", False):
+                break
+
+        index = 0
+
+        async def replay_receive():
+            nonlocal index
+            if index < len(chunks):
+                message = chunks[index]
+                index += 1
+                return message
+            # Once the buffered body is replayed, hand off to the real
+            # receive so a later disconnect check (e.g. StreamingResponse
+            # watching for the client going away mid-SSE-stream) gets an
+            # honest answer instead of a fabricated immediate disconnect,
+            # which would otherwise look like the client vanished and cut
+            # a streaming response short right after it starts.
+            return await receive()
+
+        await self.app(scope, replay_receive, send)
+
+
 def _guardrail_response(
     messages: list[ChatMessage], settings: Settings, response: Response
 ) -> JSONResponse | None:
@@ -334,7 +410,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
 
         # Reject oversized bodies up front (cheap Content-Length check) so a huge
-        # payload can't tie up parsing or memory.
+        # payload can't tie up parsing or memory. This is only advisory — a
+        # client using chunked transfer-encoding sends no Content-Length at
+        # all, or the header could simply understate the real size — the hard
+        # cap enforced against every byte actually received is
+        # MaxBodySizeMiddleware, wrapped around the whole app (see create_app).
         if is_api_write and settings.max_body_bytes > 0:
             content_length = request.headers.get("content-length")
             if content_length is not None and content_length.isdigit():
@@ -424,9 +504,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return response
 
+    # The hard body-size cap (see MaxBodySizeMiddleware) wraps the whole app,
+    # so it runs before _rate_limit/auth/routing ever see the request.
+    app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_body_bytes)
+
     # CORS is added last so it wraps the others (outermost): short-circuit
-    # responses like a 429 from the rate limiter still get CORS headers, so the
-    # browser can read them instead of failing the fetch.
+    # responses like a 429 from the rate limiter (or a 413 from the body-size
+    # cap above) still get CORS headers, so the browser can read them instead
+    # of failing the fetch.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,

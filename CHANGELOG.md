@@ -7,6 +7,23 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **Request body size limit is now a hard cap, not just a Content-Length
+  check** — the previous check only rejected requests that sent an oversized
+  `Content-Length` header; a client using chunked transfer-encoding (which
+  omits `Content-Length` entirely) sailed straight past it, and Starlette
+  would buffer the *entire* body before any size validation ran — no real
+  protection against a memory-exhaustion DoS. Added `MaxBodySizeMiddleware`
+  (`apps/api/rekai/main.py`), a pure-ASGI middleware wrapping the whole app:
+  it buffers `/v1/*` request bodies up to the limit and sends a 413 directly
+  the moment the running total is exceeded, without ever invoking the
+  downstream app. (A `BaseHTTPMiddleware`-based approach — raising mid-read
+  from inside the existing `_rate_limit` middleware — turned out to be
+  fundamentally broken: Starlette's internal receive-forwarding wraps such an
+  exception in an `anyio.ExceptionGroup`, which loses its type before
+  FastAPI's body-parsing code can recognize it as an `HTTPException`, so it
+  fell through to a generic 400. The pure-ASGI buffer-then-replay approach
+  sidesteps that translation entirely.) The existing Content-Length check
+  remains as a cheap, no-buffering fast-path rejection.
 - **Per-client tracking is now bounded** (`REKAI_MAX_TRACKED_CLIENTS`, default
   10,000; `0` = unlimited) — `usage_by_client` and the budget-window store grew
   one entry per distinct client id forever, and without gateway auth that id is
