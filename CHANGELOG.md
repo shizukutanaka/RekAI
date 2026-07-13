@@ -6,6 +6,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`tests/test_service.py`** — direct unit tests for
+  `service.handle_chat_stream`, the shared streaming pipeline extracted in an
+  earlier commit. It previously had no dedicated test file, only indirect
+  coverage via the streaming endpoints' SSE-serialized output; these drive it
+  directly and assert on the typed `ChatStreamEvent`/`StreamSummary` values
+  (usage estimation vs provider-reported, tool-call surfacing, 429/5xx
+  cooldown and circuit-breaker behavior including reset-on-success, and
+  per-client budget-window recording).
+
 ### Fixed
 - **Dynamic-key decryption failure now logs a warning instead of failing
   silently** — a wrong or rotated `REKAI_DYNAMIC_KEYS_ENCRYPTION_KEY` made
