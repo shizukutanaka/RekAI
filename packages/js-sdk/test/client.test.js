@@ -112,6 +112,20 @@ test("chat forwards tools and returns tool_calls", async () => {
   assert.deepEqual(result.tool_calls, [{ id: "c1" }]);
 });
 
+test("chat forwards response_format", async () => {
+  const client = new RekAIClient(baseUrl);
+  await client.chat("gpt-4o-mini", "give me json", {
+    responseFormat: { type: "json_object" },
+  });
+  assert.deepEqual(lastRequest.body.response_format, { type: "json_object" });
+});
+
+test("chat omits response_format when absent", async () => {
+  const client = new RekAIClient(baseUrl);
+  await client.chat("echo", "hi");
+  assert.equal(lastRequest.body.response_format, undefined);
+});
+
 test("chat forwards gateway key as a Bearer header", async () => {
   const client = new RekAIClient(baseUrl, { gatewayKey: "sk-rekai-default" });
   await client.chat("echo", "hi");

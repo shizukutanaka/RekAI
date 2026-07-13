@@ -113,9 +113,7 @@ class RekAIClient:
         self.close()
 
     # -- helpers -----------------------------------------------------------
-    def _headers(
-        self, provider_key: str | None, gateway_key: str | None = None
-    ) -> dict[str, str]:
+    def _headers(self, provider_key: str | None, gateway_key: str | None = None) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
         key = provider_key or self._provider_key
         if key:
@@ -139,6 +137,7 @@ class RekAIClient:
         fallbacks: list[dict[str, Any]] | None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": model,
@@ -156,6 +155,8 @@ class RekAIClient:
             payload["tools"] = tools
         if tool_choice is not None:
             payload["tool_choice"] = tool_choice
+        if response_format is not None:
+            payload["response_format"] = response_format
         return payload
 
     @staticmethod
@@ -183,11 +184,21 @@ class RekAIClient:
         fallbacks: list[dict[str, Any]] | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any | None = None,
+        response_format: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
     ) -> ChatResult:
         payload = self._payload(
-            model, messages, provider, temperature, max_tokens, cache, fallbacks, tools, tool_choice
+            model,
+            messages,
+            provider,
+            temperature,
+            max_tokens,
+            cache,
+            fallbacks,
+            tools,
+            tool_choice,
+            response_format,
         )
         resp = self._client.post(
             "/v1/chat", json=payload, headers=self._headers(provider_key, gateway_key)
@@ -203,6 +214,7 @@ class RekAIClient:
         provider: str | None = None,
         temperature: float = 0.7,
         max_tokens: int | None = None,
+        response_format: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], None] | None = None,
@@ -213,7 +225,16 @@ class RekAIClient:
         ``{"provider", "model", "usage", "cost_usd", "estimated"}`` when the
         server reports it (just before the stream ends).
         """
-        payload = self._payload(model, messages, provider, temperature, max_tokens, True, None)
+        payload = self._payload(
+            model,
+            messages,
+            provider,
+            temperature,
+            max_tokens,
+            True,
+            None,
+            response_format=response_format,
+        )
         with self._client.stream(
             "POST",
             "/v1/chat/stream",

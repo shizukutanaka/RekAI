@@ -110,6 +110,54 @@ def test_chat_forwards_tools_and_returns_tool_calls() -> None:
     assert result.tool_calls == [tool_call]
 
 
+def test_chat_forwards_response_format() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "content": "{}",
+                "usage": {},
+                "cost_usd": None,
+                "cached": False,
+                "fallback_used": False,
+            },
+        )
+
+    client = make_client(handler)
+    client.chat("gpt-4o-mini", "give me json", response_format={"type": "json_object"})
+    assert captured["body"]["response_format"] == {"type": "json_object"}
+
+
+def test_chat_omits_response_format_when_absent() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "provider": "echo",
+                "model": "echo",
+                "content": "ok",
+                "usage": {},
+                "cost_usd": None,
+                "cached": False,
+                "fallback_used": False,
+            },
+        )
+
+    client = make_client(handler)
+    client.chat("echo", "hi")
+    assert "response_format" not in captured["body"]
+
+
 def test_chat_forwards_gateway_key_as_bearer_header() -> None:
     captured = {}
 

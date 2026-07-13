@@ -29,6 +29,12 @@ export interface ChatOptions {
   tools?: Record<string, unknown>[];
   /** Tool choice ('auto' | 'none' | 'required' | object), passed through. */
   toolChoice?: unknown;
+  /**
+   * OpenAI-style response_format ({ type: 'json_object' } or
+   * { type: 'json_schema', json_schema: {...} }), passed through to providers
+   * that support it (OpenAI/OpenAI-compatible natively, Gemini best-effort).
+   */
+  responseFormat?: Record<string, unknown>;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
 }

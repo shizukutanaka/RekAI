@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`response_format` in both SDKs** — the Python client's `chat()`/`stream()`
+  take `response_format={...}` and the JS client takes
+  `responseFormat: {...}`, forwarded to the gateway's `response_format`
+  passthrough added below, so SDK users get structured outputs without
+  hand-building requests.
 - **OpenTelemetry GenAI attributes in the access log** — chat and embeddings
   requests now attach the OTel GenAI semantic-convention fields
   (`gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`,

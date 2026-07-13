@@ -49,6 +49,11 @@ const res = await client.chat("gpt-4o-mini", "weather in Tokyo?", {
 });
 console.log(res.tool_calls); // the model's requested tool calls, if any
 
+// Structured output (OpenAI/OpenAI-compatible natively, Gemini best-effort)
+await client.chat("gpt-4o-mini", "Return JSON with a 'city' field for Tokyo.", {
+  responseFormat: { type: "json_object" },
+});
+
 // Embeddings (echo works keyless; OpenAI-compatible call the real API)
 const emb = await client.embeddings("echo", ["hello", "world"]);
 console.log(emb.embeddings.length, emb.usage.total_tokens, emb.cached);
