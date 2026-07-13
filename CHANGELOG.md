@@ -6,6 +6,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Per-client tracking is now bounded** (`REKAI_MAX_TRACKED_CLIENTS`, default
+  10,000; `0` = unlimited) — `usage_by_client` and the budget-window store grew
+  one entry per distinct client id forever, and without gateway auth that id is
+  the raw request IP, making any internet-facing deployment a slow memory leak
+  (persisted across restarts via the metrics snapshot, no less). The rate
+  limiter already capped its buckets for exactly this reason; the metrics
+  structures now do too. At the cap, admitting a new client evicts the
+  least-active tracked client (the budget-window store first clears entries
+  from already-expired windows); `seed()` applies the cap to oversized
+  persisted snapshots, keeping the busiest clients. Eviction resets that
+  client's lifetime-budget baseline — consistent with budget enforcement being
+  documented as approximate, not billing (see docs/architecture.md).
+
 ### Added
 - **`response_format` in both SDKs** — the Python client's `chat()`/`stream()`
   take `response_format={...}` and the JS client takes

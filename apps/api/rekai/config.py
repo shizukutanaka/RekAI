@@ -112,6 +112,16 @@ class Settings(BaseSettings):
     # current window's accumulated spend (see docs/architecture.md).
     client_budget_window_seconds: int | None = Field(default=None, ge=1)
 
+    # Cap on distinct clients tracked in usage_by_client and the budget-window
+    # store (0 = unlimited). Without auth the client id is the raw request IP,
+    # so an internet-facing deployment would otherwise accumulate one entry per
+    # IP forever — the same unbounded-growth risk the rate limiter already
+    # guards against with its own bucket cap. When full, the entry with the
+    # fewest requests is evicted to make room (protecting active tenants);
+    # eviction resets that client's lifetime-budget baseline, consistent with
+    # budget enforcement being approximate, not billing (docs/architecture.md).
+    max_tracked_clients: int = Field(default=10_000, ge=0)
+
     # /metrics is open by default (so Prometheus can scrape without a token),
     # even when api_keys gates /v1/*. It carries a per-client cost/token
     # breakdown (usage_by_client), so an operator who considers that sensitive

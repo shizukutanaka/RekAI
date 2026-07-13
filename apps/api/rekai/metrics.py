@@ -6,8 +6,15 @@ import threading
 
 
 class Metrics:
-    def __init__(self) -> None:
+    def __init__(self, max_tracked_clients: int = 10_000) -> None:
         self._lock = threading.Lock()
+        # Cap on distinct client ids kept in usage_by_client and
+        # _budget_window_usage (0 = unlimited). Without gateway auth the client
+        # id is the raw request IP, so an unbounded dict is a slow memory leak
+        # on any internet-facing deployment — the RateLimiter caps its buckets
+        # for the same reason. create_app() overrides this from
+        # REKAI_MAX_TRACKED_CLIENTS.
+        self.max_tracked_clients = max_tracked_clients
         self.requests_total = 0
         self.cache_hits_total = 0
         self.cache_misses_total = 0
@@ -74,11 +81,25 @@ class Metrics:
 
     def record_client_usage(self, client_id: str, tokens: int, cost_usd: float | None) -> None:
         """Attribute one request's tokens/cost to a client (API key or IP), so
-        per-tenant spend is observable without leaking the raw key anywhere."""
+        per-tenant spend is observable without leaking the raw key anywhere.
+
+        Bounded by ``max_tracked_clients``: admitting a new client at the cap
+        evicts the tracked client with the fewest requests, so one-off IPs
+        churn while active tenants stay. Eviction also resets that client's
+        lifetime-budget baseline (client_cost_usd starts over) — acceptable
+        because budget enforcement is documented as approximate, and the
+        alternative is unbounded growth."""
         with self._lock:
-            usage = self.usage_by_client.setdefault(
-                client_id, {"requests": 0, "tokens": 0, "cost_usd": 0.0}
-            )
+            usage = self.usage_by_client.get(client_id)
+            if usage is None:
+                cap = self.max_tracked_clients
+                if cap and len(self.usage_by_client) >= cap:
+                    coldest = min(
+                        self.usage_by_client, key=lambda c: self.usage_by_client[c]["requests"]
+                    )
+                    del self.usage_by_client[coldest]
+                usage = {"requests": 0, "tokens": 0, "cost_usd": 0.0}
+                self.usage_by_client[client_id] = usage
             usage["requests"] += 1
             usage["tokens"] += tokens
             if cost_usd:
@@ -103,6 +124,20 @@ class Metrics:
         with self._lock:
             window_index = int(now / window_seconds)
             prev = self._budget_window_usage.get(client_id)
+            cap = self.max_tracked_clients
+            if prev is None and cap and len(self._budget_window_usage) >= cap:
+                # Entries from past windows are dead weight (reads return 0.0
+                # for them), so clear those first; only evict a live entry —
+                # the cheapest one — if the cap is still exceeded.
+                stale = [c for c, (w, _) in self._budget_window_usage.items() if w != window_index]
+                for c in stale:
+                    del self._budget_window_usage[c]
+                if len(self._budget_window_usage) >= cap:
+                    cheapest = min(
+                        self._budget_window_usage,
+                        key=lambda c: self._budget_window_usage[c][1],
+                    )
+                    del self._budget_window_usage[cheapest]
             base = prev[1] if prev is not None and prev[0] == window_index else 0.0
             self._budget_window_usage[client_id] = (window_index, base + cost_usd)
 
@@ -129,9 +164,14 @@ class Metrics:
             self.tokens_total = snapshot.get("tokens_total", 0)
             self.cost_usd_total = snapshot.get("cost_usd_total", 0.0)
             self.requests_by_provider = dict(snapshot.get("requests_by_provider", {}))
-            self.usage_by_client = {
-                client: dict(usage) for client, usage in snapshot.get("usage_by_client", {}).items()
-            }
+            clients = snapshot.get("usage_by_client", {})
+            # A snapshot persisted before the cap existed (or under a larger
+            # one) may exceed max_tracked_clients — keep the busiest entries.
+            cap = self.max_tracked_clients
+            if cap and len(clients) > cap:
+                kept = sorted(clients, key=lambda c: clients[c].get("requests", 0), reverse=True)
+                clients = {c: clients[c] for c in kept[:cap]}
+            self.usage_by_client = {client: dict(usage) for client, usage in clients.items()}
 
     def snapshot(self) -> dict:
         """Return a copy of the current counters as plain data."""

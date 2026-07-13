@@ -195,6 +195,9 @@ async def _run_chat(
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level, settings.log_format)
+    # The metrics singleton predates any Settings instance; apply the
+    # per-deployment client-tracking cap before it can serve a request.
+    metrics.max_tracked_clients = settings.max_tracked_clients
 
     metrics_store = build_metrics_store(settings)
 

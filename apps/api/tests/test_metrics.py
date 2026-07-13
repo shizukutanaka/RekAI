@@ -56,6 +56,90 @@ def test_record_client_usage_accumulates_per_client() -> None:
     assert snap["usage_by_client"]["key:bbb"] == {"requests": 1, "tokens": 100, "cost_usd": 0.5}
 
 
+def test_usage_by_client_capped_evicts_fewest_requests() -> None:
+    m = Metrics(max_tracked_clients=3)
+    # "hot" gets 5 requests; "warm" 2; "one-off" 1.
+    for _ in range(5):
+        m.record_client_usage("hot", tokens=1, cost_usd=None)
+    for _ in range(2):
+        m.record_client_usage("warm", tokens=1, cost_usd=None)
+    m.record_client_usage("one-off", tokens=1, cost_usd=None)
+    assert len(m.usage_by_client) == 3
+
+    # A new client at the cap evicts the entry with the fewest requests.
+    m.record_client_usage("newcomer", tokens=1, cost_usd=None)
+    assert len(m.usage_by_client) == 3
+    assert "one-off" not in m.usage_by_client
+    assert "hot" in m.usage_by_client and "warm" in m.usage_by_client
+
+
+def test_usage_by_client_existing_client_never_evicted_on_update() -> None:
+    m = Metrics(max_tracked_clients=2)
+    m.record_client_usage("a", tokens=1, cost_usd=None)
+    m.record_client_usage("b", tokens=1, cost_usd=None)
+    # Updating an already-tracked client at the cap must not evict anything.
+    m.record_client_usage("a", tokens=1, cost_usd=None)
+    assert set(m.usage_by_client) == {"a", "b"}
+
+
+def test_usage_by_client_zero_cap_is_unlimited() -> None:
+    m = Metrics(max_tracked_clients=0)
+    for i in range(50):
+        m.record_client_usage(f"c{i}", tokens=1, cost_usd=None)
+    assert len(m.usage_by_client) == 50
+
+
+def test_budget_window_cap_drops_stale_windows_first() -> None:
+    m = Metrics(max_tracked_clients=2)
+    # Two entries in window 10 (now=1000-1099, window=100).
+    m.record_client_budget_usage("old-a", 0.10, window_seconds=100, now=1000.0)
+    m.record_client_budget_usage("old-b", 0.20, window_seconds=100, now=1050.0)
+    # A new client in the NEXT window: both stale entries are cleared, so the
+    # live one is admitted without touching any current-window data.
+    m.record_client_budget_usage("new", 0.05, window_seconds=100, now=1150.0)
+    assert set(m._budget_window_usage) == {"new"}
+    assert m.client_budget_window_cost("new", window_seconds=100, now=1160.0) == pytest.approx(0.05)
+
+
+def test_budget_window_cap_evicts_cheapest_live_entry() -> None:
+    m = Metrics(max_tracked_clients=2)
+    m.record_client_budget_usage("big", 5.00, window_seconds=100, now=1000.0)
+    m.record_client_budget_usage("small", 0.01, window_seconds=100, now=1010.0)
+    # Same window, cap reached with live entries only: evict the cheapest.
+    m.record_client_budget_usage("third", 1.00, window_seconds=100, now=1020.0)
+    assert set(m._budget_window_usage) == {"big", "third"}
+
+
+def test_seed_truncates_to_cap_keeping_busiest() -> None:
+    m = Metrics(max_tracked_clients=2)
+    m.seed(
+        {
+            "usage_by_client": {
+                "busy": {"requests": 10, "tokens": 100, "cost_usd": 1.0},
+                "medium": {"requests": 5, "tokens": 50, "cost_usd": 0.5},
+                "idle": {"requests": 1, "tokens": 1, "cost_usd": 0.0},
+            }
+        }
+    )
+    assert set(m.usage_by_client) == {"busy", "medium"}
+
+
+def test_create_app_applies_max_tracked_clients() -> None:
+    from rekai.metrics import metrics as global_metrics
+
+    create_app(
+        Settings(
+            environment="test",
+            default_provider="echo",
+            rate_limit_enabled=False,
+            max_tracked_clients=123,
+        )
+    )
+    assert global_metrics.max_tracked_clients == 123
+    # Restore the default so other tests aren't affected.
+    global_metrics.max_tracked_clients = 10_000
+
+
 def test_client_cost_usd_reads_accumulated_spend() -> None:
     m = Metrics()
     assert m.client_cost_usd("key:never-seen") == 0.0

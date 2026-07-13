@@ -408,6 +408,20 @@ feature, so nothing that worked before regresses. When a window is configured,
 a 402 also carries an `X-Budget-Reset` header (the unix timestamp of the next
 window boundary), so a client knows exactly when it can retry.
 
+Both per-client structures are **bounded**: `REKAI_MAX_TRACKED_CLIENTS`
+(default 10,000; `0` = unlimited) caps how many distinct client ids are kept in
+`usage_by_client` and the budget-window store. Without gateway auth the client
+id is the raw request IP, so an internet-facing deployment would otherwise
+accumulate one entry per IP forever — persisted across restarts via the metrics
+snapshot, no less. At the cap, admitting a new client evicts the tracked client
+with the fewest requests (the budget-window store first clears entries from
+already-expired windows, which are dead weight). Eviction resets that client's
+lifetime-budget baseline — the same "approximate, not billing" tradeoff as
+above; a deployment that needs exact caps for a known tenant set should size
+the cap above its tenant count (or set `0` behind auth, where the key space is
+operator-controlled). `seed()` applies the same cap when loading a persisted
+snapshot, keeping the busiest clients.
+
 ### Web app support
 
 The web app (`apps/web`) stores two distinct keys in `localStorage`, both only
