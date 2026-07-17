@@ -6,6 +6,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-17
+
 ### Performance
 - **Providers reuse a persistent `httpx.AsyncClient`** — every provider
   (OpenAI, Anthropic, Gemini, Ollama, and OpenAI-compatible) opened a brand-new
