@@ -22,6 +22,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
         models: list[str] | None = None,
         embedding_models: list[str] | None = None,
     ) -> None:
+        super().__init__()
         self.name = name
         self._url = base_url
         self._key = api_key

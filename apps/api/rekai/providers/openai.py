@@ -67,12 +67,12 @@ class OpenAIProvider(Provider):
 
         url = f"{self._base_url().rstrip('/')}/chat/completions"
         try:
-            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                resp = await client.post(
-                    url,
-                    json=payload,
-                    headers={**trace_headers(), "Authorization": f"Bearer {key}"},
-                )
+            client = self._client(settings.request_timeout_seconds)
+            resp = await client.post(
+                url,
+                json=payload,
+                headers={**trace_headers(), "Authorization": f"Bearer {key}"},
+            )
         except httpx.HTTPError as exc:  # network-level failure
             raise ProviderError(f"{self.name} request failed: {exc}") from exc
 
@@ -124,24 +124,24 @@ class OpenAIProvider(Provider):
         url = f"{self._base_url().rstrip('/')}/chat/completions"
         tool_calls_acc: dict[int, dict] = {}
         try:
-            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                async with client.stream(
-                    "POST",
-                    url,
-                    json=payload,
-                    headers={**trace_headers(), "Authorization": f"Bearer {key}"},
-                ) as resp:
-                    if resp.status_code >= 400:
-                        body = (await resp.aread()).decode()[:200]
-                        raise ProviderError(
-                            f"{self.name} returned {resp.status_code}: {body}",
-                            status_code=resp.status_code if resp.status_code < 500 else 502,
-                        )
-                    async for line in resp.aiter_lines():
-                        event = _parse_openai_sse_event(line)
-                        if event is not None:
-                            yield event
-                        _accumulate_tool_call_deltas(line, tool_calls_acc)
+            client = self._client(settings.request_timeout_seconds)
+            async with client.stream(
+                "POST",
+                url,
+                json=payload,
+                headers={**trace_headers(), "Authorization": f"Bearer {key}"},
+            ) as resp:
+                if resp.status_code >= 400:
+                    body = (await resp.aread()).decode()[:200]
+                    raise ProviderError(
+                        f"{self.name} returned {resp.status_code}: {body}",
+                        status_code=resp.status_code if resp.status_code < 500 else 502,
+                    )
+                async for line in resp.aiter_lines():
+                    event = _parse_openai_sse_event(line)
+                    if event is not None:
+                        yield event
+                    _accumulate_tool_call_deltas(line, tool_calls_acc)
         except httpx.HTTPError as exc:
             raise ProviderError(f"{self.name} streaming request failed: {exc}") from exc
         if tool_calls_acc:
@@ -153,12 +153,12 @@ class OpenAIProvider(Provider):
         key = self._resolve_key(api_key)
         url = f"{self._base_url().rstrip('/')}/embeddings"
         try:
-            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                resp = await client.post(
-                    url,
-                    json={"model": model, "input": inputs},
-                    headers={**trace_headers(), "Authorization": f"Bearer {key}"},
-                )
+            client = self._client(settings.request_timeout_seconds)
+            resp = await client.post(
+                url,
+                json={"model": model, "input": inputs},
+                headers={**trace_headers(), "Authorization": f"Bearer {key}"},
+            )
         except httpx.HTTPError as exc:
             raise ProviderError(f"{self.name} embeddings request failed: {exc}") from exc
         if resp.status_code >= 400:

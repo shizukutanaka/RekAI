@@ -84,8 +84,8 @@ class AnthropicProvider(Provider):
 
         url = f"{settings.anthropic_base_url.rstrip('/')}/messages"
         try:
-            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                resp = await client.post(url, json=payload, headers=self._headers(key))
+            client = self._client(settings.request_timeout_seconds)
+            resp = await client.post(url, json=payload, headers=self._headers(key))
         except httpx.HTTPError as exc:
             raise ProviderError(f"Anthropic request failed: {exc}") from exc
 
@@ -131,57 +131,55 @@ class AnthropicProvider(Provider):
         # input_json_delta fragments, keyed by block index.
         tool_blocks: dict[int, dict] = {}
         try:
-            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                async with client.stream(
-                    "POST", url, json=payload, headers=self._headers(key)
-                ) as resp:
-                    if resp.status_code >= 400:
-                        body = (await resp.aread()).decode()[:200]
-                        raise ProviderError(
-                            f"Anthropic returned {resp.status_code}: {body}",
-                            status_code=resp.status_code if resp.status_code < 500 else 502,
-                        )
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data:"):
-                            continue
-                        data = line[len("data:") :].strip()
-                        if not data:
-                            continue
-                        try:
-                            event = json.loads(data)
-                        except json.JSONDecodeError:
-                            continue
-                        etype = event.get("type")
-                        if etype == "content_block_start":
-                            block = event.get("content_block", {})
-                            if block.get("type") == "tool_use":
-                                tool_blocks[event.get("index", 0)] = {
-                                    "id": block.get("id", ""),
-                                    "type": "function",
-                                    "function": {
-                                        "name": block.get("name", ""),
-                                        "arguments": "",
-                                    },
-                                }
-                        elif etype == "content_block_delta":
-                            delta = event.get("delta", {})
-                            text = delta.get("text")
-                            if text:
-                                yield StreamEvent(delta=text)
-                            elif delta.get("type") == "input_json_delta":
-                                slot = tool_blocks.get(event.get("index", 0))
-                                if slot is not None:
-                                    slot["function"]["arguments"] += delta.get("partial_json", "")
-                        elif etype == "message_start":
-                            usage = event.get("message", {}).get("usage", {})
-                            input_tokens = usage.get("input_tokens", input_tokens)
-                            output_tokens = usage.get("output_tokens", output_tokens)
+            client = self._client(settings.request_timeout_seconds)
+            async with client.stream("POST", url, json=payload, headers=self._headers(key)) as resp:
+                if resp.status_code >= 400:
+                    body = (await resp.aread()).decode()[:200]
+                    raise ProviderError(
+                        f"Anthropic returned {resp.status_code}: {body}",
+                        status_code=resp.status_code if resp.status_code < 500 else 502,
+                    )
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[len("data:") :].strip()
+                    if not data:
+                        continue
+                    try:
+                        event = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    etype = event.get("type")
+                    if etype == "content_block_start":
+                        block = event.get("content_block", {})
+                        if block.get("type") == "tool_use":
+                            tool_blocks[event.get("index", 0)] = {
+                                "id": block.get("id", ""),
+                                "type": "function",
+                                "function": {
+                                    "name": block.get("name", ""),
+                                    "arguments": "",
+                                },
+                            }
+                    elif etype == "content_block_delta":
+                        delta = event.get("delta", {})
+                        text = delta.get("text")
+                        if text:
+                            yield StreamEvent(delta=text)
+                        elif delta.get("type") == "input_json_delta":
+                            slot = tool_blocks.get(event.get("index", 0))
+                            if slot is not None:
+                                slot["function"]["arguments"] += delta.get("partial_json", "")
+                    elif etype == "message_start":
+                        usage = event.get("message", {}).get("usage", {})
+                        input_tokens = usage.get("input_tokens", input_tokens)
+                        output_tokens = usage.get("output_tokens", output_tokens)
+                        saw_usage = True
+                    elif etype == "message_delta":
+                        usage = event.get("usage", {})
+                        if "output_tokens" in usage:
+                            output_tokens = usage["output_tokens"]
                             saw_usage = True
-                        elif etype == "message_delta":
-                            usage = event.get("usage", {})
-                            if "output_tokens" in usage:
-                                output_tokens = usage["output_tokens"]
-                                saw_usage = True
         except httpx.HTTPError as exc:
             raise ProviderError(f"Anthropic streaming request failed: {exc}") from exc
         if tool_blocks:

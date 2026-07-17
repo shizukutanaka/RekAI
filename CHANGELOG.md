@@ -6,6 +6,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Performance
+- **Providers reuse a persistent `httpx.AsyncClient`** — every provider
+  (OpenAI, Anthropic, Gemini, Ollama, and OpenAI-compatible) opened a brand-new
+  `httpx.AsyncClient` in an `async with` block and tore it down on *every*
+  chat/streaming/embeddings request, so no TCP/TLS connection to an upstream
+  provider was ever reused — a full handshake per call. A new
+  `Provider._client()` helper (in `providers/base.py`) returns a client cached
+  per provider instance, keyed by the running event loop (a client's pool is
+  loop-bound, so it's rebuilt only when the loop changes — routine only under
+  pytest-asyncio, a no-op in production's single long-lived loop). Meaningful
+  latency/throughput win under load; no behavior change.
+
 ### Added
 - **`tests/test_service.py`** — direct unit tests for
   `service.handle_chat_stream`, the shared streaming pipeline extracted in an

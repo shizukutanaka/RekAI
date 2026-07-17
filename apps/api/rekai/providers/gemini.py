@@ -78,10 +78,10 @@ class GeminiProvider(Provider):
         payload = self._build_payload(request)
         url = f"{settings.gemini_base_url.rstrip('/')}/models/{request.model}:generateContent"
         try:
-            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                resp = await client.post(
-                    url, json=payload, headers={**trace_headers(), "x-goog-api-key": key}
-                )
+            client = self._client(settings.request_timeout_seconds)
+            resp = await client.post(
+                url, json=payload, headers={**trace_headers(), "x-goog-api-key": key}
+            )
         except httpx.HTTPError as exc:
             raise ProviderError(f"Gemini request failed: {exc}") from exc
 
@@ -117,10 +117,10 @@ class GeminiProvider(Provider):
         }
         url = f"{settings.gemini_base_url.rstrip('/')}/{qualified}:batchEmbedContents"
         try:
-            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                resp = await client.post(
-                    url, json=payload, headers={**trace_headers(), "x-goog-api-key": key}
-                )
+            client = self._client(settings.request_timeout_seconds)
+            resp = await client.post(
+                url, json=payload, headers={**trace_headers(), "x-goog-api-key": key}
+            )
         except httpx.HTTPError as exc:
             raise ProviderError(f"Gemini embeddings request failed: {exc}") from exc
         if resp.status_code >= 400:
@@ -148,34 +148,34 @@ class GeminiProvider(Provider):
         # Gemini streams a functionCall complete within a chunk; collect across chunks.
         tool_calls: list[dict] = []
         try:
-            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                async with client.stream(
-                    "POST", url, json=payload, headers={**trace_headers(), "x-goog-api-key": key}
-                ) as resp:
-                    if resp.status_code >= 400:
-                        body = (await resp.aread()).decode()[:200]
-                        raise ProviderError(
-                            f"Gemini returned {resp.status_code}: {body}",
-                            status_code=resp.status_code if resp.status_code < 500 else 502,
-                        )
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data:"):
-                            continue
-                        data = line[len("data:") :].strip()
-                        if not data:
-                            continue
-                        try:
-                            chunk = json.loads(data)
-                        except json.JSONDecodeError:
-                            continue
-                        text = _extract_text(chunk)
-                        if text:
-                            yield StreamEvent(delta=text)
-                        calls = _extract_tool_calls(chunk)
-                        if calls:
-                            tool_calls.extend(calls)
-                        if chunk.get("usageMetadata"):
-                            last_usage = chunk["usageMetadata"]
+            client = self._client(settings.request_timeout_seconds)
+            async with client.stream(
+                "POST", url, json=payload, headers={**trace_headers(), "x-goog-api-key": key}
+            ) as resp:
+                if resp.status_code >= 400:
+                    body = (await resp.aread()).decode()[:200]
+                    raise ProviderError(
+                        f"Gemini returned {resp.status_code}: {body}",
+                        status_code=resp.status_code if resp.status_code < 500 else 502,
+                    )
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[len("data:") :].strip()
+                    if not data:
+                        continue
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    text = _extract_text(chunk)
+                    if text:
+                        yield StreamEvent(delta=text)
+                    calls = _extract_tool_calls(chunk)
+                    if calls:
+                        tool_calls.extend(calls)
+                    if chunk.get("usageMetadata"):
+                        last_usage = chunk["usageMetadata"]
         except httpx.HTTPError as exc:
             raise ProviderError(f"Gemini streaming request failed: {exc}") from exc
         if tool_calls:

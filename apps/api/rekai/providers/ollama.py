@@ -48,8 +48,8 @@ class OllamaProvider(Provider):
         }
         url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
         try:
-            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                resp = await client.post(url, json=payload, headers=trace_headers())
+            client = self._client(settings.request_timeout_seconds)
+            resp = await client.post(url, json=payload, headers=trace_headers())
         except httpx.HTTPError as exc:
             raise ProviderError(
                 f"Ollama request failed (is it running at {settings.ollama_base_url}?): {exc}"
@@ -76,10 +76,10 @@ class OllamaProvider(Provider):
         settings = get_settings()
         url = f"{settings.ollama_base_url.rstrip('/')}/api/embed"
         try:
-            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                resp = await client.post(
-                    url, json={"model": model, "input": inputs}, headers=trace_headers()
-                )
+            client = self._client(settings.request_timeout_seconds)
+            resp = await client.post(
+                url, json={"model": model, "input": inputs}, headers=trace_headers()
+            )
         except httpx.HTTPError as exc:
             raise ProviderError(
                 f"Ollama embeddings request failed "
@@ -113,20 +113,18 @@ class OllamaProvider(Provider):
         }
         url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
         try:
-            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
-                async with client.stream(
-                    "POST", url, json=payload, headers=trace_headers()
-                ) as resp:
-                    if resp.status_code >= 400:
-                        body = (await resp.aread()).decode()[:200]
-                        raise ProviderError(
-                            f"Ollama returned {resp.status_code}: {body}",
-                            status_code=resp.status_code if resp.status_code < 500 else 502,
-                        )
-                    async for line in resp.aiter_lines():
-                        event = _parse_ollama_ndjson_event(line)
-                        if event is not None:
-                            yield event
+            client = self._client(settings.request_timeout_seconds)
+            async with client.stream("POST", url, json=payload, headers=trace_headers()) as resp:
+                if resp.status_code >= 400:
+                    body = (await resp.aread()).decode()[:200]
+                    raise ProviderError(
+                        f"Ollama returned {resp.status_code}: {body}",
+                        status_code=resp.status_code if resp.status_code < 500 else 502,
+                    )
+                async for line in resp.aiter_lines():
+                    event = _parse_ollama_ndjson_event(line)
+                    if event is not None:
+                        yield event
         except httpx.HTTPError as exc:
             raise ProviderError(
                 f"Ollama streaming request failed (is it running at "

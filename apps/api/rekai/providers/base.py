@@ -7,9 +7,12 @@ implementing this small interface and registering it.
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
+
+import httpx
 
 from rekai.schemas import ChatRequest, Usage
 from rekai.tracing import current_traceparent
@@ -107,6 +110,40 @@ class Provider(ABC):
 
     #: Whether this provider requires an API key (server-side or BYOK).
     requires_key: bool = True
+
+    def __init__(self) -> None:
+        self._http_client: httpx.AsyncClient | None = None
+        self._http_client_loop: asyncio.AbstractEventLoop | None = None
+
+    def _client(self, timeout: float) -> httpx.AsyncClient:
+        """A persistent ``httpx.AsyncClient`` reused across requests.
+
+        Providers are long-lived singletons (built once by
+        ``providers/registry.py``), but every call used to open a brand-new
+        ``AsyncClient`` in an ``async with`` block and tear it down again —
+        so no TCP/TLS connection to an upstream provider was ever reused,
+        paying a full handshake on every single chat/embeddings call.
+
+        An ``AsyncClient``'s connection pool is bound to the event loop it was
+        created on, so this recreates the client whenever the running loop
+        differs from the one it was last built on (harmless in production,
+        which has exactly one loop for the process lifetime — the persistent-
+        reuse path is what actually matters there; it only fires routinely
+        under pytest-asyncio, where each test function gets its own loop —
+        which conveniently also means a test that monkeypatches
+        ``httpx.AsyncClient`` never observes a client cached from a prior
+        test). The old client, if any, is intentionally not awaited-closed
+        here: its loop may already be closed, and letting it fall out of
+        scope is a standard tradeoff for this pattern. (Not keyed on
+        ``.is_closed`` — nothing in this codebase ever explicitly closes a
+        cached client, and test doubles for ``httpx.AsyncClient`` don't
+        implement that attribute.)
+        """
+        loop = asyncio.get_running_loop()
+        if self._http_client is None or self._http_client_loop is not loop:
+            self._http_client = httpx.AsyncClient(timeout=timeout)
+            self._http_client_loop = loop
+        return self._http_client
 
     @abstractmethod
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:

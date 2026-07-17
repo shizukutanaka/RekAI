@@ -1,6 +1,9 @@
+import httpx
+
 from rekai.providers import get_provider, provider_names, register_provider
 from rekai.providers.base import Provider, ProviderResult, parse_retry_after, provider_http_error
 from rekai.providers.echo import EchoProvider
+from rekai.providers.openai import OpenAIProvider
 from rekai.schemas import ChatMessage, ChatRequest, Usage
 
 
@@ -56,3 +59,25 @@ def test_register_custom_provider() -> None:
 
     register_provider(Custom())
     assert get_provider("custom-test") is not None
+
+
+async def test_client_is_reused_across_calls_on_same_loop() -> None:
+    # _client() returns a persistent httpx.AsyncClient so upstream connections
+    # can be pooled instead of a fresh handshake per request.
+    provider = OpenAIProvider()
+    c1 = provider._client(30.0)
+    c2 = provider._client(30.0)
+    assert c1 is c2
+    assert isinstance(c1, httpx.AsyncClient)
+
+
+async def test_client_rebuilt_when_event_loop_changes() -> None:
+    # The pool is bound to the loop it was created on; a client cached from a
+    # prior loop must not be reused (each pytest-asyncio test gets its own loop).
+    provider = OpenAIProvider()
+    first = provider._client(30.0)
+    # Simulate the "cached from a now-defunct loop" state the next test's loop
+    # would see, without needing a second real loop.
+    provider._http_client_loop = object()  # type: ignore[assignment]
+    rebuilt = provider._client(30.0)
+    assert rebuilt is not first
