@@ -106,6 +106,43 @@ export default function SettingsPage() {
           it with <code>NEXT_PUBLIC_API_URL</code>.
         </p>
       </div>
+
+      <div className="field" style={{ marginTop: 32 }}>
+        <label>Use it from the OpenAI SDK</label>
+        <p className="hint">
+          RekAI exposes a drop-in <code>POST /v1/chat/completions</code>, so any
+          OpenAI SDK (or LangChain, etc.) works by just changing the base URL to{" "}
+          <code>{`${API_URL}/v1`}</code>:
+        </p>
+        <pre
+          style={{
+            background: "var(--panel-2)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            padding: 12,
+            overflowX: "auto",
+            fontSize: 13,
+            lineHeight: 1.5,
+          }}
+        >
+          <code>{`from openai import OpenAI
+
+client = OpenAI(
+    base_url="${API_URL}/v1",
+    api_key="${gatewayKey.trim() || "unused-on-echo"}",  # your RekAI gateway key
+)
+client.chat.completions.create(
+    model="echo",
+    messages=[{"role": "user", "content": "hello"}],
+)`}</code>
+        </pre>
+        <p className="hint">
+          Set a real provider model (<code>gpt-4o-mini</code>,{" "}
+          <code>claude-...</code>) and pass your provider key for BYOK via the
+          SDK&apos;s <code>default_headers</code> as an{" "}
+          <code>X-Provider-Key</code> header.
+        </p>
+      </div>
     </div>
   );
 }
