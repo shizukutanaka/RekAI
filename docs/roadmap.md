@@ -48,6 +48,30 @@ is a self-hostable AI gateway that runs with a single `docker compose up`.
 - [ ] Live demo instance (maintainer action)
 - [ ] GitHub Release + `v1.0.0` tag (maintainer action)
 
+### Shipped after v1.0 (v1.1 – v1.2) ✅
+
+Post-1.0 hardening and reach, all released — see [CHANGELOG.md](../CHANGELOG.md)
+for the full detail:
+
+- [x] **OpenAI-compatible `POST /v1/chat/completions`** — drop-in for the
+  OpenAI SDK / LangChain, non-streaming and streaming, with
+  `response_format` (structured outputs) passthrough across the API and both
+  SDKs (v1.2)
+- [x] **Dynamic API-key management** — add/revoke tenant keys at runtime via
+  `/admin/keys` (+ web admin UI), optionally encrypted at rest (v1.1)
+- [x] **Per-client budgets** — lifetime and time-boxed
+  (`REKAI_CLIENT_BUDGET_WINDOW_SECONDS`) spend caps, bounded tracking
+  (`REKAI_MAX_TRACKED_CLIENTS`) (v1.1 – v1.2)
+- [x] **Resilience** — retry + circuit breaker + provider cooldown;
+  Redis-shared rate limiting across workers/nodes (v1.1)
+- [x] **Observability** — W3C `traceparent` propagated to upstream providers,
+  OpenTelemetry GenAI semantic-convention attributes on access logs (v1.1 – v1.2)
+- [x] **Security hardening** — prompt-injection guardrail + output redaction,
+  a real hard cap on request body size (chunked-transfer-encoding safe),
+  security headers (v1.1 – v1.2)
+- [x] **Gateway-key (Bearer) auth** in both SDKs and all examples;
+  connection pooling to upstream providers (v1.2)
+
 ## Explicitly out of scope for v1.0
 
 To keep a single maintainer productive, these are deferred to v2.x and only
@@ -62,7 +86,9 @@ have interface seams reserved today:
 
 ## Beyond v1.0
 
-- **v1.x** — stabilize the core, more providers, advanced streaming.
+- **v1.x** — in progress: OpenAI-compatible API, structured outputs, dynamic
+  keys, budgets, and observability shipped in v1.1 – v1.2 (above); further
+  provider integrations and advanced streaming to follow.
 - **v2.x** — plugin ecosystem for providers and policies.
 - **v3.x** — advanced multi-provider orchestration (fallback, load-balancing).
 - **v4.x** — agent workflows and automation.
