@@ -3,8 +3,16 @@ node_modules
 out
 npm-debug.log*
 .env
-.env.local
+.env.*
 .git
 Dockerfile
 .dockerignore
 README.md
+# Test-only assets — never needed in the production image, and shipping the
+# E2E suite would only bloat the build context and slow the build.
+e2e
+playwright.config.ts
+playwright-report
+test-results
+coverage
+*.tsbuildinfo

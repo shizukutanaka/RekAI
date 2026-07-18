@@ -20,6 +20,8 @@ out/
 npm-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+# TypeScript incremental build cache (regenerated on every tsc run)
+*.tsbuildinfo
 
 # Playwright
 test-results/
