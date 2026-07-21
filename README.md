@@ -190,6 +190,10 @@ make up        # docker compose up --build
 
 Run `make help` for the full list. Changes are tracked in [CHANGELOG.md](./CHANGELOG.md).
 
+Working on this repo with an AI agent? Start from [`CLAUDE.md`](./CLAUDE.md)
+(shared conventions and verification gates) and the model-specific task
+assignments in [`docs/ai/`](./docs/ai/).
+
 ## 🤝 Contributing
 
 Contributions are welcome! Read [CONTRIBUTING.md](./CONTRIBUTING.md) and our [Code of Conduct](./CODE_OF_CONDUCT.md).

@@ -6,6 +6,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **AI-agent working docs** — a root `CLAUDE.md` (shared conventions: the
+  exact verification gates, established code idioms, and this environment's
+  git constraints) plus `docs/ai/instructions-opus.md` and
+  `docs/ai/instructions-sonnet.md`: a strengths/weaknesses summary of the
+  codebase and a prioritized improvement backlog split by task difficulty —
+  architecture-level work (settings DI for the provider layer, semantic-cache
+  confidence bands, cost-quality cascade routing) for Opus-class sessions,
+  pattern-following implementation (E2E coverage for v1.2 features, custom-
+  provider registry tests, npm audit cleanup, post-permission-grant release
+  steps) for Sonnet-class sessions. Every command in the docs was executed
+  as written before committing.
+
 ## [1.2.0] - 2026-07-17
 
 ### Performance
