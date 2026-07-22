@@ -40,6 +40,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   live region.
 
 ### Added
+- **First-class streaming tool calls in both SDKs** — when a streamed
+  completion ends with tool calls, they ride on the summary event under
+  `tool_calls`. The SDKs now expose an `on_tool_calls` (`onToolCalls`) stream
+  callback invoked with just that list, so callers no longer have to dig them
+  out of the usage summary. The server's SSE frame shape is unchanged
+  (backward-compatible); `on_usage` still receives the full summary.
 - **SDK idempotency keys + client-side retry (both SDKs)** — the Python and JS
   clients now retry transient failures (connection errors and
   `429`/`502`/`503`/`504`) with exponential backoff, honoring `Retry-After`;

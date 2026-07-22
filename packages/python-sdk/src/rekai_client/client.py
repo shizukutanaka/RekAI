@@ -364,12 +364,17 @@ class RekAIClient:
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], None] | None = None,
+        on_tool_calls: Callable[[list[dict[str, Any]]], None] | None = None,
     ) -> Iterator[str]:
         """Yield response text chunks from the streaming endpoint.
 
-        If ``on_usage`` is given, it is called once with the final usage summary
-        ``{"provider", "model", "usage", "cost_usd", "estimated"}`` when the
-        server reports it (just before the stream ends).
+        If ``on_usage`` is given, it is called once with the final summary
+        ``{"provider", "model", "usage", "cost_usd", "estimated", "tool_calls"?}``
+        when the server reports it (just before the stream ends).
+
+        If the model requested tool calls, they ride on that same summary under
+        ``"tool_calls"``; ``on_tool_calls`` (when given) is called with just that
+        list, so you don't have to dig them out of the usage summary yourself.
         """
         payload = self._payload(
             model,
@@ -401,6 +406,9 @@ class RekAIClient:
                 elif kind == "usage":
                     if on_usage is not None:
                         on_usage(value)
+                    tcs = value.get("tool_calls")
+                    if tcs and on_tool_calls is not None:
+                        on_tool_calls(tcs)
                 elif kind == "error":
                     raise RekAIError(value)
 
@@ -570,12 +578,15 @@ class AsyncRekAIClient:
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
+        on_tool_calls: Callable[[list[dict[str, Any]]], Awaitable[None] | None] | None = None,
     ) -> AsyncIterator[str]:
         """Yield response text chunks from the streaming endpoint.
 
         If ``on_usage`` is given, it is called once with the final usage summary
-        when the server reports it. It may be a plain callable or a coroutine
-        function (an awaitable return value is awaited).
+        when the server reports it. If the model requested tool calls (carried on
+        that same summary under ``"tool_calls"``), ``on_tool_calls`` is called
+        with just that list. Either callback may be a plain callable or a
+        coroutine function (an awaitable return value is awaited).
         """
         payload = _build_payload(
             model,
@@ -613,6 +624,11 @@ class AsyncRekAIClient:
                         maybe = on_usage(value)
                         if maybe is not None:
                             await maybe
+                    tcs = value.get("tool_calls")
+                    if tcs and on_tool_calls is not None:
+                        maybe_tc = on_tool_calls(tcs)
+                        if maybe_tc is not None:
+                            await maybe_tc
                 elif kind == "error":
                     raise RekAIError(value)
 

@@ -35,8 +35,13 @@ result = client.chat(
 # upstream provider; this authenticates you to RekAI itself).
 client = RekAIClient("http://localhost:8000", gateway_key="sk-rekai-...")
 
-# Streaming (with optional usage/cost callback)
-for chunk in client.stream("echo", "stream me", on_usage=lambda s: print("\n", s)):
+# Streaming (with optional usage/cost + tool-call callbacks)
+for chunk in client.stream(
+    "echo",
+    "stream me",
+    on_usage=lambda s: print("\n", s),
+    on_tool_calls=lambda calls: print("tools:", calls),  # fired if the model calls tools
+):
     print(chunk, end="", flush=True)
 
 # Reliability: fall back to echo on upstream errors

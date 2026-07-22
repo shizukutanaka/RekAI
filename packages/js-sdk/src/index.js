@@ -155,7 +155,9 @@ export class RekAIClient {
 
   /**
    * Stream a chat completion, yielding text chunks. If `opts.onUsage` is given,
-   * it is called once with the final usage summary when the server reports it.
+   * it is called once with the final summary when the server reports it. If the
+   * model requested tool calls (carried on that same summary under
+   * `tool_calls`), `opts.onToolCalls` is called with just that list.
    * @param {string} model
    * @param {string|Array<{role:string,content:string}>} messages
    * @param {object} [opts]
@@ -194,8 +196,10 @@ export class RekAIClient {
           continue;
         }
         if (event.delta) yield event.delta;
-        else if (event.usage) opts.onUsage?.(event);
-        else if (event.error) throw new RekAIError(event.detail || event.error);
+        else if (event.usage) {
+          opts.onUsage?.(event);
+          if (event.tool_calls) opts.onToolCalls?.(event.tool_calls);
+        } else if (event.error) throw new RekAIError(event.detail || event.error);
       }
     }
   }

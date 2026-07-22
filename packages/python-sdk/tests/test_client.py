@@ -260,6 +260,35 @@ def test_stream_invokes_on_usage() -> None:
     assert seen["estimated"] is False
 
 
+def test_stream_invokes_on_tool_calls() -> None:
+    sse = (
+        'data: {"delta": "Hi"}\n\n'
+        'data: {"provider":"echo","model":"echo","usage":{"total_tokens":2},'
+        '"cost_usd":0.0,"estimated":false,'
+        '"tool_calls":[{"id":"c1","type":"function",'
+        '"function":{"name":"get_weather","arguments":"{}"}}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=sse)
+
+    client = make_client(handler)
+    seen: dict = {}
+    tool_calls: list = []
+    list(
+        client.stream(
+            "echo",
+            "hi",
+            on_usage=lambda s: seen.update(s),
+            on_tool_calls=lambda t: tool_calls.extend(t),
+        )
+    )
+    assert tool_calls and tool_calls[0]["function"]["name"] == "get_weather"
+    # Still present on the usage summary too (unchanged wire shape).
+    assert seen["tool_calls"][0]["id"] == "c1"
+
+
 def test_stream_raises_on_error_event() -> None:
     sse = 'data: {"error": "provider_error", "detail": "boom"}\n\ndata: [DONE]\n\n'
 
@@ -576,6 +605,33 @@ def test_async_stream_awaits_coroutine_on_usage() -> None:
 
     asyncio.run(run())
     assert seen["usage"]["total_tokens"] == 2
+
+
+def test_async_stream_invokes_on_tool_calls() -> None:
+    sse = (
+        'data: {"delta": "Hi"}\n\n'
+        'data: {"provider":"echo","model":"echo","usage":{"total_tokens":2},'
+        '"cost_usd":0.0,"estimated":false,'
+        '"tool_calls":[{"id":"c1","type":"function",'
+        '"function":{"name":"get_weather","arguments":"{}"}}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=sse)
+
+    tool_calls: list = []
+
+    async def run() -> None:
+        async def on_tool_calls(tcs: list) -> None:
+            tool_calls.extend(tcs)
+
+        async with make_async_client(handler) as client:
+            async for _ in client.stream("echo", "hi", on_tool_calls=on_tool_calls):
+                pass
+
+    asyncio.run(run())
+    assert tool_calls and tool_calls[0]["function"]["name"] == "get_weather"
 
 
 def test_async_stream_raises_on_error_event() -> None:

@@ -30,9 +30,10 @@ await client.chat("gpt-4o-mini", [{ role: "user", content: "Write a haiku." }], 
   providerKey: "sk-...",
 });
 
-// Streaming (with optional usage/cost callback)
+// Streaming (with optional usage/cost + tool-call callbacks)
 for await (const chunk of client.stream("echo", "stream me", {
   onUsage: (s) => console.log("\n", s),
+  onToolCalls: (calls) => console.log("tools:", calls), // fired if the model calls tools
 })) {
   process.stdout.write(chunk);
 }

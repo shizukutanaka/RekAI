@@ -52,12 +52,17 @@ before(async () => {
         });
       }
       if (req.url === "/v1/chat/stream") {
+        // Ride tool_calls on the summary event when the request asked for tools.
+        const toolCalls = lastRequest.body && lastRequest.body.tools
+          ? ',"tool_calls":[{"id":"c1","type":"function",' +
+            '"function":{"name":"get_weather","arguments":"{}"}}]'
+          : "";
         const sse =
           'data: {"delta": "Hello"}\n\n' +
           'data: {"delta": " world"}\n\n' +
           'data: {"provider":"echo","model":"echo",' +
           '"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3},' +
-          '"cost_usd":0,"estimated":false}\n\n' +
+          '"cost_usd":0,"estimated":false' + toolCalls + "}\n\n" +
           "data: [DONE]\n\n";
         return send(res, 200, sse, { "Content-Type": "text/event-stream" });
       }
@@ -181,6 +186,25 @@ test("stream reports usage via onUsage", async () => {
   assert.ok(summary);
   assert.equal(summary.usage.total_tokens, 3);
   assert.equal(summary.estimated, false);
+});
+
+test("stream surfaces tool_calls via onToolCalls", async () => {
+  const client = new RekAIClient(baseUrl);
+  let toolCalls = null;
+  let summary = null;
+  const chunks = [];
+  for await (const c of client.stream("echo", "weather?", {
+    tools: [{ type: "function", function: { name: "get_weather" } }],
+    onUsage: (s) => (summary = s),
+    onToolCalls: (t) => (toolCalls = t),
+  })) {
+    chunks.push(c);
+  }
+  assert.equal(chunks.join(""), "Hello world");
+  assert.ok(toolCalls);
+  assert.equal(toolCalls[0].function.name, "get_weather");
+  // Still present on the usage summary too (unchanged wire shape).
+  assert.equal(summary.tool_calls[0].id, "c1");
 });
 
 test("embeddings returns vectors and forwards options", async () => {
