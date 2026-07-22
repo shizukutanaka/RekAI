@@ -17,7 +17,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pattern-following implementation (E2E coverage for v1.2 features, custom-
   provider registry tests, npm audit cleanup, post-permission-grant release
   steps) for Sonnet-class sessions. Every command in the docs was executed
-  as written before committing.
+  as written before committing. A second audit pass deepened the backlog
+  with 10 more findings (body-unbound Idempotency-Key and in-flight
+  coalescing, multi-replica metrics last-writer-wins, stale price/model
+  tables, insecure-by-default CORS, admin-page 404 string-matching, chat-UI
+  accessibility, async Python SDK, SDK idempotency/retry, streamed tool-call
+  surfacing, brittle smoke.sh) plus two strengths to guard against
+  regression (dependency-free W3C tracing, bounded Retry-After waits), all
+  cited to file:line.
 
 ## [1.2.0] - 2026-07-17
 

@@ -56,3 +56,55 @@
 2. CI コミット (tip に隔離されている `ci: add GitHub Actions workflow...`) を push
 3. push できたら GitHub Actions の初回実行を確認し、失敗ジョブがあれば修正
 4. GitHub Release (v1.2.0) を CHANGELOG の [1.2.0] 節から作成
+
+### S-6. 価格表・モデル一覧の 2026 更新 (F2 の即値部分)
+- `pricing.py:27-50` の価格表と各 `list_models()` (`providers/openai.py:180`、
+  `providers/gemini.py:200-204`) が相互不整合。openai は o1/o3 系を出さず、gemini は
+  `gemini-2.5-pro` を欠く。`gpt-4.1`/`gpt-5`/`o4-mini`/`gemini-2.5-flash` も未収録。
+- 不整合の核: `router.py:18-21` の `_MODEL_PREFIX_RULES` は o1/o3 → openai を
+  ルーティングするのに、`openai.py:180` の `list_models()` はそれらを一切公開しない。
+- 対処: 3 箇所 (pricing + 2 つの list_models) を同時に更新し、router のルールと
+  `/v1/models` の公開一覧を揃える。Anthropic の prefix (`claude-*`) は現行 id と
+  一致するので触らなくてよい。
+- **O-8 (単一情報源化) が入るまでの暫定**。値の出典 (公式価格ページ) をコミットに記載。
+
+### S-7. Admin ページの 404 判定修正 (F4)
+- `app/admin/page.tsx:35` が `msg === "Not Found"` という FastAPI 既定 404 本文の
+  文字列一致で「admin API 未設定」を判定 → サーバの detail 文言変更で壊れる。
+- 対処: `lib/api.ts` の `errorFromResponse` に HTTP ステータスを通し、`=== 404` で
+  分岐。既存の `RekAIError`-風パターンがあれば踏襲。
+
+### S-8. チャット UI の a11y パス (F5)
+- `app/page.tsx:317-355`: メッセージコンテナ/ストリーミング中の assistant バブルに
+  `aria-live` なし、エラーバナーに `role="alert"` なし、`key={i}` の index キーが
+  `regenerate()`/`clearConversation()` でずれる。
+- 対処: メッセージ領域に `aria-live="polite"`、エラーに `role="alert"`、キーを
+  安定 id ベースに。E2E に軽い a11y assert を足すと尚可。
+
+### S-9. デプロイ manifest の締め付け (F6 の実装部分、O-7 決定後)
+- `docker-compose.yml:19` と `deploy/render.yaml:32` の `REKAI_CORS_ORIGINS: "*"` を
+  コメント付きで安全化 (例: 具体オリジンのプレースホルダ + 認証キー設定の案内)。
+  **O-7 のデフォルト方針が決まってから**着手。
+
+### S-10. Python 非同期クライアント (F7)
+- `packages/python-sdk` は同期 `httpx.Client` のみ (`client.py:103`)。JS SDK は全 async。
+- `AsyncRekAIClient` を既存サーフェスのミラーで追加 (`httpx.AsyncClient`)。`stream()` は
+  `async for`。テストは既存 `tests/test_client.py` の `httpx.MockTransport` パターンを
+  async 版で踏襲。
+
+### S-11. SDK に Idempotency-Key + クライアント側リトライ (F8)
+- サーバは `Idempotency-Key` を尊重する (`main.py`) が、Python/JS どちらの SDK からも
+  送れず、接続エラー/429 のリトライもない。両 SDK に `idempotency_key` 引数と
+  簡易リトライ (指数バックオフ) を追加。**S-10 の後、または独立で**可 (ヘッダ透過は
+  現行サーバでそのまま有効)。O-5 のサーバ側強化とは独立。
+
+### S-12. ストリーミング tool_calls の一級イベント化 (F9)
+- `service.py` は tool_calls を summary/usage SSE イベント内に同梱し、SDK は
+  それを `on_usage`/`onUsage` にのみ渡す (Python docstring `client.py:222-227` にも
+  未記載)。SDK に `on_tool_calls`/`onToolCalls` コールバックを足し、README/docstring
+  に記載。サーバのフレーム形状は変えない (後方互換)。
+
+### S-13. smoke.sh の jq 化 (F10)
+- `scripts/smoke.sh:29-42` は compact JSON の部分文字列 grep (`"status":"ok"` 等) で
+  脆い。`jq` のフィールド単位チェックに置換し、認証系ネガティブケース (キー設定時の
+  401) を 1 つ追加。`jq` 前提を README/Makefile に明記。

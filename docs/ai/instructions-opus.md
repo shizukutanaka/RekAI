@@ -16,6 +16,12 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
 - **OpenAI 互換層の品質**: 実 OpenAI SDK での E2E (`tests/test_openai_sdk_e2e.py`)
   が回帰ゲート。互換性を落とす変更はこのテストで検出される。
 - **362+ テスト、ruff/mypy クリーン、TODO ゼロ**の状態を維持する。
+- **tracing.py の W3C 実装は正しく依存ゼロ** (`ContextVar` 隔離、リクエスト外では
+  ヘッダ省略、全ゼロ trace/span id の拒否 `tracing.py:63`)。OTel SDK を将来入れる
+  場合もこの性質を保つ。
+- **retry.py は Retry-After を `max_delay` で上限化** (`retry.py:79-85`) — 敵対的/
+  誤設定 upstream が任意秒数ワーカーを眠らせられない。カスケードルーティング (O-3)
+  実装時もこの防御を迂回しないこと。
 
 ### 短所 — 既知の構造的制約
 1. **プロバイダ層に `create_app(settings)` が届かない**: providers は module-level
@@ -26,6 +32,15 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
 3. **ガードレールがヒューリスティックのみ** (`guardrails.py`)。
 4. **Anthropic/Ollama は response_format 非対応** (debug ログのみ、文書化済み)。
 5. **streaming に Idempotency-Key なし** (意図的・文書化済み — 変更するなら設計から)。
+6. **Idempotency-Key がボディに紐付かない** (`idempotency.py:23` はキーのみで
+   sha256、`main.py` はキー単独で lookup)。同キー+別ボディで初回応答を黙って返し、
+   同時2リクエストは両方 provider を呼ぶ (store が provider 成功後なので合流しない)。
+7. **metrics スナップショットが単一 Redis キーで last-writer-wins**
+   (`metrics_store.py:19` の `rekai:metrics:snapshot`、マージ/CAS なし)。
+   マルチレプリカで `/v1/usage` が過小報告。
+8. **セキュアでないデフォルト**: `cors_origins="*"` + `api_keys=""` (認証オフ) が
+   config・docker-compose.yml・deploy/render.yaml すべてに。ワンクリックデプロイが
+   全オリジン開放。
 
 ## 割当タスク (優先度順)
 
@@ -58,6 +73,32 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
   (response_format 追加時の前例: キーに含めないと衝突、含めると一回限りの全キャッシュ
   無効化)。
 
+### O-5. Idempotency セマンティクスの強化 (短所 6)
+- 保存値にリクエストボディの指紋 (sha256) を含め、同キー+別ボディは 422
+  (Stripe 方式)。in-progress センチネルで同時実行を合流 (待機して同じ応答) か
+  409 を返す。**設計判断**: キャッシュバックエンドの原子性 — Redis なら `SET NX`、
+  メモリなら別途ロック。fail-open 方針 (Redis 障害時) との整合も。`idempotency.py`
+  と `main.py:251-267` / embeddings 側の両方。
+
+### O-6. マルチレプリカ metrics 集計 (短所 7)
+- 単一キー上書きを廃し、per-instance キー (`rekai:metrics:snapshot:<instance-id>`)
+  + 読み取り時合算、または Redis アトミックインクリメントへ。`metrics_store.py`
+  の load/save と `Metrics.seed/snapshot` の契約変更を伴う。instance id の採番
+  (env or 起動時 uuid) も設計に含める。
+
+### O-7. セキュアデフォルトの方針決定 (短所 8 の設計部分)
+- `cors_origins` / `api_keys` の安全側デフォルトをどう取るか (破壊的変更の是非)。
+  例: 本番検出時 (`environment=production`) は `*` を警告 or 拒否。決定後の
+  manifest 修正は Sonnet の S-9 へ委譲。web が localStorage にキーを置く前提
+  (`lib/api.ts`) とのトレードオフも判断材料。
+
+### O-8. モデル⇔プロバイダ⇔価格の単一情報源化 (F2 の構造部分)
+- 現状 `pricing.py` の価格表、各 provider の `list_models()`、`README.md:59` の
+  ルーティング記述が三重管理で相互不整合 (o1/o3 が pricing にあるが
+  `openai.py:180` の list_models に無い、等)。単一のモデルレジストリ
+  (prefix→provider→price→type) に集約し、router / /v1/models / cost 推定が
+  そこを引く設計。即値の更新だけなら Sonnet の S-6。
+
 ### 進め方
 - 1 タスク = 設計メモ (docs/ か PR 説明) → 実装 → テスト → live 検証 → CHANGELOG →
-  1 コミット。O-1 は特に、着手前に設計を文書化してから。
+  1 コミット。O-1 / O-5 / O-6 は特に、着手前に設計を文書化してから。
