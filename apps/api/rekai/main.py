@@ -20,7 +20,7 @@ from rekai.cache import CacheBackend, build_cache
 from rekai.config import Settings, get_settings
 from rekai.keystore import DynamicKeyStore
 from rekai.logging_config import configure_logging, get_logger
-from rekai.metrics import metrics
+from rekai.metrics import merge_snapshots, metrics
 from rekai.metrics_store import build_metrics_store
 from rekai.pricing import price_for_model
 from rekai.providers import get_provider, provider_names
@@ -610,7 +610,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/v1/usage", response_model=UsageSummary, tags=["system"])
     async def usage_summary() -> UsageSummary:
-        return UsageSummary(**metrics.snapshot())
+        # Fleet-wide view: this replica's live counters plus every other
+        # replica's last-persisted snapshot. With no Redis (process-local) or a
+        # single replica, load_others() returns [] and this is just the local
+        # snapshot. /metrics stays per-instance for Prometheus (see metrics_store).
+        others = await metrics_store.load_others()
+        if not others:
+            return UsageSummary(**metrics.snapshot())
+        merged = merge_snapshots([metrics.snapshot(), *others], metrics.max_tracked_clients)
+        return UsageSummary(**merged)
 
     # --- admin: runtime key management (only registered when configured) --
     # Deliberately outside /v1/*, so it's governed solely by REKAI_ADMIN_KEY —

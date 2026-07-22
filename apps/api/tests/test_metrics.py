@@ -237,15 +237,19 @@ async def test_null_store_is_noop() -> None:
 
 
 class _FakeStore:
-    def __init__(self, baseline: dict | None) -> None:
+    def __init__(self, baseline: dict | None, others: list[dict] | None = None) -> None:
         self.baseline = baseline
         self.saved: dict | None = None
+        self.others = others or []
 
     async def load(self) -> dict | None:
         return self.baseline
 
     async def save(self, snapshot: dict) -> None:
         self.saved = snapshot
+
+    async def load_others(self) -> list[dict]:
+        return self.others
 
 
 def test_lifespan_seeds_and_persists(monkeypatch) -> None:
@@ -265,6 +269,85 @@ def test_lifespan_seeds_and_persists(monkeypatch) -> None:
     finally:
         # Restore the shared singleton so other tests are unaffected.
         main_module.metrics.seed({})
+
+
+def test_merge_snapshots_sums_scalars_providers_and_clients() -> None:
+    from rekai.metrics import merge_snapshots
+
+    a = {
+        "requests_total": 5,
+        "tokens_total": 10,
+        "cost_usd_total": 0.25,
+        "requests_by_provider": {"echo": 5},
+        "usage_by_client": {"key:local": {"requests": 5, "tokens": 10, "cost_usd": 0.25}},
+    }
+    b = {
+        "requests_total": 100,
+        "tokens_total": 500,
+        "cost_usd_total": 1.5,
+        "requests_by_provider": {"echo": 20, "openai": 80},
+        "usage_by_client": {"key:peer": {"requests": 100, "tokens": 500, "cost_usd": 1.5}},
+    }
+    merged = merge_snapshots([a, b])
+    assert merged["requests_total"] == 105
+    assert merged["tokens_total"] == 510
+    assert merged["cost_usd_total"] == 1.75
+    assert merged["requests_by_provider"] == {"echo": 25, "openai": 80}
+    assert set(merged["usage_by_client"]) == {"key:local", "key:peer"}
+
+
+def test_merge_snapshots_caps_to_busiest_clients() -> None:
+    from rekai.metrics import merge_snapshots
+
+    snap = {
+        "usage_by_client": {
+            "a": {"requests": 1, "tokens": 0, "cost_usd": 0.0},
+            "b": {"requests": 9, "tokens": 0, "cost_usd": 0.0},
+            "c": {"requests": 5, "tokens": 0, "cost_usd": 0.0},
+        }
+    }
+    merged = merge_snapshots([snap], cap=2)
+    # Keeps the two busiest by request count (b, c); drops the quietest (a).
+    assert set(merged["usage_by_client"]) == {"b", "c"}
+
+
+def test_usage_endpoint_aggregates_peer_snapshots(monkeypatch) -> None:
+    # A second replica's persisted snapshot is summed with this instance's live
+    # counters so /v1/usage reflects the whole fleet, not just one process.
+    peer = {
+        "requests_total": 100,
+        "tokens_total": 500,
+        "cost_usd_total": 1.5,
+        "requests_by_provider": {"openai": 100},
+        "usage_by_client": {"key:peer": {"requests": 100, "tokens": 500, "cost_usd": 1.5}},
+    }
+    fake = _FakeStore(baseline=None, others=[peer])
+    monkeypatch.setattr(main_module, "build_metrics_store", lambda settings: fake)
+
+    saved = main_module.metrics.snapshot()
+    try:
+        main_module.metrics.seed(
+            {
+                "requests_total": 5,
+                "tokens_total": 10,
+                "cost_usd_total": 0.25,
+                "requests_by_provider": {"echo": 5},
+                "usage_by_client": {"key:local": {"requests": 5, "tokens": 10, "cost_usd": 0.25}},
+            }
+        )
+        client = TestClient(
+            create_app(
+                Settings(environment="test", default_provider="echo", rate_limit_enabled=False)
+            )
+        )
+        body = client.get("/v1/usage").json()
+        assert body["requests_total"] == 105
+        assert body["tokens_total"] == 510
+        assert body["cost_usd_total"] == 1.75
+        assert body["requests_by_provider"] == {"echo": 5, "openai": 100}
+        assert set(body["usage_by_client"]) == {"key:local", "key:peer"}
+    finally:
+        main_module.metrics.seed(saved)
 
 
 def test_usage_by_client_tracked_per_key() -> None:

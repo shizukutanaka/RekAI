@@ -39,6 +39,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   README and Makefile.
 
 ### Changed
+- **Multi-replica metrics aggregation** — persisted metrics used a single Redis
+  key that every replica overwrote (last-writer-wins), so `/v1/usage` reflected
+  only whichever process flushed last. Each replica now persists to its own
+  `rekai:metrics:snapshot:<instance-id>` key and loads only *its own* snapshot as
+  its startup baseline; `/v1/usage` sums this instance's live counters with every
+  other replica's persisted snapshot for a fleet-wide view. `/metrics` stays
+  per-instance so a Prometheus scraper (which already sums targets) doesn't
+  double-count. Instance id comes from `REKAI_INSTANCE_ID` or a random
+  per-process id. Added a pure `merge_snapshots()` and `MetricsStore.load_others()`.
 - **Idempotency-Key semantics hardened (Stripe-style)** — a key reused with a
   *different* request body now returns **422** instead of silently replaying the
   first (unrelated) response, and a second request that arrives while the first

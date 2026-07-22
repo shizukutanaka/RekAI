@@ -81,6 +81,10 @@ class Settings(BaseSettings):
 
     # Metrics persistence (only active when redis_url is set)
     metrics_persist_interval_seconds: int = Field(default=30, ge=1)
+    # Identifies this replica when persisting metrics, so multiple replicas each
+    # write their own snapshot key (aggregated at read time) instead of
+    # overwriting a single shared key. Defaults to a random per-process id.
+    instance_id: str | None = None
 
     # Rate limiting (token bucket per client)
     rate_limit_enabled: bool = True

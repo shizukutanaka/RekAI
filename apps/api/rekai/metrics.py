@@ -252,3 +252,49 @@ class Metrics:
 
 
 metrics = Metrics()
+
+
+_SCALAR_COUNTERS = (
+    "requests_total",
+    "cache_hits_total",
+    "cache_misses_total",
+    "errors_total",
+    "fallbacks_total",
+    "retries_total",
+    "cooldowns_total",
+    "tokens_total",
+)
+
+
+def merge_snapshots(snapshots: list[dict], cap: int = 0) -> dict:
+    """Sum a list of :meth:`Metrics.snapshot` dicts into one aggregate.
+
+    Used to combine this replica's live counters with peers' persisted
+    snapshots for the fleet-wide ``/v1/usage`` view. Scalar counters and the
+    per-provider / per-client breakdowns are added; ``cap`` (when > 0) keeps
+    only the busiest clients by request count, matching the in-memory bound.
+    """
+    merged: dict = {k: 0 for k in _SCALAR_COUNTERS}
+    merged["cost_usd_total"] = 0.0
+    providers: dict[str, int] = {}
+    clients: dict[str, dict[str, float]] = {}
+    for snap in snapshots:
+        for key in _SCALAR_COUNTERS:
+            merged[key] += snap.get(key, 0)
+        merged["cost_usd_total"] += snap.get("cost_usd_total", 0.0)
+        for provider, count in snap.get("requests_by_provider", {}).items():
+            providers[provider] = providers.get(provider, 0) + count
+        for client, usage in snap.get("usage_by_client", {}).items():
+            acc = clients.setdefault(client, {"requests": 0, "tokens": 0, "cost_usd": 0.0})
+            acc["requests"] += usage.get("requests", 0)
+            acc["tokens"] += usage.get("tokens", 0)
+            acc["cost_usd"] += usage.get("cost_usd", 0.0)
+    merged["cost_usd_total"] = round(merged["cost_usd_total"], 6)
+    for usage in clients.values():
+        usage["cost_usd"] = round(usage["cost_usd"], 6)
+    if cap and len(clients) > cap:
+        kept = sorted(clients, key=lambda c: clients[c]["requests"], reverse=True)[:cap]
+        clients = {c: clients[c] for c in kept}
+    merged["requests_by_provider"] = providers
+    merged["usage_by_client"] = clients
+    return merged

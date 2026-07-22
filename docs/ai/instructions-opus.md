@@ -86,6 +86,11 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
   と `main.py:251-267` / embeddings 側の両方。
 
 ### O-6. マルチレプリカ metrics 集計 (短所 7)
+> ✅ **完了**: per-instance キー (`rekai:metrics:snapshot:<instance-id>`) に変更。
+> `load()` は自インスタンスのキーのみをベースラインに、`/v1/usage` は自 live + 他
+> レプリカの永続スナップショット (`load_others`) を `merge_snapshots` で合算。`/metrics`
+> は per-instance のまま (Prometheus が集計するため二重計上を回避)。instance id は
+> `REKAI_INSTANCE_ID` かプロセス起動時の乱数。純関数 merge + エンドポイント集計をテスト。
 - 単一キー上書きを廃し、per-instance キー (`rekai:metrics:snapshot:<instance-id>`)
   + 読み取り時合算、または Redis アトミックインクリメントへ。`metrics_store.py`
   の load/save と `Metrics.seed/snapshot` の契約変更を伴う。instance id の採番
