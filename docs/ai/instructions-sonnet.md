@@ -19,6 +19,9 @@
 
 ## 割当タスク (優先度順)
 
+> **進捗**: S-6〜S-8, S-10〜S-13 は実装・push 済み (下記各項の ✅ 参照)。
+> 未着手は S-1〜S-4、および S-9 (O-7 のデフォルト方針決定待ち)。S-5 はメンテナ権限待ち。
+
 ### S-1. E2E スイートの v1.2 機能カバー
 - `apps/web/e2e/` に spec を追加:
   1. OpenAI 互換エンドポイント: API (port 8090) に直接 `POST /v1/chat/completions`
@@ -58,6 +61,9 @@
 4. GitHub Release (v1.2.0) を CHANGELOG の [1.2.0] 節から作成
 
 ### S-6. 価格表・モデル一覧の 2026 更新 (F2 の即値部分)
+> ✅ **完了** (`57b4522`): openai/gemini の `list_models()` に o1/o3/gemini-2.5-pro を
+> 追加し、「広告する全モデルは価格表にあり同プロバイダへルーティングされる」不変条件を
+> `test_providers.py` に追加。
 - `pricing.py:27-50` の価格表と各 `list_models()` (`providers/openai.py:180`、
   `providers/gemini.py:200-204`) が相互不整合。openai は o1/o3 系を出さず、gemini は
   `gemini-2.5-pro` を欠く。`gpt-4.1`/`gpt-5`/`o4-mini`/`gemini-2.5-flash` も未収録。
@@ -69,12 +75,16 @@
 - **O-8 (単一情報源化) が入るまでの暫定**。値の出典 (公式価格ページ) をコミットに記載。
 
 ### S-7. Admin ページの 404 判定修正 (F4)
+> ✅ **完了** (`6599c75`): `errorFromResponse` を typed `ApiError`(`.status` 付き)に
+> し、admin ページは `e.status === 404` で分岐(メッセージ文字列比較を廃止)。
 - `app/admin/page.tsx:35` が `msg === "Not Found"` という FastAPI 既定 404 本文の
   文字列一致で「admin API 未設定」を判定 → サーバの detail 文言変更で壊れる。
 - 対処: `lib/api.ts` の `errorFromResponse` に HTTP ステータスを通し、`=== 404` で
   分岐。既存の `RekAIError`-風パターンがあれば踏襲。
 
 ### S-8. チャット UI の a11y パス (F5)
+> ✅ **完了** (`ec3a5eb`): 会話領域を `role="log"` `aria-live="polite"` に、エラーを
+> `role="alert"` に、メッセージキーを安定 id ベースに。E2E に live region assert 追加。
 - `app/page.tsx:317-355`: メッセージコンテナ/ストリーミング中の assistant バブルに
   `aria-live` なし、エラーバナーに `role="alert"` なし、`key={i}` の index キーが
   `regenerate()`/`clearConversation()` でずれる。
@@ -87,24 +97,32 @@
   **O-7 のデフォルト方針が決まってから**着手。
 
 ### S-10. Python 非同期クライアント (F7)
+> ✅ **完了** (`bfcfd73`): `AsyncRekAIClient` を追加(httpx.AsyncClient、`async for`
+> ストリーム)。共通の plumbing をモジュール関数に切り出し sync/async の乖離を防止。
 - `packages/python-sdk` は同期 `httpx.Client` のみ (`client.py:103`)。JS SDK は全 async。
 - `AsyncRekAIClient` を既存サーフェスのミラーで追加 (`httpx.AsyncClient`)。`stream()` は
   `async for`。テストは既存 `tests/test_client.py` の `httpx.MockTransport` パターンを
   async 版で踏襲。
 
 ### S-11. SDK に Idempotency-Key + クライアント側リトライ (F8)
+> ✅ **完了** (`40b740c`): 両 SDK に指数バックオフのリトライ(429/5xx/接続エラー、
+> Retry-After 尊重)と `idempotency_key`/`idempotencyKey`(リトライ有効時は自動生成)。
 - サーバは `Idempotency-Key` を尊重する (`main.py`) が、Python/JS どちらの SDK からも
   送れず、接続エラー/429 のリトライもない。両 SDK に `idempotency_key` 引数と
   簡易リトライ (指数バックオフ) を追加。**S-10 の後、または独立で**可 (ヘッダ透過は
   現行サーバでそのまま有効)。O-5 のサーバ側強化とは独立。
 
 ### S-12. ストリーミング tool_calls の一級イベント化 (F9)
+> ✅ **完了** (`1d75614`): 両 SDK に `on_tool_calls`/`onToolCalls` コールバックを追加
+> (summary イベントの `tool_calls` を単独で受け渡し)。ワイヤ形状は不変・後方互換。
 - `service.py` は tool_calls を summary/usage SSE イベント内に同梱し、SDK は
   それを `on_usage`/`onUsage` にのみ渡す (Python docstring `client.py:222-227` にも
   未記載)。SDK に `on_tool_calls`/`onToolCalls` コールバックを足し、README/docstring
   に記載。サーバのフレーム形状は変えない (後方互換)。
 
 ### S-13. smoke.sh の jq 化 (F10)
+> ✅ **完了** (`df1ba54`): `jq -e` のフィールド単位 assert に置換し、認証系ネガティブ
+> ケース(`REKAI_API_KEY` 設定時に未認証 /v1/chat が 401)を追加。jq 前提を明記。
 - `scripts/smoke.sh:29-42` は compact JSON の部分文字列 grep (`"status":"ok"` 等) で
   脆い。`jq` のフィールド単位チェックに置換し、認証系ネガティブケース (キー設定時の
   401) を 1 つ追加。`jq` 前提を README/Makefile に明記。
