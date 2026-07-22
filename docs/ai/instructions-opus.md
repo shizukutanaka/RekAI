@@ -74,6 +74,11 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
   無効化)。
 
 ### O-5. Idempotency セマンティクスの強化 (短所 6)
+> ✅ **完了**: 保存レコードにボディの sha256 指紋を含め、同キー+別ボディ→422、
+> in-progress センチネル(`cache.add`=Redis `SET NX`/メモリはイベントループ原子性)で
+> 同時実行→409、エラー時は `release` でセンチネル解放。全キャッシュ操作は fail-open。
+> `/v1/chat`(+ OpenAI 互換)と `/v1/embeddings` の両方。`CacheBackend` に `add`/`delete`
+> を追加。ライブ検証(replay/422)+ claim/complete/release のモジュールテスト済み。
 - 保存値にリクエストボディの指紋 (sha256) を含め、同キー+別ボディは 422
   (Stripe 方式)。in-progress センチネルで同時実行を合流 (待機して同じ応答) か
   409 を返す。**設計判断**: キャッシュバックエンドの原子性 — Redis なら `SET NX`、

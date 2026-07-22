@@ -38,6 +38,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   authenticates the other checks). Documents the `jq` prerequisite in the
   README and Makefile.
 
+### Changed
+- **Idempotency-Key semantics hardened (Stripe-style)** — a key reused with a
+  *different* request body now returns **422** instead of silently replaying the
+  first (unrelated) response, and a second request that arrives while the first
+  is still in flight returns **409** instead of racing it. Each record stores a
+  sha256 fingerprint of the request body, and the key is claimed atomically with
+  an in-progress sentinel (`cache.add` → Redis `SET NX` / an event-loop-atomic
+  memory write) that is released if processing errors so a retry isn't blocked.
+  All cache access fails open on backend errors. Applies to both `/v1/chat`
+  (and the OpenAI-compatible route) and `/v1/embeddings`. The `CacheBackend`
+  protocol gained atomic `add()` and `delete()`.
+
 ### Fixed
 - **Provider HTTP client honors a changed request timeout** — `Provider._client()`
   cached its persistent `httpx.AsyncClient` keyed only on the event loop, so a

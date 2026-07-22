@@ -46,6 +46,14 @@ def embedding_cache_key(provider: str, model: str, inputs: list[str]) -> str:
 class CacheBackend(Protocol):
     async def get(self, key: str) -> str | None: ...
     async def set(self, key: str, value: str, ttl: int) -> None: ...
+    async def add(self, key: str, value: str, ttl: int) -> bool:
+        """Atomically set ``key`` only if absent. Returns True if it was set
+        (the caller won the race), False if a live value already existed.
+        Used by idempotency to claim an in-progress sentinel without a
+        check-then-set race."""
+        ...
+
+    async def delete(self, key: str) -> None: ...
     @property
     def label(self) -> str: ...
 
@@ -68,13 +76,30 @@ class MemoryCache:
         return value
 
     async def set(self, key: str, value: str, ttl: int) -> None:
+        self._evict_expired_if_full()
+        self._store[key] = (time.time() + ttl, value)
+
+    async def add(self, key: str, value: str, ttl: int) -> bool:
+        # Atomic w.r.t. the event loop: there is no ``await`` between the
+        # liveness check and the write, so no other coroutine can interleave.
+        now = time.time()
+        item = self._store.get(key)
+        if item is not None and item[0] >= now:
+            return False
+        self._evict_expired_if_full()
+        self._store[key] = (now + ttl, value)
+        return True
+
+    async def delete(self, key: str) -> None:
+        self._store.pop(key, None)
+
+    def _evict_expired_if_full(self) -> None:
         # Drop expired entries before growing past the cap so the dict can't
         # accumulate keys that are never read again.
         if len(self._store) >= self._max_entries:
             now = time.time()
             for k in [k for k, (exp, _) in self._store.items() if exp < now]:
                 del self._store[k]
-        self._store[key] = (time.time() + ttl, value)
 
     @property
     def label(self) -> str:
@@ -96,6 +121,13 @@ class RedisCache:
     async def set(self, key: str, value: str, ttl: int) -> None:
         await self._client.set(key, value, ex=ttl)
 
+    async def add(self, key: str, value: str, ttl: int) -> bool:
+        # SET key value NX EX ttl — atomic set-if-absent. Returns True when set.
+        return bool(await self._client.set(key, value, ex=ttl, nx=True))
+
+    async def delete(self, key: str) -> None:
+        await self._client.delete(key)
+
     @property
     def label(self) -> str:
         return "redis"
@@ -108,6 +140,14 @@ class NullCache:
         return None
 
     async def set(self, key: str, value: str, ttl: int) -> None:
+        return None
+
+    async def add(self, key: str, value: str, ttl: int) -> bool:
+        # Nothing is stored, so every claim "succeeds" and idempotency is a
+        # no-op (get always misses) — matching the disabled-cache contract.
+        return True
+
+    async def delete(self, key: str) -> None:
         return None
 
     @property

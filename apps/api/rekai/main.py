@@ -151,6 +151,18 @@ def _guardrail_response(
     return None
 
 
+def _idempotency_error(status_code: int, detail: str) -> JSONResponse:
+    """A 409/422 for an Idempotency-Key that conflicts with an existing record."""
+    return JSONResponse(
+        status_code=status_code,
+        content=ErrorResponse(error="idempotency_error", detail=detail).model_dump(),
+    )
+
+
+_IDEM_MISMATCH = "Idempotency-Key was already used with a different request body."
+_IDEM_CONFLICT = "A request with this Idempotency-Key is already being processed."
+
+
 def _redact_output(result: ChatResponse, settings: Settings, response: Response) -> ChatResponse:
     """Scrub common secret/API-key patterns from the assistant's content
     (OWASP LLM02). Sets X-Redacted (comma-separated pattern names) when
@@ -248,21 +260,39 @@ async def _run_chat(
     blocked = _guardrail_response(request.messages, settings, response)
     if blocked is not None:
         return blocked
+    fingerprint: str | None = None
+    claimed = False
     if idempotency_key:
-        stored = await idempotency.get(cache_backend, idempotency_key)
-        if stored is not None:
+        fingerprint = idempotency.fingerprint(request.model_dump_json())
+        outcome = await idempotency.claim(
+            cache_backend, idempotency_key, fingerprint, settings.idempotency_ttl_seconds
+        )
+        if outcome.kind == "mismatch":
+            return _idempotency_error(422, _IDEM_MISMATCH)
+        if outcome.kind == "conflict":
+            return _idempotency_error(409, _IDEM_CONFLICT)
+        if outcome.kind == "replay" and outcome.response is not None:
             response.headers["Idempotent-Replay"] = "true"
-            replayed = ChatResponse(**stored)
+            replayed = ChatResponse(**outcome.response)
             _record_client_usage(http_request, replayed, settings)
             return replayed
-    result = await handle_chat(request, x_provider_key, settings, cache_backend)
+        claimed = True  # we hold the in-progress sentinel
+    try:
+        result = await handle_chat(request, x_provider_key, settings, cache_backend)
+    except Exception:
+        # Free the sentinel so the client can retry immediately instead of
+        # getting a 409 until it expires.
+        if claimed:
+            await idempotency.release(cache_backend, idempotency_key)  # type: ignore[arg-type]
+        raise
     result = _redact_output(result, settings, response)
     _record_client_usage(http_request, result, settings)
-    if idempotency_key:
-        await idempotency.store(
+    if idempotency_key and fingerprint is not None:
+        await idempotency.complete(
             cache_backend,
             idempotency_key,
-            result.model_dump_json(),
+            fingerprint,
+            result.model_dump(mode="json"),
             settings.idempotency_ttl_seconds,
         )
     return result
@@ -766,7 +796,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         responses={
             401: {"model": ErrorResponse},
             403: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
             413: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
             429: {"model": ErrorResponse},
             502: {"model": ErrorResponse},
         },
@@ -791,7 +823,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         responses={
             400: {"model": ErrorResponse},
             401: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
             413: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
             429: {"model": ErrorResponse},
             502: {"model": ErrorResponse},
         },
@@ -804,21 +838,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         config: Settings = Depends(get_config),
         cache_backend: CacheBackend = Depends(get_cache),
-    ) -> EmbeddingsResponse:
+    ) -> EmbeddingsResponse | JSONResponse:
+        fingerprint: str | None = None
+        claimed = False
         if idempotency_key:
-            stored = await idempotency.get(cache_backend, idempotency_key)
-            if stored is not None:
+            fingerprint = idempotency.fingerprint(request.model_dump_json())
+            outcome = await idempotency.claim(
+                cache_backend, idempotency_key, fingerprint, config.idempotency_ttl_seconds
+            )
+            if outcome.kind == "mismatch":
+                return _idempotency_error(422, _IDEM_MISMATCH)
+            if outcome.kind == "conflict":
+                return _idempotency_error(409, _IDEM_CONFLICT)
+            if outcome.kind == "replay" and outcome.response is not None:
                 response.headers["Idempotent-Replay"] = "true"
-                replayed = EmbeddingsResponse(**stored)
+                replayed = EmbeddingsResponse(**outcome.response)
                 _record_client_usage(http_request, replayed, config, operation="embeddings")
                 return replayed
-        result = await handle_embeddings(request, x_provider_key, config, cache_backend)
+            claimed = True
+        try:
+            result = await handle_embeddings(request, x_provider_key, config, cache_backend)
+        except Exception:
+            if claimed:
+                await idempotency.release(cache_backend, idempotency_key)  # type: ignore[arg-type]
+            raise
         _record_client_usage(http_request, result, config, operation="embeddings")
-        if idempotency_key:
-            await idempotency.store(
+        if idempotency_key and fingerprint is not None:
+            await idempotency.complete(
                 cache_backend,
                 idempotency_key,
-                result.model_dump_json(),
+                fingerprint,
+                result.model_dump(mode="json"),
                 config.idempotency_ttl_seconds,
             )
         return result
