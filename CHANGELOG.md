@@ -6,6 +6,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **`scripts/smoke.sh` asserts JSON fields with `jq`, not substring greps** —
+  the smoke test matched compact-JSON fragments (`"status":"ok"`), which is
+  brittle to whitespace/key-order changes and can't check nested values. It now
+  uses `jq -e` field assertions (e.g. `.usage.total_tokens > 0`, the echo
+  provider present in `.data`) and gained an optional auth negative case: set
+  `REKAI_API_KEY` and it verifies an unauthenticated `/v1/chat` returns 401 (and
+  authenticates the other checks). Documents the `jq` prerequisite in the
+  README and Makefile.
+
 ### Fixed
 - **`/v1/models` now lists every model RekAI routes and prices** — the router
   sends `o1*`/`o3*` to OpenAI and the price table knows `o1`, `o1-mini`,

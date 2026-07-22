@@ -73,7 +73,7 @@ run-web: ## Run the web dev server (http://localhost:3000)
 ## --- docker ---
 
 .PHONY: smoke
-smoke: ## Smoke-test a running API (BASE_URL=http://localhost:8000)
+smoke: ## Smoke-test a running API (needs jq; BASE_URL=http://localhost:8000)
 	scripts/smoke.sh
 
 .PHONY: up
