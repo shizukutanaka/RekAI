@@ -39,6 +39,26 @@ async def test_echo_models() -> None:
     assert await EchoProvider().list_models(None) == ["echo"]
 
 
+async def test_listed_chat_models_are_priced_and_routable() -> None:
+    # Invariant: every chat model a provider advertises via list_models() must
+    # have a price in the table AND route back to that same provider. Otherwise
+    # /v1/models surfaces a model with null cost or one RekAI routes elsewhere
+    # (the o1/o3 and gemini-2.5-pro gap this test was added to lock down).
+    from rekai.config import Settings
+    from rekai.pricing import price_for_model
+    from rekai.providers.gemini import GeminiProvider
+    from rekai.providers.openai import OpenAIProvider
+    from rekai.router import resolve_provider
+
+    settings = Settings(environment="test", default_provider="echo")
+    for provider_name, provider in [("openai", OpenAIProvider()), ("gemini", GeminiProvider())]:
+        for model in await provider.list_models(None):
+            assert price_for_model(model) is not None, f"{model} advertised but unpriced"
+            assert resolve_provider(None, model, settings) == provider_name, (
+                f"{model} advertised by {provider_name} but routes elsewhere"
+            )
+
+
 def test_keyless_provider_is_always_ready() -> None:
     # Keyless providers report ready without any server-side key.
     assert EchoProvider().server_key_configured() is True

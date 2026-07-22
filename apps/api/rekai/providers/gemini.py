@@ -197,7 +197,10 @@ class GeminiProvider(Provider):
             )
 
     async def list_models(self, api_key: str | None) -> list[str]:
+        # Kept in sync with the price table (rekai/pricing.py) — gemini-2.5-pro
+        # is priced there but was previously hidden from /v1/models.
         return [
+            "gemini-2.5-pro",
             "gemini-2.0-flash",
             "gemini-1.5-pro",
             "gemini-1.5-flash",

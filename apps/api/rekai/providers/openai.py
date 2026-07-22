@@ -177,7 +177,18 @@ class OpenAIProvider(Provider):
 
     async def list_models(self, api_key: str | None) -> list[str]:
         # Static, commonly-available models; avoids an extra network round-trip.
-        return ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"]
+        # Kept consistent with the router's prefix rules (rekai/router.py routes
+        # o1*/o3* here) and the price table (rekai/pricing.py) so /v1/models
+        # doesn't hide models RekAI actually routes and can price.
+        return [
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-4-turbo",
+            "gpt-3.5-turbo",
+            "o1",
+            "o1-mini",
+            "o3-mini",
+        ]
 
     async def list_embedding_models(self, api_key: str | None) -> list[str]:
         return ["text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002"]

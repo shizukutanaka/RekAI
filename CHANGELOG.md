@@ -6,6 +6,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **`/v1/models` now lists every model RekAI routes and prices** — the router
+  sends `o1*`/`o3*` to OpenAI and the price table knows `o1`, `o1-mini`,
+  `o3-mini`, and `gemini-2.5-pro`, but each provider's `list_models()` omitted
+  them, so `/v1/models` hid models that RekAI actually handles (and their
+  cost estimates). Added them, and a `test_providers.py` invariant that every
+  advertised chat model both has a price and routes back to the advertising
+  provider — locking the three surfaces (router, price table, model list)
+  together so they can't drift apart again.
+
 ### Added
 - **AI-agent working docs** — a root `CLAUDE.md` (shared conventions: the
   exact verification gates, established code idioms, and this environment's
