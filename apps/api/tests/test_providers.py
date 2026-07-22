@@ -101,3 +101,16 @@ async def test_client_rebuilt_when_event_loop_changes() -> None:
     provider._http_client_loop = object()  # type: ignore[assignment]
     rebuilt = provider._client(30.0)
     assert rebuilt is not first
+
+
+async def test_client_rebuilt_when_timeout_changes() -> None:
+    # A changed request_timeout_seconds (e.g. re-running create_app with new
+    # settings) must take effect: the cached client is rebuilt with the new
+    # timeout rather than frozen at the first value seen.
+    provider = OpenAIProvider()
+    first = provider._client(30.0)
+    same = provider._client(30.0)
+    assert same is first  # unchanged timeout reuses the pooled client
+    rebuilt = provider._client(5.0)
+    assert rebuilt is not first
+    assert rebuilt.timeout.read == 5.0

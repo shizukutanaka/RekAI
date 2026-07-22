@@ -114,6 +114,7 @@ class Provider(ABC):
     def __init__(self) -> None:
         self._http_client: httpx.AsyncClient | None = None
         self._http_client_loop: asyncio.AbstractEventLoop | None = None
+        self._http_client_timeout: float | None = None
 
     def _client(self, timeout: float) -> httpx.AsyncClient:
         """A persistent ``httpx.AsyncClient`` reused across requests.
@@ -138,11 +139,21 @@ class Provider(ABC):
         ``.is_closed`` — nothing in this codebase ever explicitly closes a
         cached client, and test doubles for ``httpx.AsyncClient`` don't
         implement that attribute.)
+
+        The client is also rebuilt when the requested ``timeout`` differs from
+        the one it was built with — so re-running ``create_app`` with a changed
+        ``request_timeout_seconds`` takes effect on the next call instead of
+        being frozen at the value seen when the client was first constructed.
         """
         loop = asyncio.get_running_loop()
-        if self._http_client is None or self._http_client_loop is not loop:
+        if (
+            self._http_client is None
+            or self._http_client_loop is not loop
+            or self._http_client_timeout != timeout
+        ):
             self._http_client = httpx.AsyncClient(timeout=timeout)
             self._http_client_loop = loop
+            self._http_client_timeout = timeout
         return self._http_client
 
     @abstractmethod

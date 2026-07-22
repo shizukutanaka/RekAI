@@ -39,6 +39,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   README and Makefile.
 
 ### Fixed
+- **Provider HTTP client honors a changed request timeout** — `Provider._client()`
+  cached its persistent `httpx.AsyncClient` keyed only on the event loop, so a
+  changed `request_timeout_seconds` (e.g. re-running `create_app` with new
+  settings) was frozen at the value seen when the client was first built. The
+  cache key now includes the timeout, so the client is rebuilt when it changes.
 - **`/v1/models` now lists every model RekAI routes and prices** — the router
   sends `o1*`/`o3*` to OpenAI and the price table knows `o1`, `o1-mini`,
   `o3-mini`, and `gemini-2.5-pro`, but each provider's `list_models()` omitted

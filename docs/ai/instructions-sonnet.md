@@ -46,19 +46,26 @@
   書き直しになるため、**軽量に** (1-2 テスト)。
 
 ### S-3. web devDependencies の npm audit 対応
-- `npm audit` が 10 件 (moderate 4 / high 5 / critical 1) を報告 (eslint 8 EOL、旧
-  glob 等)。runtime 依存ではなく devDeps だが、公開リポジトリとして解消する。
-- 依存更新後は web の全検証 (tsc / lint / vitest / build / E2E) を必ず通す。
-  eslint 9 移行が必要なら flat config への移行込みで 1 コミット。
+> 🟡 **一部完了** (`d0b23df`): vitest 2→4 で critical(vite/esbuild 系)を解消、
+> `npm audit fix` で brace-expansion を patch(11→5 件)。残る 5 件は Next.js
+> フレームワークの advisory で、14.2.35 が 14.x 最新のため next 14→16 メジャーが必要。
+> **S-3b** として分離(下記)。
+- `npm audit` が報告(監査時点)。runtime 依存ではなく devDeps だが、公開リポジトリ
+  として解消する。依存更新後は web の全検証 (tsc / lint / vitest / build / E2E) を必ず通す。
+
+### S-3b. Next.js フレームワークメジャー (14→16)
+- 残る 5 advisory (next/postcss/eslint-config-next/glob/@next/eslint-plugin-next) は
+  next 14→16 メジャーでのみ解消。React 19 要件・App Router 挙動変更・eslint 9 flat
+  config 移行を伴うため、専用セッション/PR で全ゲート(特に E2E とビルド)を通して実施。
+  外向き・不可逆度が高いので単独で。
 
 ### S-4. 小粒の改善 (各 1 コミット)
 - `/metrics` (Prometheus 出力) は現状 per-client 3 系列のみ。retries/cooldowns は
   出力済みなので、必要なら provider 別トークン等を検討 — ただし cardinality に注意
-  (client id 系列は `REKAI_MAX_TRACKED_CLIENTS` で有界)。
-- `Provider._client()` の timeout は初回構築時に固定される — settings の
-  `request_timeout_seconds` を変えて `create_app` し直しても既存クライアントには
-  効かない。docstring には記載済み。テストで顕在化したら、timeout 変更時の再構築
-  (キーに timeout を含める) を追加。
+  (client id 系列は `REKAI_MAX_TRACKED_CLIENTS` で有界)。**未着手**。
+- ✅ **完了**: `Provider._client()` の timeout をキャッシュキーに含め、
+  `request_timeout_seconds` 変更時に client を再構築するように修正
+  (`rebuilt.timeout.read` を assert するテスト付き)。
 
 ### S-5. 権限復旧後の後処理 (メンテナが権限を付与したら)
 1. `git push origin v1.2.0` (タグは作成済み・ローカルにある)
