@@ -30,6 +30,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   live region.
 
 ### Added
+- **`AsyncRekAIClient` in the Python SDK** — an `async`/`await` mirror of the
+  synchronous `RekAIClient`, backed by `httpx.AsyncClient` so the connection
+  pool is reused across awaits. `stream()` is an async generator driven with
+  `async for`, and its `on_usage` callback accepts a coroutine function.
+  Shared request/response plumbing (header/payload builders, SSE decoding) was
+  factored to module level so the two clients can't drift. Bumps the SDK
+  package `__version__` to 1.2.0 (it lagged at 1.1.0 behind `pyproject.toml`).
 - **AI-agent working docs** — a root `CLAUDE.md` (shared conventions: the
   exact verification gates, established code idioms, and this environment's
   git constraints) plus `docs/ai/instructions-opus.md` and

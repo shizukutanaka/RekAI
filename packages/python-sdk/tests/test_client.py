@@ -2,17 +2,32 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
 import pytest
 
-from rekai_client import ChatResult, EmbeddingsResult, RekAIClient, RekAIError
+from rekai_client import (
+    AsyncRekAIClient,
+    ChatResult,
+    EmbeddingsResult,
+    RekAIClient,
+    RekAIError,
+)
 
 
 def make_client(handler) -> RekAIClient:
     client = RekAIClient("http://test")
     client._client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(handler))
+    return client
+
+
+def make_async_client(handler) -> AsyncRekAIClient:
+    client = AsyncRekAIClient("http://test")
+    client._client = httpx.AsyncClient(
+        base_url="http://test", transport=httpx.MockTransport(handler)
+    )
     return client
 
 
@@ -337,3 +352,168 @@ def test_context_manager() -> None:
 
     with make_client(handler) as client:
         assert client.health()["status"] == "ok"
+
+
+# --- AsyncRekAIClient (driven via asyncio.run to avoid a pytest-asyncio dep) --
+
+
+def test_async_chat_returns_result() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        captured["key"] = request.headers.get("X-Provider-Key")
+        return httpx.Response(
+            200,
+            json={
+                "id": "rekai-1",
+                "provider": "echo",
+                "model": "echo",
+                "content": "Echo: hi",
+                "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
+                "cost_usd": 0.0,
+                "cached": False,
+                "fallback_used": False,
+            },
+        )
+
+    async def run() -> ChatResult:
+        async with make_async_client(handler) as client:
+            return await client.chat("echo", "hi", provider_key="sk-x")
+
+    result = asyncio.run(run())
+    assert isinstance(result, ChatResult)
+    assert result.content == "Echo: hi"
+    assert result.usage["total_tokens"] == 3
+    assert captured["body"]["messages"] == [{"role": "user", "content": "hi"}]
+    assert captured["url"].endswith("/v1/chat")
+    assert captured["key"] == "sk-x"
+
+
+def test_async_chat_raises_on_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": "provider_error", "detail": "no key"})
+
+    async def run() -> None:
+        async with make_async_client(handler) as client:
+            await client.chat("gpt-4o-mini", "hi")
+
+    with pytest.raises(RekAIError) as exc:
+        asyncio.run(run())
+    assert exc.value.status_code == 401
+    assert "no key" in str(exc.value)
+
+
+def test_async_stream_yields_deltas_and_usage() -> None:
+    sse = (
+        'data: {"delta": "Hello"}\n\n'
+        'data: {"delta": " world"}\n\n'
+        'data: {"provider":"echo","model":"echo",'
+        '"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2},'
+        '"cost_usd":0.0,"estimated":false}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=sse, headers={"content-type": "text/event-stream"})
+
+    seen: dict = {}
+
+    async def run() -> list[str]:
+        chunks: list[str] = []
+        async with make_async_client(handler) as client:
+            async for chunk in client.stream("echo", "hi", on_usage=lambda s: seen.update(s)):
+                chunks.append(chunk)
+        return chunks
+
+    chunks = asyncio.run(run())
+    assert "".join(chunks) == "Hello world"
+    assert seen["usage"]["total_tokens"] == 2
+
+
+def test_async_stream_awaits_coroutine_on_usage() -> None:
+    sse = (
+        'data: {"delta": "Hi"}\n\n'
+        'data: {"provider":"echo","model":"echo","usage":{"total_tokens":2},'
+        '"cost_usd":0.0,"estimated":false}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=sse)
+
+    seen: dict = {}
+
+    async def run() -> None:
+        async def on_usage(summary: dict) -> None:
+            seen.update(summary)
+
+        async with make_async_client(handler) as client:
+            async for _ in client.stream("echo", "hi", on_usage=on_usage):
+                pass
+
+    asyncio.run(run())
+    assert seen["usage"]["total_tokens"] == 2
+
+
+def test_async_stream_raises_on_error_event() -> None:
+    sse = 'data: {"error": "provider_error", "detail": "boom"}\n\ndata: [DONE]\n\n'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=sse)
+
+    async def run() -> None:
+        async with make_async_client(handler) as client:
+            async for _ in client.stream("echo", "hi"):
+                pass
+
+    with pytest.raises(RekAIError):
+        asyncio.run(run())
+
+
+def test_async_embeddings_and_gateway_key() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["auth"] = request.headers.get("Authorization")
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "provider": "echo",
+                "model": "echo",
+                "embeddings": [[0.1, 0.2]],
+                "usage": {"total_tokens": 2},
+                "cost_usd": 0.0,
+                "cached": False,
+            },
+        )
+
+    async def run() -> EmbeddingsResult:
+        async with make_async_client(handler) as client:
+            return await client.embeddings("echo", "hi", gateway_key="sk-rekai-1")
+
+    result = asyncio.run(run())
+    assert isinstance(result, EmbeddingsResult)
+    assert result.embeddings == [[0.1, 0.2]]
+    assert captured["auth"] == "Bearer sk-rekai-1"
+
+
+def test_async_models_usage_health() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/v1/models":
+            return httpx.Response(200, json={"data": [{"id": "echo", "provider": "echo"}]})
+        if path == "/v1/usage":
+            return httpx.Response(200, json={"requests_total": 5})
+        return httpx.Response(200, json={"status": "ok"})
+
+    async def run() -> tuple:
+        async with make_async_client(handler) as client:
+            return (await client.models(), await client.usage(), await client.health())
+
+    models, usage, health = asyncio.run(run())
+    assert models[0]["id"] == "echo"
+    assert usage["requests_total"] == 5
+    assert health["status"] == "ok"

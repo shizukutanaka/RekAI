@@ -75,6 +75,30 @@ with RekAIClient("http://localhost:8000", provider_key="sk-...") as client:
     print(client.chat("gpt-4o-mini", "hi").content)
 ```
 
+## Async
+
+`AsyncRekAIClient` mirrors the same surface with `async`/`await`, backed by
+`httpx.AsyncClient` (so the connection pool is reused across awaits).
+`stream()` is an async generator you drive with `async for`:
+
+```python
+import asyncio
+from rekai_client import AsyncRekAIClient
+
+async def main():
+    async with AsyncRekAIClient("http://localhost:8000") as client:
+        result = await client.chat("echo", "Hello!")
+        print(result.content)
+
+        async for chunk in client.stream("echo", "stream me"):
+            print(chunk, end="", flush=True)
+
+        # on_usage may be a plain callable or a coroutine function.
+        await client.embeddings("echo", ["hello", "world"])
+
+asyncio.run(main())
+```
+
 ## Errors
 
 Failed requests raise `RekAIError` with a `.status_code` attribute.
