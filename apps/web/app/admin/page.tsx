@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   AdminKeyList,
+  ApiError,
   addAdminKey,
   fetchAdminKeys,
   getStoredAdminKey,
@@ -28,14 +29,14 @@ export default function AdminPage() {
     try {
       setKeys(await fetchAdminKeys(key));
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Failed to load keys";
       // The admin routes aren't registered at all unless REKAI_ADMIN_KEY is
-      // set server-side, so an unmatched route (not "unauthorized") means
-      // this deployment simply doesn't have the admin API available.
-      if (msg === "Not Found") {
+      // set server-side, so a 404 (not a 401) means this deployment simply
+      // doesn't have the admin API available. Branch on the status code, not
+      // the error message text, which is a server-controlled string.
+      if (e instanceof ApiError && e.status === 404) {
         setNotConfigured(true);
       } else {
-        setError(msg);
+        setError(e instanceof Error ? e.message : "Failed to load keys");
       }
       setKeys(null);
     }

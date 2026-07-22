@@ -15,6 +15,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   advertised chat model both has a price and routes back to the advertising
   provider — locking the three surfaces (router, price table, model list)
   together so they can't drift apart again.
+- **Admin page detects "admin API not configured" by status code, not error
+  text** — the page treated a `404` as "this deployment has no admin API"
+  (the routes aren't mounted unless `REKAI_ADMIN_KEY` is set) but did so by
+  matching FastAPI's `"Not Found"` message string, which silently breaks if
+  that server-controlled text ever changes. `errorFromResponse` now returns a
+  typed `ApiError` carrying `.status`, and the page branches on
+  `e.status === 404`.
 
 ### Added
 - **AI-agent working docs** — a root `CLAUDE.md` (shared conventions: the

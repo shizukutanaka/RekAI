@@ -41,15 +41,30 @@ export function parseRateLimit(res: Response): RateLimitInfo {
 }
 
 /**
- * Build a user-friendly Error from a failed response. A 429 yields a clear
- * "rate limited — retry in Ns" message sourced from the `Retry-After` header;
- * otherwise the API's `detail`/`error` body is used.
+ * An Error that carries the HTTP status of the failed response, so callers can
+ * branch on the code (e.g. 404 vs 401) instead of matching the message string.
  */
-export async function errorFromResponse(res: Response): Promise<Error> {
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+/**
+ * Build a user-friendly ApiError from a failed response. A 429 yields a clear
+ * "rate limited — retry in Ns" message sourced from the `Retry-After` header;
+ * otherwise the API's `detail`/`error` body is used. The `.status` field lets
+ * callers distinguish, e.g., a 404 ("admin API not configured") from a 401.
+ */
+export async function errorFromResponse(res: Response): Promise<ApiError> {
   if (res.status === 429) {
     const retry = res.headers.get("Retry-After");
-    return new Error(
+    return new ApiError(
       retry ? `Rate limited — retry in ${retry}s.` : "Rate limited — slow down.",
+      res.status,
     );
   }
   let detail = `Request failed (${res.status})`;
@@ -59,7 +74,7 @@ export async function errorFromResponse(res: Response): Promise<Error> {
   } catch {
     /* ignore */
   }
-  return new Error(detail);
+  return new ApiError(detail, res.status);
 }
 
 export interface ModelPricing {

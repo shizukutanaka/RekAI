@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ApiError,
   cosineSimilarity,
   errorFromResponse,
   formatCost,
@@ -121,6 +122,15 @@ describe("errorFromResponse", () => {
   it("falls back to the status when the body is not JSON", async () => {
     const res = new Response("boom", { status: 500 });
     expect((await errorFromResponse(res)).message).toBe("Request failed (500)");
+  });
+
+  it("carries the HTTP status so callers can branch on the code", async () => {
+    // The admin page distinguishes a 404 ("admin API not configured") from a
+    // 401 by inspecting `.status`, not the server-controlled message string.
+    const res = new Response(JSON.stringify({ detail: "Not Found" }), { status: 404 });
+    const err = await errorFromResponse(res);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(404);
   });
 });
 
