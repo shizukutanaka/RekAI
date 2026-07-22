@@ -33,6 +33,9 @@
   `playwright.config.ts` は変更不要のはず。
 
 ### S-2. `REKAI_CUSTOM_BASE_URL` の registry 統合テスト
+> ✅ **完了**: `test_openai_compatible.py` に `importlib.reload` +
+> `monkeypatch.setenv` で env→registry 登録経路を検証(URL/key/models を assert し、
+> 後続テストのためグローバル状態を復元)。O-1 (DI 化) が入るまでの軽量版。
 - 監査指摘: env → `providers/registry.py` の custom provider 登録経路が未テスト
   (既存テストは `OpenAICompatibleProvider` を直接構築するのみ)。
 - registry は import 時初期化なので、テストは `importlib.reload` + monkeypatch.setenv

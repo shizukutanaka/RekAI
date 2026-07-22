@@ -7,6 +7,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **Registry test for `REKAI_CUSTOM_*` env wiring** — the env → registry path
+  that registers a custom OpenAI-compatible backend at import time was
+  untested (existing tests only built the provider directly). Added a
+  reload-based test that sets `REKAI_CUSTOM_BASE_URL`/`_NAME`/`_MODELS` and
+  asserts the provider is registered with the right URL, key, and models (and
+  cleans up so global registry state is restored for later tests).
 - **`scripts/smoke.sh` asserts JSON fields with `jq`, not substring greps** —
   the smoke test matched compact-JSON fragments (`"status":"ok"`), which is
   brittle to whitespace/key-order changes and can't check nested values. It now

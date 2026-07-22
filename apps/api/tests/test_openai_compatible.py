@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import importlib
+
 import httpx
 import pytest
 
-from rekai.config import Settings
+from rekai.config import Settings, get_settings
 from rekai.providers.base import ProviderError
 from rekai.providers.openai_compatible import OpenAICompatibleProvider
 from rekai.schemas import ChatMessage, ChatRequest
@@ -83,3 +85,40 @@ async def test_chat_uses_custom_base_url_and_key(monkeypatch) -> None:
     assert result.content == "ok"
     assert captured["url"] == "https://api.groq.com/openai/v1/chat/completions"
     assert captured["headers"]["Authorization"] == "Bearer gk"
+
+
+def test_env_registers_custom_provider(monkeypatch) -> None:
+    # The registry wires a custom OpenAI-compatible backend from REKAI_CUSTOM_*
+    # env at import time. The other tests build the provider directly and never
+    # exercise that env -> registry path; this reloads the module to cover it.
+    import rekai.providers.registry as registry
+
+    monkeypatch.setenv("REKAI_CUSTOM_BASE_URL", "https://llm.example.com/v1")
+    monkeypatch.setenv("REKAI_CUSTOM_NAME", "myllm")
+    monkeypatch.setenv("REKAI_CUSTOM_API_KEY", "sk-custom")
+    monkeypatch.setenv("REKAI_CUSTOM_MODELS", "my-model-a, my-model-b")
+    get_settings.cache_clear()
+    try:
+        importlib.reload(registry)
+        provider = registry.get_provider("myllm")
+        assert isinstance(provider, OpenAICompatibleProvider)
+        assert provider._url == "https://llm.example.com/v1"
+        assert provider._key == "sk-custom"
+        assert provider._models == ["my-model-a", "my-model-b"]
+        assert "myllm" in registry.provider_names()
+    finally:
+        # Restore the default (env-free) registry so later tests see clean global
+        # state — the registry holds module-level singletons.
+        monkeypatch.undo()
+        get_settings.cache_clear()
+        importlib.reload(registry)
+
+    assert registry.get_provider("myllm") is None
+
+
+def test_no_custom_provider_without_base_url() -> None:
+    # Sanity: the default registry (no REKAI_CUSTOM_BASE_URL) has no custom entry.
+    import rekai.providers.registry as registry
+
+    assert registry.get_provider("myllm") is None
+    assert "custom" not in registry.provider_names()
