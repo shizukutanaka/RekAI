@@ -354,6 +354,127 @@ def test_context_manager() -> None:
         assert client.health()["status"] == "ok"
 
 
+def _chat_ok(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "id": "x",
+            "provider": "echo",
+            "model": "echo",
+            "content": "ok",
+            "usage": {},
+            "cost_usd": None,
+            "cached": False,
+            "fallback_used": False,
+        },
+    )
+
+
+# --- Idempotency-Key + client-side retry (S-11) ------------------------------
+
+
+def test_chat_sends_explicit_idempotency_key() -> None:
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["key"] = request.headers.get("Idempotency-Key")
+        return _chat_ok(request)
+
+    client = make_client(handler)
+    client.chat("echo", "hi", idempotency_key="my-key-123")
+    assert seen["key"] == "my-key-123"
+
+
+def test_chat_auto_generates_idempotency_key_when_retries_enabled() -> None:
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["key"] = request.headers.get("Idempotency-Key")
+        return _chat_ok(request)
+
+    client = make_client(handler)  # default max_retries=2
+    client.chat("echo", "hi")
+    assert seen["key"] and seen["key"].startswith("rekai-sdk-")
+
+
+def test_chat_omits_idempotency_key_when_retries_disabled() -> None:
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["key"] = request.headers.get("Idempotency-Key")
+        return _chat_ok(request)
+
+    client = make_client(handler)
+    client._max_retries = 0
+    client.chat("echo", "hi")
+    assert seen["key"] is None
+
+
+def test_retry_on_429_reuses_the_same_idempotency_key() -> None:
+    attempts = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request.headers.get("Idempotency-Key"))
+        if len(attempts) == 1:
+            return httpx.Response(429, json={"detail": "slow down"})
+        return _chat_ok(request)
+
+    client = make_client(handler)
+    client._retry_backoff = 0  # no real sleeping in tests
+    result = client.chat("echo", "hi", idempotency_key="k1")
+    assert result.content == "ok"
+    assert attempts == ["k1", "k1"]  # retried once, same key both times
+
+
+def test_retry_on_transport_error_then_succeeds() -> None:
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ConnectError("boom", request=request)
+        return _chat_ok(request)
+
+    client = make_client(handler)
+    client._retry_backoff = 0
+    assert client.chat("echo", "hi").content == "ok"
+    assert calls["n"] == 2
+
+
+def test_retry_gives_up_and_raises_after_max_retries() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"detail": "down"})
+
+    client = make_client(handler)
+    client._max_retries = 1
+    client._retry_backoff = 0
+    with pytest.raises(RekAIError) as exc:
+        client.chat("echo", "hi")
+    # After exhausting retries the last 503 surfaces as-is (the SDK echoes the
+    # response status; it doesn't normalize 5xx the way the server does).
+    assert exc.value.status_code == 503
+
+
+def test_async_retry_on_429_then_succeeds() -> None:
+    attempts = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request.headers.get("Idempotency-Key"))
+        if len(attempts) == 1:
+            return httpx.Response(429, json={"detail": "slow down"})
+        return _chat_ok(request)
+
+    async def run() -> ChatResult:
+        client = make_async_client(handler)
+        client._retry_backoff = 0
+        async with client:
+            return await client.chat("echo", "hi", idempotency_key="ka")
+
+    result = asyncio.run(run())
+    assert result.content == "ok"
+    assert attempts == ["ka", "ka"]
+
+
 # --- AsyncRekAIClient (driven via asyncio.run to avoid a pytest-asyncio dep) --
 
 

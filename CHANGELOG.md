@@ -40,6 +40,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   live region.
 
 ### Added
+- **SDK idempotency keys + client-side retry (both SDKs)** — the Python and JS
+  clients now retry transient failures (connection errors and
+  `429`/`502`/`503`/`504`) with exponential backoff, honoring `Retry-After`;
+  tunable via `max_retries`/`retry_backoff` (`maxRetries`/`retryBackoff` in JS),
+  set retries to 0 to disable. `chat()` accepts an `idempotency_key`
+  (`idempotencyKey`) sent as the `Idempotency-Key` header so the server replays
+  the first response instead of re-processing; when retries are enabled and no
+  key is given, one is generated per call (and reused across a request's own
+  retries) so an auto-retry can't double-execute. `AsyncRekAIClient` shares the
+  same options.
 - **`AsyncRekAIClient` in the Python SDK** — an `async`/`await` mirror of the
   synchronous `RekAIClient`, backed by `httpx.AsyncClient` so the connection
   pool is reused across awaits. `stream()` is an async generator driven with

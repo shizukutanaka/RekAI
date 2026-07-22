@@ -78,6 +78,28 @@ authenticates you to RekAI itself):
 const client = new RekAIClient("http://localhost:8000", { gatewayKey: "sk-rekai-..." });
 ```
 
+## Idempotency & retries
+
+The client retries transient failures — network errors and `429`/`502`/`503`/
+`504` responses — with exponential backoff, honoring a `Retry-After` header when
+present. Tune or disable it per client:
+
+```js
+const client = new RekAIClient("http://localhost:8000", {
+  maxRetries: 2,       // default; set 0 to disable
+  retryBackoff: 0.5,   // seconds, doubled each attempt
+});
+```
+
+So an automatic retry can never double-execute a chat, `chat()` sends an
+`Idempotency-Key` header — the server replays the first response instead of
+re-processing. Pass your own for end-to-end safety, or let the client mint one
+per call when retries are enabled:
+
+```js
+await client.chat("gpt-4o-mini", "charge me once", { idempotencyKey: "order-42" });
+```
+
 ## Errors
 
 Failed requests throw `RekAIError` with a `.statusCode` property.

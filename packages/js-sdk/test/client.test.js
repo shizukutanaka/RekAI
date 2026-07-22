@@ -6,6 +6,11 @@ import { RekAIClient, RekAIError } from "../src/index.js";
 let server;
 let baseUrl;
 let lastRequest = {};
+// Test-controlled transient-failure injection for the retry tests. When
+// `remaining > 0`, /v1/chat responds with `status` and decrements, so the
+// client's retry can eventually reach a 200. Also records the idempotency key
+// seen on each attempt.
+let flake = { remaining: 0, status: 503, retryAfter: undefined, keys: [] };
 
 function send(res, status, body, headers = {}) {
   res.writeHead(status, { "Content-Type": "application/json", ...headers });
@@ -25,6 +30,12 @@ before(async () => {
       };
 
       if (req.url === "/v1/chat") {
+        flake.keys.push(req.headers["idempotency-key"]);
+        if (flake.remaining > 0) {
+          flake.remaining -= 1;
+          const h = flake.retryAfter ? { "Retry-After": String(flake.retryAfter) } : {};
+          return send(res, flake.status, { detail: "transient" }, h);
+        }
         if (req.headers["x-provider-key"] === "bad") {
           return send(res, 401, { error: "provider_error", detail: "no key" });
         }
@@ -197,4 +208,62 @@ test("models, usage, health", async () => {
   assert.equal((await client.models())[0].id, "echo");
   assert.equal((await client.usage()).requests_total, 7);
   assert.equal((await client.health()).status, "ok");
+});
+
+// --- Idempotency-Key + client-side retry (S-11) ------------------------------
+
+test("chat sends an explicit Idempotency-Key", async () => {
+  const client = new RekAIClient(baseUrl);
+  await client.chat("echo", "hi", { idempotencyKey: "my-key-123" });
+  assert.equal(lastRequest.headers["idempotency-key"], "my-key-123");
+});
+
+test("chat auto-generates an Idempotency-Key when retries are enabled", async () => {
+  const client = new RekAIClient(baseUrl); // default maxRetries=2
+  await client.chat("echo", "hi");
+  assert.match(lastRequest.headers["idempotency-key"], /^rekai-sdk-/);
+});
+
+test("chat omits the Idempotency-Key when retries are disabled", async () => {
+  const client = new RekAIClient(baseUrl, { maxRetries: 0 });
+  await client.chat("echo", "hi");
+  assert.equal(lastRequest.headers["idempotency-key"], undefined);
+});
+
+test("chat retries a 429 and reuses the same Idempotency-Key", async () => {
+  flake = { remaining: 1, status: 429, retryAfter: undefined, keys: [] };
+  const client = new RekAIClient(baseUrl, { retryBackoff: 0 });
+  const result = await client.chat("echo", "hi", { idempotencyKey: "k1" });
+  assert.equal(result.content, "Echo: hi");
+  assert.deepEqual(flake.keys, ["k1", "k1"]); // one retry, same key
+  flake = { remaining: 0, status: 503, retryAfter: undefined, keys: [] };
+});
+
+test("chat gives up after maxRetries and raises", async () => {
+  flake = { remaining: 5, status: 503, retryAfter: undefined, keys: [] };
+  const client = new RekAIClient(baseUrl, { maxRetries: 1, retryBackoff: 0 });
+  await assert.rejects(
+    () => client.chat("echo", "hi"),
+    (err) => err instanceof RekAIError && err.statusCode === 503,
+  );
+  assert.equal(flake.keys.length, 2); // initial attempt + 1 retry
+  flake = { remaining: 0, status: 503, retryAfter: undefined, keys: [] };
+});
+
+test("chat retries a network error then succeeds", async () => {
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (...args) => {
+    calls++;
+    if (calls === 1) return Promise.reject(new TypeError("network down"));
+    return realFetch(...args);
+  };
+  try {
+    const client = new RekAIClient(baseUrl, { retryBackoff: 0 });
+    const result = await client.chat("echo", "hi");
+    assert.equal(result.content, "Echo: hi");
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

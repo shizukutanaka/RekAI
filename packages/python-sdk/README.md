@@ -99,6 +99,31 @@ async def main():
 asyncio.run(main())
 ```
 
+## Idempotency & retries
+
+Both clients retry transient failures — connection errors and `429`/`502`/
+`503`/`504` responses — with exponential backoff, honoring a `Retry-After`
+header when present. Tune or disable it per client:
+
+```python
+client = RekAIClient(
+    "http://localhost:8000",
+    max_retries=2,      # default; set 0 to disable
+    retry_backoff=0.5,  # seconds, doubled each attempt
+)
+```
+
+So an automatic retry can never double-execute a chat, `chat()` sends an
+`Idempotency-Key` header — the server replays the first response instead of
+re-processing. Pass your own for end-to-end safety, or let the client mint one
+per call when retries are enabled:
+
+```python
+client.chat("gpt-4o-mini", "charge me once", idempotency_key="order-42")
+```
+
+`AsyncRekAIClient` accepts the same options.
+
 ## Errors
 
 Failed requests raise `RekAIError` with a `.status_code` attribute.
