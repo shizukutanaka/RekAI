@@ -18,11 +18,21 @@ import {
 } from "@/lib/api";
 
 interface DisplayMessage extends ChatMessage {
+  id?: string;
   provider?: string;
   cached?: boolean;
   tokens?: number;
   cost?: number | null;
   streaming?: boolean;
+}
+
+// Monotonic id for React keys. Index keys shift when regenerate()/clear drop or
+// replace bubbles, which confuses reconciliation (and assistive tech tracking a
+// live region). A stable per-message id avoids that.
+let _msgSeq = 0;
+function nextMsgId(): string {
+  _msgSeq += 1;
+  return `m${_msgSeq}`;
 }
 
 export default function ChatPage() {
@@ -57,7 +67,11 @@ export default function ChatPage() {
     // Restore a previous conversation, if any.
     try {
       const saved = window.localStorage.getItem(HISTORY_KEY);
-      if (saved) setMessages(JSON.parse(saved));
+      if (saved) {
+        // Backfill stable ids for conversations persisted before ids existed.
+        const restored: DisplayMessage[] = JSON.parse(saved);
+        setMessages(restored.map((m) => ({ ...m, id: m.id ?? nextMsgId() })));
+      }
     } catch {
       /* ignore malformed history */
     }
@@ -119,7 +133,10 @@ export default function ChatPage() {
     try {
       if (streaming) {
         // Append a placeholder assistant bubble and fill it as deltas arrive.
-        setMessages([...history, { role: "assistant", content: "", streaming: true }]);
+        setMessages([
+          ...history,
+          { id: nextMsgId(), role: "assistant", content: "", streaming: true },
+        ]);
         const controller = new AbortController();
         abortRef.current = controller;
         let summary: StreamSummary | null = null;
@@ -185,6 +202,7 @@ export default function ChatPage() {
         setMessages([
           ...history,
           {
+            id: nextMsgId(),
             role: "assistant",
             content: res.content,
             provider: res.provider,
@@ -209,7 +227,10 @@ export default function ChatPage() {
   async function send() {
     const content = input.trim();
     if (!content || loading) return;
-    const history: DisplayMessage[] = [...messages, { role: "user", content }];
+    const history: DisplayMessage[] = [
+      ...messages,
+      { id: nextMsgId(), role: "user", content },
+    ];
     setMessages(history);
     setInput("");
     await runChat(history);
@@ -314,7 +335,7 @@ export default function ChatPage() {
         </div>
       )}
 
-      <div className="messages">
+      <div className="messages" role="log" aria-live="polite" aria-label="Conversation">
         {messages.length === 0 && (
           <div className="empty">
             Start chatting. The default <code>echo</code> model needs no API key.
@@ -323,7 +344,7 @@ export default function ChatPage() {
           </div>
         )}
         {messages.map((m, i) => (
-          <div key={i} className={`msg ${m.role}`}>
+          <div key={m.id ?? i} className={`msg ${m.role}`}>
             {m.content}
             {m.streaming && <span className="cursor">▌</span>}
             {m.role === "assistant" && !m.streaming && (
@@ -352,7 +373,11 @@ export default function ChatPage() {
         </div>
       )}
 
-      {error && <div className="error">{error}</div>}
+      {error && (
+        <div className="error" role="alert">
+          {error}
+        </div>
+      )}
 
       <div className="composer">
         <textarea

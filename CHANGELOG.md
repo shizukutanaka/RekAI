@@ -22,6 +22,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that server-controlled text ever changes. `errorFromResponse` now returns a
   typed `ApiError` carrying `.status`, and the page branches on
   `e.status === 404`.
+- **Chat UI accessibility** — the conversation is now a labelled `role="log"`
+  `aria-live="polite"` region so assistive tech announces streamed and appended
+  replies, the error banner is `role="alert"`, and message bubbles carry stable
+  ids instead of array-index React keys (which shifted on
+  regenerate/clear and confused reconciliation). Added an E2E assertion for the
+  live region.
 
 ### Added
 - **AI-agent working docs** — a root `CLAUDE.md` (shared conventions: the

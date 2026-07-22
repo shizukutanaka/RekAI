@@ -23,3 +23,15 @@ test("sending a message to the echo model renders a reply with metadata", async 
   await expect(reply).toContainText("echo");
   await expect(reply).toContainText("tokens");
 });
+
+test("the conversation is an accessible live region", async ({ page }) => {
+  await page.goto("/");
+  // Screen readers should announce streamed/appended replies: the message log
+  // is a labelled polite live region.
+  const log = page.getByRole("log", { name: "Conversation" });
+  await expect(log).toHaveAttribute("aria-live", "polite");
+
+  await page.fill('textarea[placeholder*="Type a message"]', "hi a11y");
+  await page.click('button:has-text("Send")');
+  await expect(log.locator(".msg.assistant").last()).toContainText("Echo: hi a11y");
+});
