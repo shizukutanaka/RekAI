@@ -6,6 +6,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **Web dev-tooling audit cleanup** — bumped `vitest` 2 → 4, clearing the
+  critical advisory in its bundled `vite`/`esbuild`/`vite-node`/`@vitest/mocker`
+  chain, and ran `npm audit fix` for a transitive `brace-expansion` fix — from
+  11 advisories (1 critical) down to 5. The remaining five are the Next.js
+  framework advisories, which only a `next` 14 → 16 major resolves; tracked as
+  a dedicated follow-up (S-3b) since a framework major needs its own migration
+  and full re-verification. All web gates (tsc/lint/vitest/build/E2E) pass on
+  vitest 4.
+
 ### Changed
 - **E2E coverage for the v1.2 OpenAI-compatible surface** — added
   `e2e/openai-compat.spec.ts`: a direct `POST /v1/chat/completions` asserting
