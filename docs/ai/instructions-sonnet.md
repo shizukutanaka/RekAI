@@ -19,10 +19,13 @@
 
 ## 割当タスク (優先度順)
 
-> **進捗**: S-6〜S-8, S-10〜S-13 は実装・push 済み (下記各項の ✅ 参照)。
-> 未着手は S-1〜S-4、および S-9 (O-7 のデフォルト方針決定待ち)。S-5 はメンテナ権限待ち。
+> **進捗**: S-1, S-2, S-6〜S-8, S-10〜S-13 は実装・push 済み (下記各項の ✅ 参照)。
+> 未着手は S-3 (npm audit), S-4 (小粒改善)、および S-9 (O-7 のデフォルト方針決定待ち)。
+> S-5 はメンテナ権限待ち。
 
 ### S-1. E2E スイートの v1.2 機能カバー
+> ✅ **完了**: `e2e/openai-compat.spec.ts` を追加(直接 `POST /v1/chat/completions`
+> の非ストリーム/ストリーム形状 assert + Settings の OpenAI SDK スニペット表示)。
 - `apps/web/e2e/` に spec を追加:
   1. OpenAI 互換エンドポイント: API (port 8090) に直接 `POST /v1/chat/completions`
      (非ストリーム + stream: true) を投げ、`chat.completion` / `chunk` 形状を assert。

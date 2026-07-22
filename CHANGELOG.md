@@ -7,6 +7,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **E2E coverage for the v1.2 OpenAI-compatible surface** — added
+  `e2e/openai-compat.spec.ts`: a direct `POST /v1/chat/completions` asserting
+  the `chat.completion` shape (object, choices, `finish_reason`, usage), a
+  `stream: true` run asserting `chat.completion.chunk` frames and a terminal
+  `[DONE]` with reassembled deltas, and a check that the Settings page's "Use it
+  from the OpenAI SDK" snippet shows the drop-in base URL.
 - **Registry test for `REKAI_CUSTOM_*` env wiring** — the env → registry path
   that registers a custom OpenAI-compatible backend at import time was
   untested (existing tests only built the provider directly). Added a
