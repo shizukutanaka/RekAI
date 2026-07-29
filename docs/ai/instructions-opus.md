@@ -68,6 +68,13 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
   時のみ、と明確に区別する。
 
 ### O-4. プロンプトキャッシング・パススルー
+> ✅ **完了**: `ChatRequest`/`ChatMessage` に `cache_control` を追加(トップレベルは
+> 最終ブロック、メッセージ単位はそのメッセージに付与。文字列 content は text ブロックへ
+> 昇格)。`Usage` に `cache_read_tokens`/`cache_write_tokens`(既定 0 で後方互換、
+> `prompt_tokens` の内訳)を追加し、Anthropic の `cache_read_input_tokens`/
+> `cache_creation_input_tokens`(非ストリーム+ストリーム)と OpenAI の
+> `prompt_tokens_details.cached_tokens` から取得。`estimate_cost` は読出 0.1倍・
+> 書込 1.25倍で計上し二重計上なし。`cache_key` にも含めて衝突回避。
 - Anthropic `cache_control` / OpenAI automatic caching の透過。ChatRequest への
   フィールド追加はキャッシュキー (`cache.py::cache_key`) への影響を必ず設計に含める
   (response_format 追加時の前例: キーに含めないと衝突、含めると一回限りの全キャッシュ

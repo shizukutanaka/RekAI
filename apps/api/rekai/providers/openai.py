@@ -90,6 +90,10 @@ class OpenAIProvider(Provider):
                 prompt_tokens=usage.get("prompt_tokens", 0),
                 completion_tokens=usage.get("completion_tokens", 0),
                 total_tokens=usage.get("total_tokens", 0),
+                # OpenAI caches prompts automatically and reports how much of
+                # prompt_tokens was served from cache (already included in it,
+                # unlike Anthropic). There is no separate write count.
+                cache_read_tokens=_cached_prompt_tokens(usage),
             ),
             tool_calls=message.get("tool_calls"),
         )
@@ -185,6 +189,12 @@ class OpenAIProvider(Provider):
         return models.advertised_models("openai", "embedding")
 
 
+def _cached_prompt_tokens(usage: dict) -> int:
+    """Cached prompt tokens from an OpenAI usage object (0 when absent)."""
+    details = usage.get("prompt_tokens_details") or {}
+    return details.get("cached_tokens", 0) or 0
+
+
 def _parse_openai_sse_line(line: str) -> str | None:
     """Extract the text delta from one OpenAI SSE line, if present."""
     event = _parse_openai_sse_event(line)
@@ -214,6 +224,7 @@ def _parse_openai_sse_event(line: str) -> StreamEvent | None:
                 prompt_tokens=usage.get("prompt_tokens", 0),
                 completion_tokens=usage.get("completion_tokens", 0),
                 total_tokens=usage.get("total_tokens", 0),
+                cache_read_tokens=_cached_prompt_tokens(usage),
             )
         )
     return None

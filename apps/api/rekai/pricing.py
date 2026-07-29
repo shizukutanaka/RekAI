@@ -24,6 +24,13 @@ from rekai.schemas import Usage
 # Providers whose usage is free to the operator (local or echo).
 FREE_PROVIDERS: set[str] = {"echo", "ollama"}
 
+# Prompt-cache multipliers applied to the *input* price. Reading a cached prefix
+# is ~10x cheaper than sending it fresh; writing one costs a premium. These match
+# Anthropic's published ratios and are close enough for OpenAI's automatic
+# caching, which only ever reports reads.
+_CACHE_READ_MULTIPLIER = 0.1
+_CACHE_WRITE_MULTIPLIER = 1.25
+
 # model-id prefix -> (input_per_1m, output_per_1m) in USD, derived from the
 # single model registry (rekai/models.py) so pricing can't drift from routing
 # and the advertised model list. register_price() still mutates this in place.
@@ -79,7 +86,14 @@ def estimate_cost(
     if price is None:
         return None
     input_per_1m, output_per_1m = price
+    # cache_read/cache_write are a breakdown of prompt_tokens, so bill the
+    # remainder at full input price and each cached slice at its own rate.
+    cached = usage.cache_read_tokens + usage.cache_write_tokens
+    uncached_prompt = max(0, usage.prompt_tokens - cached)
     cost = (
-        usage.prompt_tokens * input_per_1m + usage.completion_tokens * output_per_1m
+        uncached_prompt * input_per_1m
+        + usage.cache_read_tokens * input_per_1m * _CACHE_READ_MULTIPLIER
+        + usage.cache_write_tokens * input_per_1m * _CACHE_WRITE_MULTIPLIER
+        + usage.completion_tokens * output_per_1m
     ) / 1_000_000
     return round(cost, 6)

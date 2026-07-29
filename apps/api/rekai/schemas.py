@@ -17,6 +17,10 @@ class ChatMessage(BaseModel):
     # Pass-through OpenAI-style tool fields (round-tripping tool calls).
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
+    # Provider-native prompt-cache breakpoint, passed through verbatim (e.g.
+    # Anthropic's {"type": "ephemeral"}). Providers that cache automatically
+    # (OpenAI) ignore it.
+    cache_control: dict[str, Any] | None = None
 
 
 class FallbackTarget(BaseModel):
@@ -56,12 +60,26 @@ class ChatRequest(BaseModel):
         "that support it (OpenAI/OpenAI-compatible natively, Gemini best-effort); "
         "ignored by others.",
     )
+    cache_control: dict[str, Any] | None = Field(
+        default=None,
+        description="Provider-native prompt-cache breakpoint applied to the last "
+        "prompt block, e.g. {'type': 'ephemeral'}. Anthropic honors it (cached "
+        "prompt prefixes are billed at a large discount); OpenAI caches "
+        "automatically and ignores it. Per-message placement is also supported "
+        "via a message's own cache_control.",
+    )
 
 
 class Usage(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    # Provider-side prompt-cache accounting. Cached prompt tokens are billed at a
+    # steep discount (Anthropic ~0.1x to read, ~1.25x to write); these are a
+    # *breakdown* of prompt_tokens, not additional tokens. Default 0 so existing
+    # responses and stored snapshots are unchanged.
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 # --- OpenAI-compatible /v1/chat/completions -------------------------------

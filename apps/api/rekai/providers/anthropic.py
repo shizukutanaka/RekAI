@@ -66,6 +66,11 @@ class AnthropicProvider(Provider):
             choice = _translate_tool_choice(request.tool_choice)
             if choice is not None:
                 payload["tool_choice"] = choice
+        # A top-level cache_control marks the end of the cacheable prefix. Place
+        # it on the last message block (after tools/system in Anthropic's render
+        # order) so everything before it is cached.
+        if request.cache_control and payload["messages"]:
+            _apply_cache_control(payload["messages"][-1], request.cache_control)
         if stream:
             payload["stream"] = True
         return payload
@@ -99,7 +104,11 @@ class AnthropicProvider(Provider):
         content = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
         tool_calls = _extract_tool_calls(blocks)
         usage = data.get("usage", {})
-        prompt_tokens = usage.get("input_tokens", 0)
+        cache_read, cache_write = _cache_tokens(usage)
+        # Anthropic reports cached prompt tokens *separately* from input_tokens;
+        # fold them in so prompt_tokens stays the true prompt size and the cache
+        # split is a breakdown of it (see pricing.estimate_cost).
+        prompt_tokens = usage.get("input_tokens", 0) + cache_read + cache_write
         completion_tokens = usage.get("output_tokens", 0)
         return ProviderResult(
             content=content,
@@ -109,6 +118,8 @@ class AnthropicProvider(Provider):
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 total_tokens=prompt_tokens + completion_tokens,
+                cache_read_tokens=cache_read,
+                cache_write_tokens=cache_write,
             ),
         )
 
@@ -127,6 +138,8 @@ class AnthropicProvider(Provider):
         # input tokens arrive in message_start; output tokens in message_delta.
         input_tokens = 0
         output_tokens = 0
+        cache_read = 0
+        cache_write = 0
         saw_usage = False
         # tool_use blocks: id/name from content_block_start, args from
         # input_json_delta fragments, keyed by block index.
@@ -175,6 +188,7 @@ class AnthropicProvider(Provider):
                         usage = event.get("message", {}).get("usage", {})
                         input_tokens = usage.get("input_tokens", input_tokens)
                         output_tokens = usage.get("output_tokens", output_tokens)
+                        cache_read, cache_write = _cache_tokens(usage)
                         saw_usage = True
                     elif etype == "message_delta":
                         usage = event.get("usage", {})
@@ -186,11 +200,16 @@ class AnthropicProvider(Provider):
         if tool_blocks:
             yield StreamEvent(tool_calls=[tool_blocks[i] for i in sorted(tool_blocks)])
         if saw_usage:
+            # Cached prompt tokens are reported alongside input_tokens, not
+            # inside it — fold them in so prompt_tokens is the true prompt size.
+            prompt_tokens = input_tokens + cache_read + cache_write
             yield StreamEvent(
                 usage=Usage(
-                    prompt_tokens=input_tokens,
+                    prompt_tokens=prompt_tokens,
                     completion_tokens=output_tokens,
-                    total_tokens=input_tokens + output_tokens,
+                    total_tokens=prompt_tokens + output_tokens,
+                    cache_read_tokens=cache_read,
+                    cache_write_tokens=cache_write,
                 )
             )
 
@@ -248,6 +267,31 @@ def _translate_tool_choice(choice: object) -> dict | None:
     return None
 
 
+def _cache_tokens(usage: dict) -> tuple[int, int]:
+    """(cache_read, cache_write) prompt tokens from an Anthropic usage object."""
+    return (
+        usage.get("cache_read_input_tokens", 0) or 0,
+        usage.get("cache_creation_input_tokens", 0) or 0,
+    )
+
+
+def _apply_cache_control(entry: dict, cache_control: dict | None) -> None:
+    """Attach a cache_control breakpoint to an entry's last content block.
+
+    Anthropic takes ``cache_control`` on a *content block*, not on the message,
+    and caches the prefix up to that breakpoint. A message whose content is a
+    bare string is promoted to a one-element text block so the marker has
+    somewhere to live.
+    """
+    if not cache_control:
+        return
+    content = entry.get("content")
+    if isinstance(content, str):
+        entry["content"] = [{"type": "text", "text": content, "cache_control": cache_control}]
+    elif isinstance(content, list) and content:
+        content[-1]["cache_control"] = cache_control
+
+
 def _translate_messages(messages: list) -> list[dict]:
     """Map OpenAI-style messages (incl. tool calls/results) to Anthropic blocks."""
     out: list[dict] = []
@@ -289,6 +333,7 @@ def _translate_messages(messages: list) -> list[dict]:
             out.append({"role": "assistant", "content": blocks})
         else:
             out.append({"role": m.role, "content": m.content or ""})
+        _apply_cache_control(out[-1], getattr(m, "cache_control", None))
     return out
 
 

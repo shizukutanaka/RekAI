@@ -96,6 +96,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   live region.
 
 ### Added
+- **Provider prompt-cache passthrough and discounted cost accounting** — RekAI
+  dropped `cache_control` on the way to the provider, so callers couldn't use
+  Anthropic's prompt caching (up to ~90% off a cached prefix) through the
+  gateway, and cost estimates ignored caching entirely. `ChatRequest` and
+  `ChatMessage` now accept a `cache_control` breakpoint: a top-level one marks
+  the last prompt block, a per-message one marks that message (a plain string
+  body is promoted to a text block so the marker has somewhere to live).
+  `Usage` gained `cache_read_tokens` / `cache_write_tokens` — a *breakdown* of
+  `prompt_tokens`, defaulting to 0 so existing responses are unchanged —
+  populated from Anthropic's `cache_read_input_tokens` /
+  `cache_creation_input_tokens` (non-streaming and streaming) and OpenAI's
+  `prompt_tokens_details.cached_tokens`. `estimate_cost` bills cache reads at
+  0.1x and writes at 1.25x the input rate, with the remainder at full price, so
+  a cached prompt is never double-counted. `cache_key` includes the breakpoint
+  so differently-cached requests don't share an entry.
 - **First-class streaming tool calls in both SDKs** — when a streamed
   completion ends with tool calls, they ride on the summary event under
   `tool_calls`. The SDKs now expose an `on_tool_calls` (`onToolCalls`) stream

@@ -31,6 +31,10 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         "tool_choice": request.tool_choice,
         # A JSON-mode request and a plain one must not share a cache entry.
         "response_format": request.response_format,
+        # Prompt-cache breakpoints change what the provider is asked to do (and
+        # the cost breakdown we report back), so they key separately. Per-message
+        # cache_control already rides along in `messages` above.
+        "cache_control": request.cache_control,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "rekai:chat:" + hashlib.sha256(raw.encode()).hexdigest()
