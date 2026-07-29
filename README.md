@@ -20,6 +20,7 @@ RekAI sits between your application and multiple LLM providers (OpenAI, Anthropi
 - **Embeddings** — `/v1/embeddings` across echo, OpenAI, Gemini, and Ollama, with the same routing, caching, BYOK, and cost; a web playground shows vectors and cosine similarity.
 - **Model discovery** — `/v1/models` lists every model with its `type` (chat/embedding) and per-model `pricing`, filterable via `?type=`.
 - **Response cache** — Redis-backed with an automatic in-memory fallback. Identical requests are served instantly and for free.
+- **Provider prompt caching** — pass a `cache_control` breakpoint (top-level, or per message) straight through to the provider. Anthropic caches the prefix before it at up to ~90% off; OpenAI caches automatically. Responses report the split via `usage.cache_read_tokens` / `cache_write_tokens`, and cost estimates apply the discount.
 - **Cost awareness** — each response carries an estimated USD cost; cumulative spend is exposed at `/v1/usage`.
 - **Auth & BYOK** — optionally gate the gateway with client API keys (`Authorization: Bearer`, constant-time); users supply their own upstream provider key per request (`X-Provider-Key`), never persisted.
 - **Rate limiting** — per-client token bucket with `Retry-After` and `X-RateLimit-*` headers; oversized bodies are rejected with 413.
