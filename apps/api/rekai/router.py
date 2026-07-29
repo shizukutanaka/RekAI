@@ -10,36 +10,21 @@ Resolution order:
 from __future__ import annotations
 
 from rekai.config import Settings
+from rekai.models import PROVIDER_PREFIXES, provider_for_prefix
 from rekai.providers import Provider, get_provider
 from rekai.providers.base import ProviderError
 from rekai.schemas import ChatRequest
 
-# Ordered (prefix, provider) rules. First match wins.
-_MODEL_PREFIX_RULES: tuple[tuple[str, str], ...] = (
-    ("gpt-", "openai"),
-    ("o1", "openai"),
-    ("o3", "openai"),
-    ("claude", "anthropic"),
-    ("gemini", "gemini"),
-    ("text-embedding", "openai"),
-    ("llama", "ollama"),
-    ("mistral", "ollama"),
-    ("qwen", "ollama"),
-    ("gemma", "ollama"),
-    ("phi", "ollama"),
-    ("echo", "echo"),
-)
+# Ordered (prefix, provider) rules, from the single model registry
+# (rekai/models.py) so routing can't drift from pricing / the model list.
+_MODEL_PREFIX_RULES: tuple[tuple[str, str], ...] = PROVIDER_PREFIXES
 
 
 def resolve_provider(provider: str | None, model: str, settings: Settings) -> str:
     """Resolve a provider name from an explicit choice, model prefix, or default."""
     if provider:
         return provider
-    model_lower = model.lower()
-    for prefix, name in _MODEL_PREFIX_RULES:
-        if model_lower.startswith(prefix):
-            return name
-    return settings.default_provider
+    return provider_for_prefix(model) or settings.default_provider
 
 
 def resolve_provider_name(request: ChatRequest, settings: Settings) -> str:

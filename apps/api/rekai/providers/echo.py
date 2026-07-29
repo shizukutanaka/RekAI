@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import AsyncIterator
 
+from rekai import models
 from rekai.providers.base import EmbeddingResult, Provider, ProviderResult, StreamEvent
 from rekai.schemas import ChatRequest, Usage
 
@@ -73,7 +74,7 @@ class EchoProvider(Provider):
         )
 
     async def list_models(self, api_key: str | None) -> list[str]:
-        return ["echo"]
+        return models.advertised_models("echo", "chat")
 
     async def list_embedding_models(self, api_key: str | None) -> list[str]:
-        return ["echo"]
+        return models.advertised_models("echo", "embedding")

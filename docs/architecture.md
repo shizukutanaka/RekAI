@@ -60,6 +60,11 @@ ChatResponse
    `llama*`, `mistral*`, `qwen*`, `gemma*`, `phi*` → Ollama; `echo` → Echo).
 3. Otherwise the configured `REKAI_DEFAULT_PROVIDER` is used.
 
+These prefixes, the price table, and each provider's advertised `/v1/models`
+list all derive from a single registry — `rekai/models.py` — so they can't drift
+apart (a `test_models.py` invariant asserts every advertised model routes back to
+its provider and, for chat, is priced).
+
 ## Retry & fallback / failover
 
 Each target is first **retried in place** on transient failures: a **5xx**

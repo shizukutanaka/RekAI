@@ -18,36 +18,16 @@ Override or extend the table two ways:
 
 from __future__ import annotations
 
+from rekai.models import price_table
 from rekai.schemas import Usage
 
 # Providers whose usage is free to the operator (local or echo).
 FREE_PROVIDERS: set[str] = {"echo", "ollama"}
 
-# model-id prefix -> (input_per_1m, output_per_1m) in USD.
-_PRICES_PER_1M: dict[str, tuple[float, float]] = {
-    # OpenAI
-    "gpt-4o-mini": (0.15, 0.60),
-    "gpt-4o": (2.50, 10.00),
-    "gpt-4-turbo": (10.00, 30.00),
-    "gpt-4": (30.00, 60.00),
-    "gpt-3.5-turbo": (0.50, 1.50),
-    "o1-mini": (1.10, 4.40),
-    "o1": (15.00, 60.00),
-    "o3-mini": (1.10, 4.40),
-    # Anthropic
-    "claude-opus": (15.00, 75.00),
-    "claude-sonnet": (3.00, 15.00),
-    "claude-haiku": (0.80, 4.00),
-    # Google Gemini
-    "gemini-1.5-flash": (0.075, 0.30),
-    "gemini-1.5-pro": (1.25, 5.00),
-    "gemini-2.0-flash": (0.10, 0.40),
-    "gemini-2.5-pro": (1.25, 10.00),
-    # Embeddings (input-only; output price is 0).
-    "text-embedding-3-small": (0.02, 0.0),
-    "text-embedding-3-large": (0.13, 0.0),
-    "text-embedding-ada-002": (0.10, 0.0),
-}
+# model-id prefix -> (input_per_1m, output_per_1m) in USD, derived from the
+# single model registry (rekai/models.py) so pricing can't drift from routing
+# and the advertised model list. register_price() still mutates this in place.
+_PRICES_PER_1M: dict[str, tuple[float, float]] = price_table()
 
 
 def register_price(model_prefix: str, input_per_1m: float, output_per_1m: float) -> None:

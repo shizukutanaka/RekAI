@@ -37,8 +37,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `REKAI_API_KEY` and it verifies an unauthenticated `/v1/chat` returns 401 (and
   authenticates the other checks). Documents the `jq` prerequisite in the
   README and Makefile.
-
-### Changed
+- **Single model registry (`rekai/models.py`)** — model→provider routing, the
+  price table, and each provider's advertised `/v1/models` list were maintained
+  in three separate places and drifted (o1/o3 and gemini-2.5-pro were priced but
+  hidden from `/v1/models`, fixed earlier by hand-syncing all three). They now
+  derive from one `ModelSpec` registry: `router` reads its prefix rules,
+  `pricing` builds its table from it, and providers advertise from it. A
+  `test_models.py` invariant asserts every advertised chat model routes back to
+  its provider and is priced, so a model can't be added to one surface and
+  forgotten on the others. No behavior change — `/v1/models`, routing, and cost
+  estimates are identical.
 - **Multi-replica metrics aggregation** — persisted metrics used a single Redis
   key that every replica overwrote (last-writer-wins), so `/v1/usage` reflected
   only whichever process flushed last. Each replica now persists to its own

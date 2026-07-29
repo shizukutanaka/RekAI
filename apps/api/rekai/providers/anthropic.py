@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 
+from rekai import models
 from rekai.config import get_settings
 from rekai.logging_config import get_logger
 from rekai.providers.base import (
@@ -194,11 +195,7 @@ class AnthropicProvider(Provider):
             )
 
     async def list_models(self, api_key: str | None) -> list[str]:
-        return [
-            "claude-opus-4-8",
-            "claude-sonnet-4-6",
-            "claude-haiku-4-5",
-        ]
+        return models.advertised_models("anthropic", "chat")
 
 
 def _parse_anthropic_sse_line(line: str) -> str | None:

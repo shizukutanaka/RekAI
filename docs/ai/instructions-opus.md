@@ -103,6 +103,11 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
   (`lib/api.ts`) とのトレードオフも判断材料。
 
 ### O-8. モデル⇔プロバイダ⇔価格の単一情報源化 (F2 の構造部分)
+> ✅ **完了**: `rekai/models.py` に `ModelSpec` レジストリを新設し単一情報源化。
+> `router` は `PROVIDER_PREFIXES`/`provider_for_prefix` を、`pricing` は `price_table()` を、
+> 各 provider の `list_models`/`list_embedding_models` は `advertised_models()` を参照。
+> `test_models.py` の不変条件で「広告モデルは自 provider にルーティング + (chat は) 価格あり」
+> を保証。挙動不変(/v1/models・ルーティング・コスト推定は同一)をライブ検証。
 - 現状 `pricing.py` の価格表、各 provider の `list_models()`、`README.md:59` の
   ルーティング記述が三重管理で相互不整合 (o1/o3 が pricing にあるが
   `openai.py:180` の list_models に無い、等)。単一のモデルレジストリ

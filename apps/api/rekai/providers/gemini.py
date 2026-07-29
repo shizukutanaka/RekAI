@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 
+from rekai import models
 from rekai.config import get_settings
 from rekai.providers.base import (
     EmbeddingResult,
@@ -197,17 +198,10 @@ class GeminiProvider(Provider):
             )
 
     async def list_models(self, api_key: str | None) -> list[str]:
-        # Kept in sync with the price table (rekai/pricing.py) — gemini-2.5-pro
-        # is priced there but was previously hidden from /v1/models.
-        return [
-            "gemini-2.5-pro",
-            "gemini-2.0-flash",
-            "gemini-1.5-pro",
-            "gemini-1.5-flash",
-        ]
+        return models.advertised_models("gemini", "chat")
 
     async def list_embedding_models(self, api_key: str | None) -> list[str]:
-        return ["text-embedding-004"]
+        return models.advertised_models("gemini", "embedding")
 
 
 def _extract_text(data: dict) -> str:
