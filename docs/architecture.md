@@ -65,6 +65,18 @@ list all derive from a single registry — `rekai/models.py` — so they can't d
 apart (a `test_models.py` invariant asserts every advertised model routes back to
 its provider and, for chat, is priced).
 
+**Which providers a request may reach** is an operator decision, not a client
+one. `REKAI_ALLOWED_PROVIDERS` (comma-separated; empty = all, the default)
+restricts every client-steered path through `router.ensure_allowed`: an explicit
+`provider`, the provider a model name routes to, and request-level `fallbacks`.
+Off-list targets get a **403**. `REKAI_DEFAULT_PROVIDER` is always allowed, so an
+allowlist can't lock the gateway out of its own default. Without this, an
+operator holding server-side keys for several providers had no way to say which
+ones tenants may spend on — any authenticated caller could name any of them and
+bill the operator's key. Note this is an *authorization* control, not an SSRF
+one: provider names have always resolved against a fixed registry, so there is
+no URL a client can inject.
+
 ## Retry & fallback / failover
 
 Each target is first **retried in place** on transient failures: a **5xx**

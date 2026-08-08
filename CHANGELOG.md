@@ -29,6 +29,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `(client, key)` split can be rearranged into another's digest — the same
   per-API-key scoping Stripe uses. `idempotency.claim/complete/release` take a
   `client_id` argument.
+- **`REKAI_ALLOWED_PROVIDERS` — operator control over which providers a request
+  may reach** (new, empty = unrestricted, so no behavior change by default). An
+  operator holding server-side keys for several providers had no way to restrict
+  tenants to a subset: any authenticated caller could name any registered
+  provider (via `provider`, a model prefix, or request-level `fallbacks`) and
+  bill the operator's key for it. `router.ensure_allowed` now gates all three
+  paths with a 403; `REKAI_DEFAULT_PROVIDER` is always allowed. Request-level
+  `fallbacks` reject off-list targets outright rather than skipping them
+  silently, so a caller can't end up believing it has a chain it doesn't.
 - **Web dev-tooling audit cleanup** — bumped `vitest` 2 → 4, clearing the
   critical advisory in its bundled `vite`/`esbuild`/`vite-node`/`@vitest/mocker`
   chain, and ran `npm audit fix` for a transitive `brace-expansion` fix — from

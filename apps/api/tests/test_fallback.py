@@ -333,3 +333,22 @@ async def test_circuit_breaker_threshold_of_one_parks_immediately() -> None:
     assert provider.calls == 1  # parked after just one failure
     cooldowns.clear()
     consecutive_failures.clear()
+
+
+async def test_request_fallbacks_are_checked_against_the_allowlist() -> None:
+    # `fallbacks` is client-steered, so an off-list target is a 403 — not a
+    # silent skip that would leave the caller believing it has a chain it hasn't.
+    request = _req(model="gpt-4o-mini", fallbacks=[{"provider": "anthropic"}])
+    settings = _settings(allowed_providers="openai")
+    with pytest.raises(ProviderError) as exc:
+        await handle_chat(request, None, settings, NullCache())
+    assert exc.value.status_code == 403
+
+
+async def test_allowed_request_fallbacks_still_work() -> None:
+    register_provider(FlakyProvider("flaky502b", 502))
+    request = _req(model="x", provider="flaky502b", fallbacks=[{"provider": "echo"}])
+    settings = _settings(allowed_providers="flaky502b,echo")
+    resp = await handle_chat(request, None, settings, NullCache())
+    assert resp.provider == "echo"
+    assert resp.fallback_used is True

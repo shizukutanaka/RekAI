@@ -31,8 +31,27 @@ def resolve_provider_name(request: ChatRequest, settings: Settings) -> str:
     return resolve_provider(request.provider, request.model, settings)
 
 
+def ensure_allowed(name: str, settings: Settings) -> None:
+    """Reject a provider the operator hasn't enabled for requests (403).
+
+    Everything a client can steer — an explicit ``provider``, the provider a
+    model name routes to, and request-level ``fallbacks`` — funnels through
+    this. ``REKAI_ALLOWED_PROVIDERS`` empty means no restriction, and
+    ``default_provider`` is always allowed so an allowlist can't lock the
+    gateway out of its own default.
+    """
+    allowed = settings.allowed_provider_list
+    if not allowed or name == settings.default_provider or name in allowed:
+        return
+    raise ProviderError(
+        f"Provider '{name}' is not enabled on this gateway.",
+        status_code=403,
+    )
+
+
 def select_provider(request: ChatRequest, settings: Settings) -> tuple[str, Provider]:
     name = resolve_provider_name(request, settings)
+    ensure_allowed(name, settings)
     provider = get_provider(name)
     if provider is None:
         raise ProviderError(f"Unknown provider '{name}'.", status_code=400)

@@ -69,6 +69,17 @@ class Settings(BaseSettings):
     # Routing
     default_provider: str = "echo"
 
+    # Restrict which providers a *request* may reach, comma-separated (e.g.
+    # "openai,echo"). Empty (default) = every registered provider, today's
+    # behavior. This governs everything a client can steer: an explicit
+    # `provider`, the provider a model name routes to, and request-level
+    # `fallbacks`. default_provider is always allowed (it's the operator's own
+    # choice, so an allowlist can't accidentally lock the gateway out of its
+    # own default). Without this an operator who configures server-side keys
+    # for several providers has no way to say "tenants may only spend on this
+    # one" — every authenticated caller can name any of them.
+    allowed_providers: str = ""
+
     # Fallback: ordered "provider:model" targets tried on upstream (5xx) errors.
     # e.g. "openai:gpt-4o-mini,echo" — model is optional (defaults to request model).
     fallback_enabled: bool = False
@@ -199,6 +210,11 @@ class Settings(BaseSettings):
     @property
     def api_key_list(self) -> list[str]:
         return [k.strip() for k in self.api_keys.split(",") if k.strip()]
+
+    @property
+    def allowed_provider_list(self) -> list[str]:
+        """Providers a request may reach, or ``[]`` meaning "no restriction"."""
+        return [p.strip() for p in self.allowed_providers.split(",") if p.strip()]
 
     @property
     def client_budget_overrides(self) -> dict[str, float]:

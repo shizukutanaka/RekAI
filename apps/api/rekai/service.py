@@ -19,7 +19,7 @@ from rekai.pricing import estimate_cost, estimate_tokens
 from rekai.providers import Provider, get_provider
 from rekai.providers.base import ProviderError, ProviderResult
 from rekai.retry import call_with_retry
-from rekai.router import resolve_provider, select_provider
+from rekai.router import ensure_allowed, resolve_provider, select_provider
 from rekai.schemas import (
     ChatRequest,
     ChatResponse,
@@ -83,8 +83,14 @@ def _build_attempts(
     """Primary attempt followed by the resolved fallback chain."""
     attempts = [_Attempt(primary_name, primary, request.model)]
 
-    # Request-level fallbacks take precedence over the server default chain.
+    # Request-level fallbacks take precedence over the server default chain —
+    # but only among providers the operator has enabled for requests, since
+    # this is a client-steered choice like `provider` itself. A disallowed
+    # target is a 403, not a silent skip: quietly dropping it would leave the
+    # client believing it had a fallback chain it doesn't have.
     if request.fallbacks is not None:
+        for target in request.fallbacks:
+            ensure_allowed(target.provider, settings)
         targets: list[tuple[str, str | None]] = [(f.provider, f.model) for f in request.fallbacks]
     elif settings.fallback_enabled:
         targets = settings.fallback_target_list
@@ -384,6 +390,7 @@ async def handle_embeddings(
     cache: CacheBackend,
 ) -> EmbeddingsResponse:
     provider_name = resolve_provider(request.provider, request.model, settings)
+    ensure_allowed(provider_name, settings)
     provider = get_provider(provider_name)
     if provider is None:
         raise ProviderError(f"Unknown provider '{provider_name}'.", status_code=400)
