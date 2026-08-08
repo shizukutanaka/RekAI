@@ -15,7 +15,15 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
   per-client / per-request 構造には必ず上限と eviction を付ける。
 - **OpenAI 互換層の品質**: 実 OpenAI SDK での E2E (`tests/test_openai_sdk_e2e.py`)
   が回帰ゲート。互換性を落とす変更はこのテストで検出される。
-- **362+ テスト、ruff/mypy クリーン、TODO ゼロ**の状態を維持する。
+- **486+ テスト、ruff/mypy クリーン、TODO ゼロ**の状態を維持する。
+- **保存前レダクション** (`service._redact`): 応答キャッシュ・セマンティック
+  キャッシュ・idempotency ストアの**いずれよりも前**にスクラブする。文書
+  (`docs/architecture.md`) の約束はこれ。後から edge で消す形に戻さないこと。
+- **テナント境界**: idempotency キー・セマンティックキャッシュのバケット・
+  `/v1/usage` の `usage_by_client`・`/metrics` の `rekai_client_*` は
+  すべて呼び出し元スコープ。共有ゲートウェイである以上ここは本質。
+- **有界性の追加分**: `REKAI_MAX_CONCURRENT_REQUESTS` は**占有**を、レート
+  リミッタは**到着**を数える。別物なので両方要る。ヒストグラムの系列数も上限つき。
 - **tracing.py の W3C 実装は正しく依存ゼロ** (`ContextVar` 隔離、リクエスト外では
   ヘッダ省略、全ゼロ trace/span id の拒否 `tracing.py:63`)。OTel SDK を将来入れる
   場合もこの性質を保つ。
@@ -27,20 +35,30 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
 1. **プロバイダ層に `create_app(settings)` が届かない**: providers は module-level
    `get_settings()` (env 固定・`@lru_cache`) を直接読む。`registry.py` は import 時に
    設定を読んで custom provider を登録する。テストで env 以外の設定を providers に
-   注入できない。
+   注入できない。**未解決 (O-1)**。
 2. **セマンティックキャッシュが単一閾値 + 線形走査** (`semantic_cache.py`)。
-3. **ガードレールがヒューリスティックのみ** (`guardrails.py`)。
+   正しさの欠陥 (バケット不足・テナント越え・TTL なし・上限未配線・埋め込み
+   コスト未計上) は解消済みだが、**閾値設計と走査コストは未解決 (O-2)**。
+3. **ガードレールがヒューリスティックのみ** (`guardrails.py`)。パターンは実測で
+   締めた (良性 17 件中 0 誤検知 / 攻撃 21 件中 0 見逃し)、既定は `flag`。
+   ただし**言い換え耐性はない**という性質自体は変わらない。分類器導入は未着手。
 4. **Anthropic/Ollama は response_format 非対応** (debug ログのみ、文書化済み)。
 5. **streaming に Idempotency-Key なし** (意図的・文書化済み — 変更するなら設計から)。
-6. **Idempotency-Key がボディに紐付かない** (`idempotency.py:23` はキーのみで
-   sha256、`main.py` はキー単独で lookup)。同キー+別ボディで初回応答を黙って返し、
-   同時2リクエストは両方 provider を呼ぶ (store が provider 成功後なので合流しない)。
-7. **metrics スナップショットが単一 Redis キーで last-writer-wins**
-   (`metrics_store.py:19` の `rekai:metrics:snapshot`、マージ/CAS なし)。
-   マルチレプリカで `/v1/usage` が過小報告。
+   同様に**ストリームには出力レダクションもかからない** (チャンクをまたぐパターンを
+   バッファなしで消せないため。文書化済みの既知ギャップ)。
+6. ~~**Idempotency-Key がボディに紐付かない**~~ → **解消** (O-5)。さらに保存キーに
+   client_id を混ぜてテナントスコープ化済み。
+7. ~~**metrics スナップショットが単一 Redis キーで last-writer-wins**~~ → **解消** (O-6)。
 8. **セキュアでないデフォルト**: `cors_origins="*"` + `api_keys=""` (認証オフ) が
    config・docker-compose.yml・deploy/render.yaml すべてに。ワンクリックデプロイが
-   全オリジン開放。
+   全オリジン開放。**未解決 (O-7)**。なお「どの provider に到達できるか」だけは
+   `REKAI_ALLOWED_PROVIDERS` で運用者が絞れるようになった (既定は無制限のまま)。
+9. **並行数上限とレートリミッタはプロセスローカル** (Redis 設定時のレート
+   リミッタを除く)。N ワーカーなら実効上限は N 倍。文書化済み・許容だが、
+   厳密な全体上限が要るなら共有カウンタの設計が必要。
+10. **`/health` は能動的な疎通確認をしない**。無認証エンドポイントから全
+    provider を叩けるようにするのはリクエスト増幅器になるため意図的。
+    報告できるのは RekAI が既に持っている状態 (cooldown/circuit breaker) のみ。
 
 ## 割当タスク (優先度順)
 
@@ -120,6 +138,18 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
   `openai.py:180` の list_models に無い、等)。単一のモデルレジストリ
   (prefix→provider→price→type) に集約し、router / /v1/models / cost 推定が
   そこを引く設計。即値の更新だけなら Sonnet の S-6。
+
+### O-9〜O-16. First Principles 棚卸しによる修正 (完了)
+> ✅ 「AI ゲートウェイの必要性質 = 透過的 / 正直 / 有界 / テナント分離可能 /
+> 運用可能」から逆算した棚卸しで、不足機能より先に**実害のある欠陥**が出たため
+> 順序を組み替えて処理した。1 項目 = 1 コミット、すべてライブ検証済み:
+> (1) 保存前レダクション、(2) idempotency のテナントスコープ化、
+> (3) `REKAI_ALLOWED_PROVIDERS`、(4) `/v1/usage`・`/metrics` のテナント分離 +
+> `/admin/usage`、(5) セマンティックキャッシュの正しさ 5 点、
+> (6) レイテンシ 3 ヒストグラム + `rekai_requests_total` 二重計上修正、
+> (7) `REKAI_MAX_CONCURRENT_REQUESTS`、(8) エラーの次元化、
+> (9) `/health` の degraded、(10) ガードレール既定 `flag` + パターン精緻化、
+> (11) セマンティックヒットの類似度開示。詳細は CHANGELOG の `[Unreleased]`。
 
 ### 進め方
 - 1 タスク = 設計メモ (docs/ か PR 説明) → 実装 → テスト → live 検証 → CHANGELOG →
