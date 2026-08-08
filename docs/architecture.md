@@ -533,10 +533,35 @@ and every later hit or replay serves already-scrubbed text and still reports
 what was caught. The edge re-scans as a backstop, which only does anything for
 an entry cached *before* redaction was switched on. As with the input guardrail,
 this is a **heuristic**, not a
-security boundary. It is **not applied to `/v1/chat/stream`**: redacting a
-pattern that may span multiple already-sent SSE chunks isn't possible without
-buffering the whole reply first, which would defeat streaming — a known,
-documented gap rather than a silently-incomplete implementation. Off by default.
+security boundary. Off by default.
+
+**Streaming is covered too.** This used to be a documented gap — a secret can
+straddle two SSE chunks (`sk-aaaa` | `aaaa…` matches nothing in either half) and
+catching it looked to require buffering the whole reply, defeating streaming.
+It doesn't: a match can only *begin* at one of a small set of literal prefixes
+(`sk-`, `AKIA`, `ghp_`, `-----BEGIN`, …), so `guardrails.StreamRedactor` holds
+back only the text from the last such prefix onward and releases everything
+before it. Ordinary prose is therefore delayed by 9 characters — just enough
+that a prefix split across a chunk boundary is still recognised — and the buffer
+only grows once something resembling the start of a secret appears. Each prefix
+carries the longest run its pattern can plausibly span, so a stray `sk-` in
+prose costs a few hundred characters of delay while a PEM block gets the
+kilobytes it needs.
+
+The buffered region is deliberately kept **raw**. Scrubbing it on every delta
+looks tempting and is wrong: the patterns end in `{20,}`, so a half-arrived key
+matches at its minimum length, gets replaced, and the *rest of the key* then
+streams out as literal text after the replacement. Text is scrubbed only as it
+leaves the buffer. A regression test splits each secret format at every possible
+byte boundary and asserts neither the secret nor its tail survives, and that the
+streamed output is byte-identical to the non-streaming path.
+
+Because response headers are long gone by the time the first delta is redacted,
+a stream reports what it caught in its terminal summary event
+(`"redacted": ["openai_api_key"]`) rather than via `X-Redacted`. A
+`test_guardrails.py` invariant asserts every secret pattern begins with a known
+prefix, so adding a pattern without one fails the suite instead of silently
+streaming through.
 
 ## Gateway authentication
 

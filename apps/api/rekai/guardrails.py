@@ -142,6 +142,112 @@ def redact_secrets(text: str) -> tuple[str, list[str]]:
     return text, hit_names
 
 
+# The literal prefixes every pattern above begins with. A secret can only start
+# where one of these appears, which is what lets StreamRedactor hold back a few
+# characters instead of buffering the whole reply. `test_guardrails.py` pins the
+# invariant that every pattern's matches start with one of these, so adding a
+# pattern without its sentinel fails the suite rather than silently leaking.
+#
+# Each carries the longest run of text its pattern can plausibly span, which
+# caps how long a stream stalls behind it. A PEM block runs all the way to its
+# END marker, so it needs real room; a key format does not, so a stray "sk-" in
+# prose costs a few hundred characters of delay rather than kilobytes.
+_STREAM_SENTINELS: tuple[tuple[str, int], ...] = (
+    ("-----BEGIN", 8192),
+    ("sk-", 256),
+    ("sk_", 256),
+    ("ghp_", 256),
+    ("gho_", 256),
+    ("ghu_", 256),
+    ("ghs_", 256),
+    ("ghr_", 256),
+    ("xox", 256),
+    ("AKIA", 64),
+    ("Bearer", 256),
+)
+_SENTINEL_OVERLAP = max(len(s) for s, _ in _STREAM_SENTINELS) - 1
+_MAX_SENTINEL_SPAN = max(span for _, span in _STREAM_SENTINELS)
+
+
+class StreamRedactor:
+    """Redacts secrets from a token stream without buffering the whole reply.
+
+    Redaction was previously skipped on ``/v1/chat/stream`` because a secret can
+    straddle two SSE chunks — ``sk-aaaa`` | ``aaaa…`` matches nothing in either
+    half — and the alternative appeared to be buffering the entire response,
+    which defeats streaming. It isn't: a match can only *begin* at one of the
+    sentinel prefixes above, so it is enough to hold back the text from the last
+    sentinel onward and release everything before it.
+
+    In practice that means ordinary prose is delayed by ``_SENTINEL_OVERLAP``
+    characters — just enough that a sentinel split across a chunk boundary is
+    still recognised — and the buffer only grows once something that *looks
+    like* the start of a secret appears. Once the pattern completes it is
+    replaced, the replacement contains no sentinel, and the buffer collapses
+    back to the overlap.
+
+    The buffered region is deliberately kept **raw**. Scrubbing it on every
+    delta looks tempting but is wrong: patterns end in ``{20,}``, so a
+    half-arrived key matches at its minimum length, gets replaced, and the rest
+    of the key then streams out as literal text after the replacement — leaking
+    the tail of the very secret that was just caught. Text is scrubbed only as
+    it leaves the buffer, by which point no sentinel in it can still be growing.
+
+    A secret longer than its sentinel's span can still slip through; the spans
+    are sized so that is not a realistic case for the formats above.
+    """
+
+    def __init__(self, max_hold: int = _MAX_SENTINEL_SPAN) -> None:
+        self._max = max_hold
+        self._pending = ""
+        self._hits: list[str] = []
+
+    @property
+    def hits(self) -> list[str]:
+        """Names of the patterns redacted so far, in the order first seen."""
+        return list(self._hits)
+
+    def feed(self, text: str) -> str:
+        """Absorb one delta; return the text that is now safe to emit."""
+        self._pending += text
+        hold = self._hold_length(self._pending)
+        if len(self._pending) <= hold:
+            return ""
+        emit, self._pending = self._pending[:-hold], self._pending[-hold:]
+        return self._scrub(emit)
+
+    def flush(self) -> str:
+        """Emit whatever is still held back, at end of stream."""
+        remaining, self._pending = self._pending, ""
+        return self._scrub(remaining)
+
+    def _scrub(self, text: str) -> str:
+        scrubbed, hits = redact_secrets(text)
+        for name in hits:
+            if name not in self._hits:
+                self._hits.append(name)
+        return scrubbed
+
+    def _hold_length(self, text: str) -> int:
+        """How many trailing characters must stay buffered.
+
+        The distance back to the nearest in-flight sentinel, or just the
+        sentinel overlap when none is in sight — enough that a sentinel split
+        across a chunk boundary is still recognised. A sentinel further back
+        than its span is treated as settled: whatever it started has finished,
+        so holding for it would stall the stream for nothing.
+        """
+        tail = text[-self._max :]
+        hold = _SENTINEL_OVERLAP
+        for sentinel, span in _STREAM_SENTINELS:
+            index = tail.rfind(sentinel)
+            if index != -1:
+                distance = len(tail) - index
+                if distance <= span:
+                    hold = max(hold, distance)
+        return min(hold, self._max)
+
+
 class _HasRoleContent(Protocol):
     @property
     def role(self) -> str: ...

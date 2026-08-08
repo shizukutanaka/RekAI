@@ -1133,6 +1133,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     }
                     if s.tool_calls:
                         summary["tool_calls"] = s.tool_calls
+                    if s.redacted:
+                        summary["redacted"] = s.redacted
                     yield f"data: {json.dumps(summary)}\n\n"
             yield "data: [DONE]\n\n"
 

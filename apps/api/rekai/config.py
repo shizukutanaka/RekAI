@@ -68,9 +68,9 @@ class Settings(BaseSettings):
     guardrails_action: Literal["block", "flag"] = "flag"
 
     # Output redaction (OWASP LLM02). Heuristic, opt-in: scrubs common secret/
-    # API-key patterns from the assistant's `content` on non-streamed /v1/chat
-    # responses before they reach the client (and before caching/idempotency
-    # storage). Not applied to /v1/chat/stream — see docs/architecture.md.
+    # API-key patterns from the assistant's `content` before it reaches the
+    # client and before caching/idempotency storage. Covers streaming too, via
+    # guardrails.StreamRedactor — see docs/architecture.md.
     output_redaction_enabled: bool = False
 
     log_format: Literal["text", "json"] = "text"

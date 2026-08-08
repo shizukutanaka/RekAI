@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
 from rekai.cache import MemoryCache, NullCache, cache_key
 from rekai.config import Settings
-from rekai.guardrails import detect_prompt_injection, redact_secrets, scan_messages
+from rekai.guardrails import (
+    StreamRedactor,
+    detect_prompt_injection,
+    redact_secrets,
+    scan_messages,
+)
 from rekai.main import create_app
+from rekai.providers import register_provider
+from rekai.providers.base import Provider
+from rekai.providers.base import StreamEvent as ProviderStreamEvent
 from rekai.schemas import ChatMessage, ChatRequest
 from rekai.semantic_cache import semantic_cache
 from rekai.service import handle_chat
@@ -260,3 +270,140 @@ def test_redaction_survives_an_idempotent_replay() -> None:
     assert replay.headers["Idempotent-Replay"] == "true"
     assert secret not in replay.json()["content"]
     assert replay.headers["X-Redacted"] == "openai_api_key"
+
+
+# --- streaming redaction -----------------------------------------------------
+# Redaction used to be skipped entirely on /v1/chat/stream, documented as
+# unavoidable: a secret can straddle two SSE chunks ("sk-aaaa" | "aaaa…" matches
+# nothing in either half) and catching it seemed to require buffering the whole
+# reply. It doesn't — a match can only *begin* at a known prefix, so holding
+# back from the last such prefix is enough. Streaming is what a chat UI uses, so
+# this was the endpoint where redaction mattered most and did nothing.
+
+_STREAM_SECRETS = {
+    "openai_api_key": "sk-" + "a" * 40,
+    "anthropic_api_key": "sk-ant-" + "b" * 30,
+    "stripe_secret_key": "sk_live_" + "c" * 24,
+    "github_token": "ghp_" + "d" * 40,
+    "slack_token": "xoxb-" + "e" * 20,
+    "aws_access_key_id": "AKIA" + "F" * 16,
+    "bearer_token": "Bearer " + "g" * 30,
+    "private_key_block": (
+        "-----BEGIN RSA PRIVATE KEY-----\n" + "h" * 200 + "\n-----END RSA PRIVATE KEY-----"
+    ),
+}
+
+
+def _stream(text: str, chunks: list[str]) -> tuple[str, list[str]]:
+    redactor = StreamRedactor()
+    out = "".join(redactor.feed(c) for c in chunks) + redactor.flush()
+    return out, redactor.hits
+
+
+@pytest.mark.parametrize("name,secret", sorted(_STREAM_SECRETS.items()))
+def test_secret_never_survives_any_chunk_boundary(name: str, secret: str) -> None:
+    text = f"prefix text {secret} trailing text"
+    for cut in range(1, len(text)):
+        out, hits = _stream(text, [text[:cut], text[cut:]])
+        assert secret not in out, f"leaked when split at {cut}"
+        # Not just the whole secret — its tail must not survive either, which is
+        # what happens if the buffered region is scrubbed while still growing:
+        # the `{20,}` patterns match at their minimum and the rest streams out
+        # verbatim after the replacement.
+        assert secret[10:] not in out, f"leaked the tail when split at {cut}"
+        assert name in hits
+
+
+@pytest.mark.parametrize("name,secret", sorted(_STREAM_SECRETS.items()))
+def test_streaming_matches_non_streaming_output(name: str, secret: str) -> None:
+    # Whether a reply is streamed must not change what the caller ends up with.
+    text = f"prefix {secret} suffix"
+    out, hits = _stream(text, list(text))  # one character at a time, the worst case
+    batch, batch_hits = redact_secrets(text)
+    assert out == batch
+    assert hits == batch_hits
+
+
+def test_every_secret_pattern_has_a_stream_sentinel() -> None:
+    # The invariant the whole design rests on: a match can only begin at one of
+    # these prefixes. A new pattern without one would silently stream through,
+    # so this fails the suite instead.
+    from rekai.guardrails import _SECRET_PATTERNS, _STREAM_SENTINELS
+
+    sentinels = [s for s, _ in _STREAM_SENTINELS]
+    assert {name for name, _ in _SECRET_PATTERNS} == set(_STREAM_SECRETS), (
+        "a secret pattern has no streaming example — add one to _STREAM_SECRETS"
+    )
+    for name, secret in _STREAM_SECRETS.items():
+        assert any(secret.startswith(s) for s in sentinels), f"{name} starts with no sentinel"
+
+
+def test_ordinary_prose_is_barely_delayed() -> None:
+    # The cost of the guarantee: without a sentinel in sight only the overlap is
+    # withheld, so a chat UI doesn't visibly stall.
+    from rekai.guardrails import _SENTINEL_OVERLAP
+
+    redactor = StreamRedactor()
+    text = "The weather in Tokyo is sunny and mild today."
+    emitted = "".join(redactor.feed(word) for word in text.split(" "))
+    assert len(text.replace(" ", "")) - len(emitted) <= _SENTINEL_OVERLAP
+
+
+def test_benign_text_streams_through_unchanged() -> None:
+    text = "Here is a haiku about the sea, with no secrets in it at all."
+    out, hits = _stream(text, [text[:20], text[20:]])
+    assert out == text
+    assert hits == []
+
+
+async def test_stream_endpoint_redacts_and_reports(monkeypatch) -> None:
+    # End to end through /v1/chat/stream, with the secret split across deltas so
+    # only the incremental redactor can catch it.
+    secret = "sk-" + "z" * 40
+    pieces = ["Your key is ", secret[:10], secret[10:], " — keep it safe."]
+
+    class SplittingProvider(Provider):
+        name = "splitter"
+        requires_key = False
+
+        async def chat(self, request, api_key):  # pragma: no cover - unused
+            raise NotImplementedError
+
+        async def stream_events(self, request, api_key):
+            for piece in pieces:
+                yield ProviderStreamEvent(delta=piece)
+
+        async def embed(self, inputs, model, api_key):  # pragma: no cover - unused
+            raise NotImplementedError
+
+        async def list_models(self, api_key):
+            return ["splitter"]
+
+        async def list_embedding_models(self, api_key):
+            return []
+
+    register_provider(SplittingProvider())
+    client = TestClient(
+        create_app(
+            Settings(
+                environment="test",
+                default_provider="splitter",
+                output_redaction_enabled=True,
+                rate_limit_enabled=False,
+            )
+        )
+    )
+    body = {"model": "splitter", "messages": [{"role": "user", "content": "key?"}]}
+    with client.stream("POST", "/v1/chat/stream", json=body) as resp:
+        raw = "".join(resp.iter_text())
+
+    assert secret not in raw
+    assert "[REDACTED:openai_api_key]" in raw
+    # The summary event discloses it; a header can't, since headers were sent
+    # before the first delta was even generated.
+    summary = [
+        json.loads(line[len("data: ") :])
+        for line in raw.splitlines()
+        if line.startswith("data: ") and line != "data: [DONE]"
+    ]
+    assert any(ev.get("redacted") == ["openai_api_key"] for ev in summary)

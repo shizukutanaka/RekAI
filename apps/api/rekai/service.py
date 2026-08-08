@@ -49,6 +49,10 @@ class StreamSummary:
     cost_usd: float | None
     estimated: bool
     tool_calls: list[dict] | None = None
+    # Secret patterns scrubbed from the streamed text. Reported here rather
+    # than as a header because response headers are long gone by the time the
+    # first delta is redacted.
+    redacted: list[str] | None = None
 
 
 @dataclass
@@ -378,6 +382,10 @@ async def handle_chat_stream(
     errored = False
     started = time.perf_counter()
     first_token_at: float | None = None
+    # Output redaction applies here too, incrementally (see StreamRedactor).
+    # It holds back a few characters of every delta, so it is only constructed
+    # when actually enabled.
+    redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
     try:
         async for event in provider.stream_events(request, api_key):
             if event.delta:
@@ -387,12 +395,20 @@ async def handle_chat_stream(
                     # long the answer is and says nothing about responsiveness.
                     first_token_at = time.perf_counter()
                     metrics.observe_stream_ttft(provider_name, first_token_at - started)
+                # Token accounting follows what the provider generated, not what
+                # survived redaction — that is what was billed upstream.
                 completion.append(event.delta)
-                yield ChatStreamEvent(delta=event.delta)
+                emitted = redactor.feed(event.delta) if redactor is not None else event.delta
+                if emitted:
+                    yield ChatStreamEvent(delta=emitted)
             if event.usage is not None:
                 reported_usage = event.usage
             if event.tool_calls is not None:
                 reported_tool_calls = event.tool_calls
+        if redactor is not None:
+            tail = redactor.flush()
+            if tail:
+                yield ChatStreamEvent(delta=tail)
     except ProviderError as exc:
         errored = True
         metrics.record_error("provider_error")
@@ -448,6 +464,7 @@ async def handle_chat_stream(
                 cost_usd=cost_usd,
                 estimated=estimated,
                 tool_calls=reported_tool_calls or None,
+                redacted=(redactor.hits or None) if redactor is not None else None,
             )
         )
 

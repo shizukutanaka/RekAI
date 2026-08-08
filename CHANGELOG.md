@@ -7,6 +7,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **Output redaction now covers streaming.** `REKAI_OUTPUT_REDACTION_ENABLED`
+  scrubbed `/v1/chat` but not `/v1/chat/stream` — the endpoint a chat UI
+  actually uses — so a deployment that enabled redaction for compliance got no
+  protection on most of its traffic. This was documented as unavoidable: a
+  secret can straddle two SSE chunks (`sk-aaaa` | `aaaa…` matches nothing in
+  either half) and catching it looked to require buffering the whole reply. It
+  doesn't. A match can only *begin* at one of a small set of literal prefixes
+  (`sk-`, `AKIA`, `ghp_`, `-----BEGIN`, …), so `guardrails.StreamRedactor` holds
+  back only the text from the last such prefix onward: ordinary prose is delayed
+  by 9 characters, and the buffer grows only once something resembling a secret
+  appears. A stream reports what it caught in its terminal summary event
+  (`"redacted": [...]`), since headers are long gone by then. A regression test
+  splits each of the eight secret formats at *every* byte boundary and asserts
+  neither the secret nor its tail survives, and that streamed output is
+  byte-identical to the non-streaming path.
 - **Output redaction now runs before the response is cached** — the documented
   promise ("redaction happens before the response is cached or stored for
   `Idempotency-Key` replay") was only half true. The idempotency store was
