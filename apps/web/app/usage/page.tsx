@@ -125,7 +125,10 @@ export default function UsagePage() {
             <>
               <p className="hint">
                 One row per gateway API key (masked, never the raw key) — or per client
-                IP when no <code>REKAI_API_KEYS</code> are configured.
+                IP when no <code>REKAI_API_KEYS</code> are configured. With gateway auth
+                on, <code>/v1/usage</code> is a tenant view and shows only the key you
+                are authenticating with; the cross-tenant breakdown lives at{" "}
+                <code>/admin/usage</code>, behind <code>REKAI_ADMIN_KEY</code>.
               </p>
               <div className="bars">
                 {clients.map(([id, u]) => (

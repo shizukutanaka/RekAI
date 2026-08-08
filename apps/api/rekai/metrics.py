@@ -192,8 +192,15 @@ class Metrics:
                 },
             }
 
-    def render(self) -> str:
-        """Render metrics in Prometheus text exposition format."""
+    def render(self, include_clients: bool = True) -> str:
+        """Render metrics in Prometheus text exposition format.
+
+        ``include_clients=False`` omits the ``rekai_client_*`` series — the
+        per-tenant request/token/cost breakdown. The operational metrics an
+        unauthenticated Prometheus scrape needs are all in the scalar and
+        per-provider series, so dropping the per-client ones keeps the endpoint
+        scrapeable without exposing one tenant's spend to another.
+        """
         lines = [
             "# HELP rekai_requests_total Total chat requests handled.",
             "# TYPE rekai_requests_total counter",
@@ -225,6 +232,9 @@ class Metrics:
         ]
         for provider, count in sorted(self.requests_by_provider.items()):
             lines.append(f'rekai_requests_total{{provider="{provider}"}} {count}')
+
+        if not include_clients:
+            return "\n".join(lines) + "\n"
 
         lines += [
             "# HELP rekai_client_requests_total Requests per client (API key or IP).",

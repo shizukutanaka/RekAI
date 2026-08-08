@@ -612,34 +612,59 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             cache=cache.label,
         )
 
+    async def _is_authenticated(request: Request) -> bool:
+        """True when the request carries a valid gateway key."""
+        token = auth.parse_bearer(request.headers.get("authorization"))
+        return token is not None and auth.key_allowed(token, await _allowed_keys())
+
+    def _multi_tenant() -> bool:
+        """True when gateway auth is configured, i.e. callers are distinguishable
+        tenants rather than one operator poking a local instance."""
+        return bool(settings.api_key_list) or key_store is not None
+
     @app.get("/metrics", tags=["system"], response_class=PlainTextResponse)
     async def metrics_endpoint(request: Request, response: Response) -> str:
-        # /metrics is open by default (so Prometheus can scrape without a
-        # token), but it carries a per-client cost/token breakdown once gateway
-        # auth is in use — REKAI_METRICS_REQUIRE_AUTH locks it behind the same
-        # Bearer key for operators who consider that sensitive.
-        if settings.metrics_require_auth and (settings.api_key_list or key_store is not None):
-            token = auth.parse_bearer(request.headers.get("authorization"))
-            if token is None or not auth.key_allowed(token, await _allowed_keys()):
-                metrics.record_error()
-                response.status_code = 401
-                response.headers["WWW-Authenticate"] = "Bearer"
-                return ErrorResponse(
-                    error="unauthorized", detail="Missing or invalid API key."
-                ).model_dump_json()
-        return metrics.render()
+        # /metrics is open by default so Prometheus can scrape without a token.
+        # The scalar and per-provider series are operational and stay open; the
+        # per-client cost/token breakdown is per-tenant data, so it is emitted
+        # only to an authenticated caller once gateway auth is in use (an
+        # unauthenticated scrape still gets everything else). Operators who want
+        # the whole endpoint behind the key set REKAI_METRICS_REQUIRE_AUTH.
+        if not _multi_tenant():
+            return metrics.render()
+        authenticated = await _is_authenticated(request)
+        if settings.metrics_require_auth and not authenticated:
+            metrics.record_error()
+            response.status_code = 401
+            response.headers["WWW-Authenticate"] = "Bearer"
+            return ErrorResponse(
+                error="unauthorized", detail="Missing or invalid API key."
+            ).model_dump_json()
+        return metrics.render(include_clients=authenticated)
 
-    @app.get("/v1/usage", response_model=UsageSummary, tags=["system"])
-    async def usage_summary() -> UsageSummary:
-        # Fleet-wide view: this replica's live counters plus every other
-        # replica's last-persisted snapshot. With no Redis (process-local) or a
-        # single replica, load_others() returns [] and this is just the local
-        # snapshot. /metrics stays per-instance for Prometheus (see metrics_store).
+    async def _fleet_snapshot() -> dict:
+        """This replica's live counters plus every other replica's last-persisted
+        snapshot. With no Redis (process-local) or a single replica,
+        load_others() returns [] and this is just the local snapshot. /metrics
+        stays per-instance for Prometheus (see metrics_store)."""
         others = await metrics_store.load_others()
         if not others:
-            return UsageSummary(**metrics.snapshot())
-        merged = merge_snapshots([metrics.snapshot(), *others], metrics.max_tracked_clients)
-        return UsageSummary(**merged)
+            return metrics.snapshot()
+        return merge_snapshots([metrics.snapshot(), *others], metrics.max_tracked_clients)
+
+    @app.get("/v1/usage", response_model=UsageSummary, tags=["system"])
+    async def usage_summary(http_request: Request) -> UsageSummary:
+        snapshot = await _fleet_snapshot()
+        if _multi_tenant():
+            # usage_by_client names every tenant and what it spent. Under
+            # gateway auth this endpoint is a *tenant* view, so it reports only
+            # the caller's own row — an operator wanting the fleet breakdown
+            # uses /admin/usage (REKAI_ADMIN_KEY). With auth off there are no
+            # tenants to separate and the full map is the local operator's own.
+            client_id = _client_id(http_request)
+            own = snapshot.get("usage_by_client", {}).get(client_id)
+            snapshot = {**snapshot, "usage_by_client": {client_id: own} if own else {}}
+        return UsageSummary(**snapshot)
 
     # --- admin: runtime key management (only registered when configured) --
     # Deliberately outside /v1/*, so it's governed solely by REKAI_ADMIN_KEY —
@@ -715,6 +740,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     detail="Set REKAI_DYNAMIC_KEYS_ENABLED=true to manage keys at runtime.",
                 ).model_dump(),
             )
+
+        @app.get("/admin/usage", response_model=UsageSummary, tags=["admin"])
+        async def admin_usage(request: Request):
+            """The fleet-wide usage view, including every tenant's breakdown.
+
+            /v1/usage scopes usage_by_client to the calling tenant, so this is
+            where an operator gets the cross-tenant picture — gated by
+            REKAI_ADMIN_KEY like the rest of /admin/*, not by a tenant key."""
+            rate_limited = await _admin_rate_limited(request)
+            if rate_limited is not None:
+                return rate_limited
+            if not _admin_authorized(request):
+                return _admin_auth_error()
+            admin_logger.info(
+                "admin read usage ip=%s",
+                _admin_ip(request),
+                extra={"admin_action": "read_usage", "ip": _admin_ip(request)},
+            )
+            return UsageSummary(**await _fleet_snapshot())
 
         @app.get("/admin/keys", response_model=AdminKeyList, tags=["admin"])
         async def list_admin_keys(request: Request):

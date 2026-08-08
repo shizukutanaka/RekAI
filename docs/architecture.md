@@ -403,12 +403,30 @@ RekAI's own upstream spend and don't double-count a cache hit). This is the
 per-tenant spend visibility a multi-key deployment needs, without ever
 persisting or logging a raw key.
 
-`/metrics` is open by default even when `REKAI_API_KEYS` is set, so Prometheus
-can scrape without a token — but since it now exposes that same per-client
-breakdown, `REKAI_METRICS_REQUIRE_AUTH=true` requires the same Bearer key there
-too. A no-op if no keys are configured (open either way, same fallback as
-`/v1/*`). `/v1/usage` is unaffected by this flag — it's under `/v1/*` already,
-so it's gated by `REKAI_API_KEYS` like any other endpoint there.
+**Who may see whose numbers.** The per-client breakdown names a tenant and what
+it spent, so it is scoped by who is asking:
+
+| Endpoint | No gateway auth | Gateway auth on |
+|---|---|---|
+| `GET /v1/usage` | full `usage_by_client` | **the caller's own row only** |
+| `GET /metrics` | full `rekai_client_*` series | `rekai_client_*` only for an authenticated scrape |
+| `GET /admin/usage` | not registered unless `REKAI_ADMIN_KEY` is set | full `usage_by_client`, admin key only |
+
+`/v1/usage` sits under `/v1/*`, so `REKAI_API_KEYS` already gates *access* to it
+— but every tenant key passed that gate and read every other tenant's spend.
+It is now a **tenant view**: aggregate counters (requests, tokens, cost, cache
+hits, per-provider) stay fleet-wide, and `usage_by_client` contains just the
+calling key's row. `/admin/usage` is the operator's cross-tenant view, gated by
+`REKAI_ADMIN_KEY` outside `/v1/*` exactly like `/admin/keys` (rate-limited and
+written to the admin audit log the same way). A tenant key is not an admin key.
+
+`/metrics` stays open by default so Prometheus can scrape without a token — the
+scalar and per-provider series are operational — but the `rekai_client_*` series
+are emitted only to an authenticated caller once gateway auth is in use. An
+operator who wants the *whole* endpoint behind the key still sets
+`REKAI_METRICS_REQUIRE_AUTH=true` (a no-op if no keys are configured — open
+either way, same fallback as `/v1/*`). With no gateway auth configured there are
+no tenants to separate and nothing is withheld anywhere.
 
 ### Per-client budget cap
 

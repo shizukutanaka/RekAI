@@ -38,6 +38,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   paths with a 403; `REKAI_DEFAULT_PROVIDER` is always allowed. Request-level
   `fallbacks` reject off-list targets outright rather than skipping them
   silently, so a caller can't end up believing it has a chain it doesn't.
+- **Per-tenant spend is no longer visible to other tenants** — `usage_by_client`
+  names each tenant and what it spent, and both endpoints carrying it were
+  readable by the wrong audience: `/v1/usage` returned the full cross-tenant map
+  to any valid gateway key, and `/metrics` (open by default, so Prometheus can
+  scrape) emitted `rekai_client_*{client="key:…"}` to *unauthenticated* callers.
+  `/v1/usage` is now a tenant view — aggregate counters stay fleet-wide,
+  `usage_by_client` holds only the calling key's row; `/metrics` keeps its
+  operational series open but emits the `rekai_client_*` series only to an
+  authenticated scrape. **Breaking for unauthenticated Prometheus setups that
+  graph per-client series** — authenticate the scrape (any valid gateway key) to
+  restore them. New **`GET /admin/usage`** returns the full fleet breakdown under
+  `REKAI_ADMIN_KEY`, with the same rate limiting and audit logging as
+  `/admin/keys`. Nothing changes when no gateway auth is configured.
 - **Web dev-tooling audit cleanup** — bumped `vitest` 2 → 4, clearing the
   critical advisory in its bundled `vite`/`esbuild`/`vite-node`/`@vitest/mocker`
   chain, and ran `npm audit fix` for a transitive `brace-expansion` fix — from

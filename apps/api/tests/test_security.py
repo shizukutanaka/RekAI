@@ -434,6 +434,38 @@ def test_metrics_open_by_default_even_with_gateway_auth() -> None:
     assert client.get("/metrics").status_code == 200
 
 
+def test_metrics_omits_per_client_series_when_unauthenticated() -> None:
+    # Open scrape keeps the operational series but not the per-tenant breakdown:
+    # rekai_client_cost_usd_total{client="key:…"} names who spent what.
+    settings = Settings(
+        environment="test", default_provider="echo", api_keys="sk-m", rate_limit_enabled=False
+    )
+    client = TestClient(create_app(settings))
+    client.post(
+        "/v1/chat",
+        json={"model": "echo", "messages": [{"role": "user", "content": "hi"}], "cache": False},
+        headers={"Authorization": "Bearer sk-m"},
+    )
+    anon = client.get("/metrics")
+    assert anon.status_code == 200
+    assert "rekai_requests_total" in anon.text  # still scrapeable
+    assert "rekai_client_" not in anon.text
+
+    authed = client.get("/metrics", headers={"Authorization": "Bearer sk-m"})
+    assert "rekai_client_cost_usd_total" in authed.text
+
+
+def test_metrics_keeps_per_client_series_without_gateway_auth() -> None:
+    # No auth configured -> no tenants to separate; unchanged from before.
+    settings = Settings(environment="test", default_provider="echo", rate_limit_enabled=False)
+    client = TestClient(create_app(settings))
+    client.post(
+        "/v1/chat",
+        json={"model": "echo", "messages": [{"role": "user", "content": "hi"}], "cache": False},
+    )
+    assert "rekai_client_requests_total" in client.get("/metrics").text
+
+
 def test_metrics_require_auth_rejects_missing_key() -> None:
     settings = Settings(
         environment="test",

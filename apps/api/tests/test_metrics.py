@@ -366,17 +366,69 @@ def test_usage_by_client_tracked_per_key() -> None:
         client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-usage-a"})
         client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-usage-b"})
 
-        # /v1/usage is also gated by gateway auth when keys are configured.
+        # /v1/usage is gated by gateway auth when keys are configured, and is a
+        # *tenant* view: each key sees only its own row, never its neighbour's.
+        key_a, key_b = client_id("sk-usage-a"), client_id("sk-usage-b")
         usage = client.get("/v1/usage", headers={"Authorization": "Bearer sk-usage-a"}).json()[
             "usage_by_client"
         ]
-        key_a, key_b = client_id("sk-usage-a"), client_id("sk-usage-b")
+        assert list(usage) == [key_a]
         assert usage[key_a]["requests"] == 2
-        assert usage[key_b]["requests"] == 1
         assert usage[key_a]["tokens"] > 0
+
+        other = client.get("/v1/usage", headers={"Authorization": "Bearer sk-usage-b"}).json()[
+            "usage_by_client"
+        ]
+        assert list(other) == [key_b]
+        assert other[key_b]["requests"] == 1
+
         # The raw keys never appear as dict keys — only their masked ids.
         assert "sk-usage-a" not in usage
         assert "sk-usage-b" not in usage
+    finally:
+        main_module.metrics.seed({})
+
+
+def test_admin_usage_returns_the_cross_tenant_breakdown() -> None:
+    from rekai.auth import client_id
+
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys="sk-usage-a,sk-usage-b",
+        admin_key="sk-admin",
+        rate_limit_enabled=False,
+    )
+    client = TestClient(create_app(settings))
+    try:
+        body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}], "cache": False}
+        client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-usage-a"})
+        client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-usage-b"})
+
+        # A tenant key is not an admin key, even though both are Bearer tokens.
+        assert (
+            client.get("/admin/usage", headers={"Authorization": "Bearer sk-usage-a"}).status_code
+            == 401
+        )
+        assert client.get("/admin/usage").status_code == 401
+
+        usage = client.get("/admin/usage", headers={"Authorization": "Bearer sk-admin"}).json()
+        assert set(usage["usage_by_client"]) == {client_id("sk-usage-a"), client_id("sk-usage-b")}
+    finally:
+        main_module.metrics.seed({})
+
+
+def test_usage_without_gateway_auth_is_unscoped() -> None:
+    # No keys configured -> no tenants to separate; the full map is the local
+    # operator's own view, unchanged from before scoping existed.
+    settings = Settings(environment="test", default_provider="echo", rate_limit_enabled=False)
+    client = TestClient(create_app(settings))
+    try:
+        client.post(
+            "/v1/chat",
+            json={"model": "echo", "messages": [{"role": "user", "content": "hi"}], "cache": False},
+        )
+        assert client.get("/v1/usage").json()["usage_by_client"] != {}
     finally:
         main_module.metrics.seed({})
 
