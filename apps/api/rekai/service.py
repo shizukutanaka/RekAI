@@ -108,6 +108,12 @@ def _build_attempts(
     return attempts
 
 
+def _prompt_text(request: ChatRequest) -> str:
+    """The text the semantic cache embeds and guards on — one definition, so the
+    vector and the discriminator digest can't be derived from different strings."""
+    return "\n".join(m.content or "" for m in request.messages)
+
+
 async def _semantic_embed(request: ChatRequest, settings: Settings) -> list[float] | None:
     """Embed the prompt for the semantic cache (server-side key), or None.
 
@@ -119,7 +125,7 @@ async def _semantic_embed(request: ChatRequest, settings: Settings) -> list[floa
     provider = get_provider(provider_name)
     if provider is None:
         return None
-    text = "\n".join(m.content or "" for m in request.messages)
+    text = _prompt_text(request)
     started = time.perf_counter()
     try:
         result = await provider.embed([text], settings.semantic_cache_model, None)
@@ -171,10 +177,13 @@ async def handle_chat(
     sem_embedding: list[float] | None = None
     if sem_enabled:
         sem_bucket = semantic_bucket(request, primary_name, client_id)
+        sem_prompt = _prompt_text(request)
         sem_embedding = await _semantic_embed(request, settings)
         if sem_embedding is not None:
             lookup_started = time.perf_counter()
-            hit = semantic_cache.find(sem_bucket, sem_embedding, settings.semantic_cache_threshold)
+            hit = semantic_cache.find(
+                sem_bucket, sem_prompt, sem_embedding, settings.semantic_cache_threshold
+            )
             metrics.observe_semantic_lookup(
                 "hit" if hit is not None else "miss", time.perf_counter() - lookup_started
             )
@@ -319,6 +328,7 @@ async def handle_chat(
         if sem_enabled and sem_embedding is not None:
             semantic_cache.add(
                 sem_bucket,
+                sem_prompt,
                 sem_embedding,
                 response.model_dump_json(),
                 settings.cache_ttl_seconds,

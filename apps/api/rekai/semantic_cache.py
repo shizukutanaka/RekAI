@@ -50,6 +50,7 @@ histogram rather than against the default.
 from __future__ import annotations
 
 import math
+import re
 import time
 from collections import deque
 from typing import Any
@@ -115,17 +116,78 @@ def _similarity(query: Vector, stored: Vector) -> float:
     return max(-1.0, min(1.0, round(dot, 12)))
 
 
+# --- discriminator guard -----------------------------------------------------
+# Cosine similarity is not a proof that two prompts have the same answer, and it
+# fails hardest on small edits that flip meaning — which is exactly what a
+# paraphrase-hunting cache is built to ignore. GPTCache (arXiv:2311.13133) puts
+# a second, more discriminative model after the vector search for this reason.
+# A second model call is a heavy price for an in-process cache, so RekAI checks
+# only the two features that most reliably change an answer while barely moving
+# an embedding:
+#
+#   negation  "is aspirin safe in pregnancy" vs "is aspirin not safe in
+#             pregnancy" — near-identical vectors, opposite question. Embedding
+#             models are well known to under-represent negation.
+#   numbers   "convert 5 USD to EUR" vs "convert 500 USD to EUR"; "summarize
+#             invoice 12345" vs "invoice 12346".
+#
+# The check can only turn a hit into a miss, never the reverse, and the costs
+# are asymmetric: a wrong miss costs one upstream call, a wrong hit returns the
+# wrong answer to a question nobody asked. Most conversational prompts contain
+# no numbers and no negation, so on that traffic the guard is inert.
+#
+# Only the *digest* is stored, never the prompt text — the semantic cache is not
+# a place prompts should accumulate.
+
+_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+_NEGATION_RE = re.compile(
+    r"n't\b|\b(?:not|never|cannot|without|neither|nor|no|none|nothing|nobody|nowhere)\b",
+    re.IGNORECASE,
+)
+
+
+def discriminators(text: str) -> tuple[tuple[str, ...], int]:
+    """A tiny digest of the meaning-flipping features of ``text``.
+
+    Returns the numeric literals **in order** (order matters: "convert 5 to 10"
+    and "convert 10 to 5" are different questions with the same multiset) and
+    the count of negation markers. Numbers are normalized so ``5`` and ``5.0``
+    agree.
+    """
+    numbers = tuple(_normalize_number(m) for m in _NUMBER_RE.findall(text))
+    return numbers, len(_NEGATION_RE.findall(text))
+
+
+def _normalize_number(literal: str) -> str:
+    try:
+        return repr(float(literal))
+    except ValueError:  # pragma: no cover - the regex only matches numerics
+        return literal
+
+
 class SemanticCache:
     def __init__(self, max_entries: int = 1000) -> None:
-        # (bucket, normalized embedding, response_json, expires_at), newest right.
-        self._entries: deque[tuple[str, Vector, str, float]] = deque(maxlen=max_entries)
+        # (bucket, normalized embedding, discriminators, response_json, expires_at),
+        # newest right.
+        self._entries: deque[tuple[str, Vector, tuple[tuple[str, ...], int], str, float]] = deque(
+            maxlen=max_entries
+        )
 
     def find(
-        self, bucket: str, embedding: list[float], threshold: float, now: float | None = None
+        self,
+        bucket: str,
+        prompt: str,
+        embedding: list[float],
+        threshold: float,
+        now: float | None = None,
     ) -> tuple[str, float] | None:
         """Return ``(stored_response, similarity)`` for the closest entry in
         ``bucket`` at/above ``threshold``, else None. Expired entries are
         ignored (they age out of the deque on their own).
+
+        ``prompt`` is used only for the discriminator guard above — entries
+        whose numbers or negation count differ are rejected however close their
+        embeddings are.
 
         The similarity comes back with the payload rather than being discarded
         because the caller has to disclose it: a hit at 0.999 and a hit at
@@ -136,10 +198,13 @@ class SemanticCache:
         moment = time.time() if now is None else now
         # Normalize the query once, not once per entry.
         query = _prepare(embedding)
+        marks = discriminators(prompt)
         best: tuple[str, float] | None = None
         best_sim = threshold
-        for b, emb, payload, expires_at in self._entries:
+        for b, emb, entry_marks, payload, expires_at in self._entries:
             if b != bucket or expires_at <= moment:
+                continue
+            if entry_marks != marks:
                 continue
             if len(emb) != len(query):
                 # A different embedding dimension means a different model —
@@ -157,12 +222,15 @@ class SemanticCache:
     def add(
         self,
         bucket: str,
+        prompt: str,
         embedding: list[float],
         response_json: str,
         ttl: int,
         now: float | None = None,
     ) -> None:
         """Store a response under ``bucket`` for ``ttl`` seconds.
+
+        Only ``prompt``'s discriminator digest is retained, never its text.
 
         A ttl of 0 stores nothing: the response cache treats
         ``REKAI_CACHE_TTL_SECONDS=0`` as "don't cache", and a semantic entry
@@ -171,7 +239,9 @@ class SemanticCache:
         if ttl <= 0:
             return
         moment = time.time() if now is None else now
-        self._entries.append((bucket, _prepare(embedding), response_json, moment + ttl))
+        self._entries.append(
+            (bucket, _prepare(embedding), discriminators(prompt), response_json, moment + ttl)
+        )
 
     def clear(self) -> None:
         self._entries.clear()

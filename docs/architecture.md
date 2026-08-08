@@ -257,6 +257,26 @@ so everything about it is deliberately conservative:
   `REKAI_SEMANTIC_CACHE_MAX_ENTRIES` against that histogram. Going faster than a
   linear scan means an ANN index, which is disproportionate machinery for a
   bounded in-memory cache.
+- **Meaning-flipping edits.** Cosine similarity is not proof that two prompts
+  have the same answer, and it fails hardest on the small edits that flip
+  meaning — precisely what a paraphrase-hunting cache is built to ignore.
+  *GPTCache* (arXiv:2311.13133) puts a second, more discriminative model after
+  the vector search for this reason; a second model call is a heavy price for an
+  in-process cache, so RekAI checks the two features that most reliably change
+  an answer while barely moving an embedding:
+
+  | Feature | Example that must not share an answer |
+  |---|---|
+  | negation count | "is aspirin safe in pregnancy" vs "is aspirin **not** safe in pregnancy" |
+  | numeric literals, in order | "convert **5** USD to EUR" vs "convert **500** USD to EUR"; "convert 5 to 10" vs "convert 10 to 5" |
+
+  A candidate whose digest differs is rejected **however close its embedding
+  is** — raising the threshold cannot help here, because the vectors genuinely
+  are that close. The check only ever turns a hit into a miss, and the costs are
+  asymmetric: a wrong miss costs one upstream call, a wrong hit answers a
+  question nobody asked. Most conversational prompts contain neither feature, so
+  the guard is inert on that traffic. Only the digest is stored, never the
+  prompt text — the semantic cache is not a place prompts should accumulate.
 - **Model changes.** Entries whose embedding dimension differs from the query's
   are skipped outright, not scored. Switching `REKAI_SEMANTIC_CACHE_MODEL`
   leaves old-model entries in the process-local store, and their coordinates

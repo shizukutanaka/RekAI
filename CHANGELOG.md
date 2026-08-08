@@ -87,6 +87,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Added
+- **Semantic cache: meaning-flipping edits can no longer produce a hit.** A
+  cosine threshold cannot catch the failure mode that matters most, because the
+  vectors really are that close: "is aspirin safe during pregnancy" vs "is
+  aspirin **not** safe during pregnancy", or "convert **5** USD" vs "convert
+  **500** USD", are near-identical to an embedding model and opposite questions
+  to a user. Candidates are now rejected when their negation count or their
+  ordered numeric literals differ from the query's, however similar the
+  embeddings — the check *GPTCache* (arXiv:2311.13133) delegates to a second
+  model, minus the second model call. It can only turn a hit into a miss (a
+  wrong miss costs one upstream call; a wrong hit answers a question nobody
+  asked), and prompts with neither feature — most conversational traffic — are
+  unaffected. Only the digest is retained, never the prompt text.
 - **Semantic cache lookups are ~60× faster, and their cost is now measured** —
   the similarity scan called a cosine that re-derived *both* vectors' norms on
   every entry, including the stored vector's, once per entry per lookup.

@@ -17,7 +17,12 @@ from rekai.main import create_app
 from rekai.providers import register_provider
 from rekai.providers.base import EmbeddingResult, Provider, ProviderResult
 from rekai.schemas import ChatMessage, ChatRequest, Usage
-from rekai.semantic_cache import SemanticCache, cosine_similarity, semantic_cache
+from rekai.semantic_cache import (
+    SemanticCache,
+    cosine_similarity,
+    discriminators,
+    semantic_cache,
+)
 from rekai.service import handle_chat
 
 
@@ -30,27 +35,27 @@ def test_cosine_similarity_basics() -> None:
 
 def test_find_respects_threshold_and_bucket() -> None:
     sc = SemanticCache()
-    sc.add("b1", [1.0, 0.0], '{"r": 1}', ttl=60)
+    sc.add("b1", "p", [1.0, 0.0], '{"r": 1}', ttl=60)
     # Identical vector -> sim 1.0 >= threshold -> hit, and find() hands back the
     # similarity alongside the payload so the caller can disclose it.
-    assert sc.find("b1", [1.0, 0.0], 0.85) == ('{"r": 1}', 1.0)
+    assert sc.find("b1", "p", [1.0, 0.0], 0.85) == ('{"r": 1}', 1.0)
     # Orthogonal -> sim 0 < threshold -> miss.
-    assert sc.find("b1", [0.0, 1.0], 0.85) is None
+    assert sc.find("b1", "p", [0.0, 1.0], 0.85) is None
     # A near vector above threshold still hits, with its own lower similarity.
-    payload, similarity = sc.find("b1", [0.99, 0.01], 0.85)
+    payload, similarity = sc.find("b1", "p", [0.99, 0.01], 0.85)
     assert payload == '{"r": 1}'
     assert 0.85 <= similarity < 1.0
     # Different bucket -> never matches.
-    assert sc.find("b2", [1.0, 0.0], 0.85) is None
+    assert sc.find("b2", "p", [1.0, 0.0], 0.85) is None
 
 
 def test_eviction_is_bounded_fifo() -> None:
     sc = SemanticCache(max_entries=2)
-    sc.add("b", [1.0, 0.0], "first", ttl=60)
-    sc.add("b", [0.0, 1.0], "second", ttl=60)
-    sc.add("b", [1.0, 1.0], "third", ttl=60)  # evicts "first"
+    sc.add("b", "p", [1.0, 0.0], "first", ttl=60)
+    sc.add("b", "p", [0.0, 1.0], "second", ttl=60)
+    sc.add("b", "p", [1.0, 1.0], "third", ttl=60)  # evicts "first"
     # "first" (exact [1,0]) is gone; [0,1] and [1,1] remain.
-    assert sc.find("b", [1.0, 0.0], 0.999) is None
+    assert sc.find("b", "p", [1.0, 0.0], 0.999) is None
 
 
 # --- TTL ---------------------------------------------------------------------
@@ -60,26 +65,26 @@ def test_eviction_is_bounded_fifo() -> None:
 
 def test_entries_expire() -> None:
     sc = SemanticCache()
-    sc.add("b", [1.0, 0.0], "payload", ttl=60, now=1000.0)
-    assert sc.find("b", [1.0, 0.0], 0.85, now=1059.0) == ("payload", 1.0)
-    assert sc.find("b", [1.0, 0.0], 0.85, now=1060.0) is None
+    sc.add("b", "p", [1.0, 0.0], "payload", ttl=60, now=1000.0)
+    assert sc.find("b", "p", [1.0, 0.0], 0.85, now=1059.0) == ("payload", 1.0)
+    assert sc.find("b", "p", [1.0, 0.0], 0.85, now=1060.0) is None
 
 
 def test_zero_ttl_stores_nothing() -> None:
     sc = SemanticCache()
-    sc.add("b", [1.0, 0.0], "payload", ttl=0)
-    assert sc.find("b", [1.0, 0.0], 0.85) is None
+    sc.add("b", "p", [1.0, 0.0], "payload", ttl=0)
+    assert sc.find("b", "p", [1.0, 0.0], 0.85) is None
 
 
 def test_resize_applies_the_configured_bound() -> None:
     sc = SemanticCache(max_entries=1000)
     for i in range(5):
-        sc.add("b", [float(i), 1.0], f"e{i}", ttl=60)
+        sc.add("b", "p", [float(i), 1.0], f"e{i}", ttl=60)
     sc.resize(2)
     # Rebuilt with the cap, keeping the newest entries.
     assert len(sc._entries) == 2
     assert sc._entries.maxlen == 2
-    assert [e[2] for e in sc._entries] == ["e3", "e4"]
+    assert [e[3] for e in sc._entries] == ["e3", "e4"]  # entry = (bucket, vec, marks, payload, exp)
 
 
 def test_create_app_applies_max_entries() -> None:
@@ -362,8 +367,8 @@ def test_identical_vectors_score_exactly_one(similarity_backend) -> None:
     assert semantic_cache_module._similarity(prepared, prepared) == 1.0
 
     sc = SemanticCache()
-    sc.add("b", vec, "self", ttl=60)
-    assert sc.find("b", vec, threshold=1.0) == ("self", 1.0)
+    sc.add("b", "p", vec, "self", ttl=60)
+    assert sc.find("b", "p", vec, threshold=1.0) == ("self", 1.0)
 
 
 def test_zero_vector_scores_zero_rather_than_dividing_by_zero(similarity_backend) -> None:
@@ -379,9 +384,9 @@ def test_mismatched_dimensions_never_match(similarity_backend) -> None:
     # model's space. Scoring them 0.0 is not enough: with threshold 0.0 that
     # *is* a match (0.0 >= 0.0), so they have to be skipped outright.
     sc = SemanticCache()
-    sc.add("b", [1.0, 0.0, 0.0], "three-dim", ttl=60)
-    assert sc.find("b", [1.0, 0.0], 0.0) is None
-    assert sc.find("b", [1.0, 0.0, 0.0], 0.0) == ("three-dim", 1.0)  # right dim still hits
+    sc.add("b", "p", [1.0, 0.0, 0.0], "three-dim", ttl=60)
+    assert sc.find("b", "p", [1.0, 0.0], 0.0) is None
+    assert sc.find("b", "p", [1.0, 0.0, 0.0], 0.0) == ("three-dim", 1.0)  # right dim still hits
 
 
 def test_both_backends_pick_the_same_entry(similarity_backend) -> None:
@@ -391,8 +396,8 @@ def test_both_backends_pick_the_same_entry(similarity_backend) -> None:
     vectors = [[random.uniform(-1, 1) for _ in range(32)] for _ in range(20)]
     sc = SemanticCache()
     for i, vec in enumerate(vectors):
-        sc.add("b", vec, f"entry-{i}", ttl=60)
-    hit = sc.find("b", vectors[7], 0.0)
+        sc.add("b", "p", vec, f"entry-{i}", ttl=60)
+    hit = sc.find("b", "p", vectors[7], 0.0)
     assert hit is not None
     payload, similarity = hit
     assert payload == "entry-7"  # its own vector is the nearest
@@ -406,3 +411,76 @@ def test_lookup_duration_is_recorded() -> None:
     m.observe_semantic_lookup("miss", 0.05)
     out = m.render()
     assert 'rekai_semantic_cache_lookup_seconds_count{result="miss"} 1' in out
+
+
+# --- discriminator guard -----------------------------------------------------
+# Cosine similarity is not proof that two prompts have the same answer, and it
+# fails hardest on the small edits that flip meaning — exactly what a
+# paraphrase-hunting cache is built to ignore. GPTCache (arXiv:2311.13133) adds
+# a second model after the vector search for this; RekAI instead checks the two
+# features that most reliably change an answer while barely moving an embedding.
+
+
+@pytest.mark.parametrize(
+    "stored,queried",
+    [
+        # Negation: near-identical vectors, opposite question.
+        ("is aspirin safe during pregnancy", "is aspirin not safe during pregnancy"),
+        ("can I deploy this on friday", "can I never deploy this on friday"),
+        ("show the failing tests", "show the tests without failures"),
+        # Numbers: entity/quantity substitution.
+        ("convert 5 USD to EUR", "convert 500 USD to EUR"),
+        ("summarize invoice 12345", "summarize invoice 12346"),
+        ("retry 3 times", "retry 4 times"),
+        # Order matters — the same multiset is a different question.
+        ("convert 5 to 10", "convert 10 to 5"),
+    ],
+)
+def test_meaning_flipping_edits_never_hit(stored: str, queried: str) -> None:
+    # The embeddings are deliberately *identical*, so nothing but the guard can
+    # prevent the hit. This is the case a similarity threshold cannot catch:
+    # raising it to 1.0 would not help, because the vectors really are that close.
+    sc = SemanticCache()
+    sc.add("b", stored, [1.0, 0.0], "stored-answer", ttl=60)
+    assert sc.find("b", queried, [1.0, 0.0], 0.85) is None
+    # ...and the original prompt still hits, so the guard is not just breaking it.
+    assert sc.find("b", stored, [1.0, 0.0], 0.85) == ("stored-answer", 1.0)
+
+
+@pytest.mark.parametrize(
+    "stored,queried",
+    [
+        ("how do i reset my password", "i forgot my password, help"),
+        ("what is the capital of france", "france's capital city?"),
+        ("retry 3 times", "please retry 3 times"),  # same number, still a hit
+        ("do not retry", "don't retry"),  # n't counts as one negation, as does not
+    ],
+)
+def test_true_paraphrases_still_hit(stored: str, queried: str) -> None:
+    sc = SemanticCache()
+    sc.add("b", stored, [1.0, 0.0], "stored-answer", ttl=60)
+    assert sc.find("b", queried, [1.0, 0.0], 0.85) == ("stored-answer", 1.0)
+
+
+def test_number_normalization_is_value_based() -> None:
+    assert discriminators("retry 5 times") == discriminators("retry 5.0 times")
+    assert discriminators("retry 5 times") != discriminators("retry 50 times")
+
+
+def test_digest_is_all_that_is_retained_of_the_prompt() -> None:
+    # The semantic cache must not become a place prompt text accumulates.
+    sc = SemanticCache()
+    secret_prompt = "my customer account number is 998877 and the passphrase is hunter2"
+    sc.add("b", secret_prompt, [1.0, 0.0], "answer", ttl=60)
+    stored = repr(list(sc._entries))
+    assert "passphrase" not in stored
+    assert "hunter2" not in stored
+    # Numbers survive as a digest by design — that is what the guard compares.
+    assert discriminators(secret_prompt) == (("998877.0", "2.0"), 0)
+
+
+def test_guard_is_inert_on_prompts_with_neither_feature() -> None:
+    # Most conversational traffic has no numbers and no negation, so the guard
+    # costs those requests nothing in hit rate.
+    assert discriminators("summarize this article about cats") == ((), 0)
+    assert discriminators("write a haiku about the sea") == ((), 0)
