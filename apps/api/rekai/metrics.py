@@ -4,6 +4,87 @@ from __future__ import annotations
 
 import threading
 
+# Bucket boundaries (seconds) for every duration histogram. These are the
+# boundaries the OpenTelemetry GenAI semantic conventions advise for
+# `gen_ai.client.operation.duration` — a doubling ladder from 10ms to ~82s,
+# which is the right shape for LLM calls (multi-second p50, long tail) and
+# wrong for the default 5ms–10s HTTP ladder. Using the standard boundaries
+# keeps RekAI's histograms comparable with any other GenAI-instrumented hop.
+_DURATION_BUCKETS: tuple[float, ...] = (
+    0.01,
+    0.02,
+    0.04,
+    0.08,
+    0.16,
+    0.32,
+    0.64,
+    1.28,
+    2.56,
+    5.12,
+    10.24,
+    20.48,
+    40.96,
+    81.92,
+)
+
+# Cap on distinct label combinations per histogram. Label values are drawn from
+# fixed sets (provider names, matched route templates), so this should never
+# bind — it is the same defensive bound the rate limiter and usage_by_client
+# carry, so a future label with unexpected cardinality degrades instead of
+# growing without limit.
+_MAX_SERIES = 200
+
+
+class _Histogram:
+    """A single Prometheus histogram family: cumulative buckets, sum, count.
+
+    Deliberately *not* part of snapshot()/seed()/merge_snapshots(): those exist
+    so /v1/usage survives a restart and spans replicas, and neither applies here.
+    Prometheus already handles counter resets, and scrapes each replica
+    separately, so persisting or merging histogram state would add machinery
+    with nothing to buy.
+    """
+
+    __slots__ = ("_series",)
+
+    def __init__(self) -> None:
+        # label tuple -> ([per-bucket counts], sum of observations)
+        self._series: dict[tuple[tuple[str, str], ...], tuple[list[int], float]] = {}
+
+    def observe(self, labels: tuple[tuple[str, str], ...], seconds: float) -> None:
+        entry = self._series.get(labels)
+        if entry is None:
+            if len(self._series) >= _MAX_SERIES:
+                return
+            entry = ([0] * (len(_DURATION_BUCKETS) + 1), 0.0)
+            self._series[labels] = entry
+        counts, total = entry
+        index = len(_DURATION_BUCKETS)  # the +Inf bucket
+        for i, boundary in enumerate(_DURATION_BUCKETS):
+            if seconds <= boundary:
+                index = i
+                break
+        # Buckets are stored non-cumulatively and summed at render time.
+        counts[index] += 1
+        self._series[labels] = (counts, total + seconds)
+
+    def render(self, name: str, help_text: str) -> list[str]:
+        lines = [f"# HELP {name} {help_text}", f"# TYPE {name} histogram"]
+        for labels, (counts, total) in sorted(self._series.items()):
+            prefix = ",".join(f'{k}="{v}"' for k, v in labels)
+            cumulative = 0
+            for i, boundary in enumerate(_DURATION_BUCKETS):
+                cumulative += counts[i]
+                lines.append(f'{name}_bucket{{{prefix},le="{boundary}"}} {cumulative}')
+            cumulative += counts[-1]
+            lines.append(f'{name}_bucket{{{prefix},le="+Inf"}} {cumulative}')
+            lines.append(f"{name}_sum{{{prefix}}} {round(total, 6)}")
+            lines.append(f"{name}_count{{{prefix}}} {cumulative}")
+        return lines
+
+    def clear(self) -> None:
+        self._series.clear()
+
 
 class Metrics:
     def __init__(self, max_tracked_clients: int = 10_000) -> None:
@@ -41,6 +122,30 @@ class Metrics:
         # already process-local best-effort across workers even without
         # this feature — see docs/architecture.md).
         self._budget_window_usage: dict[str, tuple[int, float]] = {}
+        # Latency. Without these, "the gateway is slow" and "the upstream is
+        # slow" are indistinguishable: request_duration covers the whole hop,
+        # provider_duration covers only the call RekAI makes, and the gap
+        # between them is RekAI's own overhead. ttft is the streaming metric
+        # that matters — total duration says nothing about how fast the first
+        # token arrived.
+        self.request_duration = _Histogram()
+        self.provider_duration = _Histogram()
+        self.stream_ttft = _Histogram()
+
+    def observe_request_duration(self, path: str, seconds: float) -> None:
+        """End-to-end latency for one HTTP request, labelled by *route
+        template* (not raw path) so a parameterised route can't mint a series
+        per distinct value."""
+        self.request_duration.observe((("path", path),), seconds)
+
+    def observe_provider_duration(self, provider: str, operation: str, seconds: float) -> None:
+        """Latency of one upstream call, including its in-place retries —
+        retrying is part of what the caller waited for."""
+        self.provider_duration.observe((("operation", operation), ("provider", provider)), seconds)
+
+    def observe_stream_ttft(self, provider: str, seconds: float) -> None:
+        """Time to first token on a streamed completion."""
+        self.stream_ttft.observe((("provider", provider),), seconds)
 
     def record_request(self, provider: str) -> None:
         with self._lock:
@@ -230,8 +335,29 @@ class Metrics:
             "# TYPE rekai_cost_usd_total counter",
             f"rekai_cost_usd_total {round(self.cost_usd_total, 6)}",
         ]
+        # A separate family, NOT rekai_requests_total{provider="…"}: emitting
+        # both a bare series and a labelled one under one metric name makes
+        # sum(rekai_requests_total) count everything twice, and Prometheus
+        # treats inconsistent label sets within a family as an error.
+        lines += [
+            "# HELP rekai_provider_requests_total Requests dispatched per provider.",
+            "# TYPE rekai_provider_requests_total counter",
+        ]
         for provider, count in sorted(self.requests_by_provider.items()):
-            lines.append(f'rekai_requests_total{{provider="{provider}"}} {count}')
+            lines.append(f'rekai_provider_requests_total{{provider="{provider}"}} {count}')
+
+        lines += self.request_duration.render(
+            "rekai_request_duration_seconds",
+            "End-to-end request latency by route.",
+        )
+        lines += self.provider_duration.render(
+            "rekai_provider_duration_seconds",
+            "Upstream provider call latency, including in-place retries.",
+        )
+        lines += self.stream_ttft.render(
+            "rekai_stream_ttft_seconds",
+            "Time to first streamed token, by provider.",
+        )
 
         if not include_clients:
             return "\n".join(lines) + "\n"

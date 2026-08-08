@@ -476,3 +476,61 @@ def test_usage_by_client_survives_seed_accumulate_flush(monkeypatch) -> None:
         assert flushed[new_client]["tokens"] > 0
     finally:
         main_module.metrics.seed({})
+
+
+# --- latency histograms ------------------------------------------------------
+# Without these, "the gateway is slow" and "the upstream is slow" are the same
+# observation. The value was already computed for X-Response-Time-Ms and thrown
+# away.
+
+
+def test_histogram_buckets_are_cumulative_and_include_inf() -> None:
+    m = Metrics()
+    m.observe_provider_duration("openai", "chat", 0.005)  # <= 0.01
+    m.observe_provider_duration("openai", "chat", 1.0)  # <= 1.28
+    m.observe_provider_duration("openai", "chat", 500.0)  # +Inf only
+    out = m.render()
+    labels = 'operation="chat",provider="openai"'
+    assert f'rekai_provider_duration_seconds_bucket{{{labels},le="0.01"}} 1' in out
+    assert f'rekai_provider_duration_seconds_bucket{{{labels},le="1.28"}} 2' in out
+    assert f'rekai_provider_duration_seconds_bucket{{{labels},le="81.92"}} 2' in out
+    assert f'rekai_provider_duration_seconds_bucket{{{labels},le="+Inf"}} 3' in out
+    assert f"rekai_provider_duration_seconds_count{{{labels}}} 3" in out
+    assert f"rekai_provider_duration_seconds_sum{{{labels}}} {round(501.005, 6)}" in out
+
+
+def test_histogram_series_are_bounded() -> None:
+    from rekai.metrics import _MAX_SERIES
+
+    m = Metrics()
+    for i in range(_MAX_SERIES + 25):
+        m.observe_stream_ttft(f"provider-{i}", 0.1)
+    assert len(m.stream_ttft._series) == _MAX_SERIES
+
+
+def test_request_duration_is_labelled_by_route_template() -> None:
+    settings = Settings(environment="test", default_provider="echo", rate_limit_enabled=False)
+    client = TestClient(create_app(settings))
+    try:
+        client.post(
+            "/v1/chat",
+            json={"model": "echo", "messages": [{"role": "user", "content": "hi"}], "cache": False},
+        )
+        text = client.get("/metrics").text
+        assert 'rekai_request_duration_seconds_count{path="/v1/chat"}' in text
+        # An upstream call was made, so its latency is recorded too.
+        assert 'rekai_provider_duration_seconds_count{operation="chat",provider="echo"}' in text
+    finally:
+        main_module.metrics.seed({})
+
+
+def test_per_provider_requests_are_a_separate_metric_family() -> None:
+    # rekai_requests_total used to carry BOTH a bare series and a
+    # {provider="…"} one, so sum(rekai_requests_total) double-counted every
+    # request and Prometheus saw inconsistent labels within one family.
+    m = Metrics()
+    m.record_request("echo")
+    out = m.render()
+    assert "rekai_requests_total 1" in out
+    assert 'rekai_provider_requests_total{provider="echo"} 1' in out
+    assert "rekai_requests_total{provider=" not in out

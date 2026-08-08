@@ -305,6 +305,42 @@ loaded on startup and the snapshot is flushed to Redis periodically and on
 shutdown, so `/v1/usage` totals survive restarts. Without Redis the store is a
 no-op.
 
+Per-provider request counts are their own family, `rekai_provider_requests_total
+{provider="…"}`, **not** `rekai_requests_total{provider="…"}`. Emitting a bare
+series and a labelled one under one metric name makes `sum(rekai_requests_total)`
+count every request twice, and Prometheus treats inconsistent label sets within a
+family as an error.
+
+### Latency
+
+Three histograms, all on the OpenTelemetry GenAI advisory bucket boundaries for
+`gen_ai.client.operation.duration` (a doubling ladder from 10 ms to ~82 s — the
+right shape for LLM calls, unlike the default 5 ms–10 s HTTP ladder), so they
+line up with any other GenAI-instrumented hop:
+
+| Metric | Labels | Answers |
+|---|---|---|
+| `rekai_request_duration_seconds` | `path` | how long the whole hop took |
+| `rekai_provider_duration_seconds` | `provider`, `operation` | how long the upstream took (retries included — the caller waited for those too) |
+| `rekai_stream_ttft_seconds` | `provider` | time to first streamed token |
+
+The point of having the first two is the **gap between them**: that difference is
+RekAI's own overhead, and without it "the gateway is slow" and "the upstream is
+slow" are the same observation. TTFT is separate because on a stream, total
+duration mostly measures how long the answer is, not how responsive it was.
+
+Two honest caveats. `path` is the matched **route template**, so
+`/admin/keys/{key}` is one series rather than one per key; an unmatched request
+(404) is bucketed as `<unmatched>`. And on the streaming routes
+`rekai_request_duration_seconds` measures time until the response *starts*
+streaming, since the handler returns before the body is consumed —
+`rekai_stream_ttft_seconds` and `rekai_provider_duration_seconds
+{operation="stream"}` are the meaningful ones there.
+
+Histograms are deliberately **not** persisted or merged across replicas the way
+the counters are: Prometheus scrapes each replica separately and handles counter
+resets itself, so there is nothing to buy for the machinery it would cost.
+
 ## Tool / function calling
 
 `ChatRequest` accepts OpenAI-style `tools` and `tool_choice`, passed through to

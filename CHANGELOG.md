@@ -86,7 +86,25 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and full re-verification. All web gates (tsc/lint/vitest/build/E2E) pass on
   vitest 4.
 
+### Added
+- **Latency is measured** — RekAI reported cost, tokens, cache hits, retries and
+  cooldowns, but not a single duration: `elapsed_ms` was computed in the request
+  middleware for the `X-Response-Time-Ms` header and the access log, then thrown
+  away, and upstream calls were never timed at all. Three Prometheus histograms
+  on the OpenTelemetry GenAI advisory bucket boundaries for
+  `gen_ai.client.operation.duration`: `rekai_request_duration_seconds{path}`
+  (end-to-end, labelled by route template so a parameterised route is one
+  series), `rekai_provider_duration_seconds{provider,operation}` (upstream,
+  retries included), and `rekai_stream_ttft_seconds{provider}` (time to first
+  streamed token). The gap between the first two is RekAI's own overhead — the
+  thing that was previously unknowable.
+
 ### Changed
+- **`rekai_requests_total{provider="…"}` renamed to
+  `rekai_provider_requests_total{provider="…"}`** (**breaking** for dashboards
+  using the old series). The per-provider breakdown shared a metric name with
+  the bare total, so `sum(rekai_requests_total)` counted every request twice and
+  Prometheus saw inconsistent label sets within one family.
 - **E2E coverage for the v1.2 OpenAI-compatible surface** — added
   `e2e/openai-compat.spec.ts`: a direct `POST /v1/chat/completions` asserting
   the `chat.completion` shape (object, choices, `finish_reason`, usage), a

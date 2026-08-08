@@ -120,10 +120,12 @@ async def _semantic_embed(request: ChatRequest, settings: Settings) -> list[floa
     if provider is None:
         return None
     text = "\n".join(m.content or "" for m in request.messages)
+    started = time.perf_counter()
     try:
         result = await provider.embed([text], settings.semantic_cache_model, None)
     except ProviderError:
         return None  # embeddings unavailable -> just skip the semantic cache
+    metrics.observe_provider_duration(provider_name, "embed", time.perf_counter() - started)
     metrics.record_tokens(result.usage.total_tokens)
     metrics.record_cost(
         estimate_cost(provider_name, result.model, result.usage, settings.pricing_override_dict)
@@ -214,6 +216,7 @@ async def handle_chat(
                 return ChatResponse(**{**payload, "cached": True})
             metrics.record_cache(hit=False)
 
+        started = time.perf_counter()
         try:
             result = await call_with_retry(
                 _chat_factory(attempt.provider, attempt_request, api_key),
@@ -223,6 +226,9 @@ async def handle_chat(
                 on_retry=metrics.record_retry,
             )
         except ProviderError as exc:
+            metrics.observe_provider_duration(
+                attempt.provider_name, "chat", time.perf_counter() - started
+            )
             last_error = exc
             if settings.provider_cooldown_enabled and exc.status_code == 429:
                 # An explicit "back off" signal — park this provider immediately
@@ -259,6 +265,9 @@ async def handle_chat(
                 continue
             raise
 
+        metrics.observe_provider_duration(
+            attempt.provider_name, "chat", time.perf_counter() - started
+        )
         consecutive_failures.record_success(attempt.provider_name)
         usage = result.usage or Usage()
         cost_usd = estimate_cost(
@@ -334,9 +343,17 @@ async def handle_chat_stream(
     reported_usage: Usage | None = None
     reported_tool_calls: list[dict] | None = None
     errored = False
+    started = time.perf_counter()
+    first_token_at: float | None = None
     try:
         async for event in provider.stream_events(request, api_key):
             if event.delta:
+                if first_token_at is None:
+                    # Time to first token: on a stream this is what the user
+                    # perceives as latency. Total duration is dominated by how
+                    # long the answer is and says nothing about responsiveness.
+                    first_token_at = time.perf_counter()
+                    metrics.observe_stream_ttft(provider_name, first_token_at - started)
                 completion.append(event.delta)
                 yield ChatStreamEvent(delta=event.delta)
             if event.usage is not None:
@@ -346,6 +363,7 @@ async def handle_chat_stream(
     except ProviderError as exc:
         errored = True
         metrics.record_error()
+        metrics.observe_provider_duration(provider_name, "stream", time.perf_counter() - started)
         if settings.provider_cooldown_enabled and exc.status_code == 429:
             await cooldowns.mark_shared(
                 cache,
@@ -365,6 +383,7 @@ async def handle_chat_stream(
         yield ChatStreamEvent(error=exc)
 
     if not errored:
+        metrics.observe_provider_duration(provider_name, "stream", time.perf_counter() - started)
         consecutive_failures.record_success(provider_name)
         estimated = reported_usage is None
         if reported_usage is not None:
@@ -425,13 +444,17 @@ async def handle_embeddings(
             return EmbeddingsResponse(**{**json.loads(cached_raw), "cached": True})
         metrics.record_cache(hit=False)
 
-    result = await call_with_retry(
-        lambda: provider.embed(inputs, request.model, api_key),
-        attempts=settings.retry_max_attempts,
-        base_delay=settings.retry_base_delay_seconds,
-        max_delay=settings.retry_max_delay_seconds,
-        on_retry=metrics.record_retry,
-    )
+    started = time.perf_counter()
+    try:
+        result = await call_with_retry(
+            lambda: provider.embed(inputs, request.model, api_key),
+            attempts=settings.retry_max_attempts,
+            base_delay=settings.retry_base_delay_seconds,
+            max_delay=settings.retry_max_delay_seconds,
+            on_retry=metrics.record_retry,
+        )
+    finally:
+        metrics.observe_provider_duration(provider_name, "embed", time.perf_counter() - started)
     metrics.record_tokens(result.usage.total_tokens)
     cost_usd = estimate_cost(
         provider_name, result.model, result.usage, settings.pricing_override_dict

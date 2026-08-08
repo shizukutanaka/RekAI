@@ -544,7 +544,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response = await call_next(request)
         finally:
             tracing.reset_current_trace_id(trace_token)
-        elapsed_ms = (time.perf_counter() - start) * 1000
+        elapsed = time.perf_counter() - start
+        elapsed_ms = elapsed * 1000
+        # The value was already being computed for the header and the log line;
+        # recording it is what makes latency queryable. Labelled by the matched
+        # route *template* so /admin/keys/{key} is one series, not one per key —
+        # an unmatched request (404) has no template and is bucketed together.
+        route = request.scope.get("route")
+        metrics.observe_request_duration(getattr(route, "path", None) or "<unmatched>", elapsed)
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
         response.headers["X-RekAI-Version"] = __version__
