@@ -130,6 +130,69 @@ class MaxBodySizeMiddleware:
         await self.app(scope, replay_receive, send)
 
 
+class ConcurrencyLimitMiddleware:
+    """Cap the number of `/v1/*` requests in flight at once.
+
+    The rate limiter counts **arrivals** — it says nothing about how many
+    requests are still running. Those are different quantities for an LLM
+    gateway, where one request can occupy a worker for minutes: 60 requests/min
+    is satisfiable by 60 concurrent 60-second streams. Worse, `httpx`'s read
+    timeout resets on every chunk, so a slow-trickling upstream can hold a
+    streaming request open indefinitely without ever tripping
+    `REKAI_REQUEST_TIMEOUT_SECONDS`. Nothing else in the stack bounds occupancy.
+
+    Excess requests are **rejected** with 429 + `Retry-After`, not queued —
+    queueing an LLM request behind a minutes-long one just converts a fast
+    failure the client can act on into a timeout it can't.
+
+    Pure ASGI rather than a `@app.middleware("http")` dispatch for the reason
+    that matters here: `BaseHTTPMiddleware` returns from `call_next` as soon as
+    the response *starts*, so a slot released there would be released before a
+    streamed body had sent a single token — exactly the case this exists for.
+    Wrapping the app means the slot is held until the last byte is sent.
+
+    Process-local, like the default rate limiter: with N uvicorn workers the
+    effective cap is N × the configured value.
+    """
+
+    def __init__(self, app, max_concurrent: int) -> None:
+        self.app = app
+        self.max_concurrent = max_concurrent
+        self._in_flight = 0
+
+    async def __call__(self, scope, receive, send) -> None:
+        if (
+            scope["type"] != "http"
+            or self.max_concurrent <= 0
+            or not scope["path"].startswith("/v1/")
+            or scope["method"] == "OPTIONS"
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        # Atomic with respect to the event loop: no await between the read and
+        # the increment, so two coroutines can't both see a free slot (the same
+        # property MemoryCache.add relies on).
+        if self._in_flight >= self.max_concurrent:
+            metrics.record_error()
+            response = JSONResponse(
+                status_code=429,
+                content=ErrorResponse(
+                    error="concurrency_limit",
+                    detail=f"Too many requests in flight (limit {self.max_concurrent}).",
+                ).model_dump(),
+                headers={"Retry-After": "1"},
+            )
+            await response(scope, receive, send)
+            return
+
+        self._in_flight += 1
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            self._in_flight -= 1
+
+
 def _guardrail_response(
     messages: list[ChatMessage], settings: Settings, response: Response
 ) -> JSONResponse | None:
@@ -581,8 +644,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return response
 
-    # The hard body-size cap (see MaxBodySizeMiddleware) wraps the whole app,
-    # so it runs before _rate_limit/auth/routing ever see the request.
+    # Both of these wrap the whole app so they run before _rate_limit/auth/
+    # routing see the request, and — unlike a BaseHTTPMiddleware dispatch —
+    # stay wrapped around a streaming response body.
+    #
+    # Added first = innermost, so the ordering below is
+    #   CORS → MaxBodySize → ConcurrencyLimit → the http middlewares
+    # deliberately: rejecting an oversized body is cheap and shouldn't consume
+    # one of the concurrency slots it would otherwise occupy.
+    app.add_middleware(ConcurrencyLimitMiddleware, max_concurrent=settings.max_concurrent_requests)
     app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_body_bytes)
 
     # CORS is added last so it wraps the others (outermost): short-circuit

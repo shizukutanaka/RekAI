@@ -15,13 +15,16 @@ POST /v1/chat
 [ body guard ]    ── 413 if the /v1 body exceeds REKAI_MAX_BODY_BYTES
    │
    ▼
+[ concurrency ]   ── 429 (+ Retry-After) if REKAI_MAX_CONCURRENT_REQUESTS are already in flight
+   │
+   ▼
 [ auth ]          ── 401 if a configured gateway key is missing/invalid
    │
    ▼
 [ rate limiter ]  ── 429 (+ Retry-After) if the client (per key, else IP) exceeds its budget
    │
    ▼
-[ router ]  ── picks a provider (explicit → model-prefix → default)
+[ router ]  ── picks a provider (explicit → model-prefix → default, gated by REKAI_ALLOWED_PROVIDERS)
    │
    ▼
 [ cache ]  ── hit? return immediately (cached=true)
@@ -447,6 +450,29 @@ the only semantic difference is that the shared window resets at its edge
 rather than refilling continuously. If Redis errors at runtime the limiter
 **fails open** (allows the request, logs a warning) — an outage degrades to
 "no rate limiting", not "no service".
+
+### Concurrency cap
+
+`REKAI_MAX_CONCURRENT_REQUESTS` (opt-in, `0` = unlimited) bounds a different
+quantity from the rate limiter: **how many `/v1/*` requests are running**, not
+how many arrived. For an LLM gateway those diverge badly — 60 requests/minute is
+satisfiable by 60 concurrent 60-second streams — and `httpx`'s read timeout
+resets on every chunk, so a slow-trickling upstream can hold a streaming request
+open indefinitely without ever reaching `REKAI_REQUEST_TIMEOUT_SECONDS`. Nothing
+else in the stack bounded occupancy.
+
+Excess requests are **rejected** (429, `Retry-After`, `error:
+"concurrency_limit"`), not queued: queueing an LLM request behind a minutes-long
+one turns a fast failure the client can act on into a timeout it can't.
+
+Like the body guard it is pure-ASGI and wraps the whole app, which is what makes
+it correct for streaming — a `BaseHTTPMiddleware` dispatch returns from
+`call_next` when the response *starts*, so a slot released there would be free
+before a single token had been sent. It sits *inside* the body guard, so
+rejecting an oversized body doesn't consume a slot, and only covers `/v1/*`:
+`/health` and `/metrics` stay answerable exactly when the gateway is saturated
+and an operator most needs them. Process-local, like the default rate limiter —
+with N uvicorn workers the effective cap is N × the configured value.
 
 ### Per-client usage
 

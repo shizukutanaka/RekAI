@@ -87,6 +87,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Added
+- **`REKAI_MAX_CONCURRENT_REQUESTS` — a cap on in-flight `/v1/*` requests**
+  (opt-in, `0` = unlimited, so no behavior change by default). The rate limiter
+  bounds *arrivals*; nothing bounded *occupancy*, which for an LLM gateway is a
+  different quantity — 60 requests/minute is satisfiable by 60 concurrent
+  60-second streams. And since `httpx`'s read timeout resets per chunk, a
+  slow-trickling upstream could hold a streaming request open indefinitely
+  without ever reaching `REKAI_REQUEST_TIMEOUT_SECONDS`. Excess requests get 429
+  + `Retry-After` (`error: "concurrency_limit"`) rather than queueing. Pure-ASGI
+  and wrapped around the whole app, so a slot is held until the last byte of a
+  streamed body is sent — a `BaseHTTPMiddleware` dispatch would release it
+  before the first token. `/health` and `/metrics` are outside the cap, so they
+  stay answerable exactly when the gateway is saturated.
 - **Latency is measured** — RekAI reported cost, tokens, cache hits, retries and
   cooldowns, but not a single duration: `elapsed_ms` was computed in the request
   middleware for the `X-Response-Time-Ms` header and the access log, then thrown

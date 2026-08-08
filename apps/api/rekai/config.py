@@ -105,6 +105,17 @@ class Settings(BaseSettings):
     # Reject /v1/* request bodies larger than this many bytes (0 disables).
     max_body_bytes: int = Field(default=1_000_000, ge=0)
 
+    # Cap on /v1/* requests in flight at once; excess get 429 + Retry-After
+    # rather than queueing. 0 (default) = unlimited, today's behavior.
+    #
+    # The rate limiter bounds *arrivals*, which is a different quantity: 60
+    # requests/min is satisfiable by 60 concurrent 60-second streams. And
+    # httpx's read timeout resets per chunk, so a slow-trickling upstream can
+    # hold a streaming request open past request_timeout_seconds indefinitely.
+    # Process-local, like the default rate limiter — with N uvicorn workers the
+    # effective cap is N × this.
+    max_concurrent_requests: int = Field(default=0, ge=0)
+
     # Per-client spend cap (opt-in). Once a client's cumulative cost_usd_total
     # (tracked in usage_by_client) reaches this, further /v1/* requests from that
     # client get 402 until an operator resets metrics. Unset = no cap.
