@@ -8,6 +8,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 
+from rekai import guardrails
 from rekai.cache import CacheBackend, cache_key, embedding_cache_key
 from rekai.circuit_breaker import consecutive_failures
 from rekai.config import Settings
@@ -112,6 +113,25 @@ async def _semantic_embed(request: ChatRequest, settings: Settings) -> list[floa
     except ProviderError:
         return None  # embeddings unavailable -> just skip the semantic cache
     return result.embeddings[0] if result.embeddings else None
+
+
+def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
+    """Scrub secret/API-key patterns out of the assistant's content (OWASP LLM02).
+
+    Deliberately called *before* the response is written to the response cache,
+    the semantic cache, or the idempotency store: a secret that reaches any of
+    those persists there — in Redis, in plaintext, for the whole TTL — and every
+    later replay would have to re-scrub it. Redacting at the source means the
+    raw secret is never stored in the first place, which is what
+    ``docs/architecture.md`` promises. The pattern names ride along on the
+    response so a cache hit can still report ``X-Redacted``.
+    """
+    if not settings.output_redaction_enabled or not response.content:
+        return response
+    scrubbed, hits = guardrails.redact_secrets(response.content)
+    if not hits:
+        return response
+    return response.model_copy(update={"content": scrubbed, "redacted": hits})
 
 
 async def handle_chat(
@@ -242,6 +262,8 @@ async def handle_chat(
             fallback_used=is_fallback,
             created=int(time.time()),
         )
+        # Redact before *any* store below sees the content (see _redact).
+        response = _redact(response, settings)
 
         if use_cache:
             await cache.set(key, response.model_dump_json(), settings.cache_ttl_seconds)

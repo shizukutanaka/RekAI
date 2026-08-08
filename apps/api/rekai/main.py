@@ -164,17 +164,26 @@ _IDEM_CONFLICT = "A request with this Idempotency-Key is already being processed
 
 
 def _redact_output(result: ChatResponse, settings: Settings, response: Response) -> ChatResponse:
-    """Scrub common secret/API-key patterns from the assistant's content
-    (OWASP LLM02). Sets X-Redacted (comma-separated pattern names) when
-    anything was redacted; returns ``result`` unchanged otherwise or when
-    disabled."""
-    if not settings.output_redaction_enabled or not result.content:
-        return result
-    redacted, hits = guardrails.redact_secrets(result.content)
-    if not hits:
-        return result
-    response.headers["X-Redacted"] = ",".join(hits)
-    return result.model_copy(update={"content": redacted})
+    """Surface output redaction (OWASP LLM02) as the X-Redacted header.
+
+    The scrubbing itself happens in ``rekai.service._redact``, before the
+    response is written to any cache or the idempotency store, so ``result``
+    normally arrives already clean with ``result.redacted`` naming what was
+    caught — including on a cache hit or an idempotent replay, which is why the
+    header survives those paths.
+
+    The re-scan below is a backstop for content that was stored *before*
+    redaction was switched on (an entry cached while the setting was off, whose
+    TTL outlived the config change). It is a no-op on already-scrubbed text."""
+    hits = list(result.redacted or [])
+    if settings.output_redaction_enabled and result.content:
+        scrubbed, late_hits = guardrails.redact_secrets(result.content)
+        if late_hits:
+            result = result.model_copy(update={"content": scrubbed})
+            hits += [h for h in late_hits if h not in hits]
+    if hits:
+        response.headers["X-Redacted"] = ",".join(hits)
+    return result
 
 
 class _HasUsageAndCost(Protocol):
@@ -273,7 +282,7 @@ async def _run_chat(
             return _idempotency_error(409, _IDEM_CONFLICT)
         if outcome.kind == "replay" and outcome.response is not None:
             response.headers["Idempotent-Replay"] = "true"
-            replayed = ChatResponse(**outcome.response)
+            replayed = _redact_output(ChatResponse(**outcome.response), settings, response)
             _record_client_usage(http_request, replayed, settings)
             return replayed
         claimed = True  # we hold the in-progress sentinel

@@ -172,6 +172,13 @@ class ChatResponse(BaseModel):
     fallback_used: bool = Field(
         default=False, description="True if a fallback served this response, not the primary."
     )
+    redacted: list[str] | None = Field(
+        default=None,
+        description="Names of the secret patterns scrubbed from 'content' by the output "
+        "redaction guardrail, or null if nothing was redacted. Mirrors the X-Redacted "
+        "header, and survives a cache hit or Idempotency-Key replay because redaction "
+        "runs before the response is stored.",
+    )
     created: int
 
 

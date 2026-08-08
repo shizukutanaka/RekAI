@@ -329,9 +329,15 @@ With `REKAI_OUTPUT_REDACTION_ENABLED=true`, RekAI scans the assistant's
 PEM private-key blocks) — the case where a provider echoes back something
 sensitive it was handed in a tool result or RAG context (OWASP LLM02). Matches
 are replaced with `[REDACTED:<pattern>]` and the response carries an
-`X-Redacted: <pattern1,pattern2,…>` header; the redaction happens before the
-response is cached or stored for `Idempotency-Key` replay, so every later hit is
-already scrubbed. As with the input guardrail, this is a **heuristic**, not a
+`X-Redacted: <pattern1,pattern2,…>` header plus a `redacted: ["<pattern>", …]`
+field in the body. The scrub runs in `service.handle_chat` — **before** the
+response is written to the response cache, the semantic cache, or the
+`Idempotency-Key` store — so the raw secret is never persisted (which matters
+most with Redis, where it would otherwise sit in plaintext for the whole TTL),
+and every later hit or replay serves already-scrubbed text and still reports
+what was caught. The edge re-scans as a backstop, which only does anything for
+an entry cached *before* redaction was switched on. As with the input guardrail,
+this is a **heuristic**, not a
 security boundary. It is **not applied to `/v1/chat/stream`**: redacting a
 pattern that may span multiple already-sent SSE chunks isn't possible without
 buffering the whole reply first, which would defeat streaming — a known,

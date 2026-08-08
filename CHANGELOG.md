@@ -7,6 +7,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **Output redaction now runs before the response is cached** — the documented
+  promise ("redaction happens before the response is cached or stored for
+  `Idempotency-Key` replay") was only half true. The idempotency store was
+  scrubbed, but the response cache and the semantic cache were written inside
+  `handle_chat`, *before* the edge redacted, so a secret the model echoed back
+  was persisted verbatim — in Redis, in plaintext, for the whole
+  `REKAI_CACHE_TTL_SECONDS`. The scrub moved into `service.handle_chat` ahead of
+  every store, and `ChatResponse` gained a `redacted: ["<pattern>", …]` field so
+  a cache hit or an idempotent replay still reports `X-Redacted` (previously the
+  replay path emitted no header at all). The edge keeps a re-scan as a backstop
+  for entries cached before the setting was switched on. Only affects
+  deployments with `REKAI_OUTPUT_REDACTION_ENABLED=true`.
 - **Web dev-tooling audit cleanup** — bumped `vitest` 2 → 4, clearing the
   critical advisory in its bundled `vite`/`esbuild`/`vite-node`/`@vitest/mocker`
   chain, and ran `npm audit fix` for a transitive `brace-expansion` fix — from

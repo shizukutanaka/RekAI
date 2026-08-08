@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from rekai.cache import MemoryCache, NullCache, cache_key
 from rekai.config import Settings
 from rekai.guardrails import detect_prompt_injection, redact_secrets, scan_messages
 from rekai.main import create_app
-from rekai.schemas import ChatMessage
+from rekai.schemas import ChatMessage, ChatRequest
+from rekai.semantic_cache import semantic_cache
+from rekai.service import handle_chat
 
 
 def test_detect_common_injections() -> None:
@@ -126,3 +129,75 @@ def test_output_redaction_leaves_benign_content_alone() -> None:
     assert resp.status_code == 200
     assert "X-Redacted" not in resp.headers
     assert resp.json()["content"] == "Echo: hello there"
+    assert resp.json()["redacted"] is None
+
+
+# --- redaction happens before anything is *stored* ---------------------------
+# docs/architecture.md promises the scrub runs before the response is cached or
+# stored for Idempotency-Key replay. These pin that down at the store itself:
+# it is not enough for the client to receive scrubbed text if the raw secret is
+# sitting in Redis for the whole TTL.
+
+_STORE_SECRET = "sk-" + "f" * 30
+
+
+def _redacting_settings(**kw) -> Settings:
+    return Settings(
+        environment="test", default_provider="echo", output_redaction_enabled=True, **kw
+    )
+
+
+async def test_secret_never_reaches_the_response_cache() -> None:
+    settings = _redacting_settings()
+    cache = MemoryCache()
+    request = ChatRequest(model="echo", messages=[ChatMessage(role="user", content=_STORE_SECRET)])
+
+    result = await handle_chat(request, None, settings, cache)
+    assert _STORE_SECRET not in result.content
+
+    stored = await cache.get(cache_key(request, "echo"))
+    assert stored is not None
+    assert _STORE_SECRET not in stored
+    assert "[REDACTED:openai_api_key]" in stored
+
+
+async def test_secret_never_reaches_the_semantic_cache() -> None:
+    # Content cache off, so the only store in play is the semantic one.
+    settings = _redacting_settings(
+        cache_enabled=False, semantic_cache_enabled=True, semantic_cache_model="echo"
+    )
+    semantic_cache.clear()
+    request = ChatRequest(model="echo", messages=[ChatMessage(role="user", content=_STORE_SECRET)])
+
+    await handle_chat(request, None, settings, NullCache())
+    # The second call is served from the semantic cache, so its content *is*
+    # the stored payload — nothing re-scrubs it on the way out at this layer.
+    replayed = await handle_chat(request, None, settings, NullCache())
+    assert replayed.cached is True
+    assert _STORE_SECRET not in replayed.content
+    semantic_cache.clear()
+
+
+def test_redaction_is_disclosed_and_survives_a_cache_hit() -> None:
+    client = _client(output_redaction_enabled=True)
+    secret = "sk-" + "g" * 30
+    first = _chat(client, secret)
+    second = _chat(client, secret)
+    assert second.json()["cached"] is True
+    assert first.json()["redacted"] == ["openai_api_key"]
+    # The cached copy carries the disclosure, so the header survives the hit.
+    assert second.json()["redacted"] == ["openai_api_key"]
+    assert second.headers["X-Redacted"] == "openai_api_key"
+    assert secret not in second.json()["content"]
+
+
+def test_redaction_survives_an_idempotent_replay() -> None:
+    client = _client(output_redaction_enabled=True)
+    secret = "sk-" + "h" * 30
+    body = {"model": "echo", "messages": [{"role": "user", "content": secret}]}
+    headers = {"Idempotency-Key": "redaction-replay-1"}
+    client.post("/v1/chat", json=body, headers=headers)
+    replay = client.post("/v1/chat", json=body, headers=headers)
+    assert replay.headers["Idempotent-Replay"] == "true"
+    assert secret not in replay.json()["content"]
+    assert replay.headers["X-Redacted"] == "openai_api_key"
