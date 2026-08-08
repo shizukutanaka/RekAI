@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from rekai import __version__, auth, guardrails, idempotency, openai_compat, tracing
 from rekai.cache import CacheBackend, build_cache
 from rekai.config import Settings, get_settings
+from rekai.cooldown import cooldowns
 from rekai.keystore import DynamicKeyStore
 from rekai.logging_config import configure_logging, get_logger
 from rekai.metrics import merge_snapshots, metrics
@@ -701,16 +702,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/health", response_model=HealthResponse, tags=["system"])
     async def health() -> HealthResponse:
+        """Liveness plus a coarse readiness signal.
+
+        Deliberately does **no I/O**: no upstream probe, no Redis ping. An
+        unauthenticated endpoint that makes the gateway call out to every
+        provider on demand is a request amplifier, and a health check that can
+        block on a slow dependency is worse than one that can't — the answer
+        arrives from state RekAI already tracks. What it reports is real,
+        though: the cooldown/circuit-breaker machinery already knew which
+        providers were parked and had no way to say so, leaving `status` typed
+        as a constant `"ok"` that could never be anything else.
+        """
         provider_status: dict[str, Literal["ready", "byok_only"]] = {}
         for name in provider_names():
             provider = get_provider(name)
             ready = provider is not None and provider.server_key_configured()
             provider_status[name] = "ready" if ready else "byok_only"
+        parked = cooldowns.parked()
         return HealthResponse(
-            status="ok",
+            # Still 200 when degraded: the gateway is serving, just not from
+            # every backend, and flipping an orchestrator's liveness probe over
+            # one parked provider would take down a working deployment.
+            status="degraded" if parked else "ok",
             version=__version__,
             providers=provider_names(),
             provider_status=provider_status,
+            parked_providers=parked,
             cache=cache.label,
         )
 

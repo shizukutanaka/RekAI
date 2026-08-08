@@ -50,6 +50,19 @@ class Cooldown:
         until = self._until.get(key)
         return max(0.0, until - self._clock()) if until is not None else 0.0
 
+    def parked(self) -> dict[str, float]:
+        """Currently-parked keys → seconds remaining, expired entries dropped.
+
+        The read side of what ``mark`` records, so ``/health`` can report *which*
+        providers are unavailable instead of only counting cooldowns after the
+        fact via ``rekai_cooldowns_total``. Local view only: a cooldown another
+        worker recorded in Redis needs I/O to see, which ``/health`` deliberately
+        doesn't do."""
+        now = self._clock()
+        for key in [k for k, until in self._until.items() if now >= until]:
+            del self._until[key]
+        return {key: round(until - now, 1) for key, until in self._until.items()}
+
     def clear(self) -> None:
         self._until.clear()
 

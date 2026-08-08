@@ -99,6 +99,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   streamed body is sent — a `BaseHTTPMiddleware` dispatch would release it
   before the first token. `/health` and `/metrics` are outside the cap, so they
   stay answerable exactly when the gateway is saturated.
+- **`/health` can report `degraded`** — `status` was typed `Literal["ok"]`, so
+  the endpoint structurally could not signal a problem, even though the cooldown
+  and circuit-breaker machinery already knew which providers were parked (the
+  only external evidence was `rekai_cooldowns_total`, which says something
+  happened, not what is happening). It now returns `degraded` while any provider
+  is in cooldown, with `parked_providers` giving each one's remaining seconds.
+  Still HTTP 200 when degraded — the gateway is serving, and failing a liveness
+  probe over one parked provider would take down a working deployment. Still no
+  I/O: no upstream probe (an unauthenticated request amplifier) and no Redis
+  ping, so `parked_providers` is the local worker's view.
 - **Errors are dimensioned** — `record_error()` took no arguments, so
   `rekai_errors_total` mixed a bad Bearer token with an upstream outage: enough
   for an alert threshold, useless for deciding what to do about it. Adds

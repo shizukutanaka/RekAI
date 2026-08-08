@@ -247,13 +247,24 @@ class UsageSummary(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    status: Literal["ok"]
+    status: Literal["ok", "degraded"] = Field(
+        description="'degraded' when at least one provider is parked in cooldown "
+        "after a 429 or repeated 5xx — the gateway is still serving, but not from "
+        "every backend. Never a failure state: /health answering at all is the "
+        "liveness signal, so it stays 200 either way."
+    )
     version: str
     providers: list[str]
     provider_status: dict[str, Literal["ready", "byok_only"]] = Field(
         default_factory=dict,
         description="Per-provider readiness: 'ready' (usable now) or "
         "'byok_only' (needs an X-Provider-Key).",
+    )
+    parked_providers: dict[str, float] = Field(
+        default_factory=dict,
+        description="Providers currently in cooldown → seconds remaining. This "
+        "worker's local view; a cooldown recorded by another replica in Redis "
+        "isn't reflected (reading it would mean I/O, which /health avoids).",
     )
     cache: str
 

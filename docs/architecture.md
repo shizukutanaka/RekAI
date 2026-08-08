@@ -673,6 +673,26 @@ header is present.
 or a server-side key is configured) or `byok_only` (needs an `X-Provider-Key`).
 Key-requiring providers override `server_key_configured()` to check their key.
 
+`status` is `ok` or **`degraded`** — the latter when at least one provider is
+parked in cooldown after a 429 or repeated 5xx, with `parked_providers` giving
+each one's remaining seconds. Previously the field was typed `Literal["ok"]` and
+could not be anything else, even though the cooldown and circuit-breaker
+machinery already knew exactly which providers were unavailable; the only
+external evidence was the `rekai_cooldowns_total` counter, which says something
+happened but not what is happening now.
+
+Two deliberate limits:
+
+- **Degraded is still HTTP 200.** The gateway is serving, just not from every
+  backend. Failing an orchestrator's liveness probe because one of five
+  providers is parked would take down a working deployment.
+- **`/health` does no I/O** — no upstream probe, no Redis ping. An
+  unauthenticated endpoint that makes the gateway call every provider on demand
+  is a request amplifier, and a health check that can block on a slow dependency
+  is worse than one that can't. The consequence is that `parked_providers` is
+  this worker's local view: a cooldown another replica recorded in Redis isn't
+  reflected.
+
 ## Embeddings
 
 `POST /v1/embeddings` mirrors the chat path: route → cache → `provider.embed()`.

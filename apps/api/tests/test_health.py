@@ -1,3 +1,5 @@
+import time
+
 from fastapi.testclient import TestClient
 
 
@@ -52,3 +54,48 @@ def test_openapi_documents_error_responses(client: TestClient) -> None:
         # The rate-limit and body-size errors are part of the documented contract.
         assert "413" in responses
         assert "429" in responses
+
+
+# --- degraded state ----------------------------------------------------------
+# The cooldown/circuit-breaker machinery already knew which providers were
+# parked; /health was typed Literal["ok"] and could never say so.
+
+
+def test_health_reports_degraded_while_a_provider_is_parked(client: TestClient) -> None:
+    from rekai.cooldown import cooldowns
+
+    cooldowns.clear()
+    try:
+        assert client.get("/health").json()["status"] == "ok"
+
+        cooldowns.mark("openai", 30.0)
+        body = client.get("/health").json()
+        assert body["status"] == "degraded"
+        assert 0 < body["parked_providers"]["openai"] <= 30.0
+        # Degraded is still 200: the gateway is serving, just not from every
+        # backend, and failing an orchestrator's liveness probe over one parked
+        # provider would take down a working deployment.
+        assert client.get("/health").status_code == 200
+    finally:
+        cooldowns.clear()
+
+
+def test_health_recovers_when_the_cooldown_expires(client: TestClient) -> None:
+    from rekai.cooldown import cooldowns
+
+    cooldowns.clear()
+    cooldowns.mark("openai", 0.01)
+    time.sleep(0.05)
+    body = client.get("/health").json()
+    assert body["status"] == "ok"
+    assert body["parked_providers"] == {}
+
+
+def test_parked_drops_expired_entries() -> None:
+    from rekai.cooldown import Cooldown
+
+    clock = iter([0.0, 0.0, 100.0])
+    cd = Cooldown(clock=lambda: next(clock))
+    cd.mark("a", 10.0)  # expires at 10
+    assert set(cd.parked()) == {"a"}
+    assert cd.parked() == {}  # clock now 100
