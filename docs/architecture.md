@@ -314,6 +314,27 @@ series and a labelled one under one metric name makes `sum(rekai_requests_total)
 count every request twice, and Prometheus treats inconsistent label sets within a
 family as an error.
 
+### Errors
+
+`rekai_errors_total` is a single number covering everything from a bad Bearer
+token to an upstream outage — useful for an alert threshold, useless for
+deciding what to do. Two breakdowns sit beside it:
+
+- `rekai_errors_by_kind_total{kind="…"}` — `unauthorized`, `rate_limited`,
+  `concurrency_limit`, `budget_exceeded`, `payload_too_large`,
+  `guardrail_blocked`, `idempotency_error`, `provider_error`. This separates
+  "callers are misbehaving" from "we are down".
+- `rekai_provider_errors_total{provider="…",status="…"}` — recorded for **every**
+  upstream failure, including non-transient 4xx and the final attempt in a
+  fallback chain. Against `rekai_provider_requests_total` that makes a
+  per-provider success rate computable, which is the number that decides whether
+  a fallback chain is worth having.
+
+Both label sets are drawn from fixed sets (RekAI's own error codes; registered
+provider names × HTTP statuses), so neither grows with traffic. Neither is part
+of the persisted snapshot — like the histograms, they are `/metrics`-only, and
+`seed()` clears them so a breakdown can't outlive the `errors_total` it explains.
+
 ### Latency
 
 Three histograms, all on the OpenTelemetry GenAI advisory bucket boundaries for

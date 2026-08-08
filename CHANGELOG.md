@@ -99,6 +99,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   streamed body is sent — a `BaseHTTPMiddleware` dispatch would release it
   before the first token. `/health` and `/metrics` are outside the cap, so they
   stay answerable exactly when the gateway is saturated.
+- **Errors are dimensioned** — `record_error()` took no arguments, so
+  `rekai_errors_total` mixed a bad Bearer token with an upstream outage: enough
+  for an alert threshold, useless for deciding what to do about it. Adds
+  `rekai_errors_by_kind_total{kind}` (`unauthorized`, `rate_limited`,
+  `concurrency_limit`, `budget_exceeded`, `payload_too_large`,
+  `guardrail_blocked`, `idempotency_error`, `provider_error`) and
+  `rekai_provider_errors_total{provider,status}`, the latter recorded for every
+  upstream failure — including non-transient 4xx and the last attempt in a
+  fallback chain, which the old fallback-only call site dropped — so a
+  per-provider success rate is computable against
+  `rekai_provider_requests_total`. Two paths that returned an error and counted
+  *nothing* now do: the hard body-size cap (the one a chunked upload actually
+  trips) and `Idempotency-Key` 409/422 conflicts.
 - **Latency is measured** — RekAI reported cost, tokens, cache hits, retries and
   cooldowns, but not a single duration: `elapsed_ms` was computed in the request
   middleware for the `X-Response-Time-Ms` header and the access log, then thrown

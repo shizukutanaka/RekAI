@@ -352,3 +352,22 @@ async def test_allowed_request_fallbacks_still_work() -> None:
     resp = await handle_chat(request, None, settings, NullCache())
     assert resp.provider == "echo"
     assert resp.fallback_used is True
+
+
+async def test_every_upstream_failure_is_counted_per_provider() -> None:
+    # Recorded for all attempts, not only the ones that trigger a fallback:
+    # a per-provider success rate needs the full denominator, and the fallback
+    # branch alone drops the last attempt in a chain.
+    from rekai.metrics import metrics
+
+    register_provider(FlakyProvider("flaky-count", 502))
+    metrics.provider_errors.clear()
+    request = _req(model="x", provider="flaky-count", fallbacks=[{"provider": "echo"}])
+    await handle_chat(request, None, _settings(), NullCache())
+
+    # No fallback this time: the failure is the last attempt, and still counted.
+    with pytest.raises(ProviderError):
+        await handle_chat(_req(model="x", provider="flaky-count"), None, _settings(), NullCache())
+
+    assert metrics.provider_errors[("flaky-count", 502)] == 2
+    metrics.provider_errors.clear()

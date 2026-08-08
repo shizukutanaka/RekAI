@@ -229,6 +229,11 @@ async def handle_chat(
             metrics.observe_provider_duration(
                 attempt.provider_name, "chat", time.perf_counter() - started
             )
+            # Recorded for every upstream failure, not only the ones that
+            # trigger a fallback below — a per-provider success rate needs the
+            # full denominator, and the fallback branch alone drops the last
+            # attempt in a chain and every non-transient 4xx.
+            metrics.record_provider_error(attempt.provider_name, exc.status_code)
             last_error = exc
             if settings.provider_cooldown_enabled and exc.status_code == 429:
                 # An explicit "back off" signal — park this provider immediately
@@ -256,7 +261,7 @@ async def handle_chat(
             # retries), but not on other client (4xx) errors.
             transient = exc.status_code >= 500 or exc.status_code == 429
             if transient and index + 1 < len(attempts):
-                metrics.record_error()
+                metrics.record_error("provider_error")
                 logger.warning(
                     "provider %s failed (%s); trying fallback",
                     attempt.provider_name,
@@ -362,7 +367,8 @@ async def handle_chat_stream(
                 reported_tool_calls = event.tool_calls
     except ProviderError as exc:
         errored = True
-        metrics.record_error()
+        metrics.record_error("provider_error")
+        metrics.record_provider_error(provider_name, exc.status_code)
         metrics.observe_provider_duration(provider_name, "stream", time.perf_counter() - started)
         if settings.provider_cooldown_enabled and exc.status_code == 429:
             await cooldowns.mark_shared(

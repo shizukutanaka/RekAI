@@ -106,6 +106,12 @@ class Metrics:
         self.tokens_total = 0
         self.cost_usd_total = 0.0
         self.requests_by_provider: dict[str, int] = {}
+        # Error breakdowns. errors_total alone can't distinguish "clients are
+        # sending bad keys" from "the upstream is down". Both dicts are keyed
+        # by values from fixed sets (RekAI's own error codes; registered
+        # provider names × HTTP statuses), so neither grows with traffic.
+        self.errors_by_kind: dict[str, int] = {}
+        self.provider_errors: dict[tuple[str, int], int] = {}
         # Per-tenant usage, keyed by the masked "key:<hash>" client id (or the
         # client IP when the gateway has no auth configured).
         self.usage_by_client: dict[str, dict[str, float]] = {}
@@ -159,9 +165,27 @@ class Metrics:
             else:
                 self.cache_misses_total += 1
 
-    def record_error(self) -> None:
+    def record_error(self, kind: str = "unknown") -> None:
+        """Count one error returned to a client, tagged by *why*.
+
+        An undimensioned total mixes "a client sent a bad key" with "the
+        upstream is down", which are the two things an operator most needs to
+        tell apart: one is the caller's problem, the other is an incident.
+        ``kind`` is drawn from a fixed set of RekAI's own error codes, so the
+        label cardinality is bounded by the code, not by traffic."""
         with self._lock:
             self.errors_total += 1
+            self.errors_by_kind[kind] = self.errors_by_kind.get(kind, 0) + 1
+
+    def record_provider_error(self, provider: str, status_code: int) -> None:
+        """Count one upstream failure, by provider and status.
+
+        Paired with ``requests_by_provider`` this makes a per-provider success
+        rate computable — the number that decides whether to fail over, which
+        previously could not be derived from anything RekAI exposed."""
+        with self._lock:
+            key = (provider, status_code)
+            self.provider_errors[key] = self.provider_errors.get(key, 0) + 1
 
     def record_fallback(self) -> None:
         with self._lock:
@@ -259,6 +283,11 @@ class Metrics:
         """Set counters from a persisted snapshot (used on startup)."""
         with self._lock:
             self._budget_window_usage = {}
+            # The breakdowns aren't part of the snapshot (they're /metrics-only,
+            # and Prometheus handles resets), so clear them rather than let them
+            # outlive the errors_total they break down.
+            self.errors_by_kind = {}
+            self.provider_errors = {}
             self.requests_total = snapshot.get("requests_total", 0)
             self.cache_hits_total = snapshot.get("cache_hits_total", 0)
             self.cache_misses_total = snapshot.get("cache_misses_total", 0)
@@ -345,6 +374,22 @@ class Metrics:
         ]
         for provider, count in sorted(self.requests_by_provider.items()):
             lines.append(f'rekai_provider_requests_total{{provider="{provider}"}} {count}')
+
+        lines += [
+            "# HELP rekai_errors_by_kind_total Errors returned to clients, by cause.",
+            "# TYPE rekai_errors_by_kind_total counter",
+        ]
+        for kind, count in sorted(self.errors_by_kind.items()):
+            lines.append(f'rekai_errors_by_kind_total{{kind="{kind}"}} {count}')
+
+        lines += [
+            "# HELP rekai_provider_errors_total Upstream failures per provider and status.",
+            "# TYPE rekai_provider_errors_total counter",
+        ]
+        for (provider, status), count in sorted(self.provider_errors.items()):
+            lines.append(
+                f'rekai_provider_errors_total{{provider="{provider}",status="{status}"}} {count}'
+            )
 
         lines += self.request_duration.render(
             "rekai_request_duration_seconds",

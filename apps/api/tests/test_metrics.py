@@ -534,3 +534,71 @@ def test_per_provider_requests_are_a_separate_metric_family() -> None:
     assert "rekai_requests_total 1" in out
     assert 'rekai_provider_requests_total{provider="echo"} 1' in out
     assert "rekai_requests_total{provider=" not in out
+
+
+# --- error dimensions --------------------------------------------------------
+# errors_total alone mixes "a client sent a bad key" with "the upstream is
+# down" — the two things an operator most needs to tell apart.
+
+
+def test_errors_are_counted_by_kind() -> None:
+    m = Metrics()
+    m.record_error("unauthorized")
+    m.record_error("unauthorized")
+    m.record_error("provider_error")
+    out = m.render()
+    assert m.errors_total == 3  # the scalar still totals everything
+    assert 'rekai_errors_by_kind_total{kind="unauthorized"} 2' in out
+    assert 'rekai_errors_by_kind_total{kind="provider_error"} 1' in out
+
+
+def test_provider_errors_make_a_success_rate_computable() -> None:
+    m = Metrics()
+    for _ in range(10):
+        m.record_request("openai")
+    m.record_provider_error("openai", 502)
+    m.record_provider_error("openai", 502)
+    m.record_provider_error("openai", 429)
+    out = m.render()
+    assert 'rekai_provider_errors_total{provider="openai",status="502"} 2' in out
+    assert 'rekai_provider_errors_total{provider="openai",status="429"} 1' in out
+    assert 'rekai_provider_requests_total{provider="openai"} 10' in out
+
+
+def test_endpoint_errors_carry_their_kind() -> None:
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys="sk-kinds",
+        rate_limit_enabled=False,
+    )
+    client = TestClient(create_app(settings))
+    main_module.metrics.seed({})  # start from a clean breakdown
+    try:
+        client.post("/v1/chat", json={"model": "echo", "messages": []})  # no key -> 401
+        text = client.get("/metrics", headers={"Authorization": "Bearer sk-kinds"}).text
+        assert 'rekai_errors_by_kind_total{kind="unauthorized"} 1' in text
+    finally:
+        main_module.metrics.seed({})
+
+
+def test_hard_body_cap_rejection_is_recorded() -> None:
+    # The advisory Content-Length check counted its rejections; the hard cap —
+    # the one a chunked upload actually trips — recorded nothing.
+    settings = Settings(
+        environment="test", default_provider="echo", max_body_bytes=100, rate_limit_enabled=False
+    )
+    client = TestClient(create_app(settings))
+    main_module.metrics.seed({})  # start from a clean breakdown
+    try:
+        resp = client.post(
+            "/v1/chat",
+            content=iter([b"x" * 200]),  # chunked: no Content-Length to pre-check
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 413
+        assert (
+            'rekai_errors_by_kind_total{kind="payload_too_large"} 1' in client.get("/metrics").text
+        )
+    finally:
+        main_module.metrics.seed({})

@@ -99,6 +99,11 @@ class MaxBodySizeMiddleware:
                 break
             total += len(message.get("body", b""))
             if total > self.max_bytes:
+                # The advisory Content-Length check in _rate_limit counts its
+                # rejections; this hard cap — the one a chunked upload actually
+                # trips — recorded nothing, so the rejections that mattered most
+                # were invisible in both the metrics and the access log.
+                metrics.record_error("payload_too_large")
                 response = JSONResponse(
                     status_code=413,
                     content=ErrorResponse(
@@ -174,7 +179,7 @@ class ConcurrencyLimitMiddleware:
         # the increment, so two coroutines can't both see a free slot (the same
         # property MemoryCache.add relies on).
         if self._in_flight >= self.max_concurrent:
-            metrics.record_error()
+            metrics.record_error("concurrency_limit")
             response = JSONResponse(
                 status_code=429,
                 content=ErrorResponse(
@@ -203,7 +208,7 @@ def _guardrail_response(
     if hit is None:
         return None
     if settings.guardrails_action == "block":
-        metrics.record_error()
+        metrics.record_error("guardrail_blocked")
         return JSONResponse(
             status_code=403,
             content=ErrorResponse(
@@ -217,6 +222,7 @@ def _guardrail_response(
 
 def _idempotency_error(status_code: int, detail: str) -> JSONResponse:
     """A 409/422 for an Idempotency-Key that conflicts with an existing record."""
+    metrics.record_error("idempotency_error")
     return JSONResponse(
         status_code=status_code,
         content=ErrorResponse(error="idempotency_error", detail=detail).model_dump(),
@@ -477,7 +483,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # --- error handling ---------------------------------------------------
     @app.exception_handler(ProviderError)
     async def _provider_error_handler(_: Request, exc: ProviderError) -> JSONResponse:
-        metrics.record_error()
+        metrics.record_error("provider_error")
         headers: dict[str, str] = {}
         # Pass an upstream rate-limit's Retry-After through to the client so its
         # SDK can back off by the amount the provider asked for.
@@ -505,7 +511,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if is_api_write and (settings.api_key_list or key_store is not None):
             token = auth.parse_bearer(request.headers.get("authorization"))
             if token is None or not auth.key_allowed(token, await _allowed_keys()):
-                metrics.record_error()
+                metrics.record_error("unauthorized")
                 return JSONResponse(
                     status_code=401,
                     content=ErrorResponse(
@@ -529,7 +535,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             else:
                 spent = metrics.client_cost_usd(rl_client)
             if spent >= budget:
-                metrics.record_error()
+                metrics.record_error("budget_exceeded")
                 headers = {"X-Budget-Remaining": "0"}
                 if window is not None:
                     headers["X-Budget-Reset"] = str((int(time.time() / window) + 1) * window)
@@ -552,7 +558,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content_length = request.headers.get("content-length")
             if content_length is not None and content_length.isdigit():
                 if int(content_length) > settings.max_body_bytes:
-                    metrics.record_error()
+                    metrics.record_error("payload_too_large")
                     return JSONResponse(
                         status_code=413,
                         content=ErrorResponse(
@@ -566,7 +572,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if settings.rate_limit_enabled and is_api_write:
             limit = str(settings.rate_limit_requests)
             if not await limiter.allow(rl_client):
-                metrics.record_error()
+                metrics.record_error("rate_limited")
                 retry_after = await limiter.retry_after(rl_client)
                 return JSONResponse(
                     status_code=429,
@@ -730,7 +736,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return metrics.render()
         authenticated = await _is_authenticated(request)
         if settings.metrics_require_auth and not authenticated:
-            metrics.record_error()
+            metrics.record_error("unauthorized")
             response.status_code = 401
             response.headers["WWW-Authenticate"] = "Bearer"
             return ErrorResponse(
