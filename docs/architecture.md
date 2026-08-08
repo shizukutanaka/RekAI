@@ -173,11 +173,43 @@ an optional `provider` body field, or an OpenRouter-style `"<provider>/<model>"`
 model string (split only when the prefix is a *registered* provider, so a custom
 backend's own slash-containing model ids are left intact). Unknown OpenAI tuning
 params are tolerated and ignored; `n > 1` is a 400; errors use OpenAI's error
-envelope. `response_format` (JSON mode / `json_schema`) is accepted on both this
-endpoint and native `/v1/chat`, and forwarded to providers that support it
-(OpenAI/OpenAI-compatible natively, Gemini best-effort via `responseMimeType`/
-`responseSchema`; Anthropic and Ollama ignore it). It is part of the cache key,
-so a JSON-mode request and a plain one never collide.
+envelope. It is part of the cache key, so a JSON-mode request and a plain one
+never collide.
+
+### Structured output
+
+`response_format` (JSON mode / `json_schema`) is accepted on both this endpoint
+and native `/v1/chat`, and **every provider honors it** — each in the way its own
+API expresses the idea:
+
+| Provider | Mechanism |
+|---|---|
+| OpenAI / OpenAI-compatible | `response_format` passed through natively |
+| Gemini | `generationConfig.responseMimeType` + `responseSchema` |
+| Ollama | top-level `format`: `"json"`, or the schema itself for constrained decoding |
+| Anthropic | **forced tool use** — see below |
+
+Anthropic's Messages API has no `response_format` field at all. Its documented
+route to a schema-shaped answer is forced tool use: declare one tool whose
+`input_schema` is the desired shape and pin `tool_choice` to it, and the model
+must emit a `tool_use` block whose `input` conforms. RekAI injects that tool
+(`json_response`), then **unwraps the resulting block back into JSON `content`**
+and suppresses the tool call — so the response is shaped like OpenAI's JSON mode
+rather than like a tool call the caller never asked for. Streaming works too:
+the forced tool's `input_json_delta` fragments *are* the answer, so they are
+emitted as text deltas.
+
+Two deliberate limits. A `json_object` request carries no schema, so the injected
+tool uses a permissive `{"type": "object"}` — any object satisfies it. And when
+the caller sends their own `tools` **alongside** `response_format`, the tools
+win: only one tool can be forced, OpenAI's "either a tool call or JSON" has no
+equivalent in forced tool use, and silently disabling the tools someone
+explicitly asked for is worse than leaving the ambiguity with them.
+
+Previously Anthropic and Ollama accepted the field and dropped it with a debug
+log, so a caller who asked for JSON got prose and no signal — while Ollama had
+supported structured output all along and Anthropic had a documented workaround.
+That is the kind of gap a gateway exists to close, not to introduce.
 
 ## Idempotency
 

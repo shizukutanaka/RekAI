@@ -23,9 +23,48 @@ from rekai.schemas import ChatRequest, Usage
 logger = get_logger("rekai.providers.anthropic")
 
 
+# --- structured output -------------------------------------------------------
+# Anthropic's Messages API has no `response_format`. Its documented route to a
+# schema-shaped answer is **forced tool use**: declare one tool whose
+# input_schema is the desired shape and set tool_choice to that tool, and the
+# model must emit a tool_use block whose `input` conforms. RekAI presents that
+# back to the caller as ordinary JSON `content`, so a request written against
+# OpenAI's JSON mode behaves the same way here — which is the entire point of a
+# gateway. Previously the field was accepted at the edge, advertised in the
+# OpenAPI schema, and then dropped with only a debug log.
+_JSON_TOOL_NAME = "json_response"
+
+
+def _structured_output_schema(request: ChatRequest) -> dict | None:
+    """The schema to force via tool use, or None when emulation doesn't apply.
+
+    Returns None when the caller sent their own ``tools``: only one tool can be
+    forced, so honoring ``response_format`` there would silently disable the
+    tools they asked for. OpenAI can express "either a tool call or JSON";
+    forced tool use cannot, and guessing which the caller meant is worse than
+    leaving the ambiguity to them.
+    """
+    rf = request.response_format
+    if not isinstance(rf, dict) or request.tools:
+        return None
+    kind = rf.get("type")
+    if kind == "json_schema":
+        schema = (rf.get("json_schema") or {}).get("schema")
+        if isinstance(schema, dict):
+            return schema
+        return {"type": "object"}
+    if kind == "json_object":
+        # No schema was given, so any object satisfies the request.
+        return {"type": "object"}
+    return None
+
+
 class AnthropicProvider(Provider):
     name = "anthropic"
     requires_key = True
+
+    def _emulating_json(self, request: ChatRequest) -> bool:
+        return _structured_output_schema(request) is not None
 
     def server_key_configured(self) -> bool:
         return bool(get_settings().anthropic_api_key)
@@ -56,10 +95,24 @@ class AnthropicProvider(Provider):
         }
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
-        if request.response_format is not None:
-            # Anthropic has no response_format equivalent (structured output is
-            # done via forced tool use, out of scope here) — ignore, don't error.
-            logger.debug("ignoring response_format: unsupported by the anthropic provider")
+        # Structured output: Anthropic has no `response_format`, but forcing a
+        # single-tool call is the documented way to get a schema-shaped object
+        # out of it. See _structured_output_schema.
+        schema = _structured_output_schema(request)
+        if schema is not None:
+            payload["tools"] = [
+                {
+                    "name": _JSON_TOOL_NAME,
+                    "description": "Return the answer as a JSON object matching the schema.",
+                    "input_schema": schema,
+                }
+            ]
+            payload["tool_choice"] = {"type": "tool", "name": _JSON_TOOL_NAME}
+        elif request.response_format is not None:
+            logger.debug(
+                "not emulating response_format on anthropic: %s",
+                "the request also carries tools" if request.tools else "unrecognised format",
+            )
         # Translate OpenAI-style tools / tool_choice into Anthropic's format.
         if request.tools:
             payload["tools"] = _translate_tools(request.tools)
@@ -103,6 +156,12 @@ class AnthropicProvider(Provider):
         # content is a list of blocks; concatenate the text blocks.
         content = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
         tool_calls = _extract_tool_calls(blocks)
+        if self._emulating_json(request):
+            # The caller asked for JSON, not a tool call: unwrap the forced
+            # tool_use block's input back into `content` and drop the call, so
+            # the response is shaped like OpenAI's JSON mode.
+            content = _unwrap_structured_output(blocks) or content
+            tool_calls = None
         usage = data.get("usage", {})
         cache_read, cache_write = _cache_tokens(usage)
         # Anthropic reports cached prompt tokens *separately* from input_tokens;
@@ -134,6 +193,10 @@ class AnthropicProvider(Provider):
         settings = get_settings()
         key = self._resolve_key(api_key)
         payload = self._build_payload(request, stream=True)
+        # When emulating JSON mode the forced tool's input_json_delta fragments
+        # ARE the answer, so they stream out as text deltas rather than
+        # accumulating into a tool call the caller never asked for.
+        emulating_json = self._emulating_json(request)
         url = f"{settings.anthropic_base_url.rstrip('/')}/messages"
         # input tokens arrive in message_start; output tokens in message_delta.
         input_tokens = 0
@@ -181,9 +244,14 @@ class AnthropicProvider(Provider):
                         if text:
                             yield StreamEvent(delta=text)
                         elif delta.get("type") == "input_json_delta":
+                            fragment = delta.get("partial_json", "")
+                            if emulating_json:
+                                if fragment:
+                                    yield StreamEvent(delta=fragment)
+                                continue
                             slot = tool_blocks.get(event.get("index", 0))
                             if slot is not None:
-                                slot["function"]["arguments"] += delta.get("partial_json", "")
+                                slot["function"]["arguments"] += fragment
                     elif etype == "message_start":
                         usage = event.get("message", {}).get("usage", {})
                         input_tokens = usage.get("input_tokens", input_tokens)
@@ -197,7 +265,7 @@ class AnthropicProvider(Provider):
                             saw_usage = True
         except httpx.HTTPError as exc:
             raise ProviderError(f"Anthropic streaming request failed: {exc}") from exc
-        if tool_blocks:
+        if tool_blocks and not emulating_json:
             yield StreamEvent(tool_calls=[tool_blocks[i] for i in sorted(tool_blocks)])
         if saw_usage:
             # Cached prompt tokens are reported alongside input_tokens, not
@@ -335,6 +403,19 @@ def _translate_messages(messages: list) -> list[dict]:
             out.append({"role": m.role, "content": m.content or ""})
         _apply_cache_control(out[-1], getattr(m, "cache_control", None))
     return out
+
+
+def _unwrap_structured_output(blocks: list[dict]) -> str | None:
+    """Turn the forced ``json_response`` tool_use block back into JSON text.
+
+    Returns None when the model didn't produce one (it is *forced*, so this is
+    the abnormal path) — the caller then falls back to whatever text blocks came
+    back, which is strictly better than returning an empty response.
+    """
+    for block in blocks:
+        if block.get("type") == "tool_use" and block.get("name") == _JSON_TOOL_NAME:
+            return json.dumps(block.get("input", {}))
+    return None
 
 
 def _extract_tool_calls(blocks: list[dict]) -> list[dict] | None:

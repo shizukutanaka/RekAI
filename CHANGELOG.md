@@ -87,6 +87,27 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Added
+- **`response_format` is now honored by every provider.** RekAI advertised JSON
+  mode in its OpenAPI schema and README, but Anthropic and Ollama accepted the
+  field and dropped it with only a debug log — a caller who asked for JSON got
+  prose and no signal, which breaks the one promise a gateway makes. Neither
+  provider lacked the capability:
+  - **Ollama** takes a top-level `format`: `"json"` for free-form JSON, or the
+    JSON schema itself, which it uses for *constrained decoding* so the output
+    conforms by construction. The old log line said "unsupported by the ollama
+    provider", which was simply untrue.
+  - **Anthropic** has no `response_format` at all, so RekAI uses its documented
+    route — forced tool use: inject one tool whose `input_schema` is the
+    requested shape, pin `tool_choice` to it, then **unwrap the resulting
+    `tool_use` block back into JSON `content`** and suppress the tool call, so
+    the response looks like OpenAI's JSON mode. Streaming included: the forced
+    tool's `input_json_delta` fragments are emitted as text deltas.
+
+  Two documented limits: a `json_object` request has no schema, so the injected
+  tool uses a permissive `{"type": "object"}`; and if the caller sends their own
+  `tools` alongside `response_format`, the tools win — only one tool can be
+  forced, and silently disabling tools someone explicitly asked for is worse
+  than leaving the ambiguity with them.
 - **Semantic cache: meaning-flipping edits can no longer produce a hit.** A
   cosine threshold cannot catch the failure mode that matters most, because the
   vectors really are that close: "is aspirin safe during pregnancy" vs "is

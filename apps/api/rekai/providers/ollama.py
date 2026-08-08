@@ -24,13 +24,32 @@ logger = get_logger("rekai.providers.ollama")
 
 
 def _warn_unsupported_fields(request: ChatRequest) -> None:
-    """Ollama's /api/chat has no tools/response_format equivalent RekAI wires
-    up here — log at debug rather than silently dropping them (matches the
-    Anthropic response_format handling)."""
+    """Log the request fields this provider can't honor, rather than dropping
+    them without a trace."""
     if request.tools is not None:
-        logger.debug("ignoring tools: unsupported by the ollama provider")
-    if request.response_format is not None:
-        logger.debug("ignoring response_format: unsupported by the ollama provider")
+        logger.debug("ignoring tools: not wired up for the ollama provider")
+
+
+def _response_format(request: ChatRequest) -> str | dict | None:
+    """Map OpenAI's ``response_format`` onto Ollama's top-level ``format``.
+
+    ``json_object`` → ``"json"`` (free-form JSON); ``json_schema`` → the schema
+    itself, which Ollama uses for constrained decoding so the output conforms by
+    construction rather than by instruction. Anything else (``{"type": "text"}``
+    or a shape RekAI doesn't recognise) returns None and is left off the payload.
+    """
+    rf = request.response_format
+    if not isinstance(rf, dict):
+        return None
+    kind = rf.get("type")
+    if kind == "json_schema":
+        schema = (rf.get("json_schema") or {}).get("schema")
+        if schema is not None:
+            return schema
+        return "json"  # json_schema with no schema still means "JSON, please"
+    if kind == "json_object":
+        return "json"
+    return None
 
 
 class OllamaProvider(Provider):
@@ -40,12 +59,15 @@ class OllamaProvider(Provider):
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
         settings = get_settings()
         _warn_unsupported_fields(request)
-        payload = {
+        payload: dict = {
             "model": request.model,
             "messages": [m.model_dump(exclude_none=True) for m in request.messages],
             "stream": False,
             "options": {"temperature": request.temperature},
         }
+        fmt = _response_format(request)
+        if fmt is not None:
+            payload["format"] = fmt
         url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
         try:
             client = self._client(settings.request_timeout_seconds)
@@ -105,12 +127,15 @@ class OllamaProvider(Provider):
     ) -> AsyncIterator[StreamEvent]:
         settings = get_settings()
         _warn_unsupported_fields(request)
-        payload = {
+        payload: dict = {
             "model": request.model,
             "messages": [m.model_dump(exclude_none=True) for m in request.messages],
             "stream": True,
             "options": {"temperature": request.temperature},
         }
+        fmt = _response_format(request)
+        if fmt is not None:
+            payload["format"] = fmt
         url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
         try:
             client = self._client(settings.request_timeout_seconds)

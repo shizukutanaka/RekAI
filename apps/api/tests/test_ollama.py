@@ -100,23 +100,73 @@ async def test_chat_network_error_wrapped(monkeypatch) -> None:
         await OllamaProvider().chat(req, api_key=None)
 
 
-async def test_tools_and_response_format_logged_not_forwarded(monkeypatch, caplog) -> None:
+async def test_tools_are_logged_not_forwarded(monkeypatch, caplog) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
     req = ChatRequest(
         model="llama3",
         messages=[ChatMessage(role="user", content="weather?")],
         tools=[WEATHER_TOOL],
-        response_format={"type": "json_object"},
     )
     with caplog.at_level(logging.DEBUG, logger="rekai.providers.ollama"):
         await OllamaProvider().chat(req, api_key=None)
-    # Neither field is sent upstream — Ollama's /api/chat payload has no slot
-    # for either, so this asserts they're silently dropped, not mistranslated.
+    # tools are still not wired up for Ollama; assert they're dropped with a
+    # trace rather than mistranslated.
     assert "tools" not in FakeClient.captured["json"]
-    assert "response_format" not in FakeClient.captured["json"]
-    messages = [r.message for r in caplog.records]
-    assert any("ignoring tools" in m for m in messages)
-    assert any("ignoring response_format" in m for m in messages)
+    assert any("ignoring tools" in r.message for r in caplog.records)
+
+
+# --- structured output -------------------------------------------------------
+# Ollama's /api/chat takes a top-level `format`: "json" for free-form JSON, or a
+# JSON schema for constrained decoding. RekAI used to log "unsupported by the
+# ollama provider" and drop it, which was not true — it was unimplemented.
+
+
+async def test_json_object_maps_to_format_json(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    req = ChatRequest(
+        model="llama3",
+        messages=[ChatMessage(role="user", content="hi")],
+        response_format={"type": "json_object"},
+    )
+    await OllamaProvider().chat(req, api_key=None)
+    assert FakeClient.captured["json"]["format"] == "json"
+
+
+async def test_json_schema_is_sent_for_constrained_decoding(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    schema = {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}
+    req = ChatRequest(
+        model="llama3",
+        messages=[ChatMessage(role="user", content="hi")],
+        response_format={"type": "json_schema", "json_schema": {"name": "loc", "schema": schema}},
+    )
+    await OllamaProvider().chat(req, api_key=None)
+    # The schema goes through verbatim: Ollama constrains decoding to it, so the
+    # output conforms by construction rather than by instruction.
+    assert FakeClient.captured["json"]["format"] == schema
+
+
+async def test_json_schema_without_a_schema_still_asks_for_json(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    req = ChatRequest(
+        model="llama3",
+        messages=[ChatMessage(role="user", content="hi")],
+        response_format={"type": "json_schema"},
+    )
+    await OllamaProvider().chat(req, api_key=None)
+    assert FakeClient.captured["json"]["format"] == "json"
+
+
+async def test_text_format_and_absent_format_send_nothing(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    for rf in (None, {"type": "text"}):
+        req = ChatRequest(
+            model="llama3",
+            messages=[ChatMessage(role="user", content="hi")],
+            response_format=rf,
+        )
+        await OllamaProvider().chat(req, api_key=None)
+        assert "format" not in FakeClient.captured["json"]
 
 
 async def test_no_unsupported_fields_no_log(monkeypatch, caplog) -> None:

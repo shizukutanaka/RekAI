@@ -47,7 +47,13 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
 3. **ガードレールがヒューリスティックのみ** (`guardrails.py`)。パターンは実測で
    締めた (良性 17 件中 0 誤検知 / 攻撃 21 件中 0 見逃し)、既定は `flag`。
    ただし**言い換え耐性はない**という性質自体は変わらない。分類器導入は未着手。
-4. **Anthropic/Ollama は response_format 非対応** (debug ログのみ、文書化済み)。
+4. ~~**Anthropic/Ollama は response_format 非対応**~~ → **解消**。Ollama は
+   トップレベル `format` (JSON / スキーマによる制約デコード)、Anthropic は
+   強制ツール使用 (`json_response` ツールを注入し `tool_use.input` を JSON
+   content に戻す。ストリームも `input_json_delta` を text delta として送出)。
+   **残る制約**: 呼び出し側が `tools` と `response_format` を同時に送った場合は
+   tools を優先する (強制できるツールは 1 つだけで、OpenAI の「ツール呼び出し
+   *または* JSON」は強制ツール使用では表現できないため)。
 5. **streaming に Idempotency-Key なし** (意図的・文書化済み — 変更するなら設計から)。
    同様に**ストリームには出力レダクションもかからない** (チャンクをまたぐパターンを
    バッファなしで消せないため。文書化済みの既知ギャップ)。
