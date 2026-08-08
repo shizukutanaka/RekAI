@@ -163,6 +163,12 @@ _IDEM_MISMATCH = "Idempotency-Key was already used with a different request body
 _IDEM_CONFLICT = "A request with this Idempotency-Key is already being processed."
 
 
+def _client_id(http_request: Request) -> str:
+    """The requesting tenant: the masked API-key id under gateway auth, else the
+    client IP (set by the ``_rate_limit`` middleware)."""
+    return getattr(http_request.state, "client_id", None) or "anonymous"
+
+
 def _redact_output(result: ChatResponse, settings: Settings, response: Response) -> ChatResponse:
     """Surface output redaction (OWASP LLM02) as the X-Redacted header.
 
@@ -241,7 +247,7 @@ def _record_client_usage(
 
     When REKAI_CLIENT_BUDGET_WINDOW_SECONDS is set, this also updates the
     current window's bucket used by the budget-cap check."""
-    client_id = getattr(http_request.state, "client_id", None) or "anonymous"
+    client_id = _client_id(http_request)
     metrics.record_client_usage(client_id, result.usage.total_tokens, result.cost_usd)
     if settings.client_budget_window_seconds is not None:
         metrics.record_client_budget_usage(
@@ -271,10 +277,15 @@ async def _run_chat(
         return blocked
     fingerprint: str | None = None
     claimed = False
+    client_id = _client_id(http_request)
     if idempotency_key:
         fingerprint = idempotency.fingerprint(request.model_dump_json())
         outcome = await idempotency.claim(
-            cache_backend, idempotency_key, fingerprint, settings.idempotency_ttl_seconds
+            cache_backend,
+            client_id,
+            idempotency_key,
+            fingerprint,
+            settings.idempotency_ttl_seconds,
         )
         if outcome.kind == "mismatch":
             return _idempotency_error(422, _IDEM_MISMATCH)
@@ -292,13 +303,14 @@ async def _run_chat(
         # Free the sentinel so the client can retry immediately instead of
         # getting a 409 until it expires.
         if claimed:
-            await idempotency.release(cache_backend, idempotency_key)  # type: ignore[arg-type]
+            await idempotency.release(cache_backend, client_id, idempotency_key)  # type: ignore[arg-type]
         raise
     result = _redact_output(result, settings, response)
     _record_client_usage(http_request, result, settings)
     if idempotency_key and fingerprint is not None:
         await idempotency.complete(
             cache_backend,
+            client_id,
             idempotency_key,
             fingerprint,
             result.model_dump(mode="json"),
@@ -858,10 +870,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> EmbeddingsResponse | JSONResponse:
         fingerprint: str | None = None
         claimed = False
+        client_id = _client_id(http_request)
         if idempotency_key:
             fingerprint = idempotency.fingerprint(request.model_dump_json())
             outcome = await idempotency.claim(
-                cache_backend, idempotency_key, fingerprint, config.idempotency_ttl_seconds
+                cache_backend,
+                client_id,
+                idempotency_key,
+                fingerprint,
+                config.idempotency_ttl_seconds,
             )
             if outcome.kind == "mismatch":
                 return _idempotency_error(422, _IDEM_MISMATCH)
@@ -877,12 +894,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             result = await handle_embeddings(request, x_provider_key, config, cache_backend)
         except Exception:
             if claimed:
-                await idempotency.release(cache_backend, idempotency_key)  # type: ignore[arg-type]
+                await idempotency.release(cache_backend, client_id, idempotency_key)  # type: ignore[arg-type]
             raise
         _record_client_usage(http_request, result, config, operation="embeddings")
         if idempotency_key and fingerprint is not None:
             await idempotency.complete(
                 cache_backend,
+                client_id,
                 idempotency_key,
                 fingerprint,
                 result.model_dump(mode="json"),
@@ -922,7 +940,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if blocked is not None:
             return blocked
         guardrail_flag = response.headers.get("X-Guardrail-Flag")
-        client_id = getattr(http_request.state, "client_id", None) or "anonymous"
+        client_id = _client_id(http_request)
         provider_name, provider = select_provider(request, config)
         metrics.record_request(provider_name)
         _stash_gen_ai_prestream(http_request, provider_name, request.model)
@@ -1045,7 +1063,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 ),
             )
         guardrail_flag = response.headers.get("X-Guardrail-Flag")
-        client_id = getattr(http_request.state, "client_id", None) or "anonymous"
+        client_id = _client_id(http_request)
         try:
             provider_name, provider = select_provider(chat_request, config)
         except ProviderError as exc:

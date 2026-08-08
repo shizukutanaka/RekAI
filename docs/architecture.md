@@ -177,6 +177,15 @@ is keyed by the client-supplied id (not the request body) and works even with
 `REKAI_IDEMPOTENCY_TTL_SECONDS` (default 24h); it is a no-op when caching is
 disabled.
 
+Records are **scoped per client** — the store key hashes the caller's client id
+(the masked API-key id under gateway auth, else the client IP) together with the
+header value. Idempotency keys are caller-chosen and collide readily (`req-1`),
+so a global namespace would let one tenant replay another's stored response, or
+claim the in-progress sentinel first and 409 them out of their own key. Stripe
+scopes idempotency keys per API key for the same reason. A consequence worth
+knowing: with gateway auth off, the scope is the client IP, so callers behind one
+NAT share a namespace — use `REKAI_API_KEYS` for real tenant isolation.
+
 **Streaming responses are not covered** — neither `POST /v1/chat/stream` nor
 `stream: true` on `/v1/chat/completions` accept an `Idempotency-Key`. A
 retried streaming request always re-runs. A client that needs replay-safety

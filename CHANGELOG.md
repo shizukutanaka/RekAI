@@ -19,6 +19,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   replay path emitted no header at all). The edge keeps a re-scan as a backstop
   for entries cached before the setting was switched on. Only affects
   deployments with `REKAI_OUTPUT_REDACTION_ENABLED=true`.
+- **Idempotency records are scoped per client** — the store key was
+  `sha256(Idempotency-Key)` alone, a single global namespace. Since idempotency
+  keys are caller-chosen and collide constantly (`req-1`), tenant B sending
+  tenant A's key with a matching body was served **A's stored response**, and
+  claiming the in-progress sentinel first would 409 A out of its own key. The
+  key now hashes the client id (masked API-key id under gateway auth, else the
+  client IP) together with the header value, length-prefixed so no
+  `(client, key)` split can be rearranged into another's digest — the same
+  per-API-key scoping Stripe uses. `idempotency.claim/complete/release` take a
+  `client_id` argument.
 - **Web dev-tooling audit cleanup** — bumped `vitest` 2 → 4, clearing the
   critical advisory in its bundled `vite`/`esbuild`/`vite-node`/`@vitest/mocker`
   chain, and ran `npm audit fix` for a transitive `brace-expansion` fix — from
