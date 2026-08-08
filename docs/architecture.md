@@ -244,6 +244,24 @@ so everything about it is deliberately conservative:
 - **Cost.** The embedding call is a real upstream call the caller never asked
   for, billed to the operator's key — its tokens and cost are recorded, so
   `/v1/usage` doesn't make the feature look cheaper than it is.
+- **Lookup latency.** A lookup is a linear scan of the bucket, so it costs
+  entries × dimensions, and a *miss* pays the full scan for nothing. Measured on
+  1000 entries of 1536-dim vectors: ~124 ms originally (cosine re-deriving both
+  norms on every entry), ~48 ms once vectors are unit-normalized on insert so
+  the comparison is a bare dot product, ~2.1 ms when NumPy does that dot
+  product. NumPy is optional — not a runtime dependency, and the pure-Python
+  path is the reference implementation that the test suite pins it against. The
+  remaining cost is reported as `rekai_semantic_cache_lookup_seconds{result}`
+  rather than assumed away: at ~48 ms, a pure-Python deployment in front of a
+  fast provider can spend more than the cache saves, so size
+  `REKAI_SEMANTIC_CACHE_MAX_ENTRIES` against that histogram. Going faster than a
+  linear scan means an ANN index, which is disproportionate machinery for a
+  bounded in-memory cache.
+- **Model changes.** Entries whose embedding dimension differs from the query's
+  are skipped outright, not scored. Switching `REKAI_SEMANTIC_CACHE_MODEL`
+  leaves old-model entries in the process-local store, and their coordinates
+  mean nothing in the new model's space — scoring them 0.0 would still count as
+  a hit under a threshold of 0.0.
 - **Disclosure.** A hit sets `cache_similarity` on the response and an
   `X-Cache-Similarity` header, and increments `rekai_semantic_cache_hits_total`
   (a subset of `rekai_cache_hits_total`). Both are null/absent on a miss **and

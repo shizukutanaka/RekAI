@@ -173,7 +173,11 @@ async def handle_chat(
         sem_bucket = semantic_bucket(request, primary_name, client_id)
         sem_embedding = await _semantic_embed(request, settings)
         if sem_embedding is not None:
+            lookup_started = time.perf_counter()
             hit = semantic_cache.find(sem_bucket, sem_embedding, settings.semantic_cache_threshold)
+            metrics.observe_semantic_lookup(
+                "hit" if hit is not None else "miss", time.perf_counter() - lookup_started
+            )
             if hit is not None:
                 payload, similarity = hit
                 metrics.record_cache(hit=True)

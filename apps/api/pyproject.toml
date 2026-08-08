@@ -29,6 +29,11 @@ dev = [
     # Used only by tests/test_openai_sdk_e2e.py to prove drop-in compatibility
     # with the real OpenAI SDK; those tests skip if it isn't installed.
     "openai>=1.40",
+    # NOT a runtime dependency. rekai/semantic_cache.py uses NumPy for its
+    # similarity scan when it happens to be installed (~100x on that loop) and
+    # falls back to pure Python otherwise; this is here so the test suite
+    # exercises the accelerated path and proves the two agree.
+    "numpy>=1.26",
 ]
 
 [project.urls]

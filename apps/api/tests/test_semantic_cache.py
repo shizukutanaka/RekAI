@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+import rekai.semantic_cache as semantic_cache_module
 from rekai.cache import NullCache, semantic_bucket
 from rekai.config import Settings
 from rekai.main import create_app
@@ -318,3 +319,90 @@ def test_semantic_hits_are_counted_separately() -> None:
     assert "rekai_cache_hits_total 2" in out
     assert "rekai_semantic_cache_hits_total 1" in out
     assert m.snapshot()["semantic_cache_hits_total"] == 1
+
+
+# --- similarity computation --------------------------------------------------
+# Vectors are unit-normalized on insert so a comparison is a bare dot product,
+# and NumPy does that dot product when installed. Two representations means the
+# suite has to prove they agree — the pure-Python path is the reference.
+
+
+@pytest.fixture(params=["python", "numpy"])
+def similarity_backend(request, monkeypatch):
+    """Run a test under both the pure-Python and the NumPy path."""
+    if request.param == "numpy":
+        if semantic_cache_module.numpy is None:
+            pytest.skip("numpy not installed")
+    else:
+        monkeypatch.setattr(semantic_cache_module, "numpy", None)
+    return request.param
+
+
+def test_similarity_matches_the_reference_cosine(similarity_backend) -> None:
+    import random
+
+    random.seed(11)
+    a = [random.uniform(-1, 1) for _ in range(64)]
+    b = [random.uniform(-1, 1) for _ in range(64)]
+    prepared = semantic_cache_module._similarity(
+        semantic_cache_module._prepare(a), semantic_cache_module._prepare(b)
+    )
+    # Normalizing first must not change the answer, only the cost of getting it.
+    assert prepared == pytest.approx(cosine_similarity(a, b), abs=1e-12)
+
+
+def test_identical_vectors_score_exactly_one(similarity_backend) -> None:
+    # Summing float64 products leaves self-similarity at 0.9999999999999998, so
+    # a threshold of exactly 1.0 ("only an identical embedding may hit") would
+    # never match anything. Rounding above the noise floor fixes that; the clamp
+    # covers the other direction, where a score above 1 would be nonsense and
+    # could outrank a genuinely closer entry.
+    vec = [0.3, -0.7, 0.2, 0.9]
+    prepared = semantic_cache_module._prepare(vec)
+    assert semantic_cache_module._similarity(prepared, prepared) == 1.0
+
+    sc = SemanticCache()
+    sc.add("b", vec, "self", ttl=60)
+    assert sc.find("b", vec, threshold=1.0) == ("self", 1.0)
+
+
+def test_zero_vector_scores_zero_rather_than_dividing_by_zero(similarity_backend) -> None:
+    zero = semantic_cache_module._prepare([0.0, 0.0, 0.0])
+    other = semantic_cache_module._prepare([1.0, 0.0, 0.0])
+    assert semantic_cache_module._similarity(zero, other) == 0.0
+    assert cosine_similarity([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]) == 0.0  # same as the reference
+
+
+def test_mismatched_dimensions_never_match(similarity_backend) -> None:
+    # Changing REKAI_SEMANTIC_CACHE_MODEL leaves entries from the old model in
+    # this process-local store. Their coordinates mean nothing in the new
+    # model's space. Scoring them 0.0 is not enough: with threshold 0.0 that
+    # *is* a match (0.0 >= 0.0), so they have to be skipped outright.
+    sc = SemanticCache()
+    sc.add("b", [1.0, 0.0, 0.0], "three-dim", ttl=60)
+    assert sc.find("b", [1.0, 0.0], 0.0) is None
+    assert sc.find("b", [1.0, 0.0, 0.0], 0.0) == ("three-dim", 1.0)  # right dim still hits
+
+
+def test_both_backends_pick_the_same_entry(similarity_backend) -> None:
+    import random
+
+    random.seed(12)
+    vectors = [[random.uniform(-1, 1) for _ in range(32)] for _ in range(20)]
+    sc = SemanticCache()
+    for i, vec in enumerate(vectors):
+        sc.add("b", vec, f"entry-{i}", ttl=60)
+    hit = sc.find("b", vectors[7], 0.0)
+    assert hit is not None
+    payload, similarity = hit
+    assert payload == "entry-7"  # its own vector is the nearest
+    assert similarity == pytest.approx(1.0)
+
+
+def test_lookup_duration_is_recorded() -> None:
+    from rekai.metrics import Metrics
+
+    m = Metrics()
+    m.observe_semantic_lookup("miss", 0.05)
+    out = m.render()
+    assert 'rekai_semantic_cache_lookup_seconds_count{result="miss"} 1' in out

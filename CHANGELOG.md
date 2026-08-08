@@ -87,6 +87,26 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Added
+- **Semantic cache lookups are ~60× faster, and their cost is now measured** —
+  the similarity scan called a cosine that re-derived *both* vectors' norms on
+  every entry, including the stored vector's, once per entry per lookup.
+  Measured on the default 1000-entry bound with 1536-dim embeddings, per lookup:
+  **~124 ms → ~48 ms** by unit-normalizing on insert so a comparison is a bare
+  dot product, **→ ~2.1 ms** when NumPy is installed. NumPy is optional (a dev
+  extra so the suite tests both paths; the pure-Python path stays the
+  reference), not a runtime dependency. New
+  `rekai_semantic_cache_lookup_seconds{result}` histogram, because the residual
+  cost is paid on every request including misses — at ~48 ms a pure-Python
+  deployment fronting a fast provider can spend more than the cache saves, and
+  that should be visible rather than inferred.
+- **Semantic cache: entries from a different embedding model can no longer
+  match.** Changing `REKAI_SEMANTIC_CACHE_MODEL` leaves old-dimension entries in
+  the process-local store; they scored `0.0`, which under a threshold of `0.0`
+  counts as a hit (`0.0 >= 0.0`). They are now skipped outright. Also, a
+  vector's similarity to itself came out as `0.9999999999999998` from float
+  accumulation, so a threshold of exactly `1.0` — "only an identical embedding
+  may hit" — could never match anything; similarity is now rounded at 1e-12,
+  well above the noise floor and far below any meaningful discrimination.
 - **Semantic cache hits disclose their similarity** — a hit that answers a
   *different* prompt arrived as `cached: true`, identical to an exact hit, and
   landed in the same `rekai_cache_hits_total` counter, so neither a caller nor

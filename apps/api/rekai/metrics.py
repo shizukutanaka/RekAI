@@ -142,6 +142,7 @@ class Metrics:
         self.request_duration = _Histogram()
         self.provider_duration = _Histogram()
         self.stream_ttft = _Histogram()
+        self.semantic_lookup = _Histogram()
 
     def observe_request_duration(self, path: str, seconds: float) -> None:
         """End-to-end latency for one HTTP request, labelled by *route
@@ -157,6 +158,15 @@ class Metrics:
     def observe_stream_ttft(self, provider: str, seconds: float) -> None:
         """Time to first token on a streamed completion."""
         self.stream_ttft.observe((("provider", provider),), seconds)
+
+    def observe_semantic_lookup(self, result: str, seconds: float) -> None:
+        """Time spent scanning the semantic cache, hit or miss.
+
+        The scan is linear in entries × dimensions and runs on *every* request
+        once the cache is enabled — including the misses, which pay the full
+        scan and get nothing. A cache that costs more than it saves is a real
+        possibility here, so the cost is measured rather than assumed away."""
+        self.semantic_lookup.observe((("result", result),), seconds)
 
     def record_request(self, provider: str) -> None:
         with self._lock:
@@ -417,6 +427,10 @@ class Metrics:
         lines += self.stream_ttft.render(
             "rekai_stream_ttft_seconds",
             "Time to first streamed token, by provider.",
+        )
+        lines += self.semantic_lookup.render(
+            "rekai_semantic_cache_lookup_seconds",
+            "Time spent scanning the semantic cache (linear in entries x dimensions).",
         )
 
         if not include_clients:
