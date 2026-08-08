@@ -53,10 +53,19 @@ class Settings(BaseSettings):
     admin_rate_limit_requests: int = Field(default=20, ge=1)
     admin_rate_limit_window_seconds: int = Field(default=60, ge=1)
 
-    # Prompt-injection guardrail (OWASP LLM01). Heuristic, opt-in. "block"
-    # rejects a flagged request with 403; "flag" adds an X-Guardrail-Flag header.
+    # Prompt-injection guardrail (OWASP LLM01). Heuristic, opt-in. "flag" adds
+    # an X-Guardrail-Flag header and lets the request through; "block" rejects
+    # it with 403.
+    #
+    # "flag" is the default because these are regexes, and a regex that is wrong
+    # in the blocking direction deletes a legitimate request with no recourse,
+    # while one that is wrong in the flagging direction costs a header. Pattern
+    # matching cannot be a security boundary against an adversary who can
+    # rephrase (arXiv:2504.11168), so its realistic value is *signal* — and
+    # signal doesn't require blocking. Turn on "block" when you have measured
+    # the false-positive rate against your own traffic.
     guardrails_enabled: bool = False
-    guardrails_action: Literal["block", "flag"] = "block"
+    guardrails_action: Literal["block", "flag"] = "flag"
 
     # Output redaction (OWASP LLM02). Heuristic, opt-in: scrubs common secret/
     # API-key patterns from the assistant's `content` on non-streamed /v1/chat

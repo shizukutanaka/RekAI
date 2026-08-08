@@ -416,12 +416,28 @@ There are two ways to override or extend the table:
 With `REKAI_GUARDRAILS_ENABLED=true`, RekAI scans the **user** messages of a
 chat / chat-stream request for common prompt-injection / jailbreak phrasings
 ("ignore previous instructions", "reveal your system prompt", "developer mode
-enabled", …) before calling a provider. `REKAI_GUARDRAILS_ACTION=block` (default)
-rejects a flagged request with `403 guardrail_blocked`; `flag` lets it through
-with an `X-Guardrail-Flag: <pattern>` header so a caller can decide. This is a
+enabled", …) before calling a provider. `REKAI_GUARDRAILS_ACTION=flag` (default)
+lets the request through with an `X-Guardrail-Flag: <pattern>` header so the
+caller can decide; `block` rejects it with `403 guardrail_blocked`. This is a
 **heuristic first layer** (OWASP LLM01), not a security boundary — obfuscated or
 encoded attacks evade regexes (arXiv:2504.11168), so keep tools least-privileged
 and add a classifier-based guardrail where assurance matters. Off by default.
+
+**Why `flag` and not `block` by default.** A regex that is wrong in the blocking
+direction deletes a legitimate request with no recourse; wrong in the flagging
+direction it costs a header. Since pattern matching cannot be a boundary against
+an adversary who can simply rephrase, its realistic value is *signal* — and
+signal does not require blocking. Turn on `block` once you have measured the
+false-positive rate against your own traffic.
+
+Every pattern requires an object referring to **the model's own instructions or
+safety configuration**, which is the design constraint that keeps the
+false-positive rate usable. Earlier versions matched a verb plus a bare noun and
+flagged ordinary prose — "show me the instructions for assembling this
+bookshelf", "override the system clock in a unit test", "summarize this paper
+about jailbreak techniques" — each a hard 403 under the old default. The two
+corpora in `tests/test_guardrails.py` (21 attack phrasings, 17 benign ones that
+all used to be flagged) are the regression gate for any pattern change.
 
 ### Output redaction
 

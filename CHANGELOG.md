@@ -135,6 +135,23 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   thing that was previously unknowable.
 
 ### Changed
+- **Prompt-injection guardrail: patterns narrowed, and the default action is now
+  `flag` instead of `block`** (**breaking** for deployments running with
+  `REKAI_GUARDRAILS_ENABLED=true` and no explicit action — they stop returning
+  403 and start returning 200 with `X-Guardrail-Flag`; set
+  `REKAI_GUARDRAILS_ACTION=block` to keep the old behavior). The patterns matched
+  a verb plus a bare noun, so all 17 benign phrasings now in the test corpus were
+  flagged — "show me the instructions for assembling this bookshelf", "override
+  the system clock in a unit test", "summarize this security paper about
+  jailbreak techniques", "disregard the previous draft" — each a hard 403 on
+  ordinary traffic. Every pattern now requires an object referring to the model's
+  own instructions or safety configuration: 0/17 false positives, 0/21 attack
+  phrasings missed (up from 6 attack cases covered). The default changed because
+  a regex wrong in the blocking direction deletes a legitimate request with no
+  recourse, while one wrong in the flagging direction costs a header — and since
+  pattern matching can't be a boundary against an adversary who rephrases
+  (arXiv:2504.11168), its realistic value is signal, which doesn't require
+  blocking.
 - **`rekai_requests_total{provider="…"}` renamed to
   `rekai_provider_requests_total{provider="…"}`** (**breaking** for dashboards
   using the old series). The per-provider breakdown shared a metric name with
