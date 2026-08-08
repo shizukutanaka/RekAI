@@ -173,10 +173,17 @@ class Settings(BaseSettings):
     idempotency_ttl_seconds: int = Field(default=86_400, ge=0)
 
     # Semantic cache: reuse a response when a prior prompt's embedding is within
-    # the cosine threshold. Opt-in (one embedding call per request); use a real
-    # embeddings model. Process-local.
+    # the cosine threshold. Opt-in (one embedding call per request). Process-local,
+    # scoped per client, and TTL'd by cache_ttl_seconds.
+    #
+    # semantic_cache_model has no default on purpose: a hit here answers a prompt
+    # that was never sent, so the threshold means nothing unless the embedding is
+    # genuinely semantic. Enabling the cache without naming a model is refused at
+    # startup rather than quietly falling back to `echo`, whose 16-dimension hash
+    # "embedding" puts every vector in the positive orthant — unrelated prompts
+    # sit around 0.78 cosine and ~12% of pairs clear the 0.85 default.
     semantic_cache_enabled: bool = False
-    semantic_cache_model: str = "echo"
+    semantic_cache_model: str = ""
     semantic_cache_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
     semantic_cache_max_entries: int = Field(default=1000, ge=1)
 

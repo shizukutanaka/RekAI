@@ -51,6 +51,32 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   restore them. New **`GET /admin/usage`** returns the full fleet breakdown under
   `REKAI_ADMIN_KEY`, with the same rate limiting and audit logging as
   `/admin/keys`. Nothing changes when no gateway auth is configured.
+- **Semantic cache correctness** (opt-in feature; five defects, all of which
+  could return a *wrong answer*):
+  - **Bucket was under-specified.** Entries were partitioned by
+    `f"{provider}:{model}:{temperature}:{max_tokens}"` — omitting `tools`,
+    `tool_choice`, `response_format`, and `cache_control`, i.e. exactly the
+    collisions `cache_key`'s own comments warn about. A JSON-mode request could
+    be answered from a prose entry. Now `cache.semantic_bucket`, defined beside
+    `cache_key` as its payload minus `messages`.
+  - **Entries were shared across tenants.** A semantic hit answers a prompt the
+    caller never sent, so the bucket now includes the client id. (The exact
+    cache still shares: a hit there requires the caller to have sent the
+    identical prompt itself.)
+  - **`REKAI_SEMANTIC_CACHE_MAX_ENTRIES` was dead config** — declared,
+    documented, and never passed to `SemanticCache()`, which used its own
+    default of 1000. Now applied in `create_app`.
+  - **Entries never expired**, while the exact cache honors
+    `REKAI_CACHE_TTL_SECONDS`. They now share that TTL.
+  - **The embedding call was unmetered** — a real upstream call per request,
+    billed to the operator's key, invisible in `/v1/usage`. Now counted.
+- **`REKAI_SEMANTIC_CACHE_MODEL` no longer defaults to `echo`** (**breaking** for
+  anyone who enabled the semantic cache without setting a model: startup now
+  fails with an explanatory error instead of silently using `echo`). `echo`
+  embeddings are a 16-dimension SHA-256 slice, so every vector is in the positive
+  orthant, unrelated prompts sit around 0.78 cosine, and ~12% of random pairs
+  clear the 0.85 default threshold — a false-hit generator, not a cache.
+  Explicitly setting it to `echo` still works for tests, with a loud warning.
 - **Web dev-tooling audit cleanup** — bumped `vitest` 2 → 4, clearing the
   critical advisory in its bundled `vite`/`esbuild`/`vite-node`/`@vitest/mocker`
   chain, and ran `npm audit fix` for a transitive `brace-expansion` fix — from

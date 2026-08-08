@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 
 from rekai import guardrails
-from rekai.cache import CacheBackend, cache_key, embedding_cache_key
+from rekai.cache import CacheBackend, cache_key, embedding_cache_key, semantic_bucket
 from rekai.circuit_breaker import consecutive_failures
 from rekai.config import Settings
 from rekai.cooldown import cooldowns
@@ -109,8 +109,14 @@ def _build_attempts(
 
 
 async def _semantic_embed(request: ChatRequest, settings: Settings) -> list[float] | None:
-    """Embed the prompt for the semantic cache (server-side key), or None."""
-    provider = get_provider(resolve_provider(None, settings.semantic_cache_model, settings))
+    """Embed the prompt for the semantic cache (server-side key), or None.
+
+    This is a real upstream call the caller never asked for, billed to the
+    operator's key, so its tokens and cost are recorded like any other — an
+    unmetered call would make the semantic cache look strictly cheaper than it
+    is, which is the opposite of what a cost-aware gateway should report."""
+    provider_name = resolve_provider(None, settings.semantic_cache_model, settings)
+    provider = get_provider(provider_name)
     if provider is None:
         return None
     text = "\n".join(m.content or "" for m in request.messages)
@@ -118,6 +124,10 @@ async def _semantic_embed(request: ChatRequest, settings: Settings) -> list[floa
         result = await provider.embed([text], settings.semantic_cache_model, None)
     except ProviderError:
         return None  # embeddings unavailable -> just skip the semantic cache
+    metrics.record_tokens(result.usage.total_tokens)
+    metrics.record_cost(
+        estimate_cost(provider_name, result.model, result.usage, settings.pricing_override_dict)
+    )
     return result.embeddings[0] if result.embeddings else None
 
 
@@ -145,6 +155,7 @@ async def handle_chat(
     api_key: str | None,
     settings: Settings,
     cache: CacheBackend,
+    client_id: str = "anonymous",
 ) -> ChatResponse:
     primary_name, primary = select_provider(request, settings)
     attempts = _build_attempts(request, primary_name, primary, settings)
@@ -157,7 +168,7 @@ async def handle_chat(
     sem_bucket = ""
     sem_embedding: list[float] | None = None
     if sem_enabled:
-        sem_bucket = f"{primary_name}:{request.model}:{request.temperature}:{request.max_tokens}"
+        sem_bucket = semantic_bucket(request, primary_name, client_id)
         sem_embedding = await _semantic_embed(request, settings)
         if sem_embedding is not None:
             hit = semantic_cache.find(sem_bucket, sem_embedding, settings.semantic_cache_threshold)
@@ -274,7 +285,12 @@ async def handle_chat(
         if use_cache:
             await cache.set(key, response.model_dump_json(), settings.cache_ttl_seconds)
         if sem_enabled and sem_embedding is not None:
-            semantic_cache.add(sem_bucket, sem_embedding, response.model_dump_json())
+            semantic_cache.add(
+                sem_bucket,
+                sem_embedding,
+                response.model_dump_json(),
+                settings.cache_ttl_seconds,
+            )
 
         logger.info(
             "chat ok provider=%s model=%s tokens=%s fallback=%s",

@@ -26,7 +26,7 @@ from rekai.pricing import price_for_model
 from rekai.providers import get_provider, provider_names
 from rekai.providers.base import ProviderError
 from rekai.rate_limit import build_rate_limiter
-from rekai.router import select_provider
+from rekai.router import resolve_provider, select_provider
 from rekai.schemas import (
     AdminKeyList,
     AdminKeyRequest,
@@ -47,6 +47,7 @@ from rekai.schemas import (
     UsageSummary,
 )
 from rekai.security import KeyCipher, mask_key
+from rekai.semantic_cache import semantic_cache
 from rekai.service import handle_chat, handle_chat_stream, handle_embeddings
 
 access_logger = get_logger("rekai.access")
@@ -298,7 +299,7 @@ async def _run_chat(
             return replayed
         claimed = True  # we hold the in-progress sentinel
     try:
-        result = await handle_chat(request, x_provider_key, settings, cache_backend)
+        result = await handle_chat(request, x_provider_key, settings, cache_backend, client_id)
     except Exception:
         # Free the sentinel so the client can retry immediately instead of
         # getting a 409 until it expires.
@@ -322,9 +323,27 @@ async def _run_chat(
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level, settings.log_format)
-    # The metrics singleton predates any Settings instance; apply the
-    # per-deployment client-tracking cap before it can serve a request.
+    # The metrics and semantic-cache singletons predate any Settings instance;
+    # apply their per-deployment bounds before either can serve a request.
     metrics.max_tracked_clients = settings.max_tracked_clients
+    semantic_cache.resize(settings.semantic_cache_max_entries)
+
+    if settings.semantic_cache_enabled:
+        if not settings.semantic_cache_model:
+            raise ValueError(
+                "REKAI_SEMANTIC_CACHE_ENABLED=true requires REKAI_SEMANTIC_CACHE_MODEL. "
+                "A semantic hit answers a prompt that was never sent, so it needs a real "
+                "embeddings model (e.g. text-embedding-3-small); there is no safe default."
+            )
+        if resolve_provider(None, settings.semantic_cache_model, settings) == "echo":
+            access_logger.warning(
+                "REKAI_SEMANTIC_CACHE_MODEL=%s resolves to the echo provider, whose "
+                "embeddings are a 16-dimension hash, not semantic. Unrelated prompts sit "
+                "near 0.78 cosine, so a large share of pairs clear the default 0.85 "
+                "threshold and unrelated questions will be answered from cache. Use this "
+                "for tests only.",
+                settings.semantic_cache_model,
+            )
 
     metrics_store = build_metrics_store(settings)
 

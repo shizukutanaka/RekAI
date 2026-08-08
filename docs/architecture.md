@@ -223,11 +223,32 @@ RekAI embeds each prompt (via `REKAI_SEMANTIC_CACHE_MODEL`) and reuses a stored
 response when an earlier prompt's embedding is within
 `REKAI_SEMANTIC_CACHE_THRESHOLD` cosine similarity (default 0.85) — the approach
 from the *GPT Semantic Cache* work (arXiv:2411.05276), which reports large
-reductions in upstream calls. Entries are scoped to a `(provider, model,
-temperature, max_tokens)` bucket so a hit never crosses model or params, held in
-a bounded process-local store (`REKAI_SEMANTIC_CACHE_MAX_ENTRIES`, FIFO). It's
-opt-in: it costs one embedding call per request and only helps with a real
-embeddings model (the keyless `echo` embeddings are hash-based, not semantic).
+reductions in upstream calls.
+
+Unlike the exact cache, **a semantic hit answers a prompt that was never sent**,
+so everything about it is deliberately conservative:
+
+- **Bucket.** `cache.semantic_bucket` is `cache_key`'s payload *minus*
+  `messages` — provider, model, temperature, `max_tokens`, `tools`,
+  `tool_choice`, `response_format`, `cache_control` — plus the **client id**.
+  The message text is what the embedding compares; everything else must match
+  exactly. (Cross-tenant reuse would hand tenant B an answer to a question only
+  tenant A asked. The exact cache can share freely because a hit there requires
+  B to have sent the identical prompt itself — so the semantic cache trades hit
+  rate for isolation, on purpose.)
+- **Bounds.** Process-local, FIFO, capped by `REKAI_SEMANTIC_CACHE_MAX_ENTRIES`,
+  and entries expire after `REKAI_CACHE_TTL_SECONDS` like the exact cache's do.
+- **Cost.** The embedding call is a real upstream call the caller never asked
+  for, billed to the operator's key — its tokens and cost are recorded, so
+  `/v1/usage` doesn't make the feature look cheaper than it is.
+- **Embedding quality.** `REKAI_SEMANTIC_CACHE_MODEL` has **no default**:
+  enabling the cache without naming a model is refused at startup. The threshold
+  is meaningless unless the embedding is genuinely semantic — the keyless `echo`
+  embeddings are a 16-dimension SHA-256 slice, so every vector sits in the
+  positive orthant, *unrelated* prompts sit around 0.78 cosine, and ~12% of
+  random pairs clear the 0.85 default (measured; e.g.
+  `cos("what is 2+2", "translate to french") = 0.906`). Configuring it anyway is
+  allowed for tests but logs a loud startup warning.
 
 ## Request context & observability
 

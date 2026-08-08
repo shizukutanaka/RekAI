@@ -40,6 +40,37 @@ def cache_key(request: ChatRequest, provider: str) -> str:
     return "rekai:chat:" + hashlib.sha256(raw.encode()).hexdigest()
 
 
+def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
+    """The partition a semantic cache entry lives in.
+
+    Deliberately ``cache_key``'s payload **minus ``messages``** — the message
+    text is what the embedding compares, everything else must match exactly for
+    a paraphrase hit to be valid. Keeping the two side by side is the point: the
+    bucket used to be a bare
+    ``f"{provider}:{model}:{temperature}:{max_tokens}"`` string, which reproduced
+    the very collisions the comments above warn about (a ``response_format``
+    JSON-mode request could be answered from a prose entry).
+
+    ``client_id`` is in the bucket because a semantic hit answers a prompt the
+    caller never sent — sharing across tenants would hand one an answer to
+    another's question. The exact cache can share freely; a hit there requires
+    the caller to have sent the identical prompt itself.
+    """
+    payload = {
+        "client": client_id,
+        "provider": provider,
+        "model": request.model,
+        "temperature": request.temperature,
+        "max_tokens": request.max_tokens,
+        "tools": request.tools,
+        "tool_choice": request.tool_choice,
+        "response_format": request.response_format,
+        "cache_control": request.cache_control,
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
 def embedding_cache_key(provider: str, model: str, inputs: list[str]) -> str:
     """A deterministic key for an embeddings request."""
     payload = {"provider": provider, "model": model, "inputs": inputs}
