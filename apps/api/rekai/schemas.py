@@ -169,6 +169,14 @@ class ChatResponse(BaseModel):
         description="Approximate USD cost. 0.0 for free/local providers, null if unknown.",
     )
     cached: bool = False
+    cache_similarity: float | None = Field(
+        default=None,
+        description="Cosine similarity to the stored prompt when the semantic cache "
+        "served this response — meaning the answer is to a *similar* prompt, not this "
+        "one. Null on a miss and on an exact cache hit (where the prompt matched "
+        "byte-for-byte), so a non-null value is exactly the signal that an "
+        "approximate match was used.",
+    )
     fallback_used: bool = Field(
         default=False, description="True if a fallback served this response, not the primary."
     )
@@ -232,6 +240,11 @@ class UsageSummary(BaseModel):
     requests_total: int
     cache_hits_total: int
     cache_misses_total: int
+    semantic_cache_hits_total: int = Field(
+        default=0,
+        description="Subset of cache_hits_total served by approximate (embedding) "
+        "match rather than an exact prompt match.",
+    )
     errors_total: int
     fallbacks_total: int
     retries_total: int = 0

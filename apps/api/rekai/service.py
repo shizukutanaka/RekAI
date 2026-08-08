@@ -175,9 +175,23 @@ async def handle_chat(
         if sem_embedding is not None:
             hit = semantic_cache.find(sem_bucket, sem_embedding, settings.semantic_cache_threshold)
             if hit is not None:
+                payload, similarity = hit
                 metrics.record_cache(hit=True)
-                logger.info("semantic cache hit model=%s", request.model)
-                return ChatResponse(**{**json.loads(hit), "cached": True})
+                metrics.record_semantic_cache_hit()
+                logger.info(
+                    "semantic cache hit model=%s similarity=%.4f", request.model, similarity
+                )
+                # cache_similarity is what distinguishes this from an exact hit:
+                # the answer is to a *different* prompt, and how different is
+                # the caller's business. Overwrites whatever was stored (always
+                # None — only fresh responses are stored) with this hit's score.
+                return ChatResponse(
+                    **{
+                        **json.loads(payload),
+                        "cached": True,
+                        "cache_similarity": round(similarity, 4),
+                    }
+                )
 
     last_error: ProviderError | None = None
 

@@ -377,6 +377,10 @@ async def _run_chat(
             await idempotency.release(cache_backend, client_id, idempotency_key)  # type: ignore[arg-type]
         raise
     result = _redact_output(result, settings, response)
+    if result.cache_similarity is not None:
+        # Disclose that this answer is to a *similar* prompt, not this one —
+        # otherwise a semantic hit is indistinguishable from an exact one.
+        response.headers["X-Cache-Similarity"] = f"{result.cache_similarity:.4f}"
     _record_client_usage(http_request, result, settings)
     if idempotency_key and fingerprint is not None:
         await idempotency.complete(
@@ -684,6 +688,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "traceparent",
             "X-Guardrail-Flag",
             "X-Redacted",
+            "X-Cache-Similarity",
             "X-Budget-Remaining",
             "X-Budget-Reset",
         ],

@@ -54,7 +54,16 @@ export interface ChatResult {
   usage: Usage;
   cost_usd: number | null;
   cached: boolean;
+  /**
+   * Cosine similarity to the stored prompt when the semantic cache served this
+   * response — i.e. the answer is to a *similar* prompt, not this one. Null on
+   * a miss and on an exact cache hit, so a non-null value is exactly the signal
+   * that an approximate match was used.
+   */
+  cache_similarity: number | null;
   fallback_used: boolean;
+  /** Secret patterns scrubbed from `content` by the output-redaction guardrail. */
+  redacted: string[] | null;
 }
 
 export interface ModelPricing {
@@ -89,6 +98,8 @@ export interface UsageSummary {
   requests_total: number;
   cache_hits_total: number;
   cache_misses_total: number;
+  /** Subset of cache_hits_total served by approximate (embedding) match. */
+  semantic_cache_hits_total: number;
   errors_total: number;
   fallbacks_total: number;
   tokens_total: number;

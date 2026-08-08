@@ -41,6 +41,14 @@ class ChatResult:
     cached: bool
     fallback_used: bool
     tool_calls: list[dict[str, Any]] | None = None
+    #: Cosine similarity to the stored prompt when the semantic cache served
+    #: this response — the answer is to a *similar* prompt, not this one. None
+    #: on a miss and on an exact cache hit, so a value here is exactly the
+    #: signal that an approximate match was used.
+    cache_similarity: float | None = None
+    #: Secret patterns scrubbed from ``content`` by the output-redaction
+    #: guardrail, or None if nothing was redacted.
+    redacted: list[str] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ChatResult:
@@ -54,6 +62,8 @@ class ChatResult:
             cached=data.get("cached", False),
             fallback_used=data.get("fallback_used", False),
             tool_calls=data.get("tool_calls"),
+            cache_similarity=data.get("cache_similarity"),
+            redacted=data.get("redacted"),
         )
 
 

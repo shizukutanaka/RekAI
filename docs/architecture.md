@@ -244,6 +244,13 @@ so everything about it is deliberately conservative:
 - **Cost.** The embedding call is a real upstream call the caller never asked
   for, billed to the operator's key — its tokens and cost are recorded, so
   `/v1/usage` doesn't make the feature look cheaper than it is.
+- **Disclosure.** A hit sets `cache_similarity` on the response and an
+  `X-Cache-Similarity` header, and increments `rekai_semantic_cache_hits_total`
+  (a subset of `rekai_cache_hits_total`). Both are null/absent on a miss **and
+  on an exact cache hit**, so a value there is precisely the signal that the
+  answer is to a *different* prompt than the one asked — a hit at 0.999 and one
+  at exactly the threshold are very different claims, and without the number a
+  caller could not tell a semantic hit from an exact one at all.
 - **Embedding quality.** `REKAI_SEMANTIC_CACHE_MODEL` has **no default**:
   enabling the cache without naming a model is refused at startup. The threshold
   is meaningless unless the embedding is genuinely semantic — the keyless `echo`

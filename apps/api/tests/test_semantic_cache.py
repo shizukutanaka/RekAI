@@ -30,12 +30,15 @@ def test_cosine_similarity_basics() -> None:
 def test_find_respects_threshold_and_bucket() -> None:
     sc = SemanticCache()
     sc.add("b1", [1.0, 0.0], '{"r": 1}', ttl=60)
-    # Identical vector -> sim 1.0 >= threshold -> hit.
-    assert sc.find("b1", [1.0, 0.0], 0.85) == '{"r": 1}'
+    # Identical vector -> sim 1.0 >= threshold -> hit, and find() hands back the
+    # similarity alongside the payload so the caller can disclose it.
+    assert sc.find("b1", [1.0, 0.0], 0.85) == ('{"r": 1}', 1.0)
     # Orthogonal -> sim 0 < threshold -> miss.
     assert sc.find("b1", [0.0, 1.0], 0.85) is None
-    # A near vector above threshold still hits.
-    assert sc.find("b1", [0.99, 0.01], 0.85) == '{"r": 1}'
+    # A near vector above threshold still hits, with its own lower similarity.
+    payload, similarity = sc.find("b1", [0.99, 0.01], 0.85)
+    assert payload == '{"r": 1}'
+    assert 0.85 <= similarity < 1.0
     # Different bucket -> never matches.
     assert sc.find("b2", [1.0, 0.0], 0.85) is None
 
@@ -57,7 +60,7 @@ def test_eviction_is_bounded_fifo() -> None:
 def test_entries_expire() -> None:
     sc = SemanticCache()
     sc.add("b", [1.0, 0.0], "payload", ttl=60, now=1000.0)
-    assert sc.find("b", [1.0, 0.0], 0.85, now=1059.0) == "payload"
+    assert sc.find("b", [1.0, 0.0], 0.85, now=1059.0) == ("payload", 1.0)
     assert sc.find("b", [1.0, 0.0], 0.85, now=1060.0) is None
 
 
@@ -262,3 +265,56 @@ def test_echo_backed_semantic_cache_warns(capsys) -> None:
         )
     )
     assert "echo provider" in capsys.readouterr().out
+
+
+# --- disclosure --------------------------------------------------------------
+# A semantic hit and an exact hit both arrive as cached=true. They are not the
+# same claim: one is the answer to this prompt, the other to a different one.
+
+
+async def test_semantic_hit_discloses_its_similarity() -> None:
+    provider = StubSemanticProvider()
+    register_provider(provider)
+    semantic_cache.clear()
+    settings = _semantic_settings()
+
+    def ask(text: str) -> ChatRequest:
+        return ChatRequest(model="semstub", messages=[ChatMessage(role="user", content=text)])
+
+    fresh = await handle_chat(ask("how do i reset my password"), None, settings, NullCache(), "c1")
+    assert fresh.cache_similarity is None  # a miss makes no similarity claim
+
+    hit = await handle_chat(ask("i forgot my password, help"), None, settings, NullCache(), "c1")
+    assert hit.cached is True
+    assert hit.cache_similarity is not None
+    assert 0.9 < hit.cache_similarity < 1.0  # the stub's paraphrase vector
+    semantic_cache.clear()
+
+
+def test_exact_cache_hit_makes_no_similarity_claim() -> None:
+    # cache_similarity must stay null on an exact hit — a non-null value is
+    # precisely the signal that an approximate match was used.
+    from fastapi.testclient import TestClient
+
+    client = TestClient(
+        create_app(Settings(environment="test", default_provider="echo", rate_limit_enabled=False))
+    )
+    body = {"model": "echo", "messages": [{"role": "user", "content": "disclosure-exact"}]}
+    client.post("/v1/chat", json=body)
+    second = client.post("/v1/chat", json=body)
+    assert second.json()["cached"] is True
+    assert second.json()["cache_similarity"] is None
+    assert "X-Cache-Similarity" not in second.headers
+
+
+def test_semantic_hits_are_counted_separately() -> None:
+    from rekai.metrics import Metrics
+
+    m = Metrics()
+    m.record_cache(hit=True)  # exact
+    m.record_cache(hit=True)  # semantic...
+    m.record_semantic_cache_hit()  # ...counted again in its own subset
+    out = m.render()
+    assert "rekai_cache_hits_total 2" in out
+    assert "rekai_semantic_cache_hits_total 1" in out
+    assert m.snapshot()["semantic_cache_hits_total"] == 1

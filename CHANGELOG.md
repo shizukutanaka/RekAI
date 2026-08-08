@@ -87,6 +87,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Added
+- **Semantic cache hits disclose their similarity** — a hit that answers a
+  *different* prompt arrived as `cached: true`, identical to an exact hit, and
+  landed in the same `rekai_cache_hits_total` counter, so neither a caller nor
+  an operator could tell the two apart. Responses now carry
+  `cache_similarity` (plus an `X-Cache-Similarity` header), null on a miss and
+  on an exact hit so a value is exactly the signal that an approximate match was
+  used; `rekai_semantic_cache_hits_total` / `UsageSummary.semantic_cache_hits_total`
+  count the subset. Both SDKs expose the new fields.
 - **`REKAI_MAX_CONCURRENT_REQUESTS` — a cap on in-flight `/v1/*` requests**
   (opt-in, `0` = unlimited, so no behavior change by default). The rate limiter
   bounds *arrivals*; nothing bounded *occupancy*, which for an LLM gateway is a

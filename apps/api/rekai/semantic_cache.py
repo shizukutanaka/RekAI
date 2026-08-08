@@ -47,12 +47,19 @@ class SemanticCache:
 
     def find(
         self, bucket: str, embedding: list[float], threshold: float, now: float | None = None
-    ) -> str | None:
-        """Return the stored response whose embedding is most similar to
-        ``embedding`` within ``bucket`` and at/above ``threshold`` — else None.
-        Expired entries are ignored (they age out of the deque on their own)."""
+    ) -> tuple[str, float] | None:
+        """Return ``(stored_response, similarity)`` for the closest entry in
+        ``bucket`` at/above ``threshold``, else None. Expired entries are
+        ignored (they age out of the deque on their own).
+
+        The similarity comes back with the payload rather than being discarded
+        because the caller has to disclose it: a hit at 0.999 and a hit at
+        exactly the threshold are very different claims about the answer, and
+        without the number a caller cannot tell a semantic hit from an exact
+        one at all.
+        """
         moment = time.time() if now is None else now
-        best_json: str | None = None
+        best: tuple[str, float] | None = None
         best_sim = threshold
         for b, emb, payload, expires_at in self._entries:
             if b != bucket or expires_at <= moment:
@@ -60,8 +67,8 @@ class SemanticCache:
             sim = cosine_similarity(embedding, emb)
             if sim >= best_sim:
                 best_sim = sim
-                best_json = payload
-        return best_json
+                best = (payload, sim)
+        return best
 
     def add(
         self,
