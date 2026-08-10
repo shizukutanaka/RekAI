@@ -284,6 +284,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   protocol gained atomic `add()` and `delete()`.
 
 ### Fixed
+- **`MemoryCache` expires entries with `ttl=0` correctly** — `get()` and
+  `_evict_expired_if_full()` compared `expires_at < now`, so an entry written
+  with `ttl=0` (expires immediately) had `expires_at == now` and was treated as
+  still valid. Both comparisons now use `<=` so `ttl=0` is expired on the next
+  read and is pruned when the cache is at capacity. `tests/test_cache.py`
+  (`test_memory_cache_expiry`, `test_memory_cache_evicts_expired_at_capacity`)
+  now pass.
 - **Provider HTTP client honors a changed request timeout** — `Provider._client()`
   cached its persistent `httpx.AsyncClient` keyed only on the event loop, so a
   changed `request_timeout_seconds` (e.g. re-running `create_app` with new

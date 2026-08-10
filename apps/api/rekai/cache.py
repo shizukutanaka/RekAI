@@ -105,7 +105,7 @@ class MemoryCache:
         if item is None:
             return None
         expires_at, value = item
-        if expires_at < time.time():
+        if expires_at <= time.time():
             self._store.pop(key, None)
             return None
         return value
@@ -133,7 +133,7 @@ class MemoryCache:
         # accumulate keys that are never read again.
         if len(self._store) >= self._max_entries:
             now = time.time()
-            for k in [k for k, (exp, _) in self._store.items() if exp < now]:
+            for k in [k for k, (exp, _) in self._store.items() if exp <= now]:
                 del self._store[k]
 
     @property
