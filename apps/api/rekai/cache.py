@@ -119,7 +119,13 @@ class MemoryCache:
         # liveness check and the write, so no other coroutine can interleave.
         now = time.time()
         item = self._store.get(key)
-        if item is not None and item[0] >= now:
+        # An entry is live only while ``expires_at`` is strictly in the future —
+        # the same boundary ``get``/``_evict_expired_if_full`` use (``<= now``
+        # means expired). With ``>=`` a ttl=0 (or exactly-due) entry counted as
+        # live here while ``get`` reported it gone, so the key could never be
+        # re-claimed: an idempotency sentinel written with ttl=0 wedged the
+        # caller forever.
+        if item is not None and item[0] > now:
             return False
         self._evict_expired_if_full()
         self._store[key] = (now + ttl, value)

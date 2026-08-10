@@ -1,5 +1,6 @@
 import pytest
 
+from rekai import cache as cache_module
 from rekai.cache import MemoryCache, NullCache, cache_key
 from rekai.schemas import ChatMessage, ChatRequest
 
@@ -53,6 +54,29 @@ async def test_memory_cache_evicts_expired_at_capacity() -> None:
     await cache.set("a", "v", ttl=10)  # at capacity -> prunes "old", then stores
     assert "old" not in cache._store
     assert await cache.get("a") == "v"
+
+
+async def test_memory_cache_add_reclaims_an_expired_key(monkeypatch) -> None:
+    # ``add`` must use the same expiry boundary as ``get``: an entry whose
+    # expires_at has arrived is dead, so the key is claimable again. A ttl=0
+    # sentinel used to be treated as live by ``add`` (``>= now``) while ``get``
+    # reported it gone (``<= now``), wedging idempotency claims on that key.
+    # The clock is frozen so the boundary (expires_at == now) is hit exactly —
+    # on a coarse-resolution clock it otherwise reproduces only intermittently.
+    monkeypatch.setattr(cache_module.time, "time", lambda: 1_000.0)
+    cache = MemoryCache()
+    await cache.set("k", "old", ttl=0)
+    # Note: no ``get`` first — a read would evict the dead entry itself and
+    # hide the bug. ``add`` must judge the expiry on its own.
+    assert await cache.add("k", "new", ttl=60) is True
+    assert await cache.get("k") == "new"
+
+
+async def test_memory_cache_add_refuses_a_live_key() -> None:
+    cache = MemoryCache()
+    assert await cache.add("k", "first", ttl=60) is True
+    assert await cache.add("k", "second", ttl=60) is False
+    assert await cache.get("k") == "first"
 
 
 async def test_null_cache_always_misses() -> None:

@@ -284,6 +284,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   protocol gained atomic `add()` and `delete()`.
 
 ### Fixed
+- **`MemoryCache.add()` can re-claim a just-expired key** — the previous fix
+  moved `get()` and `_evict_expired_if_full()` to `expires_at <= now`, but
+  `add()` was left on `item[0] >= now`, so at the boundary (an entry written
+  with `ttl=0`, or read exactly when it is due) `add()` still saw the entry as
+  live and returned `False` while `get()` reported it gone. The in-progress
+  idempotency sentinel is claimed through `add()`, so on that path a key could
+  never be re-claimed: the caller was refused the claim yet found no stored
+  response. `add()` now uses the same strict boundary (`item[0] > now`).
+  Regression tests `test_memory_cache_add_reclaims_an_expired_key` (frozen
+  clock, no intervening `get()` — a read would evict the entry and mask the
+  bug) and `test_memory_cache_add_refuses_a_live_key`.
 - **`MemoryCache` expires entries with `ttl=0` correctly** — `get()` and
   `_evict_expired_if_full()` compared `expires_at < now`, so an entry written
   with `ttl=0` (expires immediately) had `expires_at == now` and was treated as
