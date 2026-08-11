@@ -284,6 +284,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   protocol gained atomic `add()` and `delete()`.
 
 ### Fixed
+- **Two divergent CI workflows were staged for the same destination.** Both
+  `ci/ci.yml` and `.github/ci-workflow.yml` existed, and `ci/README.md` and
+  `.github/README.md` each instructed a maintainer to `git mv` *their* file to
+  `.github/workflows/ci.yml` — so whichever instruction was followed silently
+  decided which gates ran, and the second `git mv` would clobber the first. The
+  two files had drifted apart and neither ran the full `CLAUDE.md` gate set:
+  `ci/ci.yml` had `smoke` + `docker` but no `e2e` and no `tsc --noEmit`;
+  `.github/ci-workflow.yml` had `e2e` but no `smoke`, no `docker`, and also no
+  `tsc --noEmit`. They also disagreed on Python version (3.12 vs 3.11), on the
+  `ruff format` scope (`.` vs `rekai tests`), and on trigger branches.
+  Consolidated into the single staged file `.github/ci-workflow.yml`, now the
+  union of both — `api`, `python-sdk`, `js-sdk`, `web`, `smoke`, `e2e`,
+  `docker` — with `tsc --noEmit` added to the web job to match `CLAUDE.md`, and
+  Python pinned to 3.12 throughout. `ci/` is removed and the `CONTRIBUTING.md`
+  pointer updated, so there is exactly one file and one install instruction.
 - **`MemoryCache.add()` can re-claim a just-expired key** — the previous fix
   moved `get()` and `_evict_expired_if_full()` to `expires_at <= now`, but
   `add()` was left on `item[0] >= now`, so at the boundary (an entry written

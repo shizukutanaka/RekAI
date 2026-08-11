@@ -2,10 +2,19 @@
 
 ## `ci-workflow.yml` — pending installation as `workflows/ci.yml`
 
-This file is a complete GitHub Actions workflow that runs every gate in
-[`CLAUDE.md`](../CLAUDE.md): API (`ruff check`, `ruff format --check`, `mypy`,
-`pytest`), Python SDK (`ruff`, `pytest`), JS SDK (`node --test`), Web (`lint`,
-`vitest`, `build`), and Web E2E (Playwright/Chromium against the port-8090 API).
+This file is the **single** staged GitHub Actions workflow for this repo, and
+it runs every gate in [`CLAUDE.md`](../CLAUDE.md):
+
+| job | gates |
+| --- | --- |
+| `api` | `ruff check`, `ruff format --check`, `mypy rekai`, `pytest` |
+| `python-sdk` | `ruff check`, `ruff format --check`, `pytest` |
+| `js-sdk` | `node --test` |
+| `web` | `tsc --noEmit`, `npm run lint`, `vitest`, `next build` |
+| `smoke` | live `uvicorn` + `scripts/smoke.sh` against `/health`, `/v1/*` |
+| `e2e` | Playwright/Chromium against the port-8090 API |
+| `docker` | build the API and Web images |
+
 The CI badge in the root README already points at where it belongs.
 
 It lives here rather than at `.github/workflows/ci.yml` because the GitHub App
