@@ -36,6 +36,30 @@ def test_every_advertised_chat_model_routes_and_prices() -> None:
                 assert price_for_model(model) is not None, f"{model} advertised but unpriced"
 
 
+def test_every_advertised_embedding_model_routes_to_its_provider() -> None:
+    # The chat check above left embeddings unguarded, and they drifted:
+    # `text-embedding-004` is advertised on /v1/models as a *gemini* model, but
+    # the `text-embedding` -> openai family rule matched it first, so a request
+    # for it was routed to OpenAI (a 401/unknown-model against the wrong
+    # upstream, or a silent bill on the operator's OpenAI key). Embeddings are
+    # not required to be priced — some advertised ones deliberately aren't.
+    settings = Settings(environment="test", default_provider="echo")
+    for spec in models.MODEL_SPECS:
+        if spec.kind != "embedding":
+            continue
+        for model in spec.advertised:
+            assert resolve_provider(None, model, settings) == spec.provider, (
+                f"{model} advertised by {spec.provider} but routes elsewhere"
+            )
+
+
+def test_openai_embedding_family_still_routes_to_openai() -> None:
+    # The gemini-specific rule must not shadow the broader OpenAI family.
+    assert models.provider_for_prefix("text-embedding-004") == "gemini"
+    assert models.provider_for_prefix("text-embedding-3-small") == "openai"
+    assert models.provider_for_prefix("text-embedding-ada-002") == "openai"
+
+
 def test_advertised_models_groups_by_provider_and_kind() -> None:
     assert models.advertised_models("openai", "chat")[0].startswith("gpt-")
     assert models.advertised_models("gemini", "chat") == [

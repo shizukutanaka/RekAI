@@ -6,6 +6,22 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **`text-embedding-004` was advertised as Gemini but routed to OpenAI.** The
+  model registry (`rekai/models.py`) is meant to be the single source of truth
+  for routing, pricing, and the advertised `/v1/models` list, but its two halves
+  disagreed for exactly one id: `MODEL_SPECS` advertises `text-embedding-004` as
+  a **gemini** embedding model, while the broader `("text-embedding", "openai")`
+  family rule in `PROVIDER_PREFIXES` matched it first. A client that read the id
+  straight off `/v1/models` and posted it to `/v1/embeddings` therefore reached
+  **OpenAI**, not Gemini — an unknown-model error against the wrong upstream, or
+  a silent charge on the operator's OpenAI key when one is configured. Fixed by
+  matching the exact `text-embedding-004` prefix ahead of the OpenAI family
+  rule; `text-embedding-3-*` / `-ada-002` still route to OpenAI. The drift
+  survived because `test_models.py` asserted advertised-vs-routed consistency
+  for **chat** models only, so two regression tests now extend that guarantee to
+  every advertised embedding model.
+
 ### Security
 - **Output redaction now covers streaming.** `REKAI_OUTPUT_REDACTION_ENABLED`
   scrubbed `/v1/chat` but not `/v1/chat/stream` — the endpoint a chat UI
