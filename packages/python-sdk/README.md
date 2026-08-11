@@ -19,7 +19,7 @@ client = RekAIClient("http://localhost:8000")
 
 # Simple chat (a plain string becomes a single user message)
 result = client.chat("echo", "Hello!")
-print(result.content)          # "Echo: Hello!"
+print(result.content)  # "Echo: Hello!"
 print(result.provider, result.usage["total_tokens"], result.cost_usd)
 
 # BYOK + a real provider
@@ -68,8 +68,8 @@ emb = client.embeddings("echo", ["hello", "world"])
 print(len(emb.embeddings), emb.usage["total_tokens"], emb.cached)
 
 # Introspection
-client.models()   # [{"id": "...", "provider": "..."}, ...]
-client.usage()    # aggregate counters
+client.models()  # [{"id": "...", "provider": "..."}, ...]
+client.usage()  # aggregate counters
 client.health()
 ```
 
@@ -90,6 +90,7 @@ with RekAIClient("http://localhost:8000", provider_key="sk-...") as client:
 import asyncio
 from rekai_client import AsyncRekAIClient
 
+
 async def main():
     async with AsyncRekAIClient("http://localhost:8000") as client:
         result = await client.chat("echo", "Hello!")
@@ -100,6 +101,7 @@ async def main():
 
         # on_usage may be a plain callable or a coroutine function.
         await client.embeddings("echo", ["hello", "world"])
+
 
 asyncio.run(main())
 ```
@@ -113,7 +115,7 @@ header when present. Tune or disable it per client:
 ```python
 client = RekAIClient(
     "http://localhost:8000",
-    max_retries=2,      # default; set 0 to disable
+    max_retries=2,  # default; set 0 to disable
     retry_backoff=0.5,  # seconds, doubled each attempt
 )
 ```
