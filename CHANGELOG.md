@@ -7,6 +7,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **CI was silently dead — the workflow file lived outside `.github/workflows/`.**
+  GitHub Actions only loads workflows from `.github/workflows/`, but the CI
+  definition was committed as `.github/ci-workflow.yml`, so **no CI ever ran**
+  despite the README badge and the `ci: consolidate the two divergent staged CI
+  workflows into one` commit both pointing at `workflows/ci.yml`. Moved it to
+  `.github/workflows/ci.yml` so push/PR triggers actually fire. Verified the YAML
+  parses and the file now sits at the path GitHub scans.
+
+### Fixed
 - **`text-embedding-004` was advertised as Gemini but routed to OpenAI.** The
   model registry (`rekai/models.py`) is meant to be the single source of truth
   for routing, pricing, and the advertised `/v1/models` list, but its two halves
