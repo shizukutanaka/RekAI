@@ -7,6 +7,22 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **The response cache no longer turns a Redis outage into a site-wide 500.** A
+  configured `REKAI_REDIS_URL` that is unreachable (wrong host, Redis down,
+  network partition) made `RedisCache.get()` raise `redis.exceptions.ConnectionError`
+  on every `/v1/chat`, `/v1/chat/completions`, and `/v1/embeddings` request —
+  so the gateway returned `Internal Server Error` instead of serving, despite
+  Redis being "optional". This broke the repo's own core invariant ("Redis-when-
+  configured, process-local otherwise, **fail-open on Redis errors**"), which the
+  rate limiter and metrics store already honored but the cache did not. `RedisCache`
+  now catches errors on `get`/`set`/`add`/`delete`, returns a miss (and a no-op
+  write) instead of propagating, logs a single `redis cache failing open` warning,
+  and transparently downgrades to an in-process `MemoryCache` for the rest of the
+  process — so a transient Redis blip no longer keeps recomputing every cacheable
+  hit for the server's lifetime. `/health` still reports `cache: "redis"` (the
+  configured backend). Verified live: with `REKAI_REDIS_URL` pointed at a dead
+  port, chat/embeddings now return 200 (was 500) with zero tracebacks; a new
+  `test_redis_cache_fails_open_on_errors` regression test asserts the downgrade.
 - **CI was silently dead — the workflow file lived outside `.github/workflows/`.**
   GitHub Actions only loads workflows from `.github/workflows/`, but the CI
   definition was committed as `.github/ci-workflow.yml`, so **no CI ever ran**

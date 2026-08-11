@@ -12,7 +12,10 @@ import time
 from typing import Protocol
 
 from rekai.config import Settings
+from rekai.logging_config import get_logger
 from rekai.schemas import ChatRequest
+
+logger = get_logger("rekai.cache")
 
 
 def cache_key(request: ChatRequest, provider: str) -> str:
@@ -148,26 +151,77 @@ class MemoryCache:
 
 
 class RedisCache:
+    """Redis-backed cache that fails open on Redis errors.
+
+    A Redis outage must degrade to "no cache" (and therefore "no service
+    impact"), never to "500 on every request" — the same fail-open contract the
+    rate limiter and metrics store honor. Any error in ``get``/``set``/``add``/
+    ``delete`` is swallowed (after a single warning) and the operation becomes a
+    no-op: a ``get`` returns a miss, a ``set``/``add``/``delete`` does nothing.
+
+    On the first error the backend also transparently downgrades to a
+    process-local :class:`MemoryCache` for the rest of the process, so a
+    transient Redis blip doesn't keep turning real (cacheable) hits into
+    recomputations for the whole lifetime of the server — once Redis is back the
+    memory layer just stops being consulted. ``label`` stays ``"redis"`` so
+    ``/health`` keeps reporting the configured backend.
+    """
+
     def __init__(self, url: str) -> None:
         import redis.asyncio as redis  # imported lazily so redis is optional at runtime
 
         self._client = redis.from_url(url, decode_responses=True)
+        self._local: MemoryCache | None = None
+        self._degraded = False
 
     async def get(self, key: str) -> str | None:
-        value = await self._client.get(key)
+        if self._local is not None:
+            return await self._local.get(key)
+        try:
+            value = await self._client.get(key)
+        except Exception as exc:
+            self._degrade(exc)
+            return None
         if value is None:
             return None
         return value.decode() if isinstance(value, bytes) else str(value)
 
     async def set(self, key: str, value: str, ttl: int) -> None:
-        await self._client.set(key, value, ex=ttl)
+        if self._local is not None:
+            await self._local.set(key, value, ttl)
+            return
+        try:
+            await self._client.set(key, value, ex=ttl)
+        except Exception as exc:
+            self._degrade(exc)
 
     async def add(self, key: str, value: str, ttl: int) -> bool:
         # SET key value NX EX ttl — atomic set-if-absent. Returns True when set.
-        return bool(await self._client.set(key, value, ex=ttl, nx=True))
+        if self._local is not None:
+            return await self._local.add(key, value, ttl)
+        try:
+            return bool(await self._client.set(key, value, ex=ttl, nx=True))
+        except Exception as exc:
+            self._degrade(exc)
+            return False
 
     async def delete(self, key: str) -> None:
-        await self._client.delete(key)
+        if self._local is not None:
+            await self._local.delete(key)
+            return
+        try:
+            await self._client.delete(key)
+        except Exception as exc:
+            self._degrade(exc)
+
+    def _degrade(self, exc: Exception) -> None:
+        # Only warn once: the first blip is worth surfacing, the next thousand
+        # are noise. Switch to the local fallback so we stop hammering a dead
+        # Redis and stop paying the connection-timeout latency on every call.
+        if not self._degraded:
+            logger.warning("redis cache failing open (redis error: %s)", exc)
+            self._degraded = True
+        self._local = MemoryCache()
 
     @property
     def label(self) -> str:
