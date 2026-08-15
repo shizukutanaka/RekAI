@@ -176,6 +176,38 @@ params are tolerated and ignored; `n > 1` is a 400; errors use OpenAI's error
 envelope. It is part of the cache key, so a JSON-mode request and a plain one
 never collide.
 
+### Why generation stopped
+
+`finish_reason` is **reported by the provider, not synthesised**. Every backend
+says why it stopped and RekAI normalizes the four vocabularies onto OpenAI's:
+
+| | OpenAI | Anthropic `stop_reason` | Gemini `finishReason` | Ollama `done_reason` |
+|---|---|---|---|---|
+| `stop` | `stop` | `end_turn`, `stop_sequence` | `STOP` | `stop` |
+| `length` | `length` | `max_tokens` | `MAX_TOKENS` | `length` |
+| `tool_calls` | `tool_calls` | `tool_use` | *(inferred from parts)* | — |
+| `content_filter` | `content_filter` | `refusal` | `SAFETY`, `RECITATION`, … | — |
+
+`length` is the one that matters: it means the answer was **cut off by
+`max_tokens` and is incomplete**. RekAI used to discard all four fields and
+synthesise `"tool_calls" if tool_calls else "stop"` at the edge, so a truncated
+answer was indistinguishable from a complete one — the standard "retry with a
+larger budget when `finish_reason == 'length'`" pattern could never fire, and the
+truncated answer was then cached and replayed to everyone else as if whole.
+
+Two provider-specific wrinkles are handled rather than passed through. Gemini
+reports `STOP` even when it stopped to emit a `functionCall`, so a tool call is
+inferred from the parts — otherwise an OpenAI client would never know to run the
+tool. And under Anthropic's forced-tool JSON emulation the reason is `tool_use`,
+which is rewritten to `stop`: the forced tool is RekAI's own device and the
+caller never sees a tool call, so reporting one would describe an implementation
+detail.
+
+`null` means the provider reported nothing — the honest answer for a backend
+that doesn't, and how responses cached before this field existed read. The
+OpenAI-compatible endpoint falls back to the old derivation in that case, so it
+always emits one of the documented values.
+
 ### Structured output
 
 `response_format` (JSON mode / `json_schema`) is accepted on both this endpoint

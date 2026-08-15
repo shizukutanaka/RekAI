@@ -11,6 +11,7 @@ from rekai.config import get_settings
 from rekai.logging_config import get_logger
 from rekai.providers.base import (
     EmbeddingResult,
+    FinishReason,
     Provider,
     ProviderError,
     ProviderResult,
@@ -52,6 +53,18 @@ def _response_format(request: ChatRequest) -> str | dict | None:
     return None
 
 
+def _finish_reason(raw: object) -> FinishReason | None:
+    """Map Ollama's ``done_reason`` onto the normalized vocabulary.
+
+    Ollama reports ``"stop"`` when the model finished and ``"length"`` when it
+    hit the context/prediction limit — already the right words, so this only
+    validates and drops anything unrecognised.
+    """
+    if raw in ("stop", "length"):
+        return raw  # type: ignore[return-value]
+    return None
+
+
 class OllamaProvider(Provider):
     name = "ollama"
     requires_key = False
@@ -82,6 +95,7 @@ class OllamaProvider(Provider):
 
         data = resp.json()
         content = data.get("message", {}).get("content", "")
+        finish_reason = _finish_reason(data.get("done_reason"))
         prompt_tokens = data.get("prompt_eval_count", 0)
         completion_tokens = data.get("eval_count", 0)
         return ProviderResult(
@@ -92,6 +106,7 @@ class OllamaProvider(Provider):
                 completion_tokens=completion_tokens,
                 total_tokens=prompt_tokens + completion_tokens,
             ),
+            finish_reason=finish_reason,
         )
 
     async def embed(self, inputs: list[str], model: str, api_key: str | None) -> EmbeddingResult:
@@ -177,12 +192,18 @@ def _parse_ollama_ndjson_event(line: str) -> StreamEvent | None:
     if chunk.get("done"):
         prompt_tokens = chunk.get("prompt_eval_count", 0)
         completion_tokens = chunk.get("eval_count", 0)
-        if prompt_tokens or completion_tokens:
+        finish_reason = _finish_reason(chunk.get("done_reason"))
+        if prompt_tokens or completion_tokens or finish_reason:
             return StreamEvent(
-                usage=Usage(
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    total_tokens=prompt_tokens + completion_tokens,
-                )
+                usage=(
+                    Usage(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=prompt_tokens + completion_tokens,
+                    )
+                    if prompt_tokens or completion_tokens
+                    else None
+                ),
+                finish_reason=finish_reason,
             )
     return None

@@ -165,6 +165,15 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
 > (9) `/health` の degraded、(10) ガードレール既定 `flag` + パターン精緻化、
 > (11) セマンティックヒットの類似度開示。詳細は CHANGELOG の `[Unreleased]`。
 
+### O-17. finish_reason の伝搬 (完了)
+> ✅ 全 5 プロバイダが返している停止理由 (`finish_reason`/`stop_reason`/
+> `finishReason`/`done_reason`) を一切パースせず、edge で `"stop"` を捏造していた。
+> `max_tokens` で切り詰められた応答が「正常完了」として報告され、しかもキャッシュ
+> されて以後も配られていた。OpenAI 語彙 (`stop`/`length`/`tool_calls`/
+> `content_filter`) に正規化して `ProviderResult`/`StreamEvent`/`ChatResponse`/
+> OpenAI 互換層まで配線。Gemini の「functionCall でも STOP」と Anthropic の JSON
+> 擬似時の `tool_use` は個別に読み替え。未報告は `None`(既存キャッシュ互換)。
+
 ### 進め方
 - 1 タスク = 設計メモ (docs/ か PR 説明) → 実装 → テスト → live 検証 → CHANGELOG →
   1 コミット。O-1 / O-5 / O-6 は特に、着手前に設計を文書化してから。

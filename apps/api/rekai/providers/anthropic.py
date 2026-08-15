@@ -11,6 +11,7 @@ from rekai import models
 from rekai.config import get_settings
 from rekai.logging_config import get_logger
 from rekai.providers.base import (
+    FinishReason,
     Provider,
     ProviderError,
     ProviderResult,
@@ -57,6 +58,36 @@ def _structured_output_schema(request: ChatRequest) -> dict | None:
         # No schema was given, so any object satisfies the request.
         return {"type": "object"}
     return None
+
+
+# Anthropic's stop_reason vocabulary -> OpenAI's. "max_tokens" is the one that
+# matters: it means the answer was cut off, which RekAI previously reported as
+# an ordinary "stop".
+_ANTHROPIC_STOP_REASONS: dict[str, FinishReason] = {
+    "end_turn": "stop",
+    "stop_sequence": "stop",
+    "max_tokens": "length",
+    "tool_use": "tool_calls",
+    "pause_turn": "stop",
+    "refusal": "content_filter",
+}
+
+
+def _finish_reason(raw: object, *, emulating_json: bool) -> FinishReason | None:
+    """Normalize ``stop_reason``.
+
+    ``emulating_json`` rewrites ``tool_use`` to ``stop``: the forced
+    ``json_response`` tool is RekAI's own device for getting structured output
+    (see _structured_output_schema), so reporting "the model stopped to call a
+    tool" would describe an implementation detail the caller never asked for
+    and never sees.
+    """
+    if not isinstance(raw, str):
+        return None
+    reason = _ANTHROPIC_STOP_REASONS.get(raw)
+    if reason == "tool_calls" and emulating_json:
+        return "stop"
+    return reason
 
 
 class AnthropicProvider(Provider):
@@ -163,6 +194,9 @@ class AnthropicProvider(Provider):
             content = _unwrap_structured_output(blocks) or content
             tool_calls = None
         usage = data.get("usage", {})
+        finish_reason = _finish_reason(
+            data.get("stop_reason"), emulating_json=self._emulating_json(request)
+        )
         cache_read, cache_write = _cache_tokens(usage)
         # Anthropic reports cached prompt tokens *separately* from input_tokens;
         # fold them in so prompt_tokens stays the true prompt size and the cache
@@ -180,6 +214,7 @@ class AnthropicProvider(Provider):
                 cache_read_tokens=cache_read,
                 cache_write_tokens=cache_write,
             ),
+            finish_reason=finish_reason,
         )
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
@@ -197,6 +232,7 @@ class AnthropicProvider(Provider):
         # ARE the answer, so they stream out as text deltas rather than
         # accumulating into a tool call the caller never asked for.
         emulating_json = self._emulating_json(request)
+        finish_reason: FinishReason | None = None
         url = f"{settings.anthropic_base_url.rstrip('/')}/messages"
         # input tokens arrive in message_start; output tokens in message_delta.
         input_tokens = 0
@@ -263,22 +299,33 @@ class AnthropicProvider(Provider):
                         if "output_tokens" in usage:
                             output_tokens = usage["output_tokens"]
                             saw_usage = True
+                        stop_reason = _finish_reason(
+                            event.get("delta", {}).get("stop_reason"),
+                            emulating_json=emulating_json,
+                        )
+                        if stop_reason is not None:
+                            finish_reason = stop_reason
         except httpx.HTTPError as exc:
             raise ProviderError(f"Anthropic streaming request failed: {exc}") from exc
         if tool_blocks and not emulating_json:
             yield StreamEvent(tool_calls=[tool_blocks[i] for i in sorted(tool_blocks)])
-        if saw_usage:
+        if saw_usage or finish_reason is not None:
             # Cached prompt tokens are reported alongside input_tokens, not
             # inside it — fold them in so prompt_tokens is the true prompt size.
             prompt_tokens = input_tokens + cache_read + cache_write
             yield StreamEvent(
-                usage=Usage(
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=output_tokens,
-                    total_tokens=prompt_tokens + output_tokens,
-                    cache_read_tokens=cache_read,
-                    cache_write_tokens=cache_write,
-                )
+                usage=(
+                    Usage(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=output_tokens,
+                        total_tokens=prompt_tokens + output_tokens,
+                        cache_read_tokens=cache_read,
+                        cache_write_tokens=cache_write,
+                    )
+                    if saw_usage
+                    else None
+                ),
+                finish_reason=finish_reason,
             )
 
     async def list_models(self, api_key: str | None) -> list[str]:

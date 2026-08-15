@@ -11,6 +11,7 @@ import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
+from typing import Literal
 
 import httpx
 
@@ -76,12 +77,33 @@ def provider_http_error(
     )
 
 
+# Why a provider must report *why* it stopped, normalized to OpenAI's vocabulary:
+#
+#   stop            the model finished on its own
+#   length          it was cut off by max_tokens — the answer is INCOMPLETE
+#   tool_calls      it stopped to call a tool
+#   content_filter  the provider's safety layer stopped it
+#
+# Every backend reports this natively (OpenAI `finish_reason`, Anthropic
+# `stop_reason`, Gemini `finishReason`, Ollama `done_reason`) and RekAI used to
+# discard all of them, synthesising "stop" at the edge. That turned a truncated
+# answer into one indistinguishable from a complete one, which breaks the
+# standard "retry with a larger budget when finish_reason == 'length'" pattern
+# and, worse, gets cached and replayed as if it were whole.
+#
+# ``None`` means the provider said nothing — the honest answer for a backend
+# that doesn't report it, and what keeps responses cached before this existed
+# readable.
+FinishReason = Literal["stop", "length", "tool_calls", "content_filter"]
+
+
 @dataclass
 class ProviderResult:
     content: str
     model: str
     usage: Usage = field(default_factory=Usage)
     tool_calls: list[dict] | None = None
+    finish_reason: FinishReason | None = None
 
 
 @dataclass
@@ -94,12 +116,13 @@ class EmbeddingResult:
 @dataclass
 class StreamEvent:
     """One event from a streaming completion: a text ``delta``, and/or (yielded
-    once at the end when available) provider-reported ``usage`` and assembled
-    ``tool_calls``."""
+    once at the end when available) provider-reported ``usage``, assembled
+    ``tool_calls``, and the normalized ``finish_reason``."""
 
     delta: str | None = None
     usage: Usage | None = None
     tool_calls: list[dict] | None = None
+    finish_reason: FinishReason | None = None
 
 
 class Provider(ABC):

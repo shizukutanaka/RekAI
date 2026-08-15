@@ -55,6 +55,12 @@ export interface ChatResult {
   cost_usd: number | null;
   cached: boolean;
   /**
+   * Why the model stopped, normalized across providers. `"length"` means the
+   * answer was cut off by `max_tokens` and is INCOMPLETE — retry with a larger
+   * budget. `null` when the provider didn't report one.
+   */
+  finish_reason: "stop" | "length" | "tool_calls" | "content_filter" | null;
+  /**
    * Cosine similarity to the stored prompt when the semantic cache served this
    * response — i.e. the answer is to a *similar* prompt, not this one. Null on
    * a miss and on an exact cache hit, so a non-null value is exactly the signal

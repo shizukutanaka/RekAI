@@ -41,6 +41,11 @@ class ChatResult:
     cached: bool
     fallback_used: bool
     tool_calls: list[dict[str, Any]] | None = None
+    #: Why the model stopped, normalized across providers: "stop", "length"
+    #: (cut off by max_tokens — the answer is INCOMPLETE, retry with a larger
+    #: budget), "tool_calls", or "content_filter". None when the provider didn't
+    #: report one.
+    finish_reason: str | None = None
     #: Cosine similarity to the stored prompt when the semantic cache served
     #: this response — the answer is to a *similar* prompt, not this one. None
     #: on a miss and on an exact cache hit, so a value here is exactly the
@@ -62,6 +67,7 @@ class ChatResult:
             cached=data.get("cached", False),
             fallback_used=data.get("fallback_used", False),
             tool_calls=data.get("tool_calls"),
+            finish_reason=data.get("finish_reason"),
             cache_similarity=data.get("cache_similarity"),
             redacted=data.get("redacted"),
         )

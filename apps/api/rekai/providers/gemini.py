@@ -11,6 +11,7 @@ from rekai import models
 from rekai.config import get_settings
 from rekai.providers.base import (
     EmbeddingResult,
+    FinishReason,
     Provider,
     ProviderError,
     ProviderResult,
@@ -19,6 +20,39 @@ from rekai.providers.base import (
     trace_headers,
 )
 from rekai.schemas import ChatRequest, Usage
+
+# Gemini's finishReason vocabulary -> OpenAI's. Everything that is a safety or
+# policy stop maps to content_filter; MAX_TOKENS is the truncation case.
+_GEMINI_FINISH_REASONS: dict[str, FinishReason] = {
+    "STOP": "stop",
+    "MAX_TOKENS": "length",
+    "SAFETY": "content_filter",
+    "RECITATION": "content_filter",
+    "BLOCKLIST": "content_filter",
+    "PROHIBITED_CONTENT": "content_filter",
+    "SPII": "content_filter",
+    "IMAGE_SAFETY": "content_filter",
+}
+
+
+def _finish_reason(chunk: dict, tool_calls: list[dict] | None = None) -> FinishReason | None:
+    """Normalize ``candidates[0].finishReason``.
+
+    Gemini says ``STOP`` even when it stopped to emit a functionCall, so a
+    tool call is inferred from the parts rather than the reason — otherwise a
+    tool-calling response would report ``stop`` and OpenAI clients would not
+    know to run the tool.
+    """
+    candidates = chunk.get("candidates") or []
+    if not candidates:
+        return None
+    raw = candidates[0].get("finishReason")
+    if not isinstance(raw, str):
+        return None
+    reason = _GEMINI_FINISH_REASONS.get(raw)
+    if reason == "stop" and tool_calls:
+        return "tool_calls"
+    return reason
 
 
 class GeminiProvider(Provider):
@@ -99,6 +133,7 @@ class GeminiProvider(Provider):
             content=content,
             model=request.model,
             tool_calls=tool_calls,
+            finish_reason=_finish_reason(data, tool_calls),
             usage=Usage(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
@@ -146,6 +181,7 @@ class GeminiProvider(Provider):
             f"{request.model}:streamGenerateContent?alt=sse"
         )
         last_usage: dict | None = None
+        finish_reason: FinishReason | None = None
         # Gemini streams a functionCall complete within a chunk; collect across chunks.
         tool_calls: list[dict] = []
         try:
@@ -175,6 +211,9 @@ class GeminiProvider(Provider):
                     calls = _extract_tool_calls(chunk)
                     if calls:
                         tool_calls.extend(calls)
+                    reason = _finish_reason(chunk, calls or tool_calls)
+                    if reason is not None:
+                        finish_reason = reason
                     if chunk.get("usageMetadata"):
                         last_usage = chunk["usageMetadata"]
         except httpx.HTTPError as exc:
@@ -184,17 +223,22 @@ class GeminiProvider(Provider):
             for i, call in enumerate(tool_calls):
                 call["id"] = f"call_{call['function']['name'] or 'fn'}_{i}"
             yield StreamEvent(tool_calls=tool_calls)
-        if last_usage is not None:
-            prompt_tokens = last_usage.get("promptTokenCount", 0)
-            completion_tokens = last_usage.get("candidatesTokenCount", 0)
+        if last_usage is not None or finish_reason is not None:
+            prompt_tokens = (last_usage or {}).get("promptTokenCount", 0)
+            completion_tokens = (last_usage or {}).get("candidatesTokenCount", 0)
             yield StreamEvent(
-                usage=Usage(
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    total_tokens=last_usage.get(
-                        "totalTokenCount", prompt_tokens + completion_tokens
-                    ),
-                )
+                usage=(
+                    Usage(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=last_usage.get(
+                            "totalTokenCount", prompt_tokens + completion_tokens
+                        ),
+                    )
+                    if last_usage is not None
+                    else None
+                ),
+                finish_reason=finish_reason,
             )
 
     async def list_models(self, api_key: str | None) -> list[str]:

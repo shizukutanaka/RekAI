@@ -102,6 +102,24 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Added
+- **`finish_reason` now comes from the provider instead of being synthesised.**
+  All five backends report why generation stopped — OpenAI `finish_reason`,
+  Anthropic `stop_reason`, Gemini `finishReason`, Ollama `done_reason` — and
+  RekAI parsed none of them, emitting `"tool_calls" if tool_calls else "stop"`
+  at the edge. So an answer **cut off by `max_tokens` was reported as a normal
+  completion**: the standard "retry with a larger budget when
+  `finish_reason == 'length'`" pattern could never fire, and the truncated
+  answer was cached and replayed to later callers as if it were whole. The four
+  vocabularies are normalized onto OpenAI's (`stop` / `length` / `tool_calls` /
+  `content_filter`) and carried through `ProviderResult`, `StreamEvent`,
+  `ChatResponse` (new nullable `finish_reason` field), both streaming paths, and
+  the OpenAI-compatible translation. Two wrinkles are handled rather than passed
+  through: Gemini says `STOP` even when emitting a `functionCall` (a tool call is
+  inferred from the parts), and Anthropic's forced-tool JSON emulation says
+  `tool_use` (rewritten to `stop`, since the caller never sees a tool call).
+  `null` means the provider said nothing — also how responses cached before this
+  field existed read, and the OpenAI endpoint falls back to the old derivation
+  there. Both SDKs expose it.
 - **`response_format` is now honored by every provider.** RekAI advertised JSON
   mode in its OpenAPI schema and README, but Anthropic and Ollama accepted the
   field and dropped it with only a debug log — a caller who asked for JSON got

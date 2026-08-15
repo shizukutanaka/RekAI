@@ -1133,6 +1133,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     }
                     if s.tool_calls:
                         summary["tool_calls"] = s.tool_calls
+                    if s.finish_reason:
+                        summary["finish_reason"] = s.finish_reason
                     if s.redacted:
                         summary["redacted"] = s.redacted
                     yield f"data: {json.dumps(summary)}\n\n"
@@ -1271,6 +1273,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     yield "data: [DONE]\n\n"
                     return
                 elif ev.summary is not None:
+                    # Prefer what the provider actually said; fall back to the
+                    # derived value only when it said nothing.
+                    if ev.summary.finish_reason:
+                        finish_reason = ev.summary.finish_reason
                     if ev.summary.tool_calls:
                         finish_reason = "tool_calls"
                         yield sse(

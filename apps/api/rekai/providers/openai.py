@@ -11,6 +11,7 @@ from rekai import models
 from rekai.config import get_settings
 from rekai.providers.base import (
     EmbeddingResult,
+    FinishReason,
     Provider,
     ProviderError,
     ProviderResult,
@@ -19,6 +20,21 @@ from rekai.providers.base import (
     trace_headers,
 )
 from rekai.schemas import ChatRequest, Usage
+
+_OPENAI_FINISH_REASONS = {"stop", "length", "tool_calls", "content_filter"}
+
+
+def _finish_reason(raw: object) -> FinishReason | None:
+    """OpenAI's vocabulary *is* the normalized one, so this only validates.
+
+    Unknown values (a compatible backend inventing its own, or "function_call"
+    from the deprecated API) become None rather than being passed through: a
+    value outside the documented set would fail the response model and is not
+    worth guessing at.
+    """
+    if isinstance(raw, str) and raw in _OPENAI_FINISH_REASONS:
+        return raw  # type: ignore[return-value]
+    return None
 
 
 class OpenAIProvider(Provider):
@@ -96,6 +112,7 @@ class OpenAIProvider(Provider):
                 cache_read_tokens=_cached_prompt_tokens(usage),
             ),
             tool_calls=message.get("tool_calls"),
+            finish_reason=_finish_reason(data["choices"][0].get("finish_reason")),
         )
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
@@ -215,8 +232,11 @@ def _parse_openai_sse_event(line: str) -> StreamEvent | None:
     choices = chunk.get("choices") or []
     if choices:
         delta = choices[0].get("delta", {}).get("content")
-        if delta:
-            return StreamEvent(delta=delta)
+        reason = _finish_reason(choices[0].get("finish_reason"))
+        if delta or reason:
+            # The terminal chunk usually carries a finish_reason and an empty
+            # delta; a provider may also send both at once.
+            return StreamEvent(delta=delta or None, finish_reason=reason)
     usage = chunk.get("usage")
     if usage:
         return StreamEvent(

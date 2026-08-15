@@ -49,6 +49,7 @@ class StreamSummary:
     cost_usd: float | None
     estimated: bool
     tool_calls: list[dict] | None = None
+    finish_reason: str | None = None
     # Secret patterns scrubbed from the streamed text. Reported here rather
     # than as a header because response headers are long gone by the time the
     # first delta is redacted.
@@ -322,6 +323,7 @@ async def handle_chat(
             cost_usd=cost_usd,
             cached=False,
             fallback_used=is_fallback,
+            finish_reason=result.finish_reason,
             created=int(time.time()),
         )
         # Redact before *any* store below sees the content (see _redact).
@@ -379,6 +381,7 @@ async def handle_chat_stream(
     completion: list[str] = []
     reported_usage: Usage | None = None
     reported_tool_calls: list[dict] | None = None
+    reported_finish_reason: str | None = None
     errored = False
     started = time.perf_counter()
     first_token_at: float | None = None
@@ -405,6 +408,8 @@ async def handle_chat_stream(
                 reported_usage = event.usage
             if event.tool_calls is not None:
                 reported_tool_calls = event.tool_calls
+            if event.finish_reason is not None:
+                reported_finish_reason = event.finish_reason
         if redactor is not None:
             tail = redactor.flush()
             if tail:
@@ -464,6 +469,7 @@ async def handle_chat_stream(
                 cost_usd=cost_usd,
                 estimated=estimated,
                 tool_calls=reported_tool_calls or None,
+                finish_reason=reported_finish_reason,
                 redacted=(redactor.hits or None) if redactor is not None else None,
             )
         )

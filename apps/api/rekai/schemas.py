@@ -137,7 +137,9 @@ class ChatCompletionMessage(BaseModel):
 class ChatCompletionChoice(BaseModel):
     index: int = 0
     message: ChatCompletionMessage
-    finish_reason: Literal["stop", "tool_calls"] = "stop"
+    # "length" matters most: it is how an OpenAI client learns the answer was
+    # truncated by max_tokens and should be retried with a larger budget.
+    finish_reason: Literal["stop", "length", "tool_calls", "content_filter"] = "stop"
 
 
 class ChatCompletionResponse(BaseModel):
@@ -169,6 +171,13 @@ class ChatResponse(BaseModel):
         description="Approximate USD cost. 0.0 for free/local providers, null if unknown.",
     )
     cached: bool = False
+    finish_reason: Literal["stop", "length", "tool_calls", "content_filter"] | None = Field(
+        default=None,
+        description="Why the model stopped, normalized across providers: 'stop' "
+        "(finished), 'length' (cut off by max_tokens — the answer is INCOMPLETE), "
+        "'tool_calls', or 'content_filter'. Null when the provider didn't report "
+        "one, which is also how responses cached before this field existed read.",
+    )
     cache_similarity: float | None = Field(
         default=None,
         description="Cosine similarity to the stored prompt when the semantic cache "
