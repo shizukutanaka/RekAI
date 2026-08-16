@@ -7,6 +7,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **Streaming cost/budget estimation is script-aware — CJK no longer counts as
+  ~1 token.** When a provider streams without reporting usage, RekAI estimates
+  the token count, and that estimate feeds both `cost_usd` and the per-client
+  budget cap (`REKAI_CLIENT_BUDGET_USD`). The estimator was `len(text.split())`
+  — a whitespace word count — which undercounts Latin text ~30% and, for scripts
+  without spaces (Japanese, Chinese), collapsed an entire reply to ~1 token: a
+  100×+ undercount that let a CJK-language app run past its spend cap
+  effectively unmetered. It now counts CJK/kana/Hangul characters ~1 token each
+  and the rest at OpenAI's ~4-chars-per-token rule, landing within ~15% of
+  `o200k_base` across English, Japanese, Chinese, and Korean and erring slightly
+  high (the safe direction for a cap). Still a dependency-free heuristic — an
+  exact tokenizer needs a per-model vocab download a self-hosted deployment
+  can't assume, and providers that report exact usage never hit this path.
 - **Output redaction now covers streaming.** `REKAI_OUTPUT_REDACTION_ENABLED`
   scrubbed `/v1/chat` but not `/v1/chat/stream` — the endpoint a chat UI
   actually uses — so a deployment that enabled redaction for compliance got no

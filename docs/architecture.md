@@ -506,6 +506,20 @@ billing. `/v1/models` also reports each model's `pricing`
 (`input_per_1m`/`output_per_1m`, or `null` when unknown), so clients can build
 cost UIs without hardcoding rates.
 
+When a provider streams without reporting usage, tokens are **estimated** from
+the text (`estimated: true`). That estimate is script-aware, not a word count:
+CJK ideographs, kana, and Hangul are counted ~1 token each, and Latin-script
+text at OpenAI's ~4-chars-per-token rule. This matters because the estimate
+feeds `cost_usd` *and* the per-client budget cap — the earlier `len(text.split())`
+undercounted Latin text ~30% and collapsed a space-free CJK reply to ~1 token
+(a 100×+ undercount), so a Japanese/Chinese app could run past its budget
+effectively unmetered. Measured against `o200k_base` the heuristic lands within
+~15% across English, Japanese, Chinese, and Korean and errs slightly high — the
+safe direction for a spend cap. It stays a heuristic rather than a real
+tokenizer (tiktoken) on purpose: an exact count needs a per-model vocab download
+a self-hosted or air-gapped deployment can't assume, and any provider that
+reports exact usage never reaches this path.
+
 There are two ways to override or extend the table:
 
 - `pricing.register_price()` mutates the built-in table directly — process-wide,
