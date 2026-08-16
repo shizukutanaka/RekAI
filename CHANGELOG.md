@@ -7,6 +7,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **The in-process rate limiter no longer degrades under the flood it exists to
+  stop.** Its bucket cap was enforced by reclaiming only *fully-refilled*
+  buckets — which reclaims nothing during a flood of distinct client ids, since
+  every bucket is then mid-refill. So the dict grew past `max_buckets` without
+  limit, and because the reclaim scan ran on every request once at the cap, cost
+  grew quadratically: **8000 distinct ids against the default 60-per-60s config
+  took 4.4 s and left 1612 buckets under a 1000 cap** (an algorithmic-complexity
+  attack, Crosby & Wallach, USENIX Security 2003 — the component meant to stop
+  abuse amplifying it). Reclaim now falls back to evicting the buckets closest
+  to full, in amortized batches: the same workload is **44 ms and exactly 1000
+  buckets**, ~288× faster with the cap actually enforced. Eviction order is
+  deliberate — evicting a bucket resets that client to full capacity, so
+  discarding the *least*-throttled gives away the least budget and can't be used
+  by an attacker to flood their own exhausted bucket out and reset their limit.
 - **Streaming cost/budget estimation is script-aware — CJK no longer counts as
   ~1 token.** When a provider streams without reporting usage, RekAI estimates
   the token count, and that estimate feeds both `cost_usd` and the per-client

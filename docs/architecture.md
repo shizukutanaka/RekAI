@@ -636,6 +636,23 @@ rather than refilling continuously. If Redis errors at runtime the limiter
 **fails open** (allows the request, logs a warning) — an outage degrades to
 "no rate limiting", not "no service".
 
+The in-process limiter caps how many buckets it tracks, so a flood of distinct
+client ids can't grow memory without bound. Reclaiming *only* fully-refilled
+buckets used to fail in exactly the case the cap exists for: during a flood
+every bucket is mid-refill and therefore unprunable, so the dict grew past the
+cap **and** the O(n) scan then ran on every subsequent request — the limiter
+degrading quadratically under the abuse it exists to stop (an
+algorithmic-complexity attack in the sense of Crosby & Wallach, USENIX Security
+2003). Measured: 8000 distinct ids against the default 60-per-60s config took
+4.4 s and left 1612 buckets under a 1000 cap; it is now 44 ms and exactly 1000.
+
+When idle buckets aren't enough, the limiter evicts the buckets **closest to
+full**, in batches. The order is a security property: evicting a bucket resets
+its client to full capacity, so eviction hands budget back. Discarding the
+least-throttled clients gives away the least — and never the most-throttled,
+which the opposite policy would, letting an attacker flood distinct keys to
+force their own exhausted bucket out and reset their limit.
+
 ### Concurrency cap
 
 `REKAI_MAX_CONCURRENT_REQUESTS` (opt-in, `0` = unlimited) bounds a different

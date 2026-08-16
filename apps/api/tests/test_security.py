@@ -1,4 +1,5 @@
 import logging
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -71,23 +72,26 @@ def test_rate_limiter_blocks_after_capacity() -> None:
     assert limiter.allow("other") is True
 
 
-def test_rate_limiter_prunes_idle_buckets() -> None:
-    import time
-
-    # Active clients (below capacity) are retained even when the cap is hit, so
-    # legitimate traffic keeps its budget.
+def test_rate_limiter_reclaims_idle_buckets_before_active_ones() -> None:
+    # A fully-refilled bucket is indistinguishable from a brand-new one, so it
+    # carries no state and is reclaimed first; a partially-spent bucket is
+    # holding a real client's consumed budget and is kept.
     limiter = RateLimiter(capacity=5, window=60, max_buckets=10)
-    for i in range(11):
-        limiter.allow(f"active-{i}")  # each consumes a token -> not full -> kept
-    assert len(limiter._buckets) == 11
-
-    # _prune drops fully-refilled (idle) buckets but keeps active ones.
     now = time.time()
     limiter._buckets["idle"] = (5.0, now)  # tokens == capacity -> idle
     limiter._buckets["busy"] = (0.5, now)  # partially spent -> active
-    limiter._prune(now)
+    limiter._reclaim(now)
     assert "idle" not in limiter._buckets
     assert "busy" in limiter._buckets
+
+
+def test_rate_limiter_enforces_its_bucket_cap() -> None:
+    # This used to assert the opposite — that active buckets accumulate past
+    # max_buckets — which encoded the unbounded growth as intended behavior.
+    limiter = RateLimiter(capacity=5, window=60, max_buckets=10)
+    for i in range(11):
+        limiter.allow(f"active-{i}")  # each spends a token -> none is prunable
+    assert len(limiter._buckets) <= 10
 
 
 def test_rate_limiter_retry_after() -> None:
@@ -773,3 +777,86 @@ def test_admin_rate_limit_can_be_disabled() -> None:
     headers = {"Authorization": "Bearer sk-admin-1"}
     for _ in range(5):
         assert client.get("/admin/keys", headers=headers).status_code == 200
+
+
+# --- rate limiter: bucket eviction under a flood ------------------------------
+# The bucket cap exists so a flood of distinct client ids can't grow memory
+# without bound. Reclaiming *only* fully-refilled buckets silently failed in
+# exactly that case — during a flood every bucket is mid-refill, so nothing was
+# prunable, the dict grew past the cap, and the O(n) scan then ran on every
+# subsequent request. Measured before the fix: 8000 distinct ids against the
+# default 60-per-60s config took 4.4s and left 1612 buckets under a 1000 cap —
+# the limiter amplifying the abuse it exists to stop (an algorithmic-complexity
+# attack, Crosby & Wallach, USENIX Security 2003).
+
+
+def _flood(limiter: RateLimiter, count: int, prefix: str = "ip") -> None:
+    for i in range(count):
+        limiter.allow(f"{prefix}-{i}")
+
+
+def test_bucket_count_stays_capped_when_nothing_can_refill() -> None:
+    # A long window means a bucket that spent one token needs 360s to refill,
+    # so the old fully-refilled-only policy could reclaim nothing at all.
+    limiter = RateLimiter(capacity=10, window=3600.0, max_buckets=200)
+    _flood(limiter, 5000)
+    assert len(limiter._buckets) <= 200
+
+
+def test_bucket_count_stays_capped_on_the_default_config() -> None:
+    limiter = RateLimiter(capacity=60, window=60.0, max_buckets=1000)
+    _flood(limiter, 8000)
+    assert len(limiter._buckets) <= 1000
+
+
+def test_reclaim_is_amortized_not_run_per_request() -> None:
+    # The cost that made this quadratic: once at the cap, every single request
+    # paid a full scan. Batched eviction must make that ~1 pass per 10% of the
+    # cap, not one per admission.
+    limiter = RateLimiter(capacity=10, window=3600.0, max_buckets=100)
+    passes = 0
+    original = limiter._reclaim
+
+    def counting(now: float) -> None:
+        nonlocal passes
+        passes += 1
+        original(now)
+
+    limiter._reclaim = counting  # type: ignore[method-assign]
+    _flood(limiter, 1000)
+    # ~900 admissions happen past the cap; one pass each would be ~900.
+    assert passes < 200
+
+
+def test_eviction_never_hands_budget_back_to_a_throttled_client() -> None:
+    # Eviction resets a client to full capacity, so it *grants* budget. If the
+    # policy evicted the most-throttled buckets, an attacker could flood
+    # distinct keys to force their own exhausted bucket out and reset their
+    # limit — turning the cap into a rate-limit bypass.
+    limiter = RateLimiter(capacity=5, window=3600.0, max_buckets=50)
+    for _ in range(5):
+        limiter.allow("victim")
+    assert limiter.allow("victim") is False  # budget exhausted
+
+    _flood(limiter, 500, prefix="flood")
+
+    assert limiter.allow("victim") is False  # still exhausted, not reset
+    assert limiter.remaining("victim") == 0
+
+
+def test_idle_buckets_are_still_reclaimed_first() -> None:
+    # The cheap case must keep working: a fully-refilled bucket carries no
+    # state, so it goes before any partially-spent one.
+    limiter = RateLimiter(capacity=5, window=1.0, max_buckets=10)
+    limiter.allow("idle")
+    time.sleep(1.1)  # "idle" refills completely
+    for i in range(9):
+        limiter.allow(f"active-{i}")
+    limiter.allow("trigger")
+    assert "idle" not in limiter._buckets
+
+
+def test_a_normal_client_is_unaffected_by_the_cap() -> None:
+    # Sanity: ordinary traffic still gets exactly its configured budget.
+    limiter = RateLimiter(capacity=3, window=3600.0, max_buckets=1000)
+    assert [limiter.allow("solo") for _ in range(4)] == [True, True, True, False]
