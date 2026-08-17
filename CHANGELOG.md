@@ -158,6 +158,24 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   intended. `ff` stays reserved and rejected.
 
 ### Added
+- **`REKAI_REQUEST_DEADLINE_SECONDS` — a total budget for one request.**
+  `REKAI_REQUEST_TIMEOUT_SECONDS` reads like a request bound and is not one: it
+  caps a *single* outbound call, which `REKAI_RETRY_MAX_ATTEMPTS` multiplies and
+  the fallback chain multiplies again. Measured against a hung upstream with a
+  1.0 s per-call bound: **6 upstream calls and 6.04 s of client wait** — scaled
+  to the shipped defaults (60 s, 2 attempts, a 3-target chain) that is **~6
+  minutes** holding a connection and a concurrency slot for a request whose
+  "timeout" is one minute. The new setting is the missing half — the split Envoy
+  draws between `route.timeout` and `retry_policy.per_try_timeout`, and that
+  LiteLLM/Portkey expose as two settings. It is enforced before starting each
+  fallback target, around each attempt (so one hung upstream cannot overrun the
+  budget by itself), and before each backoff sleep (a sleep that would leave no
+  time to actually retry is skipped, and the real upstream error raised
+  instead). Exceeding it returns **504**; when a genuine upstream failure is in
+  hand that is surfaced instead, so the client sees the cause and not the
+  budget. `0` (the default) keeps today's unlimited behavior. Streaming is
+  exempt — a stream's duration is the length of the answer, not a fault, and
+  `REKAI_MAX_CONCURRENT_REQUESTS` already bounds occupancy there.
 - **`tracestate` is now propagated.** `traceparent`'s companion header carries
   vendor state (sampling decisions, a vendor's own trace id) and was dropped
   entirely — the spec pairs the two, and a gateway is the hop every call

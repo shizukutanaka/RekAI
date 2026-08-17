@@ -104,6 +104,40 @@ provider is reflected in the response `provider` field and `fallback_used` is
 set when a non-primary target answered. Each fallback attempt increments
 `rekai_fallbacks_total`. Retry and failover apply to embeddings too.
 
+### Per-try timeout vs. request deadline
+
+`REKAI_REQUEST_TIMEOUT_SECONDS` reads like a request bound but is a **per-call**
+one: it caps a single outbound HTTP call. Attempts multiply it by
+`REKAI_RETRY_MAX_ATTEMPTS`, and the fallback chain multiplies it again, so the
+shipped defaults (60s × 2 attempts × a 3-target chain) let one caller wait
+**~6 minutes** — holding a connection, a concurrency slot and the client's own
+patience — for a request whose "timeout" is 60 seconds. Measured on a hung
+upstream: 6 upstream calls, 6.04s of client wait for a 1.0s per-call bound.
+
+`REKAI_REQUEST_DEADLINE_SECONDS` is the missing half — the total wall-clock
+budget for one non-streaming request, across *every* retry and fallback
+attempt. This is the split Envoy draws between `route.timeout` and
+`retry_policy.per_try_timeout`, and that LiteLLM and Portkey expose as separate
+settings. It is enforced at three points (`rekai/retry.py`,
+`rekai/service.py`):
+
+- **before starting a target** — when the budget is spent, the chain stops
+  rather than walking every remaining fallback;
+- **around each attempt** — a single hung upstream is cut off at the remaining
+  budget instead of running to its own per-call timeout;
+- **before each backoff sleep** — a sleep that would consume the rest of the
+  budget and still leave no time to retry is skipped, and the *real* upstream
+  error is raised immediately instead of after the wait.
+
+Exceeding it returns **504** with `error: provider_error`. When RekAI has a
+genuine upstream failure in hand it surfaces that instead, so the client sees
+the cause rather than the budget. `0` (the default) means unlimited — existing
+deployments are unchanged.
+
+**Streaming is deliberately exempt.** A stream's duration is the length of the
+answer, not a fault; the bound that matters there is occupancy, which
+`REKAI_MAX_CONCURRENT_REQUESTS` already provides.
+
 ### Provider cooldown
 
 When a provider 429s, it is **parked** for the upstream `Retry-After`, or

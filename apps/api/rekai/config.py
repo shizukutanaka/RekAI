@@ -228,6 +228,22 @@ class Settings(BaseSettings):
 
     # Networking
     request_timeout_seconds: float = 60.0
+
+    # Total wall-clock budget for one /v1/chat or /v1/embeddings request,
+    # across *every* retry and fallback attempt. 0 (default) = unlimited,
+    # today's behavior.
+    #
+    # request_timeout_seconds above bounds a single upstream call. It reads
+    # like a request bound and is not one: attempts multiply by
+    # retry_max_attempts and again by the length of the fallback chain, so the
+    # shipped defaults (60s, 2 attempts, a 3-target chain) let one client wait
+    # ~384s while holding a connection and a concurrency slot. This is the
+    # distinction Envoy draws between a route timeout and a per-try timeout,
+    # and that LiteLLM/Portkey expose as separate settings; RekAI only had the
+    # per-try half. Streaming is deliberately exempt — a stream's duration is
+    # the length of the answer, not a fault (REKAI_MAX_CONCURRENT_REQUESTS
+    # bounds occupancy there).
+    request_deadline_seconds: float = Field(default=0.0, ge=0.0)
     cors_origins: str = "*"
 
     @property
