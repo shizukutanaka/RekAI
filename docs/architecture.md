@@ -621,6 +621,18 @@ optionally be locked behind the same Bearer key too (see below), since it
 carries a per-client cost breakdown that scraping doesn't need to be public.
 This is separate from **BYOK** below, which is the *upstream provider* key.
 
+Keys are compared as **bytes**, not `str`. `secrets.compare_digest` raises
+`TypeError` on a `str` holding any non-ASCII character, and the presented token
+comes straight from an attacker-controlled header — so
+`Authorization: Bearer ké` used to raise out of the auth middleware as an
+unhandled **500** rather than a 401. Because auth runs *before* the rate
+limiter, those requests consumed no rate-limit budget, never reached
+`metrics.record_error`, and wrote a full stack trace each time: unmetered,
+uncounted log amplification from a one-character header change. Encoding both
+sides (with `surrogatepass`, so a lone surrogate can't reintroduce it) keeps the
+comparison constant-time while making every malformed credential an ordinary
+401.
+
 Rate limiting is **per tenant**: when authenticated, the bucket is keyed by the
 API key (a non-reversible `key:<hash>` id, also attached to the structured
 access log as `client`) rather than the client IP, so one tenant's traffic can't

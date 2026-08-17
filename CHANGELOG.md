@@ -7,6 +7,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **A non-ASCII `Authorization` header no longer crashes the auth gate.**
+  `secrets.compare_digest` rejects a `str` containing any non-ASCII character
+  with `TypeError`, and the presented token is attacker-controlled — so
+  `Authorization: Bearer ké` raised out of the auth middleware as an unhandled
+  **500 instead of a 401**, on `/v1/*` and `/admin/*` alike. Three things made
+  that more than cosmetic: auth runs *before* the rate limiter, so these
+  requests consumed **no rate-limit budget**; the exception escaped before
+  `metrics.record_error`, so they were **invisible in `rekai_errors_*`**
+  (measured: `errors_total` 1 after 9 crashes); and each one logged a full
+  stack trace. An unauthenticated client could therefore generate unbounded,
+  unmetered, uncounted 500s and log volume by changing one character. Keys are
+  now compared as bytes (`surrogatepass`, so a lone surrogate can't reintroduce
+  it), which keeps the comparison constant-time and turns every malformed
+  credential into an ordinary 401.
 - **The in-process rate limiter no longer degrades under the flood it exists to
   stop.** Its bucket cap was enforced by reclaiming only *fully-refilled*
   buckets — which reclaims nothing during a flood of distinct client ids, since
