@@ -612,12 +612,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # (deep in the handler call stack) can attach its own traceparent
         # without threading trace_id through every function signature down to
         # it. Reset unconditionally so it can't leak into an unrelated request.
+        tracestate = tracing.parse_tracestate(request.headers.get("tracestate"))
         trace_token = tracing.set_current_trace_id(trace_id)
+        tracestate_token = tracing.set_current_tracestate(tracestate)
         start = time.perf_counter()
         try:
             response = await call_next(request)
         finally:
             tracing.reset_current_trace_id(trace_token)
+            tracing.reset_current_tracestate(tracestate_token)
         elapsed = time.perf_counter() - start
         elapsed_ms = elapsed * 1000
         # The value was already being computed for the header and the log line;
@@ -630,6 +633,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.1f}"
         response.headers["X-RekAI-Version"] = __version__
         response.headers["traceparent"] = tracing.format_traceparent(trace_id, span_id)
+        if tracestate:
+            response.headers["tracestate"] = tracestate
         response.headers["X-Content-Type-Options"] = "nosniff"
         access_logger.info(
             "%s %s -> %s %.1fms id=%s",
@@ -686,6 +691,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "X-RekAI-Version",
             "Idempotent-Replay",
             "traceparent",
+            "tracestate",
             "X-Guardrail-Flag",
             "X-Redacted",
             "X-Cache-Similarity",

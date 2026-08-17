@@ -142,7 +142,30 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and full re-verification. All web gates (tsc/lint/vitest/build/E2E) pass on
   vitest 4.
 
+### Fixed
+- **W3C Trace Context conformance.** `traceparent` was validated with
+  `int(value, 16)`, far more permissive than the spec's `HEXDIGLC` (lowercase
+  hex only): a leading sign, underscore digit separators, and surrounding ASCII
+  whitespace all passed, so values like `+bf92…` and `4bf9…47_6` were accepted
+  as trace ids — then formatted back into the response header *and* the outbound
+  provider header, i.e. RekAI emitted a `traceparent` that a conforming parser
+  must reject, silently breaking the correlation the header exists to provide.
+  (Not header injection: a raw CR/LF can't reach a single header value, since
+  the HTTP parser splits on it first.) Now validated by regex. A **future
+  version is parsed rather than rejected**, per the spec's forward-compatibility
+  rule — the previous code accepted only `00`, so it would have restarted every
+  trace the day the spec advanced, and an existing test had encoded that as
+  intended. `ff` stays reserved and rejected.
+
 ### Added
+- **`tracestate` is now propagated.** `traceparent`'s companion header carries
+  vendor state (sampling decisions, a vendor's own trace id) and was dropped
+  entirely — the spec pairs the two, and a gateway is the hop every call
+  crosses, so this stranded that state on every request. It is now forwarded to
+  providers alongside `traceparent` and echoed to the client. Since it is
+  attacker-controlled and goes back out in a header, it is validated rather than
+  passed through verbatim: printable ASCII only, at most 32 list members,
+  truncated to 512 bytes on a member boundary.
 - **`finish_reason` now comes from the provider instead of being synthesised.**
   All five backends report why generation stopped — OpenAI `finish_reason`,
   Anthropic `stop_reason`, Gemini `finishReason`, Ollama `done_reason` — and

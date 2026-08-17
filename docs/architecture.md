@@ -390,7 +390,28 @@ The same `trace_id` is also forwarded to the **upstream provider** — every
 provider's outbound HTTP call (OpenAI, Anthropic, Gemini, Ollama, and any
 OpenAI-compatible backend; chat, streaming, and embeddings) carries its own
 `traceparent`, continuing the request's trace with a fresh span id rather than
-reusing the one already returned to the client. Previously the trace stopped at
+reusing the one already returned to the client. **`tracestate` is forwarded with
+it** — the spec pairs the two, and propagating one without the other strands
+whatever vendor state (a sampling decision, a vendor's own trace id) the caller
+put there. A gateway is the hop where that matters most, since every call
+crosses it. It is attacker-controlled and goes back out in a header, so it is
+validated rather than echoed verbatim: printable ASCII only, at most 32 list
+members, truncated to 512 bytes **on a member boundary** (a half-member would
+be malformed).
+
+`traceparent` validation follows the spec's ABNF, which builds trace-id and
+parent-id from `HEXDIGLC` — *lowercase* hex and nothing else. Checking with
+`int(value, 16)` was far too permissive: Python accepts a leading sign,
+underscores as digit separators, and surrounding ASCII whitespace, so `+bf92…`,
+`4bf9…47_6` and a tab-padded id all passed, and were then formatted back into
+the response and the outbound provider header — RekAI emitting a `traceparent`
+a conforming parser must reject, silently breaking the correlation the header
+exists to provide. (Not a header-injection vector: a raw CR/LF cannot reach a
+single header value, because the HTTP parser splits the request on it first.)
+A **higher version is parsed, not discarded** — the spec fixes
+`version-trace_id-parent_id-flags` as any future version's first fields and
+allows extra ones, so accepting only `00` would restart every trace the day the
+spec advances. `ff` is the reserved invalid version and is rejected. Previously the trace stopped at
 RekAI's edge — a distributed trace couldn't follow the request into the
 provider that actually served it. This works without threading a `trace_id`
 parameter through every function from the route handler down to the HTTP call:

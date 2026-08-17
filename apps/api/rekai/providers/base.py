@@ -16,16 +16,27 @@ from typing import Literal
 import httpx
 
 from rekai.schemas import ChatRequest, Usage
-from rekai.tracing import current_traceparent
+from rekai.tracing import current_traceparent, current_tracestate
 
 
 def trace_headers() -> dict[str, str]:
-    """``{"traceparent": ...}`` for the outbound HTTP call a provider is about
-    to make, or ``{}`` outside a request context — so distributed tracing
-    doesn't stop at RekAI's edge. Merge into a provider's request headers,
-    e.g. ``{**trace_headers(), "Authorization": ...}``."""
+    """W3C propagation headers for the outbound call a provider is about to
+    make, or ``{}`` outside a request context — so distributed tracing doesn't
+    stop at RekAI's edge. Merge into a provider's request headers, e.g.
+    ``{**trace_headers(), "Authorization": ...}``.
+
+    ``tracestate`` rides along with ``traceparent``: the spec pairs them, and
+    forwarding one without the other strands whatever vendor state the caller
+    put there. A gateway is the hop where that matters most, since every call
+    crosses it."""
     traceparent = current_traceparent()
-    return {"traceparent": traceparent} if traceparent else {}
+    if not traceparent:
+        return {}
+    headers = {"traceparent": traceparent}
+    tracestate = current_tracestate()
+    if tracestate:
+        headers["tracestate"] = tracestate
+    return headers
 
 
 class ProviderError(Exception):
