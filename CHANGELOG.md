@@ -177,6 +177,25 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   trace the day the spec advanced, and an existing test had encoded that as
   intended. `ff` stays reserved and rejected.
 
+### Changed
+- **One CI workflow instead of two divergent staged copies.** `ci/ci.yml` and
+  `.github/ci-workflow.yml` were both complete, both parked (the GitHub App
+  token cannot push `.github/workflows/`), and each shipped its own README
+  telling a maintainer to `git mv` it into place — so whichever was installed
+  first, the other's instructions became wrong. They had also drifted apart in
+  ways that mattered: Python 3.12 vs 3.11, `main`+`claude/**` vs `main` only,
+  and neither was a superset — `ci/ci.yml` alone had smoke and Docker-build
+  jobs, `.github/ci-workflow.yml` alone had Playwright E2E. `ci/` is deleted and
+  the surviving file carries the union, with two changes on top:
+  the `api` job now runs a **3.10 + 3.12 matrix** (the `requires-python` floor
+  and the version the shipped image runs — both confirmed green locally, 645
+  tests each, before the matrix was written, so a red build there is a real
+  regression), and the separate smoke and docker-build jobs are merged into one
+  `stack` job that validates the compose file, builds both images, brings the
+  stack up with `--wait`, and runs `scripts/smoke.sh` against the actual
+  containers. That job is the only build verification the images ever get:
+  agent sessions on this repo have no Docker daemon.
+
 ### Added
 - **The LangChain compatibility claim is now a test, not a promise.** The
   README's first feature bullet names "any OpenAI SDK, LangChain, or

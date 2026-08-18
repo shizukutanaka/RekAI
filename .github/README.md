@@ -2,16 +2,26 @@
 
 ## `ci-workflow.yml` — pending installation as `workflows/ci.yml`
 
-This file is a complete GitHub Actions workflow that runs every gate in
-[`CLAUDE.md`](../CLAUDE.md): API (`ruff check`, `ruff format --check`, `mypy`,
-`pytest`), Python SDK (`ruff`, `pytest`), JS SDK (`node --test`), Web (`lint`,
-`vitest`, `build`), and Web E2E (Playwright/Chromium against the port-8090 API).
-The CI badge in the root README already points at where it belongs.
+The complete GitHub Actions workflow for RekAI. It runs every gate in
+[`CLAUDE.md`](../CLAUDE.md) and one that no agent session can run at all:
+
+| Job | Covers |
+|---|---|
+| `api` | `ruff check`, `ruff format --check`, `mypy`, `pytest` — on Python 3.10 (the `requires-python` floor) and 3.12 (what the shipped image runs) |
+| `python-sdk` | `ruff`, `pytest` |
+| `js-sdk` | `node --test` |
+| `web` | `lint`, `vitest`, `build` |
+| `e2e` | Playwright/Chromium against a real API |
+| `stack` | `docker compose config -q`, `compose up --build --wait`, then `scripts/smoke.sh` against the running containers |
+
+The `stack` job matters most: agent sessions working on this repo have **no
+Docker daemon**, so CI is the only place the compose file and both Dockerfiles
+are ever build-verified. The CI badge in the root README already points at where
+this file belongs.
 
 It lives here rather than at `.github/workflows/ci.yml` because the GitHub App
-token used by the agent sessions working on this repo lacks the `workflows`
-permission — pushing any commit that touches `.github/workflows/` is rejected
-outright:
+token used by those sessions lacks the `workflows` permission — pushing any
+commit that touches `.github/workflows/` is rejected outright:
 
 ```
 ! [remote rejected] ... refusing to allow a GitHub App to create or update
@@ -27,5 +37,5 @@ git commit -m "ci: install the verification-gate workflow"
 git push
 ```
 
-Then delete the section above from this file. Granting the GitHub App the
-`workflows` permission would remove the need for this staging step entirely.
+Then delete this section. Granting the GitHub App the `workflows` permission
+would remove the staging step entirely.

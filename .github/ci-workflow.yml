@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # `claude/**` too: the work happens on those branches, and CI that only
+    # runs after merge is feedback that arrives too late to act on.
+    branches: [main, "claude/**"]
   pull_request:
 
 concurrency:
@@ -11,8 +13,16 @@ concurrency:
 
 jobs:
   api:
-    name: API (lint, type-check, test)
+    name: API (lint, type-check, test) · py${{ matrix.python }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The two ends of the supported range: the `requires-python = ">=3.10"`
+        # floor, and the version the shipped Docker image actually runs. Both
+        # were verified green locally (645 tests) before this matrix was added,
+        # so a failure here is a real regression rather than a known gap.
+        python: ["3.10", "3.12"]
     defaults:
       run:
         working-directory: apps/api
@@ -22,7 +32,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
           cache: pip
 
       - name: Install
@@ -52,7 +62,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: pip
 
       - name: Install
@@ -90,6 +100,8 @@ jobs:
     defaults:
       run:
         working-directory: apps/web
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -121,7 +133,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install API (into apps/api/.venv, used by e2e/helpers/api-server.ts)
         working-directory: apps/api
@@ -147,3 +159,32 @@ jobs:
       - name: Run E2E
         working-directory: apps/web
         run: npm run e2e
+
+  stack:
+    # The only job that exercises what users actually run: the compose file and
+    # both Dockerfiles. Agent sessions on this repo have no Docker daemon, so
+    # nothing else can build-verify the images — a broken Dockerfile or an
+    # unhealthy container would otherwise reach a release unnoticed. It also
+    # covers scripts/smoke.sh, which is a shipped, documented entry point
+    # (`make smoke`) and not just a test helper.
+    name: Stack (compose build + smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate compose
+        run: docker compose config -q
+
+      - name: Build and start the stack
+        run: docker compose up -d --build --wait
+
+      - name: Smoke-test the running API
+        run: scripts/smoke.sh http://localhost:8000
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
