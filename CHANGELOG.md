@@ -178,6 +178,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   intended. `ff` stays reserved and rejected.
 
 ### Added
+- **The LangChain compatibility claim is now a test, not a promise.** The
+  README's first feature bullet names "any OpenAI SDK, LangChain, or
+  OpenAI-format client"; `test_openai_sdk_e2e.py` covered the first and nothing
+  covered the second, in five places where the claim is made. That is not the
+  same test — `langchain_openai.ChatOpenAI` sends fields the plain SDK does not
+  (notably `stream_options.include_usage`) and maps the response back through
+  its own `AIMessage`, so a gap would surface only there.
+  `tests/test_langchain_e2e.py` drives the real client against the in-process
+  app (ASGITransport, no network) and asserts `ainvoke` content plus
+  `finish_reason`/`model_name`/`usage_metadata`, `astream` reassembly, and the
+  trailing usage-only chunk that `stream_usage=True` depends on — without which
+  every LangChain caller's token accounting would silently read zero. It was
+  verified to fail against a build with `include_usage` forced off. The claim
+  held up on inspection; it is simply checked now. `langchain-openai` joins the
+  optional dev extras and the tests skip when it is absent.
 - **`REKAI_REQUEST_DEADLINE_SECONDS` — a total budget for one request.**
   `REKAI_REQUEST_TIMEOUT_SECONDS` reads like a request bound and is not one: it
   caps a *single* outbound call, which `REKAI_RETRY_MAX_ATTEMPTS` multiplies and

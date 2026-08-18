@@ -29,6 +29,11 @@ dev = [
     # Used only by tests/test_openai_sdk_e2e.py to prove drop-in compatibility
     # with the real OpenAI SDK; those tests skip if it isn't installed.
     "openai>=1.40",
+    # Same idea for tests/test_langchain_e2e.py. LangChain is named in the
+    # README's compatibility promise alongside the OpenAI SDK, and it is not the
+    # same test: ChatOpenAI sends fields the plain SDK doesn't and maps the
+    # response through its own AIMessage. Skips when absent.
+    "langchain-openai>=0.2",
     # NOT a runtime dependency. rekai/semantic_cache.py uses NumPy for its
     # similarity scan when it happens to be installed (~100x on that loop) and
     # falls back to pure Python otherwise; this is here so the test suite
