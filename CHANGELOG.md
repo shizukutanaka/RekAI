@@ -6,6 +6,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-18
+
 ### Security
 - **RekAI refuses to run as an open proxy for your own provider keys.** A
   gateway with no client auth *and* a server-side provider key
@@ -1109,6 +1111,8 @@ streaming, fallback, cost estimation, and a built-in web UI.
 - SDK CI now runs `ruff format --check` (previously only `ruff check`), and the
   SDK source was reformatted to match.
 
-[Unreleased]: https://github.com/shizukutanaka/RekAI/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/shizukutanaka/RekAI/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/shizukutanaka/RekAI/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/shizukutanaka/RekAI/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/shizukutanaka/RekAI/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/shizukutanaka/RekAI/releases/tag/v1.0.0

@@ -48,10 +48,24 @@ is a self-hostable AI gateway that runs with a single `docker compose up`.
 - [ ] Live demo instance (maintainer action)
 - [ ] GitHub Release + `v1.0.0` tag (maintainer action)
 
-### Shipped after v1.0 (v1.1 – v1.2) ✅
+### Shipped after v1.0 (v1.1 – v1.3) ✅
 
 Post-1.0 hardening and reach, all released — see [CHANGELOG.md](../CHANGELOG.md)
 for the full detail:
+
+- [x] **Correctness and safety of what already shipped** (v1.3) — the release
+  is almost entirely defect work found by auditing each subsystem against its
+  own specification: W3C Trace Context conformance and `tracestate`
+  propagation, the provider's real `finish_reason` instead of a synthesised
+  `"stop"` (a truncated answer used to be indistinguishable from a complete
+  one), secret redaction on the streaming path, a rate limiter that stays
+  bounded under a flood of distinct clients, script-aware token estimation, a
+  non-ASCII `Authorization` header returning 401 rather than an unhandled 500,
+  a total request deadline (`REKAI_REQUEST_DEADLINE_SECONDS`) bounding retries
+  *and* the fallback chain rather than only each upstream call, a compose file
+  that actually delivers the provider keys the quickstart tells you to set, and
+  a startup guard that refuses to run as an open proxy for the operator's own
+  provider keys
 
 - [x] **OpenAI-compatible `POST /v1/chat/completions`** — drop-in for the
   OpenAI SDK / LangChain, non-streaming and streaming, with
@@ -86,9 +100,10 @@ have interface seams reserved today:
 
 ## Beyond v1.0
 
-- **v1.x** — in progress: OpenAI-compatible API, structured outputs, dynamic
-  keys, budgets, and observability shipped in v1.1 – v1.2 (above); further
-  provider integrations and advanced streaming to follow.
+- **v1.x** — OpenAI-compatible API, structured outputs, dynamic keys, budgets
+  and observability shipped in v1.1 – v1.2; v1.3 is the correctness pass over
+  all of it (above). Further provider integrations and advanced streaming to
+  follow.
 - **v2.x** — plugin ecosystem for providers and policies.
 - **v3.x** — advanced multi-provider orchestration (fallback, load-balancing).
 - **v4.x** — agent workflows and automation.

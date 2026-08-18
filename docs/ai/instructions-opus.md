@@ -4,7 +4,7 @@
 共通規約・検証ゲート・git 制約は必ずルートの [`CLAUDE.md`](../../CLAUDE.md) に従うこと。
 Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-sonnet.md)。
 
-## 現状サマリ (v1.2.0 時点)
+## 現状サマリ (v1.3.0 時点)
 
 ### 長所 — 壊さないこと
 - **SSRF 面なし**: provider は固定レジストリのキーのみ。クライアントが URL を注入する
@@ -15,7 +15,7 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
   per-client / per-request 構造には必ず上限と eviction を付ける。
 - **OpenAI 互換層の品質**: 実 OpenAI SDK での E2E (`tests/test_openai_sdk_e2e.py`)
   が回帰ゲート。互換性を落とす変更はこのテストで検出される。
-- **486+ テスト、ruff/mypy クリーン、TODO ゼロ**の状態を維持する。
+- **654+ テスト、ruff/mypy クリーン、TODO ゼロ**の状態を維持する。
 - **保存前レダクション** (`service._redact`): 応答キャッシュ・セマンティック
   キャッシュ・idempotency ストアの**いずれよりも前**にスクラブする。文書
   (`docs/architecture.md`) の約束はこれ。後から edge で消す形に戻さないこと。
