@@ -20,6 +20,9 @@ class Settings(BaseSettings):
 
     # General
     app_name: str = "RekAI"
+    # "production" is not a label: it makes the gateway refuse to start in a
+    # configuration that would turn it into an open proxy for your own provider
+    # keys (see `open_proxy_hazard`). Anything else only warns.
     environment: str = "development"
     log_level: str = "INFO"
 
@@ -253,6 +256,55 @@ class Settings(BaseSettings):
     @property
     def api_key_list(self) -> list[str]:
         return [k.strip() for k in self.api_keys.split(",") if k.strip()]
+
+    @property
+    def gateway_auth_enabled(self) -> bool:
+        """Whether ``/v1/*`` requires an ``Authorization: Bearer`` key.
+
+        Mirrors the middleware's own condition exactly: a static key list, or the
+        dynamic keystore being enabled (which can hold runtime-added keys).
+        """
+        return bool(self.api_key_list) or self.dynamic_keys_enabled
+
+    @property
+    def server_provider_key_names(self) -> list[str]:
+        """The env-var names of provider keys configured server-side.
+
+        These are spent on the *operator's* account, unlike a BYOK key that the
+        caller supplies per request and that RekAI never stores.
+        """
+        configured = {
+            "REKAI_OPENAI_API_KEY": self.openai_api_key,
+            "REKAI_ANTHROPIC_API_KEY": self.anthropic_api_key,
+            "REKAI_GEMINI_API_KEY": self.gemini_api_key,
+            "REKAI_CUSTOM_API_KEY": self.custom_api_key,
+        }
+        return sorted(name for name, value in configured.items() if value)
+
+    def open_proxy_hazard(self) -> str | None:
+        """The one configuration that is unsafe rather than merely permissive.
+
+        A gateway with **no client auth** and a **server-side provider key** is
+        an open, unauthenticated proxy to a paid API: anyone who can reach the
+        port spends the operator's money, and the request looks legitimate to the
+        provider. Neither half is a problem alone — an open gateway with no
+        server key can only serve BYOK and `echo`, and a server key behind auth
+        is the ordinary single-tenant deployment.
+
+        Returns a message naming both the hazard and the fixes, or None.
+        """
+        if self.gateway_auth_enabled:
+            return None
+        names = self.server_provider_key_names
+        if not names:
+            return None
+        return (
+            f"Server-side provider keys are set ({', '.join(names)}) but gateway "
+            "auth is not: /v1/* is reachable without a key, so anyone who can "
+            "reach this port can spend them. Set REKAI_API_KEYS=<key>[,<key>...] "
+            "(or REKAI_DYNAMIC_KEYS_ENABLED=true), or drop the server-side keys "
+            "and let callers bring their own via the X-Provider-Key header."
+        )
 
     @property
     def allowed_provider_list(self) -> list[str]:

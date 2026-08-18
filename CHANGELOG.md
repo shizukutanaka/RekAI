@@ -7,6 +7,25 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **RekAI refuses to run as an open proxy for your own provider keys.** A
+  gateway with no client auth *and* a server-side provider key
+  (`REKAI_OPENAI_API_KEY` and friends) is an unauthenticated proxy to a paid
+  API: anyone who can reach the port spends the operator's money, and every
+  request looks legitimate to the provider. Neither half is a hazard alone — an
+  open gateway with no server key can only serve BYOK and `echo`, and a server
+  key behind auth is the ordinary single-tenant deployment — so the check fires
+  only on the combination.
+  `REKAI_ENVIRONMENT=production` now **refuses to start** in that state, with a
+  message naming the exposed keys and both ways out. Any other value logs the
+  same message as a startup warning and starts, so no existing deployment breaks
+  on upgrade. The auth condition mirrors the middleware's exactly (static
+  `REKAI_API_KEYS` *or* `REKAI_DYNAMIC_KEYS_ENABLED`), so an authenticated
+  deployment is never refused. A wildcard `REKAI_CORS_ORIGINS` was considered
+  and deliberately excluded: with auth on and no credentials it lets a foreign
+  origin spend nothing, and with auth off it changes nothing already open.
+  This also gives `REKAI_ENVIRONMENT` its first behavior — it was declared,
+  documented, set by compose and by ~40 tests, and read nowhere in the
+  application.
 - **A non-ASCII `Authorization` header no longer crashes the auth gate.**
   `secrets.compare_digest` rejects a `str` containing any non-ASCII character
   with `TypeError`, and the presented token is attacker-controlled — so

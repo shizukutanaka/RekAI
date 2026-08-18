@@ -465,6 +465,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if settings.dynamic_keys_encryption_key
         else None
     )
+    # REKAI_ENVIRONMENT used to be decoration — declared, documented, set by
+    # compose and every test, and read by nothing. This is the one thing knowing
+    # you are in production is for: refuse to serve as an open proxy for the
+    # operator's own provider keys. Outside production it is a loud warning, so
+    # the default `development` deployment is not broken by an upgrade.
+    hazard = settings.open_proxy_hazard()
+    if hazard is not None:
+        if settings.environment == "production":
+            raise RuntimeError(f"Refusing to start: {hazard}")
+        access_logger.warning("%s (REKAI_ENVIRONMENT=production refuses to start.)", hazard)
+
     key_store = DynamicKeyStore(cache, key_cipher) if settings.dynamic_keys_enabled else None
     if settings.dynamic_keys_enabled and not settings.cache_enabled:
         access_logger.warning(

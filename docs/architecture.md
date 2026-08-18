@@ -676,6 +676,27 @@ optionally be locked behind the same Bearer key too (see below), since it
 carries a per-client cost breakdown that scraping doesn't need to be public.
 This is separate from **BYOK** below, which is the *upstream provider* key.
 
+### The one configuration RekAI refuses to serve
+
+Open is a legitimate default: with no server-side provider key, an open gateway
+can only serve `echo` and BYOK, and the caller pays for their own calls. What is
+*not* legitimate is open **plus** a server-side key
+(`REKAI_OPENAI_API_KEY` and friends): that is an unauthenticated proxy to a paid
+API, where anyone who can reach the port spends the operator's money and every
+request looks legitimate to the provider.
+
+`REKAI_ENVIRONMENT` exists for exactly this. Set it to `production` and RekAI
+**refuses to start** in that combination, naming the keys that are exposed and
+both ways out — configure gateway auth (`REKAI_API_KEYS`, or
+`REKAI_DYNAMIC_KEYS_ENABLED=true`, matching the middleware's own condition), or
+drop the server-side keys and let callers bring their own. On any other value
+the same message is logged as a startup warning and the app starts, so the
+default `development` deployment is never broken by an upgrade.
+
+A wildcard `REKAI_CORS_ORIGINS` was deliberately left out of this check: with
+auth on and no credentials, a foreign origin cannot spend anything, and with
+auth off it changes nothing that is not already open.
+
 Keys are compared as **bytes**, not `str`. `secrets.compare_digest` raises
 `TypeError` on a `str` holding any non-ASCII character, and the presented token
 comes straight from an attacker-controlled header — so
