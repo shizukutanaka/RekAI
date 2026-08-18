@@ -6,6 +6,26 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **A keyless OpenAI-compatible backend was unreachable.** The README's second
+  feature bullet promises you can point RekAI at "any OpenAI-compatible
+  endpoint (Groq, Together, OpenRouter, Mistral, vLLM, LM Studio…) with one env
+  var" — but `OpenAICompatibleProvider` set `requires_key = True`, so with only
+  `REKAI_CUSTOM_BASE_URL` configured a request was rejected with RekAI's own
+  `401 No custom API key…` before anything left the process. Three of the
+  backends named — vLLM, LM Studio, llama.cpp — serve **unauthenticated** by
+  default, so the gateway was locked out of exactly the case the sentence
+  advertises, and `/health` reported such a backend as not ready. The provider
+  no longer requires a key: `Authorization` is sent when a key is configured or
+  supplied per request as BYOK, and omitted when there is none, so a hosted
+  backend that does need one answers with its own 401 instead of RekAI guessing
+  on its behalf. Verified live against a keyless OpenAI-shaped server: with
+  `REKAI_CUSTOM_BASE_URL` as the only setting, `/v1/chat` returns the upstream's
+  completion and `/health` reports `custom: ready`. Two tests that encoded the
+  old refusal as intended behavior were replaced. The README and
+  `docs/architecture.md` now state exactly which variables each case needs
+  rather than "one env var".
+
 ## [1.3.0] - 2026-08-18
 
 ### Security

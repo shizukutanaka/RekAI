@@ -997,3 +997,13 @@ reuses the OpenAI implementation (including accurate streaming usage and the
 `/embeddings` call) pointed at that endpoint. Select it with `provider="<name>"`
 or `REKAI_DEFAULT_PROVIDER`; any configured embedding models are advertised in
 `/v1/models` with `type="embedding"`.
+
+Unlike every other keyed provider, this one **does not require a key**. Three of
+the backends it exists to reach — vLLM, LM Studio, llama.cpp — serve
+unauthenticated by default, and requiring a key locked RekAI out of them: with
+only `REKAI_CUSTOM_BASE_URL` set, a request was rejected with RekAI's own 401
+(`No custom API key…`) before anything left the process. A key is now sent when
+one is configured (or supplied per request as BYOK) and the `Authorization`
+header is omitted when there is none, so a hosted backend that does need one
+answers with its own 401 rather than RekAI guessing on its behalf. `/health`
+reports such a backend as `ready`, because it is.

@@ -5,10 +5,8 @@ from __future__ import annotations
 import importlib
 
 import httpx
-import pytest
 
 from rekai.config import Settings, get_settings
-from rekai.providers.base import ProviderError
 from rekai.providers.openai_compatible import OpenAICompatibleProvider
 from rekai.schemas import ChatMessage, ChatRequest
 
@@ -22,9 +20,12 @@ def test_custom_model_list_parsing() -> None:
     assert s.custom_model_list == ["a", "b", "c"]
 
 
-def test_server_key_configured_reflects_key() -> None:
+def test_server_key_configured_is_true_without_a_key() -> None:
+    # A custom backend is *ready* with or without a key: vLLM, LM Studio and
+    # llama.cpp serve unauthenticated. This previously reported not-ready with no
+    # key, which showed a healthy local backend as unusable on /health.
     assert OpenAICompatibleProvider("groq", "https://x/v1", api_key="k").server_key_configured()
-    assert not OpenAICompatibleProvider("groq", "https://x/v1").server_key_configured()
+    assert OpenAICompatibleProvider("vllm", "https://x/v1").server_key_configured()
 
 
 async def test_list_models_returns_configured() -> None:
@@ -41,13 +42,68 @@ async def test_list_embedding_models_returns_configured() -> None:
     assert await OpenAICompatibleProvider("x", "https://x/v1").list_embedding_models(None) == []
 
 
-async def test_requires_key_uses_provider_name() -> None:
-    p = OpenAICompatibleProvider("groq", "https://x/v1", api_key=None)
-    with pytest.raises(ProviderError) as exc:
-        await p.chat(_req(), api_key=None)
-    assert exc.value.status_code == 401
-    assert "groq" in str(exc.value)
-    assert "REKAI_CUSTOM_API_KEY" in str(exc.value)
+async def test_keyless_backend_is_called_without_an_authorization_header(monkeypatch) -> None:
+    # This test used to assert the opposite — that RekAI 401s locally when no key
+    # is set. That refusal never let a request leave the process, which locked
+    # the gateway out of exactly the keyless local servers this provider exists
+    # to reach (README: "vLLM, LM Studio"). A backend that does need a key now
+    # answers with its own 401 instead of RekAI guessing on its behalf.
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {
+                "choices": [{"message": {"content": "ok", "role": "assistant"}}],
+                "model": "local",
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def post(self, url, json, headers):
+            captured["headers"] = headers
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    provider = OpenAICompatibleProvider("vllm", "http://localhost:8000/v1", api_key=None)
+
+    result = await provider.chat(_req(), api_key=None)
+
+    assert result.content == "ok"
+    assert "Authorization" not in captured["headers"]
+
+
+async def test_byok_key_is_sent_even_when_none_is_configured(monkeypatch) -> None:
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {
+                "choices": [{"message": {"content": "ok", "role": "assistant"}}],
+                "model": "m",
+                "usage": {},
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def post(self, url, json, headers):
+            captured["headers"] = headers
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    provider = OpenAICompatibleProvider("groq", "https://x/v1", api_key=None)
+
+    await provider.chat(_req(), api_key="sk-byok")
+
+    assert captured["headers"]["Authorization"] == "Bearer sk-byok"
 
 
 async def test_chat_uses_custom_base_url_and_key(monkeypatch) -> None:
