@@ -143,6 +143,26 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Fixed
+- **The quickstart's provider keys never reached the container.** The README's
+  three-line Docker path is `cp apps/api/.env.example apps/api/.env` (add keys),
+  then `docker compose up --build` — and the middle step was a **no-op**.
+  `.env` is `.dockerignore`d, correctly (a key must never be baked into an
+  image), but `docker-compose.yml` declared no `env_file`, so nothing carried it
+  into the api service. Verified with `docker compose config`: with
+  `REKAI_ANTHROPIC_API_KEY` in `apps/api/.env`, the rendered api environment
+  contained only `REKAI_CORS_ORIGINS`, `REKAI_OPENAI_API_KEY: ""` and
+  `REKAI_REDIS_URL`. So the documented way to configure a real provider silently
+  did nothing, and the product appeared to work only on `echo`. The api service
+  now reads `apps/api/.env` as an optional `env_file`.
+  Two related traps removed while proving the fix: `REKAI_OPENAI_API_KEY:
+  ${REKAI_OPENAI_API_KEY:-}` resolved to an **explicit empty string**, and an
+  `environment:` entry outranks `env_file:` — so an unset shell would have
+  erased the key the user had just put in `.env`. The value-less form
+  (`REKAI_OPENAI_API_KEY:`) turned out to do the same thing, deleting the
+  variable outright rather than falling through (both measured with `docker
+  compose config`, not assumed). Provider keys are therefore configured in
+  exactly one place now. `REKAI_CORS_ORIGINS: "*"` was dropped from compose as
+  well — it only restated the default.
 - **W3C Trace Context conformance.** `traceparent` was validated with
   `int(value, 16)`, far more permissive than the spec's `HEXDIGLC` (lowercase
   hex only): a leading sign, underscore digit separators, and surrounding ASCII
