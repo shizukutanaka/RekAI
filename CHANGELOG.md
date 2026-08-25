@@ -164,6 +164,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Fixed
+- **A truncated reply now looks truncated in the chat UI.** The API was fixed to
+  report the provider's real `finish_reason` instead of synthesising `"stop"`,
+  and both SDKs surface it — but the web app never carried the field at all, so
+  the one place a human actually reads the answer still could not tell a reply
+  cut short by `max_tokens` from a complete one. On screen the text simply stops.
+  `ChatResponse` and `StreamSummary` gain `finish_reason`, and the message
+  metadata line now says `truncated — raise max tokens` for `length` and
+  `stopped by the provider's content filter` for `content_filter`. It stays
+  silent for `stop` and `tool_calls`, which are ordinary completions — a marker
+  that fires on the common path is noise that gets ignored exactly when it
+  matters. Verified end to end against a fake upstream that truncates: RekAI
+  returns `finish_reason: "length"` on `/v1/chat` and in the `/v1/chat/stream`
+  summary, and three new Playwright specs assert the marker appears on both the
+  streamed and non-streamed paths and stays absent on a normal reply — all three
+  confirmed to fail with the render removed.
 - **Persisted metrics snapshots no longer accumulate forever.** Each process
   writes `rekai:metrics:snapshot:<instance-id>` and the id is a fresh uuid unless
   `REKAI_INSTANCE_ID` is set — correctly so, since uvicorn workers share a host

@@ -242,6 +242,16 @@ that doesn't, and how responses cached before this field existed read. The
 OpenAI-compatible endpoint falls back to the old derivation in that case, so it
 always emits one of the documented values.
 
+The field reaches every consumer, which is the part that makes it useful: both
+SDKs expose it, and the chat UI turns it into a note on the message's metadata
+line — `truncated — raise max tokens` for `length`, `stopped by the provider's
+content filter` for `content_filter`, and nothing at all for `stop` or
+`tool_calls`. Staying silent on the ordinary path is deliberate: a marker that
+fires on every reply is noise that gets ignored exactly when it matters. Without
+it a reader saw the text simply stop, which is what a complete answer also looks
+like — reporting truncation honestly at the API and dropping it at the edge
+would have fixed nothing for the person reading the answer.
+
 ### Structured output
 
 `response_format` (JSON mode / `json_schema`) is accepted on both this endpoint

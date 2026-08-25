@@ -5,6 +5,12 @@ export interface ChatMessage {
   content: string;
 }
 
+/**
+ * Why the provider stopped generating. Null when it didn't say (a cached entry
+ * written before the API reported it, or a backend that reports nothing).
+ */
+export type FinishReason = "stop" | "length" | "tool_calls" | "content_filter" | null;
+
 export interface ChatResponse {
   id: string;
   provider: string;
@@ -14,6 +20,21 @@ export interface ChatResponse {
   cost_usd: number | null;
   cached: boolean;
   created: number;
+  finish_reason?: FinishReason;
+}
+
+/**
+ * A note for a finish_reason the reader needs to know about, or "" when the
+ * answer simply ended.
+ *
+ * `stop` and `tool_calls` are ordinary completions and say nothing. `length` and
+ * `content_filter` mean the text on screen is **not the whole answer**, which is
+ * invisible otherwise — a truncated reply looks exactly like a complete one.
+ */
+export function finishNote(reason?: FinishReason): string {
+  if (reason === "length") return "truncated — raise max tokens";
+  if (reason === "content_filter") return "stopped by the provider's content filter";
+  return "";
 }
 
 /** Format an estimated USD cost for display, or "" when unknown. */
@@ -335,6 +356,7 @@ export interface StreamSummary {
   cost_usd: number | null;
   estimated: boolean;
   tool_calls?: Record<string, unknown>[];
+  finish_reason?: FinishReason;
 }
 
 export type SSEEvent =

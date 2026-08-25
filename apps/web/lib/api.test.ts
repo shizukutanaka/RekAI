@@ -3,6 +3,7 @@ import {
   ApiError,
   cosineSimilarity,
   errorFromResponse,
+  finishNote,
   formatCost,
   gatewayAuthHeaders,
   modelsOfType,
@@ -184,5 +185,31 @@ describe("parseSSEFrame", () => {
       kind: "delta",
       text: "x",
     });
+  });
+});
+
+describe("finishNote", () => {
+  // The API reports the provider's real finish_reason so a truncated answer is
+  // distinguishable from a complete one. The UI is where a reader actually finds
+  // out: without this the text just stops, and looks finished.
+  it("says nothing for an answer that simply ended", () => {
+    expect(finishNote("stop")).toBe("");
+    expect(finishNote("tool_calls")).toBe("");
+  });
+
+  it("says nothing when the provider did not report a reason", () => {
+    expect(finishNote(null)).toBe("");
+    expect(finishNote(undefined)).toBe("");
+  });
+
+  it("flags a max-tokens truncation, and says what to change", () => {
+    const note = finishNote("length");
+    expect(note).not.toBe("");
+    expect(note).toContain("truncated");
+    expect(note).toContain("max tokens");
+  });
+
+  it("flags a provider content filter", () => {
+    expect(finishNote("content_filter")).toContain("content filter");
   });
 });

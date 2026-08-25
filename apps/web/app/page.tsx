@@ -3,12 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ChatMessage,
+  FinishReason,
   HealthResponse,
   ModelInfo,
   RateLimitInfo,
   StreamSummary,
   fetchHealth,
   fetchModels,
+  finishNote,
   formatCost,
   getStoredGatewayKey,
   getStoredKey,
@@ -24,6 +26,7 @@ interface DisplayMessage extends ChatMessage {
   tokens?: number;
   cost?: number | null;
   streaming?: boolean;
+  finishReason?: FinishReason;
 }
 
 // Monotonic id for React keys. Index keys shift when regenerate()/clear drop or
@@ -184,6 +187,7 @@ export default function ChatPage() {
               provider: wasAborted ? `${model} · stopped` : model,
               tokens: finalSummary?.usage.total_tokens,
               cost: finalSummary?.cost_usd ?? undefined,
+              finishReason: finalSummary?.finish_reason,
             };
           }
           return next;
@@ -209,6 +213,7 @@ export default function ChatPage() {
             cached: res.cached,
             tokens: res.usage.total_tokens,
             cost: res.cost_usd,
+            finishReason: res.finish_reason,
           },
         ]);
       }
@@ -353,6 +358,7 @@ export default function ChatPage() {
                 {m.cached ? " · cached ⚡" : ""}
                 {typeof m.tokens === "number" ? ` · ${m.tokens} tokens` : ""}
                 {formatCost(m.cost) ? ` · ${formatCost(m.cost)}` : ""}
+                {finishNote(m.finishReason) ? ` · ${finishNote(m.finishReason)}` : ""}
               </span>
             )}
           </div>
