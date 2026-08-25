@@ -48,6 +48,24 @@ is a self-hostable AI gateway that runs with a single `docker compose up`.
 - [ ] Live demo instance (maintainer action)
 - [ ] GitHub Release + `v1.0.0` tag (maintainer action)
 
+### Blocked on repository permissions, not on code
+
+Everything below is finished in the tree and cannot be completed by the agent
+sessions working on this repo, because the GitHub App token they use can push
+neither tags nor anything under `.github/workflows/`. A maintainer with write
+access finishes each in one command:
+
+- [ ] **Install CI** — `git mv .github/ci-workflow.yml .github/workflows/ci.yml`
+  and push. The workflow is complete and covers every gate in `CLAUDE.md` plus a
+  `stack` job that builds both images and smoke-tests the running containers,
+  which is the only build verification the images can get (no Docker daemon in
+  the agent sandbox). See [`.github/README.md`](../.github/README.md).
+- [ ] **Tag the release** — `git tag -a v1.3.0 -m "RekAI 1.3.0" && git push
+  origin v1.3.0`. Every version string in the monorepo is already at 1.3.0 and
+  `CHANGELOG.md [1.3.0]` is the release notes.
+- [ ] **Publish the GitHub Release** from that CHANGELOG section.
+- [ ] **Live demo instance** — `deploy/render.yaml` provisions the whole stack.
+
 ### Shipped after v1.0 (v1.1 – v1.3) ✅
 
 Post-1.0 hardening and reach, all released — see [CHANGELOG.md](../CHANGELOG.md)
@@ -63,9 +81,11 @@ for the full detail:
   non-ASCII `Authorization` header returning 401 rather than an unhandled 500,
   a total request deadline (`REKAI_REQUEST_DEADLINE_SECONDS`) bounding retries
   *and* the fallback chain rather than only each upstream call, a compose file
-  that actually delivers the provider keys the quickstart tells you to set, and
-  a startup guard that refuses to run as an open proxy for the operator's own
-  provider keys
+  that actually delivers the provider keys the quickstart tells you to set, a
+  startup guard that refuses to run as an open proxy for the operator's own
+  provider keys, reachability for the keyless OpenAI-compatible backends the
+  README advertises (vLLM, LM Studio), and persisted metrics snapshots that
+  expire instead of leaking one Redis key per process start
 
 - [x] **OpenAI-compatible `POST /v1/chat/completions`** — drop-in for the
   OpenAI SDK / LangChain, non-streaming and streaming, with
