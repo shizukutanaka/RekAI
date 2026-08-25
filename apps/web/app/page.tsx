@@ -11,6 +11,7 @@ import {
   fetchHealth,
   fetchModels,
   cacheNote,
+  cooldownRemaining,
   finishNote,
   formatCost,
   getStoredGatewayKey,
@@ -69,7 +70,12 @@ export default function ChatPage() {
     fetchHealth().then(setHealth);
     setHasKey(Boolean(getStoredKey()));
     // Re-check the stored key when returning to the tab (it may be set elsewhere).
-    const onFocus = () => setHasKey(Boolean(getStoredKey()));
+    // Health is also re-read here: `parked_providers` is a live cooldown
+    // countdown, and a snapshot taken once at mount goes stale within seconds.
+    const onFocus = () => {
+      setHasKey(Boolean(getStoredKey()));
+      fetchHealth().then(setHealth);
+    };
     window.addEventListener("focus", onFocus);
     // Restore a previous conversation, if any.
     try {
@@ -89,6 +95,10 @@ export default function ChatPage() {
   const selectedProvider = models.find((m) => m.id === model)?.provider;
   // Chat selector excludes embedding-only models (they live on /embeddings).
   const chatModels = modelsOfType(models, "chat");
+  // Seconds of cooldown left on the selected provider, if it is parked.
+  const parkedFor = cooldownRemaining(
+    selectedProvider ? health?.parked_providers?.[selectedProvider] : undefined,
+  );
   const needsKey =
     selectedProvider != null &&
     health?.provider_status[selectedProvider] === "byok_only" &&
@@ -229,6 +239,9 @@ export default function ChatPage() {
         ]);
       }
     } catch (e) {
+      // A 429 or upstream 5xx may have just parked the provider; refresh the
+      // snapshot so the cooldown notice reflects it.
+      fetchHealth().then(setHealth);
       // Drop the half-filled streaming bubble, if any, and surface the error.
       setMessages((prev) =>
         prev.filter((m) => !(m.role === "assistant" && m.streaming)),
@@ -385,6 +398,14 @@ export default function ChatPage() {
         )}
         <div ref={bottomRef} />
       </div>
+
+      {parkedFor && (
+        <div className="notice">
+          <strong>{selectedProvider}</strong> is cooling down after a rate limit (
+          {parkedFor} left). RekAI will use a configured fallback if there is one,
+          so the reply may come from another provider.
+        </div>
+      )}
 
       {needsKey && (
         <div className="notice">

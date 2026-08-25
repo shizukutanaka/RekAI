@@ -164,6 +164,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Fixed
+- **The chat UI warns when the selected provider is cooling down.** `/health`
+  reports `parked_providers` (provider → seconds of cooldown left), and the web
+  client did not carry the field at all. A parked provider is precisely why a
+  reply arrives from somewhere other than the one selected — RekAI skips it in
+  favour of a healthy fallback — so the reroute looked arbitrary. A notice now
+  names the provider and the time left, alongside the existing "needs an API
+  key" notice. `/health` is also re-read when the tab regains focus and after a
+  failed request, since a cooldown countdown taken once at mount goes stale
+  within seconds and the moment a request fails is exactly when one starts.
+  Completes a sweep that diffed every API response the web app consumes against
+  the fields it carries; `EmbeddingsResponse`, `UsageSummary` and `ModelInfo`
+  came back clean.
 - **The usage dashboard's cache hit rate no longer hides approximate matches.**
   `semantic_cache_hits_total` is a **subset** of `cache_hits_total`, and the
   dashboard reported only the combined figure — so the one number an operator

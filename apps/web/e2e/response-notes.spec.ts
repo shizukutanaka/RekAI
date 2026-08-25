@@ -113,3 +113,39 @@ test("the usage dashboard breaks out semantic cache hits", async ({ page }) => {
 
   await expect(page.locator("body")).toContainText("12 / 30 · 5 semantic");
 });
+
+test("a parked provider is called out before you send", async ({ page }) => {
+  // /health reports parked_providers (provider -> seconds of cooldown left).
+  // It is why a reply arrives from somewhere other than the provider selected —
+  // RekAI skips a cooling-down provider in favour of a healthy fallback — and
+  // the UI dropped the field entirely, leaving the reroute looking arbitrary.
+  await page.route("**/health", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "degraded",
+        version: "test",
+        providers: ["echo"],
+        provider_status: { echo: "ready" },
+        parked_providers: { echo: 26.2 },
+        cache: "memory",
+      }),
+    });
+  });
+
+  await page.goto("/");
+
+  const notice = page.locator(".notice");
+  await expect(notice).toContainText("cooling down");
+  await expect(notice).toContainText("≈27s");
+});
+
+test("no cooldown notice when nothing is parked", async ({ page }) => {
+  // The real API, with nothing parked: the notice element is not rendered at
+  // all, so this asserts on the page rather than on a locator that has no match.
+  await page.goto("/");
+  await expect(page.locator(".msg, textarea").first()).toBeVisible();
+
+  await expect(page.locator("body")).not.toContainText("cooling down");
+});

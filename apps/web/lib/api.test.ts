@@ -3,6 +3,7 @@ import {
   ApiError,
   cacheHitDetail,
   cacheNote,
+  cooldownRemaining,
   cosineSimilarity,
   errorFromResponse,
   finishNote,
@@ -264,5 +265,24 @@ describe("cacheHitDetail", () => {
     // headline rate silently includes answers to prompts nobody asked. That is
     // the number an operator uses to decide the cache is earning its keep.
     expect(cacheHitDetail(12, 30, 5)).toBe("12 / 30 · 5 semantic");
+  });
+});
+
+describe("cooldownRemaining", () => {
+  it("says nothing for a provider that is not parked", () => {
+    expect(cooldownRemaining(undefined)).toBe("");
+    expect(cooldownRemaining(0)).toBe("");
+    expect(cooldownRemaining(-1)).toBe("");
+  });
+
+  it("rounds up to whole seconds under a minute", () => {
+    expect(cooldownRemaining(0.4)).toBe("≈1s");
+    expect(cooldownRemaining(26.2)).toBe("≈27s");
+    expect(cooldownRemaining(59)).toBe("≈59s");
+  });
+
+  it("switches to minutes at a minute", () => {
+    expect(cooldownRemaining(60)).toBe("≈1m");
+    expect(cooldownRemaining(61)).toBe("≈2m");
   });
 });

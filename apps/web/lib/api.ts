@@ -165,7 +165,21 @@ export interface HealthResponse {
   version: string;
   providers: string[];
   provider_status: Record<string, "ready" | "byok_only">;
+  /** Provider → seconds of cooldown remaining, for providers currently parked. */
+  parked_providers?: Record<string, number>;
   cache: string;
+}
+
+/**
+ * A short "time left" for a provider cooldown, or "" when it isn't parked.
+ *
+ * A parked provider is why an answer arrives from somewhere other than the one
+ * selected — RekAI skips it in favour of a healthy fallback. Without this the
+ * reroute looks arbitrary.
+ */
+export function cooldownRemaining(seconds?: number): string {
+  if (seconds == null || seconds <= 0) return "";
+  return seconds < 60 ? `≈${Math.ceil(seconds)}s` : `≈${Math.ceil(seconds / 60)}m`;
 }
 
 export interface ClientUsage {
