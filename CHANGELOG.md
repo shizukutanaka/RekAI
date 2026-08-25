@@ -7,6 +7,24 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **Persisted metrics snapshots no longer accumulate forever.** Each process
+  writes `rekai:metrics:snapshot:<instance-id>` and the id is a fresh uuid unless
+  `REKAI_INSTANCE_ID` is set — correctly so, since uvicorn workers share a host
+  and a host-derived id would collapse N workers onto one key and undercount by
+  N. But the key was written with a plain `SET` and no expiry, so **every process
+  start leaked one permanently**, and `load_others()` — which runs on every
+  `/v1/usage` request and does one GET per key — got slower with each restart
+  ever performed. Measured against a local Redis: 200 restarts left 200 keys, all
+  at `TTL -1`, and one `/v1/usage` call took **194 ms**, growing linearly and
+  never shrinking. Snapshots now carry a 24-hour TTL refreshed on every flush
+  (floored at three flush intervals so a long
+  `REKAI_METRICS_PERSIST_INTERVAL_SECONDS` cannot expire a key between its own
+  writes), so a live replica never expires and only one that stopped flushing is
+  collected. Totals were never wrong — verified before and after against a real
+  Redis and a real gateway, where three successive runs of two requests each
+  report 2, 4, 6 — the cost was unbounded memory and a read path that decayed.
+  The module docstring also claimed a restart "resumes where it left off", which
+  is only true when `REKAI_INSTANCE_ID` is set; it now says so.
 - **A keyless OpenAI-compatible backend was unreachable.** The README's second
   feature bullet promises you can point RekAI at "any OpenAI-compatible
   endpoint (Groq, Together, OpenRouter, Mistral, vLLM, LM Studio…) with one env

@@ -472,6 +472,24 @@ loaded on startup and the snapshot is flushed to Redis periodically and on
 shutdown, so `/v1/usage` totals survive restarts. Without Redis the store is a
 no-op.
 
+Each process writes its own key, `rekai:metrics:snapshot:<instance-id>`, and
+`/v1/usage` sums the local live counters with every *other* key for a fleet-wide
+view. The instance id is a fresh uuid per process unless `REKAI_INSTANCE_ID` is
+set — deliberately, because uvicorn workers share a host, so a host-derived id
+would collapse N workers onto one key and undercount by a factor of N. Two
+consequences follow. First, the startup **baseline is only restored when
+`REKAI_INSTANCE_ID` is set**; with a generated id a restart begins at zero and
+its own previous run is picked up as a "peer" instead. Fleet totals are the same
+either way — only which side of the sum they arrive on differs. Second, a
+restart never overwrites its predecessor's key, so keys carry a **24-hour TTL**
+refreshed on every flush (floored at three flush intervals, so a long
+`REKAI_METRICS_PERSIST_INTERVAL_SECONDS` can't expire a key between its own
+writes). A live replica therefore never expires; only one that stopped flushing
+does. Without the TTL every process start leaked a permanent key *and* a
+permanent per-request cost, since `load_others()` runs on each `/v1/usage` call
+and does one GET per key: measured against a local Redis, 200 restarts left 200
+keys at `TTL -1` and 194 ms per call, growing linearly and never shrinking.
+
 Per-provider request counts are their own family, `rekai_provider_requests_total
 {provider="…"}`, **not** `rekai_requests_total{provider="…"}`. Emitting a bare
 series and a labelled one under one metric name makes `sum(rekai_requests_total)`
