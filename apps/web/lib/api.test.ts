@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ApiError,
+  cacheNote,
   cosineSimilarity,
   errorFromResponse,
   finishNote,
@@ -9,6 +10,7 @@ import {
   modelsOfType,
   parseRateLimit,
   parseSSEFrame,
+  redactionNote,
 } from "./api";
 
 describe("formatCost", () => {
@@ -211,5 +213,41 @@ describe("finishNote", () => {
 
   it("flags a provider content filter", () => {
     expect(finishNote("content_filter")).toContain("content filter");
+  });
+});
+
+describe("cacheNote", () => {
+  it("says nothing for a freshly generated answer", () => {
+    expect(cacheNote(false, null)).toBe("");
+    expect(cacheNote(undefined, undefined)).toBe("");
+  });
+
+  it("reports a plain cache hit when the prompt matched exactly", () => {
+    expect(cacheNote(true, null)).toBe("cached ⚡");
+    expect(cacheNote(true, undefined)).toBe("cached ⚡");
+  });
+
+  it("says the answer belongs to a different prompt on a semantic hit", () => {
+    // The API returns cache_similarity only for a semantic hit, and that is the
+    // whole point: the reader is looking at the answer to a *neighbouring*
+    // question. Rendering it as a bare "cached" claims otherwise.
+    const note = cacheNote(true, 0.9123);
+    expect(note).toContain("91%");
+    expect(note).toContain("similar prompt");
+  });
+});
+
+describe("redactionNote", () => {
+  it("says nothing when the answer was untouched", () => {
+    expect(redactionNote(null)).toBe("");
+    expect(redactionNote(undefined)).toBe("");
+    expect(redactionNote([])).toBe("");
+  });
+
+  it("reports how many secrets were scrubbed, with correct plurals", () => {
+    // The text on screen is not what the model produced; a redaction leaves a
+    // placeholder that reads like ordinary content.
+    expect(redactionNote(["aws_key"])).toBe("1 secret redacted");
+    expect(redactionNote(["aws_key", "github_pat"])).toBe("2 secrets redacted");
   });
 });

@@ -10,11 +10,13 @@ import {
   StreamSummary,
   fetchHealth,
   fetchModels,
+  cacheNote,
   finishNote,
   formatCost,
   getStoredGatewayKey,
   getStoredKey,
   modelsOfType,
+  redactionNote,
   sendChat,
   streamChat,
 } from "@/lib/api";
@@ -27,6 +29,8 @@ interface DisplayMessage extends ChatMessage {
   cost?: number | null;
   streaming?: boolean;
   finishReason?: FinishReason;
+  cacheSimilarity?: number | null;
+  redacted?: string[] | null;
 }
 
 // Monotonic id for React keys. Index keys shift when regenerate()/clear drop or
@@ -188,6 +192,7 @@ export default function ChatPage() {
               tokens: finalSummary?.usage.total_tokens,
               cost: finalSummary?.cost_usd ?? undefined,
               finishReason: finalSummary?.finish_reason,
+              redacted: finalSummary?.redacted,
             };
           }
           return next;
@@ -214,6 +219,8 @@ export default function ChatPage() {
             tokens: res.usage.total_tokens,
             cost: res.cost_usd,
             finishReason: res.finish_reason,
+            cacheSimilarity: res.cache_similarity,
+            redacted: res.redacted,
           },
         ]);
       }
@@ -355,10 +362,13 @@ export default function ChatPage() {
             {m.role === "assistant" && !m.streaming && (
               <span className="meta">
                 {m.provider}
-                {m.cached ? " · cached ⚡" : ""}
+                {cacheNote(m.cached, m.cacheSimilarity)
+                  ? ` · ${cacheNote(m.cached, m.cacheSimilarity)}`
+                  : ""}
                 {typeof m.tokens === "number" ? ` · ${m.tokens} tokens` : ""}
                 {formatCost(m.cost) ? ` · ${formatCost(m.cost)}` : ""}
                 {finishNote(m.finishReason) ? ` · ${finishNote(m.finishReason)}` : ""}
+                {redactionNote(m.redacted) ? ` · ${redactionNote(m.redacted)}` : ""}
               </span>
             )}
           </div>

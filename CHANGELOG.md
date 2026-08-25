@@ -164,6 +164,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Fixed
+- **A semantic cache hit and a redacted answer are now visible in the chat UI.**
+  Both are things the API reports and the reader could not see from the text.
+  `cache_similarity` marks a *semantic* hit — the reply is the stored answer to a
+  **different, similar** prompt — and the UI rendered it identically to an exact
+  hit, as a bare `cached ⚡`, telling the reader their question had been answered
+  when a neighbouring one was. Confirmed live with the semantic cache on: asking
+  "what is the capital city of France" returned the stored answer to "what is the
+  capital of France" with `cached: true, cache_similarity: 0.7458`. It now reads
+  `cached ⚡ answer to a 75% similar prompt`, while an exact hit stays a plain
+  `cached ⚡`. Separately, `redacted` names the secret patterns the output
+  guardrail scrubbed; a redaction leaves a placeholder that reads like ordinary
+  content, so the answer is silently not what the model produced. The metadata
+  line now says e.g. `2 secrets redacted`, on both the streamed and non-streamed
+  paths. Four new Playwright specs cover all four states and the two positive
+  ones were confirmed to fail with the render removed.
 - **A truncated reply now looks truncated in the chat UI.** The API was fixed to
   report the provider's real `finish_reason` instead of synthesising `"stop"`,
   and both SDKs surface it — but the web app never carried the field at all, so

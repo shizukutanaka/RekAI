@@ -396,7 +396,10 @@ so everything about it is deliberately conservative:
   on an exact cache hit**, so a value there is precisely the signal that the
   answer is to a *different* prompt than the one asked — a hit at 0.999 and one
   at exactly the threshold are very different claims, and without the number a
-  caller could not tell a semantic hit from an exact one at all.
+  caller could not tell a semantic hit from an exact one at all. The chat UI
+  spends it: a semantic hit reads `cached ⚡ answer to a 75% similar prompt`
+  rather than the bare `cached ⚡` an exact hit gets, since a reader who is told
+  only "cached" reasonably assumes the answer is to the question they asked.
 - **Embedding quality.** `REKAI_SEMANTIC_CACHE_MODEL` has **no default**:
   enabling the cache without naming a model is refused at startup. The threshold
   is meaningless unless the embedding is genuinely semantic — the keyless `echo`

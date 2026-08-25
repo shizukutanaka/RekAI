@@ -21,6 +21,8 @@ export interface ChatResponse {
   cached: boolean;
   created: number;
   finish_reason?: FinishReason;
+  cache_similarity?: number | null;
+  redacted?: string[] | null;
 }
 
 /**
@@ -35,6 +37,32 @@ export function finishNote(reason?: FinishReason): string {
   if (reason === "length") return "truncated — raise max tokens";
   if (reason === "content_filter") return "stopped by the provider's content filter";
   return "";
+}
+
+/**
+ * How the answer was served, or "" when it was generated fresh.
+ *
+ * An exact cache hit replayed the answer to *this* prompt. A semantic hit —
+ * which the API marks by returning a `cache_similarity` — replayed the answer to
+ * a *different, similar* prompt. Showing both as a bare "cached" tells the
+ * reader their question was answered when a neighbouring one was.
+ */
+export function cacheNote(cached?: boolean, similarity?: number | null): string {
+  if (!cached) return "";
+  if (similarity == null) return "cached ⚡";
+  return `cached ⚡ answer to a ${Math.round(similarity * 100)}% similar prompt`;
+}
+
+/**
+ * A note when output redaction scrubbed the answer before it reached the screen.
+ *
+ * The text shown is not what the model produced, which is invisible otherwise —
+ * a redaction leaves a placeholder that reads like ordinary content.
+ */
+export function redactionNote(redacted?: string[] | null): string {
+  const count = redacted?.length ?? 0;
+  if (!count) return "";
+  return `${count} secret${count === 1 ? "" : "s"} redacted`;
 }
 
 /** Format an estimated USD cost for display, or "" when unknown. */
@@ -357,6 +385,7 @@ export interface StreamSummary {
   estimated: boolean;
   tool_calls?: Record<string, unknown>[];
   finish_reason?: FinishReason;
+  redacted?: string[] | null;
 }
 
 export type SSEEvent =
