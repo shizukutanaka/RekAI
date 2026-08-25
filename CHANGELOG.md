@@ -164,6 +164,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Fixed
+- **The usage dashboard's cache hit rate no longer hides approximate matches.**
+  `semantic_cache_hits_total` is a **subset** of `cache_hits_total`, and the
+  dashboard reported only the combined figure — so the one number an operator
+  uses to judge whether the cache is earning its keep silently counted answers
+  to prompts nobody asked. Observed live against a gateway with the semantic
+  cache on: `cache_hits_total 1, semantic_cache_hits_total 1` — every hit was an
+  approximate match, displayed as a plain hit rate. The tile's detail line now
+  reads `12 / 30 · 5 semantic`, and stays exactly as it was when there are none.
 - **A streamed reply is labelled with the provider that served it.** The chat
   UI's metadata line filled one slot from two different fields depending on a
   toggle: the non-streaming path put the response's `provider` there, the

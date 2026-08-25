@@ -65,6 +65,20 @@ export function redactionNote(redacted?: string[] | null): string {
   return `${count} secret${count === 1 ? "" : "s"} redacted`;
 }
 
+/**
+ * The detail line under the cache hit-rate tile.
+ *
+ * `cache_hits_total` includes semantic hits, which are **approximate** matches —
+ * an answer to a prompt nobody asked. Reporting only the combined number
+ * overstates what the cache did, and it is the number an operator uses to decide
+ * whether the cache is earning its keep. Silent when there are none, so the
+ * ordinary exact-cache deployment reads unchanged.
+ */
+export function cacheHitDetail(hits: number, lookups: number, semantic?: number): string {
+  const base = `${hits} / ${lookups}`;
+  return semantic ? `${base} · ${semantic} semantic` : base;
+}
+
 /** Format an estimated USD cost for display, or "" when unknown. */
 export function formatCost(cost: number | null | undefined): string {
   if (cost === null || cost === undefined) return "";
@@ -164,6 +178,7 @@ export interface UsageSummary {
   requests_total: number;
   cache_hits_total: number;
   cache_misses_total: number;
+  semantic_cache_hits_total?: number;
   errors_total: number;
   fallbacks_total: number;
   retries_total: number;

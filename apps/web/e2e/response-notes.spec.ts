@@ -82,3 +82,34 @@ test("an untouched answer carries neither marker", async ({ page }) => {
   await expect(meta).not.toContainText("similar prompt");
   await expect(meta).not.toContainText("redacted");
 });
+
+test("the usage dashboard breaks out semantic cache hits", async ({ page }) => {
+  // semantic_cache_hits_total is a subset of cache_hits_total, so the headline
+  // hit rate silently counts approximate matches as cache wins. Observed live
+  // with the semantic cache on: cache_hits_total 1, semantic_cache_hits_total 1
+  // — every "hit" was an answer to a different prompt, shown as a plain rate.
+  await page.route("**/v1/usage", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        requests_total: 30,
+        cache_hits_total: 12,
+        cache_misses_total: 18,
+        semantic_cache_hits_total: 5,
+        errors_total: 0,
+        fallbacks_total: 0,
+        retries_total: 0,
+        cooldowns_total: 0,
+        tokens_total: 100,
+        cost_usd_total: 0,
+        requests_by_provider: {},
+        usage_by_client: {},
+      }),
+    });
+  });
+
+  await page.goto("/usage");
+
+  await expect(page.locator("body")).toContainText("12 / 30 · 5 semantic");
+});

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ApiError,
+  cacheHitDetail,
   cacheNote,
   cosineSimilarity,
   errorFromResponse,
@@ -249,5 +250,19 @@ describe("redactionNote", () => {
     // placeholder that reads like ordinary content.
     expect(redactionNote(["aws_key"])).toBe("1 secret redacted");
     expect(redactionNote(["aws_key", "github_pat"])).toBe("2 secrets redacted");
+  });
+});
+
+describe("cacheHitDetail", () => {
+  it("is just the ratio when nothing was served semantically", () => {
+    expect(cacheHitDetail(12, 30, 0)).toBe("12 / 30");
+    expect(cacheHitDetail(12, 30, undefined)).toBe("12 / 30");
+  });
+
+  it("breaks out semantic hits, which are approximate matches", () => {
+    // semantic_cache_hits_total is a *subset* of cache_hits_total, so the tile's
+    // headline rate silently includes answers to prompts nobody asked. That is
+    // the number an operator uses to decide the cache is earning its keep.
+    expect(cacheHitDetail(12, 30, 5)).toBe("12 / 30 · 5 semantic");
   });
 });
