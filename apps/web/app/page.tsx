@@ -181,6 +181,10 @@ export default function ChatPage() {
         // Finalize the bubble (mark complete; note if it was stopped early).
         const wasAborted = controller.signal.aborted;
         const finalSummary = summary as StreamSummary | null;
+        // The same slot the non-streaming path fills with res.provider, so the
+        // label means the same thing in both modes. Falls back to the requested
+        // model only when no summary arrived (an aborted or failed stream).
+        const served = finalSummary?.provider ?? model;
         setMessages((prev) => {
           const next = [...prev];
           const last = next[next.length - 1];
@@ -188,7 +192,7 @@ export default function ChatPage() {
             next[next.length - 1] = {
               ...last,
               streaming: false,
-              provider: wasAborted ? `${model} · stopped` : model,
+              provider: wasAborted ? `${served} · stopped` : served,
               tokens: finalSummary?.usage.total_tokens,
               cost: finalSummary?.cost_usd ?? undefined,
               finishReason: finalSummary?.finish_reason,

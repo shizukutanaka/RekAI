@@ -164,6 +164,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Fixed
+- **A streamed reply is labelled with the provider that served it.** The chat
+  UI's metadata line filled one slot from two different fields depending on a
+  toggle: the non-streaming path put the response's `provider` there, the
+  streaming path put the *requested model* there and discarded the
+  `provider`/`model` the stream summary already carried. So the same label meant
+  two different things, and a request routed by model name never showed which
+  provider actually answered. Streaming now uses the summary's `provider`,
+  falling back to the requested model only when no summary arrived (an aborted
+  or failed stream), which is also where the existing `· stopped` marker lives.
 - **A semantic cache hit and a redacted answer are now visible in the chat UI.**
   Both are things the API reports and the reader could not see from the text.
   `cache_similarity` marks a *semantic* hit — the reply is the stored answer to a

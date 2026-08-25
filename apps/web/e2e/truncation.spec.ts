@@ -100,3 +100,32 @@ test("an ordinary completion carries no truncation marker", async ({ page }) => 
   await expect(reply).toContainText("Echo: hello");
   await expect(reply.locator(".meta")).not.toContainText("truncated");
 });
+
+test("a streamed reply is labelled with the provider that served it", async ({ page }) => {
+  // The same slot the non-streaming path fills with the response's `provider`.
+  // It used to be filled with the *requested model* instead, so the one label
+  // meant two different things depending on a toggle — and a model-name-routed
+  // request never showed which provider actually answered.
+  await page.route("**/v1/chat/stream", async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+      body:
+        `data: ${JSON.stringify({ delta: "hi" })}\n\n` +
+        `data: ${JSON.stringify({
+          provider: "anthropic",
+          model: "claude-x",
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          cost_usd: 0,
+          estimated: false,
+        })}\n\n` +
+        "data: [DONE]\n\n",
+    });
+  });
+
+  await page.goto("/");
+  await page.fill('textarea[placeholder*="Type a message"]', "hi");
+  await page.click('button:has-text("Send")');
+
+  await expect(page.locator(".msg.assistant").last().locator(".meta")).toContainText("anthropic");
+});
