@@ -87,6 +87,11 @@ PROVIDER_PREFIXES: tuple[tuple[str, str], ...] = (
     ("o3", "openai"),
     ("claude", "anthropic"),
     ("gemini", "gemini"),
+    # Gemini's embedding model is named `text-embedding-004`, which collides
+    # with OpenAI's `text-embedding-*` family. It must be matched first, or the
+    # id this registry advertises as a *gemini* model on /v1/models routes to
+    # openai — the exact registry/routing drift MODEL_SPECS exists to prevent.
+    ("text-embedding-004", "gemini"),
     ("text-embedding", "openai"),
     ("llama", "ollama"),
     ("mistral", "ollama"),

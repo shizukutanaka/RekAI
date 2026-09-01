@@ -85,6 +85,47 @@ async def test_null_cache_always_misses() -> None:
     assert await cache.get("k") is None
 
 
+class _BrokenRedis:
+    """A stand-in for a configured-but-unreachable Redis client."""
+
+    async def get(self, key):
+        raise RuntimeError("redis is down")
+
+    async def set(self, *a, **k):
+        raise RuntimeError("redis is down")
+
+    async def delete(self, key):
+        raise RuntimeError("redis is down")
+
+
+async def test_redis_cache_fails_open_on_errors() -> None:
+    # A configured Redis that is unreachable must NOT turn requests into 500s.
+    # get() returns a miss, set()/add()/delete() become no-ops, and the backend
+    # transparently downgrades to an in-process cache afterwards. (Reproduces the
+    # bug where an unreachable REKAI_REDIS_URL raised ConnectionError on every
+    # /v1/chat and returned Internal Server Error.)
+    import redis.asyncio as redis  # noqa: F401  (real module must be importable)
+
+    cache = cache_module.RedisCache.__new__(cache_module.RedisCache)
+    cache._client = _BrokenRedis()  # bypass the real from_url() connection
+    cache._local = None
+    cache._degraded = False
+
+    # get swallows the error and returns a miss; subsequent writes are no-ops.
+    assert await cache.get("k") is None
+    await cache.set("k", "v", ttl=10)
+    await cache.delete("k")
+    # set()/delete() are no-ops against the broken backend, so a get is still a miss.
+    assert await cache.get("k") is None
+    # And we have silently fallen back to an in-process cache for the rest of
+    # the process, so a later set+get works locally even though Redis is dead.
+    assert cache._local is not None
+    await cache.set("k", "v", ttl=10)
+    assert await cache.get("k") == "v"
+    # label still reports the configured backend.
+    assert cache.label == "redis"
+
+
 @pytest.mark.parametrize(
     "label_cache,expected",
     [(MemoryCache(), "memory"), (NullCache(), "disabled")],

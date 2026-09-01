@@ -70,10 +70,10 @@
 ### S-5. 権限復旧後の後処理 (メンテナが権限を付与したら)
 1. `git tag -a v1.3.0 -m "RekAI 1.3.0" && git push origin v1.3.0`
    (タグはこの環境では作成も push もできないため、**存在しない**)
-2. `git mv .github/ci-workflow.yml .github/workflows/ci.yml` して push
-   (詳細は [`.github/README.md`](../../.github/README.md))
-3. push できたら GitHub Actions の初回実行を確認し、失敗ジョブがあれば修正
-4. GitHub Release (v1.3.0) を CHANGELOG の [1.3.0] 節から作成
+2. GitHub Release (v1.3.0) を CHANGELOG の [1.3.0] 節から作成
+
+CI の設置は**完了済み** — ワークフローは `.github/workflows/ci.yml` から動く
+(詳細は [`.github/README.md`](../../.github/README.md))。
 
 ### S-6. 価格表・モデル一覧の 2026 更新 (F2 の即値部分)
 > ✅ **完了** (`57b4522`): openai/gemini の `list_models()` に o1/o3/gemini-2.5-pro を

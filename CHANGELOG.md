@@ -164,6 +164,44 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Fixed
+- **The response cache no longer turns a Redis outage into a site-wide 500.** A
+  configured `REKAI_REDIS_URL` that is unreachable (wrong host, Redis down,
+  network partition) made `RedisCache.get()` raise `redis.exceptions.ConnectionError`
+  on every `/v1/chat`, `/v1/chat/completions`, and `/v1/embeddings` request —
+  so the gateway returned `Internal Server Error` instead of serving, despite
+  Redis being "optional". This broke the repo's own core invariant ("Redis-when-
+  configured, process-local otherwise, **fail-open on Redis errors**"), which the
+  rate limiter and metrics store already honored but the cache did not. `RedisCache`
+  now catches errors on `get`/`set`/`add`/`delete`, returns a miss (and a no-op
+  write) instead of propagating, logs a single `redis cache failing open` warning,
+  and transparently downgrades to an in-process `MemoryCache` for the rest of the
+  process — so a transient Redis blip no longer keeps recomputing every cacheable
+  hit for the server's lifetime. `/health` still reports `cache: "redis"` (the
+  configured backend). Verified live: with `REKAI_REDIS_URL` pointed at a dead
+  port, chat/embeddings now return 200 (was 500) with zero tracebacks; a new
+  `test_redis_cache_fails_open_on_errors` regression test asserts the downgrade.
+- **CI was silently dead — the workflow file lived outside `.github/workflows/`.**
+  GitHub Actions only loads workflows from `.github/workflows/`, but the CI
+  definition was committed as `.github/ci-workflow.yml`, so **no CI ever ran**
+  despite the README badge and the `ci: consolidate the two divergent staged CI
+  workflows into one` commit both pointing at `workflows/ci.yml`. Moved it to
+  `.github/workflows/ci.yml` so push/PR triggers actually fire. Verified the YAML
+  parses and the file now sits at the path GitHub scans.
+
+- **`text-embedding-004` was advertised as Gemini but routed to OpenAI.** The
+  model registry (`rekai/models.py`) is meant to be the single source of truth
+  for routing, pricing, and the advertised `/v1/models` list, but its two halves
+  disagreed for exactly one id: `MODEL_SPECS` advertises `text-embedding-004` as
+  a **gemini** embedding model, while the broader `("text-embedding", "openai")`
+  family rule in `PROVIDER_PREFIXES` matched it first. A client that read the id
+  straight off `/v1/models` and posted it to `/v1/embeddings` therefore reached
+  **OpenAI**, not Gemini — an unknown-model error against the wrong upstream, or
+  a silent charge on the operator's OpenAI key when one is configured. Fixed by
+  matching the exact `text-embedding-004` prefix ahead of the OpenAI family
+  rule; `text-embedding-3-*` / `-ada-002` still route to OpenAI. The drift
+  survived because `test_models.py` asserted advertised-vs-routed consistency
+  for **chat** models only, so two regression tests now extend that guarantee to
+  every advertised embedding model.
 - **The chat UI warns when the selected provider is cooling down.** `/health`
   reports `parked_providers` (provider → seconds of cooldown left), and the web
   client did not carry the field at all. A parked provider is precisely why a
@@ -554,6 +592,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   protocol gained atomic `add()` and `delete()`.
 
 ### Fixed
+- **Two divergent CI workflows were staged for the same destination.** Both
+  `ci/ci.yml` and `.github/ci-workflow.yml` existed, and `ci/README.md` and
+  `.github/README.md` each instructed a maintainer to `git mv` *their* file to
+  `.github/workflows/ci.yml` — so whichever instruction was followed silently
+  decided which gates ran, and the second `git mv` would clobber the first. The
+  two files had drifted apart and neither ran the full `CLAUDE.md` gate set:
+  `ci/ci.yml` had `smoke` + `docker` but no `e2e` and no `tsc --noEmit`;
+  `.github/ci-workflow.yml` had `e2e` but no `smoke`, no `docker`, and also no
+  `tsc --noEmit`. They also disagreed on Python version (3.12 vs 3.11), on the
+  `ruff format` scope (`.` vs `rekai tests`), and on trigger branches.
+  Consolidated into the single staged file `.github/ci-workflow.yml`, now the
+  union of both — `api`, `python-sdk`, `js-sdk`, `web`, `smoke`, `e2e`,
+  `docker` — with `tsc --noEmit` added to the web job to match `CLAUDE.md`, and
+  Python pinned to 3.12 throughout. `ci/` is removed and the `CONTRIBUTING.md`
+  pointer updated, so there is exactly one file and one install instruction.
 - **`MemoryCache.add()` can re-claim a just-expired key** — the previous fix
   moved `get()` and `_evict_expired_if_full()` to `expires_at <= now`, but
   `add()` was left on `item[0] >= now`, so at the boundary (an entry written

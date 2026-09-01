@@ -50,16 +50,14 @@ is a self-hostable AI gateway that runs with a single `docker compose up`.
 
 ### Blocked on repository permissions, not on code
 
-Everything below is finished in the tree and cannot be completed by the agent
-sessions working on this repo, because the GitHub App token they use can push
-neither tags nor anything under `.github/workflows/`. A maintainer with write
-access finishes each in one command:
+Nothing below is unfinished in the tree. Each is one command for a maintainer
+with write access, and none can be done by the agent sessions working on this
+repo, whose GitHub App token cannot push tags.
 
-- [ ] **Install CI** — `git mv .github/ci-workflow.yml .github/workflows/ci.yml`
-  and push. The workflow is complete and covers every gate in `CLAUDE.md` plus a
-  `stack` job that builds both images and smoke-tests the running containers,
-  which is the only build verification the images can get (no Docker daemon in
-  the agent sandbox). See [`.github/README.md`](../.github/README.md).
+- [x] **Install CI** — done: the workflow runs from `.github/workflows/ci.yml`.
+  It covers every gate in `CLAUDE.md`, on Python 3.10 and 3.12, plus `smoke`
+  (live API) and `docker` (both images build) — the latter being the only build
+  verification the images can get, since the agent sandbox has no Docker daemon.
 - [ ] **Tag the release** — `git tag -a v1.3.0 -m "RekAI 1.3.0" && git push
   origin v1.3.0`. Every version string in the monorepo is already at 1.3.0 and
   `CHANGELOG.md [1.3.0]` is the release notes.
