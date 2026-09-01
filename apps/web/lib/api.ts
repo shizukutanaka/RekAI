@@ -23,6 +23,9 @@ export interface ChatResponse {
   finish_reason?: FinishReason;
   cache_similarity?: number | null;
   redacted?: string[] | null;
+  /** True when a fallback target answered because the primary failed. */
+  fallback_used?: boolean;
+  tool_calls?: Record<string, unknown>[] | null;
 }
 
 /**

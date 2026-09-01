@@ -149,3 +149,18 @@ test("no cooldown notice when nothing is parked", async ({ page }) => {
 
   await expect(page.locator("body")).not.toContainText("cooling down");
 });
+
+test("a reply served by a fallback says so", async ({ page }) => {
+  // The provider label alone shows *who* answered, not that the primary failed.
+  // fallback_used is the API's own signal that this was a failover rather than
+  // the caller's choice, and the client type did not even declare it.
+  const meta = await stubChat(page, { provider: "anthropic", fallback_used: true });
+
+  await expect(meta).toContainText("via fallback");
+});
+
+test("an ordinary reply carries no fallback marker", async ({ page }) => {
+  const meta = await stubChat(page, {});
+
+  await expect(meta).not.toContainText("via fallback");
+});

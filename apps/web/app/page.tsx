@@ -30,6 +30,7 @@ interface DisplayMessage extends ChatMessage {
   cost?: number | null;
   streaming?: boolean;
   finishReason?: FinishReason;
+  fallbackUsed?: boolean;
   cacheSimilarity?: number | null;
   redacted?: string[] | null;
 }
@@ -233,6 +234,7 @@ export default function ChatPage() {
             tokens: res.usage.total_tokens,
             cost: res.cost_usd,
             finishReason: res.finish_reason,
+            fallbackUsed: res.fallback_used,
             cacheSimilarity: res.cache_similarity,
             redacted: res.redacted,
           },
@@ -384,6 +386,7 @@ export default function ChatPage() {
                   : ""}
                 {typeof m.tokens === "number" ? ` · ${m.tokens} tokens` : ""}
                 {formatCost(m.cost) ? ` · ${formatCost(m.cost)}` : ""}
+                {m.fallbackUsed ? " · via fallback" : ""}
                 {finishNote(m.finishReason) ? ` · ${finishNote(m.finishReason)}` : ""}
                 {redactionNote(m.redacted) ? ` · ${redactionNote(m.redacted)}` : ""}
               </span>

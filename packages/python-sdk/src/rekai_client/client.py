@@ -54,6 +54,8 @@ class ChatResult:
     #: Secret patterns scrubbed from ``content`` by the output-redaction
     #: guardrail, or None if nothing was redacted.
     redacted: list[str] | None = None
+    #: Unix timestamp the gateway produced the response.
+    created: int = 0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ChatResult:
@@ -70,6 +72,7 @@ class ChatResult:
             finish_reason=data.get("finish_reason"),
             cache_similarity=data.get("cache_similarity"),
             redacted=data.get("redacted"),
+            created=data.get("created", 0),
         )
 
 

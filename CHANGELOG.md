@@ -164,6 +164,25 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Fixed
+- **The first-party clients no longer lie about the API's response shape, and
+  cannot drift again.** The web app, the JS SDK and the Python SDK each restate
+  the response shape by hand, and nothing kept those restatements honest. All
+  three had drifted: the web `ChatResponse` omitted `fallback_used` and
+  `tool_calls`; both SDKs' `ChatResult` omitted `created`; and the JS SDK's
+  `UsageSummary` omitted `retries_total`, `cooldowns_total` and
+  `usage_by_client`, so a TypeScript caller got a compile error for fields
+  `GET /v1/usage` definitely returns — a type that lies about the payload is
+  worse than no type, because it makes correct code fail to build. A dropped
+  field fails silently: the JSON still parses, the value is just gone.
+  `apps/api/tests/test_client_types_cover_the_api.py` now makes live requests
+  against the app and asserts every response key is declared by every client,
+  parsing the TypeScript interfaces and Python dataclasses textually and
+  **skipping rather than passing** when a declaration cannot be parsed, so a
+  refactor that defeats the regex can never show up as a false green. It caught
+  the two web omissions that a by-hand audit had missed. `fallback_used` is also
+  surfaced now: the chat metadata line reads `via fallback` when a failover
+  answered, since the provider label alone shows *who* replied but not that the
+  caller's own choice had failed.
 - **The response cache no longer turns a Redis outage into a site-wide 500.** A
   configured `REKAI_REDIS_URL` that is unreachable (wrong host, Redis down,
   network partition) made `RedisCache.get()` raise `redis.exceptions.ConnectionError`

@@ -70,6 +70,8 @@ export interface ChatResult {
   fallback_used: boolean;
   /** Secret patterns scrubbed from `content` by the output-redaction guardrail. */
   redacted: string[] | null;
+  /** Unix timestamp the gateway produced the response. */
+  created: number;
 }
 
 export interface ModelPricing {
@@ -111,6 +113,15 @@ export interface UsageSummary {
   tokens_total: number;
   cost_usd_total: number;
   requests_by_provider: Record<string, number>;
+  /** Transient upstream failures retried in place. */
+  retries_total: number;
+  /** Providers parked after a 429 or repeated 5xx. */
+  cooldowns_total: number;
+  /** Per-client volume and spend, keyed by the non-reversible client id. */
+  usage_by_client: Record<
+    string,
+    { requests: number; tokens: number; cost_usd: number }
+  >;
 }
 
 export class RekAIError extends Error {
