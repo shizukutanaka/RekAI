@@ -31,6 +31,21 @@ def _warn_unsupported_fields(request: ChatRequest) -> None:
         logger.debug("ignoring tools: not wired up for the ollama provider")
 
 
+def _options(request: ChatRequest) -> dict:
+    """Ollama's per-request generation options.
+
+    ``num_predict`` is Ollama's spelling of ``max_tokens``. It was missing, so
+    the cap was accepted by RekAI's schema, honored by the other three
+    providers, and silently discarded here — the local model generated until it
+    stopped on its own. Shared by the chat and streaming paths so the two cannot
+    drift apart again.
+    """
+    options: dict = {"temperature": request.temperature}
+    if request.max_tokens is not None:
+        options["num_predict"] = request.max_tokens
+    return options
+
+
 def _response_format(request: ChatRequest) -> str | dict | None:
     """Map OpenAI's ``response_format`` onto Ollama's top-level ``format``.
 
@@ -76,7 +91,7 @@ class OllamaProvider(Provider):
             "model": request.model,
             "messages": [m.model_dump(exclude_none=True) for m in request.messages],
             "stream": False,
-            "options": {"temperature": request.temperature},
+            "options": _options(request),
         }
         fmt = _response_format(request)
         if fmt is not None:
@@ -146,7 +161,7 @@ class OllamaProvider(Provider):
             "model": request.model,
             "messages": [m.model_dump(exclude_none=True) for m in request.messages],
             "stream": True,
-            "options": {"temperature": request.temperature},
+            "options": _options(request),
         }
         fmt = _response_format(request)
         if fmt is not None:

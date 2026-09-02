@@ -164,6 +164,29 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Fixed
+- **Ollama ignored `max_tokens`.** The field is declared on RekAI's own
+  `ChatRequest`, documented, and forwarded by the other three providers —
+  `max_tokens` on OpenAI and Anthropic, `maxOutputTokens` on Gemini. The Ollama
+  provider sent no cap under any name, on either the chat or the streaming path,
+  so a request that asked for 16 tokens got as many as the local model felt like
+  producing. Measured against all four backends with the HTTP layer captured:
+  three sent the cap, Ollama sent `{"temperature": 0.7}`.
+
+  It was not a known limitation. Ollama spells it `options.num_predict` and has
+  all along, so it never reached `_warn_unsupported_fields` — whose docstring
+  says it exists to log "the request fields this provider can't honor, rather
+  than dropping them without a trace". Everything around it read as though the
+  cap were in force: the `done_reason` mapping already translated Ollama's
+  `length` into the normalized "truncated" reason that this release also made
+  visible to callers. That reason could never fire from a RekAI-set cap.
+
+  Both payloads are now built by one helper, so the chat and streaming paths
+  cannot drift apart again — which is how this arose. An absent `max_tokens`
+  still sends nothing, leaving the model's own default alone. Verified live
+  against a stub Ollama: `options` arrives as
+  `{"temperature": 0.7, "num_predict": 16}` on `/v1/chat`,
+  `/v1/chat/completions` and the streaming path, and as
+  `{"temperature": 0.7}` when no cap is set.
 - **Most errors on the OpenAI-compatible endpoint were not OpenAI-shaped, and
   one of them said the wrong thing entirely.** `openai_compat.openai_error`
   existed and was correct, but it was applied *by hand inside the route

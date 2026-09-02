@@ -328,6 +328,28 @@ log, so a caller who asked for JSON got prose and no signal — while Ollama had
 supported structured output all along and Anthropic had a documented workaround.
 That is the kind of gap a gateway exists to close, not to introduce.
 
+### Generation parameters
+
+The same rule applies to the two generation knobs `ChatRequest` declares. Each
+backend spells them differently, and every backend that can honor one does:
+
+| | `temperature` | `max_tokens` |
+|---|---|---|
+| OpenAI / OpenAI-compatible | `temperature` | `max_tokens` |
+| Anthropic | `temperature` | `max_tokens` (required by the API; falls back to `REKAI_ANTHROPIC_DEFAULT_MAX_TOKENS`) |
+| Gemini | `generationConfig.temperature` | `generationConfig.maxOutputTokens` |
+| Ollama | `options.temperature` | `options.num_predict` |
+
+`max_tokens` is omitted entirely when the caller did not set one, so the
+backend's own default stands rather than being overridden by a number RekAI
+invented.
+
+Ollama sent no cap under any name until 2026-09. The field is declared on
+RekAI's own `ChatRequest`, the other three providers forwarded it, and Ollama's
+`done_reason` mapping already translated `length` — so the code read as though
+the cap were in force while a local model generated to its own stopping point.
+It was not even in `_warn_unsupported_fields`, since it is not unsupported.
+
 ## Idempotency
 
 A client can send an `Idempotency-Key` header (a unique id, e.g. a UUID) on

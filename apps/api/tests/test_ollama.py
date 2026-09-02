@@ -196,3 +196,85 @@ def test_parse_ndjson_line_delegates_to_event() -> None:
     assert _parse_ollama_ndjson_line('{"message": {"content": "x"}}') == "x"
     assert _parse_ollama_ndjson_line("") is None
     assert _parse_ollama_ndjson_line("not json") is None
+
+
+# --- max_tokens ---------------------------------------------------------------
+#
+# `max_tokens` is a declared field of RekAI's own ChatRequest, and OpenAI,
+# Anthropic and Gemini all forwarded it. Ollama did not send it under any name,
+# so the cap was accepted and silently discarded and the local model generated
+# until it stopped on its own. It is not an unsupported field — Ollama spells it
+# `options.num_predict` — so it did not even reach the `_warn_unsupported_fields`
+# log that exists precisely to stop fields being "dropped without a trace".
+
+
+class StreamingFakeClient:
+    """Captures the streaming payload; replays one delta and a final usage line."""
+
+    captured: dict = {}
+
+    def __init__(self, *a, **k) -> None:
+        pass
+
+    def stream(self, method, url, json=None, headers=None):
+        StreamingFakeClient.captured = {"url": url, "json": json}
+
+        class _Resp:
+            status_code = 200
+
+            async def aiter_lines(self):
+                yield '{"message": {"content": "hi"}, "done": false}'
+                yield '{"done": true, "prompt_eval_count": 1, "eval_count": 1}'
+
+            async def aread(self) -> bytes:
+                return b""
+
+        class _Ctx:
+            async def __aenter__(self):
+                return _Resp()
+
+            async def __aexit__(self, *a):
+                return False
+
+        return _Ctx()
+
+
+async def test_max_tokens_is_sent_as_num_predict(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    await OllamaProvider().chat(
+        ChatRequest(
+            model="llama3",
+            messages=[ChatMessage(role="user", content="write an essay")],
+            max_tokens=16,
+        ),
+        api_key=None,
+    )
+    assert FakeClient.captured["json"]["options"]["num_predict"] == 16
+
+
+async def test_streaming_sends_num_predict_too(monkeypatch) -> None:
+    """The two payloads are built by one helper, so they cannot drift apart —
+    which is how they came to differ from the other providers in the first
+    place."""
+    monkeypatch.setattr(httpx, "AsyncClient", StreamingFakeClient)
+    req = ChatRequest(
+        model="llama3",
+        messages=[ChatMessage(role="user", content="write an essay")],
+        max_tokens=16,
+    )
+    deltas = [ev.delta async for ev in OllamaProvider().stream_events(req, api_key=None)]
+    assert "hi" in deltas
+    assert StreamingFakeClient.captured["json"]["options"]["num_predict"] == 16
+
+
+async def test_no_max_tokens_leaves_ollamas_own_default_alone(monkeypatch) -> None:
+    """Absent means absent: sending num_predict unconditionally would override
+    the model's configured default with whatever RekAI happened to pick."""
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    await OllamaProvider().chat(
+        ChatRequest(model="llama3", messages=[ChatMessage(role="user", content="hi")]),
+        api_key=None,
+    )
+    options = FakeClient.captured["json"]["options"]
+    assert "num_predict" not in options
+    assert options["temperature"] == pytest.approx(0.7)
