@@ -14,10 +14,15 @@ touching the request pipeline — it is accurate and kept up to date.
 
 ## Verification gates (run before every commit)
 
-**Run CI's exact commands, not narrower ones.** These are copied from
-`.github/workflows/ci.yml`; if they drift apart, CI is the authority and this
-file is the bug. Run each on its own line rather than chaining with `&&` — a
-chain tells you it failed but not which gate did.
+**`make check` runs all of them** and stops at the first failure, naming the
+recipe that failed — prefer it to an `&&` chain, which tells you something broke
+but not what. Its recipes use each package's own `.venv`, so they run the same
+tool versions CI does; a globally-installed `ruff` is not equivalent (an older
+one checks fewer files, and has already missed a formatting error that broke CI).
+
+The individual commands are below because you will often want one of them alone.
+They are copied from `.github/workflows/ci.yml`; if they ever drift apart, CI is
+the authority and this file is the bug.
 
 API — all four must pass, from `apps/api/`:
 
