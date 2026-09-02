@@ -132,3 +132,39 @@ async def test_redis_cache_fails_open_on_errors() -> None:
 )
 def test_labels(label_cache, expected) -> None:
     assert label_cache.label == expected
+
+
+async def test_redis_cache_add_fails_open_by_claiming_locally() -> None:
+    # `add` is the codebase's atomic-claim idiom — the idempotency in-progress
+    # sentinel is a `cache.add`. Every other RedisCache method fails open by
+    # reporting an *absence*: a miss, a no-op write. `add` used to fail open by
+    # returning False, which reports a *fact* — "someone else holds this key" —
+    # when the truth is that we could not look. A caller using it as a lock
+    # would deny service on a Redis blip.
+    cache = cache_module.RedisCache.__new__(cache_module.RedisCache)
+    cache._client = _BrokenRedis()
+    cache._local = None
+    cache._degraded = False
+
+    # The claim succeeds against the fallback that the degrade installs...
+    assert await cache.add("claim", "sentinel", ttl=10) is True
+    # ...and the key is genuinely held afterwards, so a second claim is refused.
+    assert await cache.add("claim", "sentinel", ttl=10) is False
+    # Both answers are true statements about the fallback, which is the point.
+    assert await cache.get("claim") == "sentinel"
+
+
+async def test_idempotency_claim_proceeds_when_redis_is_down() -> None:
+    # The behaviour that matters to a caller: a Redis outage must not make the
+    # gateway believe a request is already in flight. Verified end to end through
+    # the idempotency layer rather than only at the cache boundary.
+    from rekai import idempotency
+
+    cache = cache_module.RedisCache.__new__(cache_module.RedisCache)
+    cache._client = _BrokenRedis()
+    cache._local = None
+    cache._degraded = False
+
+    first = await idempotency.claim(cache, "client-a", "key-1", "fingerprint", 60)
+
+    assert first.kind == "proceed"

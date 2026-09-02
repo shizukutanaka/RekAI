@@ -202,8 +202,17 @@ class RedisCache:
         try:
             return bool(await self._client.set(key, value, ex=ttl, nx=True))
         except Exception as exc:
+            # Retry against the fallback `_degrade` just installed, rather than
+            # returning False. Every other method fails open by reporting an
+            # *absence* (a miss, a no-op write); False here would report a
+            # *fact* — "someone else holds this key" — when the truth is that we
+            # could not look. `cache.add` is the codebase's atomic-claim idiom
+            # (idempotency's in-progress sentinel), so a caller using it as a
+            # lock would deny service on a Redis blip. Today's caller happens to
+            # survive that, because idempotency.claim() re-reads and gets a miss
+            # from this same fallback, but it should not have to.
             self._degrade(exc)
-            return False
+            return await self._local.add(key, value, ttl)
 
     async def delete(self, key: str) -> None:
         if self._local is not None:

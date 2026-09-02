@@ -164,6 +164,23 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Fixed
+- **`RedisCache.add()` failed open by asserting something false.** Found by
+  measuring coverage: at 94% overall, the least-covered module was `cache.py`
+  (79%), and the uncovered lines were the Redis error paths — the error handling
+  of the error handler. Reading them turned up an asymmetry. Every other method
+  fails open by reporting an *absence*: `get` a miss, `set`/`delete` a no-op.
+  `add` returned `False`, which reports a *fact* — "someone else holds this
+  key" — when the truth is that the backend could not be reached. `cache.add` is
+  the codebase's atomic-claim idiom (idempotency's in-progress sentinel), so a
+  caller using it as a lock would deny service on a Redis blip. It now retries
+  against the fallback `_degrade` has just installed, so `True` means it really
+  did claim the key and a second call really is refused — both true statements.
+  To be clear, this was **not** a live bug: `idempotency.claim()` re-reads after
+  a failed claim and gets a miss from that same fallback, so it already came out
+  at `proceed`. That was verified, not assumed, and the end-to-end test added
+  here passes against the old code too — it is kept because the behaviour it
+  pins (a Redis outage must not make the gateway believe a request is already in
+  flight) is worth holding still regardless of which layer provides it.
 - **Both SDKs honored `Retry-After` without a bound, undoing the gateway's own
   design.** RekAI deliberately refuses to wait longer than
   `REKAI_RETRY_MAX_DELAY_SECONDS` (default 8s) and passes the header to the
