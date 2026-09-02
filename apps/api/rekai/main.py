@@ -199,6 +199,126 @@ class ConcurrencyLimitMiddleware:
             self._in_flight -= 1
 
 
+# Paths an OpenAI SDK talks to that RekAI promises to serve *as OpenAI*. Only
+# /v1/chat/completions is that promise (README: "a drop-in POST
+# /v1/chat/completions"); /v1/chat, /v1/embeddings and /v1/usage are RekAI's own
+# API, and the three first-party clients read `detail || error` off their error
+# bodies, so their shape must not change.
+_OPENAI_COMPAT_PATHS = frozenset({"/v1/chat/completions"})
+
+
+def _validation_message(detail: list) -> tuple[str, str | None]:
+    """Render FastAPI's list-of-dicts validation detail as a message + param.
+
+    OpenAI reports a bad request as prose ("Missing required parameter:
+    'messages'"), not as a machine-readable list, and an SDK caller reads
+    ``exc.message`` / ``exc.param``. Returns the param only when a single field
+    is at fault, since OpenAI's envelope has room for exactly one.
+    """
+    parts: list[str] = []
+    params: list[str] = []
+    for err in detail:
+        if not isinstance(err, dict):
+            continue
+        # loc[0] is the source ("body"), which is noise to the caller.
+        loc = ".".join(str(p) for p in err.get("loc", ())[1:]) or "body"
+        params.append(loc)
+        parts.append(f"{loc}: {err.get('msg', 'invalid')}")
+    if not parts:
+        return "Invalid request.", None
+    return "; ".join(parts), params[0] if len(params) == 1 else None
+
+
+def _openai_error_body(raw: bytes, status_code: int) -> bytes:
+    """Translate whatever error body the stack produced into OpenAI's envelope.
+
+    Passes the body through untouched when it is not a JSON object, or when it
+    is already an envelope (``error`` is a mapping), so this is idempotent and
+    safe to run over a response the route wrote itself.
+    """
+    try:
+        payload = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        return raw
+    if not isinstance(payload, dict):
+        return raw
+    error = payload.get("error")
+    if isinstance(error, dict):
+        return raw
+
+    param: str | None = None
+    detail = payload.get("detail")
+    if isinstance(detail, list):
+        # FastAPI's RequestValidationError.
+        message, param = _validation_message(detail)
+    elif isinstance(detail, str):
+        message = detail
+    elif isinstance(error, str):
+        message = error
+    else:
+        return raw
+    envelope = openai_compat.openai_error(status_code, message, param=param)
+    return json.dumps(envelope).encode()
+
+
+class OpenAICompatErrorMiddleware:
+    """Give *every* error on the OpenAI-compatible endpoint OpenAI's envelope.
+
+    `openai_compat.openai_error` existed already, but it was applied by hand
+    inside the route function, which can only cover errors the route itself
+    produces. Everything else on that path escaped it: auth (401), the client
+    budget (402), the body cap (413), the rate limiter and concurrency cap
+    (429), and FastAPI's own request validation (422) all answered with RekAI's
+    flat `{"error": str, "detail": str}` — a shape the OpenAI SDK cannot read,
+    leaving `exc.body` a bare string and `exc.code`/`.type` empty.
+
+    Owning the translation in one place instead lets the route stop knowing
+    about the envelope at all, which is what fixes the rest: with its
+    hand-written `except ProviderError` gone, an upstream error reaches
+    `_provider_error_handler` again and so is both counted in metrics and
+    allowed to keep its `Retry-After`.
+
+    Pure ASGI, and installed outside the middlewares above, because that is the
+    only position from which their short-circuit responses are visible. Only
+    bodies of error responses are buffered; a 200 (including a streamed one) is
+    forwarded chunk by chunk, untouched.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http" or scope["path"] not in _OPENAI_COMPAT_PATHS:
+            await self.app(scope, receive, send)
+            return
+
+        start: dict | None = None
+        chunks: list[bytes] = []
+
+        async def _send(message: dict) -> None:
+            nonlocal start
+            if message["type"] == "http.response.start":
+                if message["status"] >= 400:
+                    # Held back: rewriting the body changes Content-Length.
+                    start = message
+                    return
+                await send(message)
+                return
+            if start is None:
+                await send(message)
+                return
+            chunks.append(message.get("body", b""))
+            if message.get("more_body"):
+                return
+            body = _openai_error_body(b"".join(chunks), start["status"])
+            headers = [(k, v) for k, v in start["headers"] if k.lower() != b"content-length"]
+            headers.append((b"content-length", str(len(body)).encode()))
+            await send({**start, "headers": headers})
+            await send({"type": "http.response.body", "body": body})
+
+        await self.app(scope, receive, _send)
+
+
 def _guardrail_response(
     messages: list[ChatMessage], settings: Settings, response: Response
 ) -> JSONResponse | None:
@@ -340,9 +460,15 @@ async def _run_chat(
 
     Guardrail check, Idempotency-Key replay, provider call (routing/cache/retry/
     fallback via ``handle_chat``), output redaction, per-client accounting, then
-    idempotency store. Returns a ``ChatResponse`` normally, or a ``JSONResponse``
-    when the guardrail blocks the request. Shared by POST /v1/chat and the
-    OpenAI-compatible POST /v1/chat/completions so neither duplicates the flow."""
+    idempotency store. Shared by POST /v1/chat and the OpenAI-compatible POST
+    /v1/chat/completions so neither duplicates the flow.
+
+    Returns a ``ChatResponse`` normally, or a ``JSONResponse`` for **any** of
+    three refusals: a guardrail block (403), an ``Idempotency-Key`` reused with
+    a different body (422), and one already in flight (409). Callers must not
+    assume which — this docstring used to say "when the guardrail blocks the
+    request", and the OpenAI-compatible route believed it and reported every
+    idempotency conflict as a prompt-injection block."""
     blocked = _guardrail_response(request.messages, settings, response)
     if blocked is not None:
         return blocked
@@ -676,11 +802,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # stay wrapped around a streaming response body.
     #
     # Added first = innermost, so the ordering below is
-    #   CORS → MaxBodySize → ConcurrencyLimit → the http middlewares
+    #   CORS → OpenAICompatError → MaxBodySize → ConcurrencyLimit → the http
+    #   middlewares
     # deliberately: rejecting an oversized body is cheap and shouldn't consume
-    # one of the concurrency slots it would otherwise occupy.
+    # one of the concurrency slots it would otherwise occupy, and the envelope
+    # translation has to sit outside every layer whose rejections it rewrites
+    # (including the 413 and the concurrency 429 above).
     app.add_middleware(ConcurrencyLimitMiddleware, max_concurrent=settings.max_concurrent_requests)
     app.add_middleware(MaxBodySizeMiddleware, max_bytes=settings.max_body_bytes)
+    app.add_middleware(OpenAICompatErrorMiddleware)
 
     # CORS is added last so it wraps the others (outermost): short-circuit
     # responses like a 429 from the rate limiter (or a 413 from the body-size
@@ -1206,60 +1336,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         on the non-streaming path only — ``stream: true`` does not accept it,
         same as ``/v1/chat/stream``; see docs/architecture.md.
         """
+        # This route does not wrap its own errors in the OpenAI envelope:
+        # OpenAICompatErrorMiddleware translates every error on this path,
+        # including the ones raised below and the ones the middlewares above
+        # produce before this function is ever called. Letting ProviderError
+        # propagate is what keeps `_provider_error_handler`'s metrics and its
+        # `Retry-After` on an upstream 429.
         try:
             chat_request = openai_compat.to_chat_request(request)
-        except ProviderError as exc:
-            return JSONResponse(
-                status_code=exc.status_code,
-                content=openai_compat.openai_error(exc.status_code, str(exc)),
-            )
         except ValidationError as exc:
-            return JSONResponse(status_code=400, content=openai_compat.openai_error(400, str(exc)))
+            # Not a ProviderError, so no handler upstream turns it into a
+            # response; without this it would surface as a 500.
+            return JSONResponse(
+                status_code=400,
+                content=ErrorResponse(error="invalid_request", detail=str(exc)).model_dump(),
+            )
 
         if not request.stream:
-            try:
-                result = await _run_chat(
-                    chat_request,
-                    http_request,
-                    response,
-                    x_provider_key,
-                    idempotency_key,
-                    config,
-                    cache_backend,
-                )
-            except ProviderError as exc:
-                return JSONResponse(
-                    status_code=exc.status_code,
-                    content=openai_compat.openai_error(exc.status_code, str(exc)),
-                )
+            result = await _run_chat(
+                chat_request,
+                http_request,
+                response,
+                x_provider_key,
+                idempotency_key,
+                config,
+                cache_backend,
+            )
+            # A guardrail block or an Idempotency-Key conflict — already a RekAI
+            # error body, so pass it along rather than guessing at its meaning.
             if isinstance(result, JSONResponse):
-                # Guardrail block — re-wrap RekAI's body in the OpenAI envelope.
-                return JSONResponse(
-                    status_code=result.status_code,
-                    content=openai_compat.openai_error(
-                        result.status_code, "Request blocked by prompt-injection guardrail."
-                    ),
-                )
+                return result
             return openai_compat.to_chat_completion(result)
 
         # Streaming.
         blocked = _guardrail_response(chat_request.messages, config, response)
         if blocked is not None:
-            return JSONResponse(
-                status_code=blocked.status_code,
-                content=openai_compat.openai_error(
-                    blocked.status_code, "Request blocked by prompt-injection guardrail."
-                ),
-            )
+            return blocked
         guardrail_flag = response.headers.get("X-Guardrail-Flag")
         client_id = _client_id(http_request)
-        try:
-            provider_name, provider = select_provider(chat_request, config)
-        except ProviderError as exc:
-            return JSONResponse(
-                status_code=exc.status_code,
-                content=openai_compat.openai_error(exc.status_code, str(exc)),
-            )
+        provider_name, provider = select_provider(chat_request, config)
         metrics.record_request(provider_name)
         _stash_gen_ai_prestream(http_request, provider_name, chat_request.model)
 

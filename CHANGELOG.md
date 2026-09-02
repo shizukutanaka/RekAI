@@ -164,6 +164,43 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Fixed
+- **Most errors on the OpenAI-compatible endpoint were not OpenAI-shaped, and
+  one of them said the wrong thing entirely.** `openai_compat.openai_error`
+  existed and was correct, but it was applied *by hand inside the route
+  function*, which can only cover errors that function produces. Everything else
+  on `/v1/chat/completions` escaped it, with five measured consequences:
+  - An upstream provider's **429 lost its `Retry-After`**. The route caught
+    `ProviderError` itself and rebuilt the response, bypassing
+    `_provider_error_handler`, which is what attaches that header. `/v1/chat`
+    kept it; the endpoint that exists *for* the OpenAI SDK was the one denying
+    the SDK the header it backs off by — inverting the same design this release
+    already fixed on the SDK side.
+  - Provider errors on that path were **counted nowhere**. The same bypass
+    skipped `metrics.record_error`, so `/v1/usage` and `rekai_errors_total`
+    under-reported failures for what is, for many deployments, *the* endpoint.
+  - An `Idempotency-Key` conflict was reported as **"Request blocked by
+    prompt-injection guardrail."** `_run_chat` returns a `JSONResponse` for a
+    guardrail block *and* for a key reused with a different body (422) or one
+    already in flight (409) — but its docstring claimed only the first, and the
+    route believed it. A caller with a duplicate key was sent after a security
+    problem they did not have. The docstring is fixed too, since it is the
+    original error.
+  - Auth (401), budget (402), body cap (413) and rate limiting (429) kept
+    RekAI's flat body, which the OpenAI SDK cannot read: `exc.body` arrived as
+    the bare string `'unauthorized'` — so `exc.body.get(...)` is an
+    `AttributeError` — with `exc.type` empty and the real message reachable only
+    by parsing the repr in `exc.message`.
+  - A schema-invalid body kept FastAPI's `{"detail": [ …pydantic dicts… ]}`,
+    which is neither shape. This is the commonest client error there is.
+
+  The envelope now has one owner, `OpenAICompatErrorMiddleware`, installed
+  outside the middlewares whose rejections it rewrites; the route no longer
+  knows about the envelope at all, which is what restores the header and the
+  metric. `param` is populated when a single field is at fault, as OpenAI does.
+  Scoped to `/v1/chat/completions` alone: `/v1/chat`, `/v1/embeddings` and the
+  rest keep the flat shape the web app and both SDKs parse. A 200 — including a
+  stream — is forwarded untouched. Verified live on uvicorn for each case, and
+  through the real `openai` SDK.
 - **A typo'd `fallbacks` entry was silently dropped.** `_build_attempts` runs
   `ensure_allowed` over request-level fallbacks for a stated reason — "quietly
   dropping it would leave the client believing it had a fallback chain it

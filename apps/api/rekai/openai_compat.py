@@ -191,12 +191,18 @@ def _error_type_for_status(status_code: int) -> str:
     return "api_error"
 
 
-def openai_error(status_code: int, message: str) -> dict:
-    """The OpenAI error envelope, so SDK error handling parses RekAI's errors."""
+def openai_error(status_code: int, message: str, param: str | None = None) -> dict:
+    """The OpenAI error envelope, so SDK error handling parses RekAI's errors.
+
+    ``param`` names the offending request field when exactly one is at fault —
+    OpenAI populates it for a bad or missing parameter, and the SDK exposes it
+    as ``exc.param``. It stays None otherwise, as OpenAI leaves it.
+    """
     return {
         "error": {
             "message": message,
             "type": _error_type_for_status(status_code),
+            "param": param,
             "code": None,
         }
     }
