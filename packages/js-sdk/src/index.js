@@ -43,6 +43,11 @@ export class RekAIClient {
     // Client-side retry for transient failures (network errors, 429/5xx).
     this.maxRetries = options.maxRetries ?? 2;
     this.retryBackoff = options.retryBackoff ?? 0.5; // seconds, doubled per attempt
+    // Ceiling on how long a `Retry-After` may park this call. The gateway draws
+    // the same line at REKAI_RETRY_MAX_DELAY_SECONDS: past it, it stops waiting
+    // and hands the header to the caller precisely so the caller can decide.
+    // Honoring an unbounded value here would undo that.
+    this.maxRetryDelay = options.maxRetryDelay ?? 60; // seconds
   }
 
   /**
@@ -65,12 +70,28 @@ export class RekAIClient {
     return headers;
   }
 
-  /** Milliseconds to wait before the next attempt: Retry-After, else backoff. */
+  /**
+   * Milliseconds to wait before the next attempt, or `null` to stop retrying.
+   *
+   * `Retry-After` wins when the server sends a usable one, but only up to
+   * `maxRetryDelay`. Beyond that, retrying is the wrong call: waiting parks the
+   * caller for however long the upstream asked (a `Retry-After: 3600` used to
+   * sleep for an hour inside `chat()`), and retrying *sooner* than asked just
+   * earns another 429. So the response is returned instead, with its header
+   * intact, and the caller decides — which is exactly what the gateway does at
+   * REKAI_RETRY_MAX_DELAY_SECONDS.
+   *
+   * An empty header is not a zero: `Number("")` is 0, which would have retried
+   * immediately in a hot loop. It falls through to backoff.
+   */
   _retryDelayMs(res, attempt) {
     if (res) {
       const raw = res.headers.get("Retry-After");
-      const secs = raw != null ? Number(raw) : NaN;
-      if (Number.isFinite(secs)) return Math.max(0, secs) * 1000;
+      const secs = raw != null && raw.trim() !== "" ? Number(raw) : NaN;
+      if (Number.isFinite(secs)) {
+        const ms = Math.max(0, secs) * 1000;
+        return ms > this.maxRetryDelay * 1000 ? null : ms;
+      }
     }
     return this.retryBackoff * 2 ** attempt * 1000;
   }
@@ -93,7 +114,9 @@ export class RekAIClient {
         continue;
       }
       if (RETRYABLE_STATUS.has(res.status) && attempt < this.maxRetries) {
-        await sleep(this._retryDelayMs(res, attempt));
+        const delay = this._retryDelayMs(res, attempt);
+        if (delay === null) return res; // asked to wait longer than we will
+        await sleep(delay);
         attempt++;
         continue;
       }

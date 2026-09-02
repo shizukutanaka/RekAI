@@ -164,6 +164,22 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Fixed
+- **Both SDKs honored `Retry-After` without a bound, undoing the gateway's own
+  design.** RekAI deliberately refuses to wait longer than
+  `REKAI_RETRY_MAX_DELAY_SECONDS` (default 8s) and passes the header to the
+  client instead — the architecture doc's words: "so its SDK can back off
+  precisely (rather than blocking the gateway)". The SDKs then slept for
+  whatever the header said. Measured through the Python client's `_send` with
+  the default 3 retries against a `Retry-After: 3600`: **10,800 seconds of
+  `time.sleep` inside one `chat()` call**, on the caller's thread; the JS twin
+  parked the event loop the same way. Both now honor `Retry-After` up to a
+  configurable `max_retry_delay` / `maxRetryDelay` (60s default) and, past it,
+  return the 429 with its header intact so the caller decides — mirroring the
+  server. Clamping and retrying anyway would have been wrong: retrying sooner
+  than the server asked just earns another 429. The JS client also treated an
+  empty `Retry-After` as `Number("") === 0` and retried immediately in a hot
+  loop; an unparseable value now falls through to backoff, as an HTTP-date
+  already did on the Python side.
 - **CI had never been green — mypy died inside numpy's stubs.** Installing the
   workflow made CI run; it did not make it pass. Every run since, on `main` and
   on every branch, failed the `api` job identically:

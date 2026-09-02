@@ -96,6 +96,15 @@ A **429** (upstream rate limit) is also retried, but **honours the provider's
 header through to the client** so its SDK can back off precisely (rather than
 blocking the gateway). A 429 with no header falls back to jittered backoff.
 
+Both SDKs draw the same line, and for the same reason. Each honors `Retry-After`
+up to `maxRetryDelay` / `max_retry_delay` (60s by default) and, past that,
+returns the 429 to the caller with its header intact instead of waiting. They
+used to honor it unbounded, which quietly inverted the design above: the gateway
+declines to block on a long `Retry-After` precisely so the caller can decide, and
+the SDK then blocked on it anyway. Measured on the Python client, three retries
+against a `Retry-After: 3600` meant **10,800 seconds of `time.sleep` inside a
+single `chat()` call**, on the calling thread.
+
 Only after a target's retries are exhausted does RekAI move on. A request may
 carry an ordered `fallbacks` list of `(provider, model)` targets; alternatively
 a server-wide chain is set via `REKAI_FALLBACK_ENABLED` +
