@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { UsageSummary, fetchUsage, getStoredGatewayKey } from "@/lib/api";
+import {
+  UsageSummary,
+  cacheHitDetail,
+  fetchUsage,
+  getStoredGatewayKey,
+} from "@/lib/api";
 
 function pct(part: number, whole: number): string {
   if (whole <= 0) return "—";
@@ -40,7 +45,11 @@ export default function UsagePage() {
         {
           label: "Cache hit rate",
           value: pct(usage.cache_hits_total, cacheLookups),
-          sub: `${usage.cache_hits_total} / ${cacheLookups}`,
+          sub: cacheHitDetail(
+            usage.cache_hits_total,
+            cacheLookups,
+            usage.semantic_cache_hits_total,
+          ),
         },
         { label: "Tokens", value: usage.tokens_total.toLocaleString() },
         {

@@ -14,12 +14,35 @@ touching the request pipeline — it is accurate and kept up to date.
 
 ## Verification gates (run before every commit)
 
+**`make check` runs all of them** and stops at the first failure, naming the
+recipe that failed — prefer it to an `&&` chain, which tells you something broke
+but not what. Its recipes use each package's own `.venv`, so they run the same
+tool versions CI does; a globally-installed `ruff` is not equivalent (an older
+one checks fewer files, and has already missed a formatting error that broke CI).
+
+The individual commands are below because you will often want one of them alone.
+They are copied from `.github/workflows/ci.yml`; if they ever drift apart, CI is
+the authority and this file is the bug.
+
 API — all four must pass, from `apps/api/`:
 
 ```bash
-.venv/bin/ruff check . && .venv/bin/ruff format --check rekai tests
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .      # NOT `rekai tests`: CI checks README code blocks too
 .venv/bin/mypy rekai
-.venv/bin/python -m pytest -q        # 360+ tests, ~5s
+.venv/bin/python -m pytest -q        # 680+ tests, ~9s
+```
+
+**A green local run does not predict CI.** A local venv pins the dependencies it
+resolved the day it was built; CI resolves them fresh every run. That gap kept
+this repo's CI red from the day the workflow was installed until 2026-09-02 —
+mypy died inside a *newer numpy's* stubs, on a tree whose author had honestly
+reported "mypy … 550 passed" locally. When a change touches typing, dependency
+metadata, or anything version-sensitive, build a scratch venv on the Python CI
+uses and run the suite there too:
+
+```bash
+python3.12 -m venv /tmp/ci && /tmp/ci/bin/pip install -e ".[dev]"
 ```
 
 Web — from `apps/web/`:
@@ -28,7 +51,9 @@ Web — from `apps/web/`:
 npx tsc --noEmit -p . && npm run lint && npx vitest run && npm run build
 ```
 
-SDKs — `packages/python-sdk`: `.venv/bin/python -m pytest -q && .venv/bin/ruff check .`;
+SDKs — `packages/python-sdk`: `.venv/bin/python -m pytest -q`, then
+`.venv/bin/ruff check .` **and `.venv/bin/ruff format --check .`** (CI runs the
+format check here too, and it covers the README's code blocks);
 `packages/js-sdk`: `node --test`.
 
 E2E (optional but preferred for UI-visible changes) — from `apps/web/`:

@@ -4,7 +4,7 @@
 共通規約・検証ゲート・git 制約は必ずルートの [`CLAUDE.md`](../../CLAUDE.md) に従うこと。
 Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-sonnet.md)。
 
-## 現状サマリ (v1.2.0 時点)
+## 現状サマリ (v1.3.0 時点)
 
 ### 長所 — 壊さないこと
 - **SSRF 面なし**: provider は固定レジストリのキーのみ。クライアントが URL を注入する
@@ -15,7 +15,7 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
   per-client / per-request 構造には必ず上限と eviction を付ける。
 - **OpenAI 互換層の品質**: 実 OpenAI SDK での E2E (`tests/test_openai_sdk_e2e.py`)
   が回帰ゲート。互換性を落とす変更はこのテストで検出される。
-- **486+ テスト、ruff/mypy クリーン、TODO ゼロ**の状態を維持する。
+- **654+ テスト、ruff/mypy クリーン、TODO ゼロ**の状態を維持する。
 - **保存前レダクション** (`service._redact`): 応答キャッシュ・セマンティック
   キャッシュ・idempotency ストアの**いずれよりも前**にスクラブする。文書
   (`docs/architecture.md`) の約束はこれ。後から edge で消す形に戻さないこと。
@@ -164,6 +164,24 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
 > (7) `REKAI_MAX_CONCURRENT_REQUESTS`、(8) エラーの次元化、
 > (9) `/health` の degraded、(10) ガードレール既定 `flag` + パターン精緻化、
 > (11) セマンティックヒットの類似度開示。詳細は CHANGELOG の `[Unreleased]`。
+
+### O-17. finish_reason の伝搬 (完了)
+> ✅ 全 5 プロバイダが返している停止理由 (`finish_reason`/`stop_reason`/
+> `finishReason`/`done_reason`) を一切パースせず、edge で `"stop"` を捏造していた。
+> `max_tokens` で切り詰められた応答が「正常完了」として報告され、しかもキャッシュ
+> されて以後も配られていた。OpenAI 語彙 (`stop`/`length`/`tool_calls`/
+> `content_filter`) に正規化して `ProviderResult`/`StreamEvent`/`ChatResponse`/
+> OpenAI 互換層まで配線。Gemini の「functionCall でも STOP」と Anthropic の JSON
+> 擬似時の `tool_use` は個別に読み替え。未報告は `None`(既存キャッシュ互換)。
+
+### O-18. トークン推定の多言語対応 (完了)
+> ✅ プロバイダが usage を報告しないストリーミング経路の `estimate_tokens` が
+> `len(text.split())`(空白語数)だった。CJK は空白がないため応答全体が ~1 トークンと
+> 数えられ、`cost_usd` と予算キャップが 100 倍以上過小計上。日本語/中国語アプリが
+> 予算を実質無計測で超過できた。文字クラス別ヒューリスティック(CJK/かな/ハングルは
+> ~1 トークン/文字、それ以外は ~4 文字/トークン)に置換。o200k_base 比 ±15%、
+> やや高め(キャップとして安全側)。tiktoken は語彙ダウンロードが必要で自己ホスト/
+> エアギャップ前提に合わないため依存にしない。
 
 ### 進め方
 - 1 タスク = 設計メモ (docs/ か PR 説明) → 実装 → テスト → live 検証 → CHANGELOG →

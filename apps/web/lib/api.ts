@@ -5,6 +5,12 @@ export interface ChatMessage {
   content: string;
 }
 
+/**
+ * Why the provider stopped generating. Null when it didn't say (a cached entry
+ * written before the API reported it, or a backend that reports nothing).
+ */
+export type FinishReason = "stop" | "length" | "tool_calls" | "content_filter" | null;
+
 export interface ChatResponse {
   id: string;
   provider: string;
@@ -14,6 +20,66 @@ export interface ChatResponse {
   cost_usd: number | null;
   cached: boolean;
   created: number;
+  finish_reason?: FinishReason;
+  cache_similarity?: number | null;
+  redacted?: string[] | null;
+  /** True when a fallback target answered because the primary failed. */
+  fallback_used?: boolean;
+  tool_calls?: Record<string, unknown>[] | null;
+}
+
+/**
+ * A note for a finish_reason the reader needs to know about, or "" when the
+ * answer simply ended.
+ *
+ * `stop` and `tool_calls` are ordinary completions and say nothing. `length` and
+ * `content_filter` mean the text on screen is **not the whole answer**, which is
+ * invisible otherwise — a truncated reply looks exactly like a complete one.
+ */
+export function finishNote(reason?: FinishReason): string {
+  if (reason === "length") return "truncated — raise max tokens";
+  if (reason === "content_filter") return "stopped by the provider's content filter";
+  return "";
+}
+
+/**
+ * How the answer was served, or "" when it was generated fresh.
+ *
+ * An exact cache hit replayed the answer to *this* prompt. A semantic hit —
+ * which the API marks by returning a `cache_similarity` — replayed the answer to
+ * a *different, similar* prompt. Showing both as a bare "cached" tells the
+ * reader their question was answered when a neighbouring one was.
+ */
+export function cacheNote(cached?: boolean, similarity?: number | null): string {
+  if (!cached) return "";
+  if (similarity == null) return "cached ⚡";
+  return `cached ⚡ answer to a ${Math.round(similarity * 100)}% similar prompt`;
+}
+
+/**
+ * A note when output redaction scrubbed the answer before it reached the screen.
+ *
+ * The text shown is not what the model produced, which is invisible otherwise —
+ * a redaction leaves a placeholder that reads like ordinary content.
+ */
+export function redactionNote(redacted?: string[] | null): string {
+  const count = redacted?.length ?? 0;
+  if (!count) return "";
+  return `${count} secret${count === 1 ? "" : "s"} redacted`;
+}
+
+/**
+ * The detail line under the cache hit-rate tile.
+ *
+ * `cache_hits_total` includes semantic hits, which are **approximate** matches —
+ * an answer to a prompt nobody asked. Reporting only the combined number
+ * overstates what the cache did, and it is the number an operator uses to decide
+ * whether the cache is earning its keep. Silent when there are none, so the
+ * ordinary exact-cache deployment reads unchanged.
+ */
+export function cacheHitDetail(hits: number, lookups: number, semantic?: number): string {
+  const base = `${hits} / ${lookups}`;
+  return semantic ? `${base} · ${semantic} semantic` : base;
 }
 
 /** Format an estimated USD cost for display, or "" when unknown. */
@@ -102,7 +168,21 @@ export interface HealthResponse {
   version: string;
   providers: string[];
   provider_status: Record<string, "ready" | "byok_only">;
+  /** Provider → seconds of cooldown remaining, for providers currently parked. */
+  parked_providers?: Record<string, number>;
   cache: string;
+}
+
+/**
+ * A short "time left" for a provider cooldown, or "" when it isn't parked.
+ *
+ * A parked provider is why an answer arrives from somewhere other than the one
+ * selected — RekAI skips it in favour of a healthy fallback. Without this the
+ * reroute looks arbitrary.
+ */
+export function cooldownRemaining(seconds?: number): string {
+  if (seconds == null || seconds <= 0) return "";
+  return seconds < 60 ? `≈${Math.ceil(seconds)}s` : `≈${Math.ceil(seconds / 60)}m`;
 }
 
 export interface ClientUsage {
@@ -115,6 +195,7 @@ export interface UsageSummary {
   requests_total: number;
   cache_hits_total: number;
   cache_misses_total: number;
+  semantic_cache_hits_total?: number;
   errors_total: number;
   fallbacks_total: number;
   retries_total: number;
@@ -335,6 +416,8 @@ export interface StreamSummary {
   cost_usd: number | null;
   estimated: boolean;
   tool_calls?: Record<string, unknown>[];
+  finish_reason?: FinishReason;
+  redacted?: string[] | null;
 }
 
 export type SSEEvent =

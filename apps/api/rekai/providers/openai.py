@@ -11,6 +11,7 @@ from rekai import models
 from rekai.config import get_settings
 from rekai.providers.base import (
     EmbeddingResult,
+    FinishReason,
     Provider,
     ProviderError,
     ProviderResult,
@@ -19,6 +20,21 @@ from rekai.providers.base import (
     trace_headers,
 )
 from rekai.schemas import ChatRequest, Usage
+
+_OPENAI_FINISH_REASONS = {"stop", "length", "tool_calls", "content_filter"}
+
+
+def _finish_reason(raw: object) -> FinishReason | None:
+    """OpenAI's vocabulary *is* the normalized one, so this only validates.
+
+    Unknown values (a compatible backend inventing its own, or "function_call"
+    from the deprecated API) become None rather than being passed through: a
+    value outside the documented set would fail the response model and is not
+    worth guessing at.
+    """
+    if isinstance(raw, str) and raw in _OPENAI_FINISH_REASONS:
+        return raw  # type: ignore[return-value]
+    return None
 
 
 class OpenAIProvider(Provider):
@@ -35,9 +51,9 @@ class OpenAIProvider(Provider):
     def _key_env_hint(self) -> str:
         return "REKAI_OPENAI_API_KEY"
 
-    def _resolve_key(self, api_key: str | None) -> str:
+    def _resolve_key(self, api_key: str | None) -> str | None:
         key = api_key or self._server_key()
-        if not key:
+        if not key and self.requires_key:
             raise ProviderError(
                 f"No {self.name} API key. Provide one with the 'X-Provider-Key' header "
                 f"(BYOK) or set {self._key_env_hint()}.",
@@ -45,12 +61,25 @@ class OpenAIProvider(Provider):
             )
         return key
 
+    def _request_headers(self, api_key: str | None) -> dict[str, str]:
+        """Trace headers, plus ``Authorization`` only when there is a key.
+
+        A subclass may set ``requires_key = False`` (see
+        ``OpenAICompatibleProvider``) — local OpenAI-compatible servers such as
+        vLLM, LM Studio and llama.cpp accept no credential, and sending them a
+        bare ``Bearer `` is at best noise and at worst a 401.
+        """
+        headers = dict(trace_headers())
+        key = self._resolve_key(api_key)
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        return headers
+
     def server_key_configured(self) -> bool:
-        return bool(self._server_key())
+        return not self.requires_key or bool(self._server_key())
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
         settings = get_settings()
-        key = self._resolve_key(api_key)
 
         payload: dict = {
             "model": request.model,
@@ -72,7 +101,7 @@ class OpenAIProvider(Provider):
             resp = await client.post(
                 url,
                 json=payload,
-                headers={**trace_headers(), "Authorization": f"Bearer {key}"},
+                headers=self._request_headers(api_key),
             )
         except httpx.HTTPError as exc:  # network-level failure
             raise ProviderError(f"{self.name} request failed: {exc}") from exc
@@ -96,6 +125,7 @@ class OpenAIProvider(Provider):
                 cache_read_tokens=_cached_prompt_tokens(usage),
             ),
             tool_calls=message.get("tool_calls"),
+            finish_reason=_finish_reason(data["choices"][0].get("finish_reason")),
         )
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
@@ -107,7 +137,6 @@ class OpenAIProvider(Provider):
         self, request: ChatRequest, api_key: str | None
     ) -> AsyncIterator[StreamEvent]:
         settings = get_settings()
-        key = self._resolve_key(api_key)
 
         payload: dict = {
             "model": request.model,
@@ -134,7 +163,7 @@ class OpenAIProvider(Provider):
                 "POST",
                 url,
                 json=payload,
-                headers={**trace_headers(), "Authorization": f"Bearer {key}"},
+                headers=self._request_headers(api_key),
             ) as resp:
                 if resp.status_code >= 400:
                     body = (await resp.aread()).decode()[:200]
@@ -155,14 +184,13 @@ class OpenAIProvider(Provider):
 
     async def embed(self, inputs: list[str], model: str, api_key: str | None) -> EmbeddingResult:
         settings = get_settings()
-        key = self._resolve_key(api_key)
         url = f"{self._base_url().rstrip('/')}/embeddings"
         try:
             client = self._client(settings.request_timeout_seconds)
             resp = await client.post(
                 url,
                 json={"model": model, "input": inputs},
-                headers={**trace_headers(), "Authorization": f"Bearer {key}"},
+                headers=self._request_headers(api_key),
             )
         except httpx.HTTPError as exc:
             raise ProviderError(f"{self.name} embeddings request failed: {exc}") from exc
@@ -215,8 +243,11 @@ def _parse_openai_sse_event(line: str) -> StreamEvent | None:
     choices = chunk.get("choices") or []
     if choices:
         delta = choices[0].get("delta", {}).get("content")
-        if delta:
-            return StreamEvent(delta=delta)
+        reason = _finish_reason(choices[0].get("finish_reason"))
+        if delta or reason:
+            # The terminal chunk usually carries a finish_reason and an empty
+            # delta; a provider may also send both at once.
+            return StreamEvent(delta=delta or None, finish_reason=reason)
     usage = chunk.get("usage")
     if usage:
         return StreamEvent(

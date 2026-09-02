@@ -18,7 +18,7 @@ from rekai.metrics import metrics
 from rekai.pricing import estimate_cost, estimate_tokens
 from rekai.providers import Provider, get_provider
 from rekai.providers.base import ProviderError, ProviderResult
-from rekai.retry import call_with_retry
+from rekai.retry import DeadlineExceeded, call_with_retry, remaining_budget
 from rekai.router import ensure_allowed, resolve_provider, select_provider
 from rekai.schemas import (
     ChatRequest,
@@ -49,6 +49,7 @@ class StreamSummary:
     cost_usd: float | None
     estimated: bool
     tool_calls: list[dict] | None = None
+    finish_reason: str | None = None
     # Secret patterns scrubbed from the streamed text. Reported here rather
     # than as a header because response headers are long gone by the time the
     # first delta is redacted.
@@ -95,6 +96,17 @@ def _build_attempts(
     if request.fallbacks is not None:
         for target in request.fallbacks:
             ensure_allowed(target.provider, settings)
+            # Existence, for the same reason as permission. `ensure_allowed`
+            # only checks the operator's allowlist, so a *nonexistent* name
+            # sailed through it and was then dropped by the `provider is None`
+            # skip below — leaving the caller with the primary's error and no
+            # sign their chain was ignored. A typo'd `"opneai"` is far likelier
+            # than an allowlist violation, and an unknown *primary* is already a
+            # 400 here, so a fallback naming nothing is one too.
+            if get_provider(target.provider) is None:
+                raise ProviderError(
+                    f"Unknown fallback provider '{target.provider}'.", status_code=400
+                )
         targets: list[tuple[str, str | None]] = [(f.provider, f.model) for f in request.fallbacks]
     elif settings.fallback_enabled:
         targets = settings.fallback_target_list
@@ -162,6 +174,20 @@ def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
     return response.model_copy(update={"content": scrubbed, "redacted": hits})
 
 
+def _request_deadline(settings: Settings) -> float | None:
+    """A ``time.monotonic()`` stamp bounding the whole request, or None.
+
+    ``request_timeout_seconds`` bounds one upstream call; retries multiply it
+    and the fallback chain multiplies it again, so without this a client can
+    wait ``targets x attempts x timeout`` while holding a connection and a
+    concurrency slot (measured ~384s on the shipped defaults). Streaming has no
+    deadline: a stream's duration is the length of the answer, not a fault.
+    """
+    if settings.request_deadline_seconds <= 0:
+        return None
+    return time.monotonic() + settings.request_deadline_seconds
+
+
 async def handle_chat(
     request: ChatRequest,
     api_key: str | None,
@@ -172,6 +198,7 @@ async def handle_chat(
     primary_name, primary = select_provider(request, settings)
     attempts = _build_attempts(request, primary_name, primary, settings)
     use_cache = settings.cache_enabled and request.cache
+    deadline = _request_deadline(settings)
 
     # Semantic cache (its own in-memory store): reuse a response for a paraphrase
     # of an earlier prompt. Respects the per-request opt-out, independent of the
@@ -214,6 +241,11 @@ async def handle_chat(
 
     for index, attempt in enumerate(attempts):
         is_fallback = index > 0
+        left = remaining_budget(deadline)
+        if left is not None and left <= 0:
+            # Starting another target would exceed the budget the caller was
+            # promised; surface the real upstream failure if we have one.
+            raise last_error or DeadlineExceeded()
         # Skip a provider that's cooling down from a recent 429 — unless it's the
         # only target left (better to try than to fail). Consults the shared
         # (Redis) backend too, so a cooldown set by another worker/node is honored.
@@ -255,6 +287,7 @@ async def handle_chat(
                 base_delay=settings.retry_base_delay_seconds,
                 max_delay=settings.retry_max_delay_seconds,
                 on_retry=metrics.record_retry,
+                deadline=deadline,
             )
         except ProviderError as exc:
             metrics.observe_provider_duration(
@@ -322,6 +355,7 @@ async def handle_chat(
             cost_usd=cost_usd,
             cached=False,
             fallback_used=is_fallback,
+            finish_reason=result.finish_reason,
             created=int(time.time()),
         )
         # Redact before *any* store below sees the content (see _redact).
@@ -379,6 +413,7 @@ async def handle_chat_stream(
     completion: list[str] = []
     reported_usage: Usage | None = None
     reported_tool_calls: list[dict] | None = None
+    reported_finish_reason: str | None = None
     errored = False
     started = time.perf_counter()
     first_token_at: float | None = None
@@ -405,6 +440,8 @@ async def handle_chat_stream(
                 reported_usage = event.usage
             if event.tool_calls is not None:
                 reported_tool_calls = event.tool_calls
+            if event.finish_reason is not None:
+                reported_finish_reason = event.finish_reason
         if redactor is not None:
             tail = redactor.flush()
             if tail:
@@ -464,6 +501,7 @@ async def handle_chat_stream(
                 cost_usd=cost_usd,
                 estimated=estimated,
                 tool_calls=reported_tool_calls or None,
+                finish_reason=reported_finish_reason,
                 redacted=(redactor.hits or None) if redactor is not None else None,
             )
         )
@@ -503,6 +541,7 @@ async def handle_embeddings(
             base_delay=settings.retry_base_delay_seconds,
             max_delay=settings.retry_max_delay_seconds,
             on_retry=metrics.record_retry,
+            deadline=_request_deadline(settings),
         )
     finally:
         metrics.observe_provider_duration(provider_name, "embed", time.perf_counter() - started)

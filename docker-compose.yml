@@ -14,11 +14,22 @@ services:
     build:
       context: ./apps/api
     restart: unless-stopped
+    # The quickstart tells you to `cp apps/api/.env.example apps/api/.env` and
+    # add provider keys. That file is .dockerignore'd (a key must never be baked
+    # into an image), so it is read as environment here instead — otherwise the
+    # documented step is silently a no-op. Absent is fine; echo needs no key.
+    # This is the one place server-side keys are configured: an `environment:`
+    # entry always outranks `env_file:`, so listing the keys here too would
+    # erase whatever the user just put in .env whenever the shell hasn't
+    # exported them (`${VAR:-}` sets the empty string; a value-less entry
+    # deletes the variable outright — both verified with `docker compose
+    # config`).
+    env_file:
+      - path: ./apps/api/.env
+        required: false
     environment:
+      # Only what compose knows and .env cannot: the service hostname.
       REKAI_REDIS_URL: redis://redis:6379/0
-      REKAI_CORS_ORIGINS: "*"
-      # Provide a server-side key here, or use BYOK via the X-Provider-Key header.
-      REKAI_OPENAI_API_KEY: ${REKAI_OPENAI_API_KEY:-}
     ports:
       - "8000:8000"
     depends_on:

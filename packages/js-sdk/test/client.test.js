@@ -291,3 +291,60 @@ test("chat retries a network error then succeeds", async () => {
     globalThis.fetch = realFetch;
   }
 });
+
+// --- Retry-After is bounded ---------------------------------------------------
+// The gateway deliberately refuses to wait longer than REKAI_RETRY_MAX_DELAY_SECONDS
+// and hands the header to the caller instead, "so its SDK can back off precisely
+// (rather than blocking the gateway)". The SDK then honored whatever the header
+// said — a `Retry-After: 3600` parked `chat()` for an hour — which undid the
+// server's design rather than completing it. Measured on the Python twin of this
+// bug: 3 retries at 3600s each meant 10,800 seconds of sleep in one call.
+
+test("a Retry-After within the cap is honored exactly", () => {
+  const client = new RekAIClient(baseUrl);
+  const res = { headers: { get: (n) => (n === "Retry-After" ? "30" : null) } };
+  assert.equal(client._retryDelayMs(res, 0), 30_000);
+});
+
+test("a Retry-After beyond the cap stops the retry", () => {
+  // null means "hand the response back", not "wait 0" — retrying sooner than
+  // the server asked would only earn another 429.
+  const client = new RekAIClient(baseUrl);
+  const res = { headers: { get: (n) => (n === "Retry-After" ? "3600" : null) } };
+  assert.equal(client._retryDelayMs(res, 0), null);
+});
+
+test("the Retry-After cap is configurable", () => {
+  const client = new RekAIClient(baseUrl, { maxRetryDelay: 7200 });
+  const res = { headers: { get: (n) => (n === "Retry-After" ? "3600" : null) } };
+  assert.equal(client._retryDelayMs(res, 0), 3_600_000);
+});
+
+test("an empty Retry-After falls back to backoff, not to zero", () => {
+  // `Number("")` is 0, which retried immediately in a hot loop.
+  const client = new RekAIClient(baseUrl, { retryBackoff: 0.5 });
+  const res = { headers: { get: () => "" } };
+  assert.equal(client._retryDelayMs(res, 0), 500);
+});
+
+test("an HTTP-date Retry-After falls back to backoff", () => {
+  const client = new RekAIClient(baseUrl, { retryBackoff: 0.5 });
+  const res = { headers: { get: () => "Wed, 21 Oct 2015 07:28:00 GMT" } };
+  assert.equal(client._retryDelayMs(res, 1), 1000);
+});
+
+test("a long Retry-After returns the response instead of sleeping", async () => {
+  // End to end through _send: the caller gets the 429 back promptly, with the
+  // header intact, rather than the event loop sitting in a timer for an hour.
+  flake = { remaining: 99, status: 429, retryAfter: "3600", keys: [] };
+  const client = new RekAIClient(baseUrl, { maxRetries: 3 });
+  const started = Date.now();
+
+  await assert.rejects(
+    () => client.chat("echo", "hi"),
+    (err) => err instanceof RekAIError && err.statusCode === 429,
+  );
+
+  assert.ok(Date.now() - started < 5000, "must not have waited on Retry-After");
+  flake = { remaining: 0, status: 503, retryAfter: undefined, keys: [] };
+});

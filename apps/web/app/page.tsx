@@ -3,16 +3,21 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ChatMessage,
+  FinishReason,
   HealthResponse,
   ModelInfo,
   RateLimitInfo,
   StreamSummary,
   fetchHealth,
   fetchModels,
+  cacheNote,
+  cooldownRemaining,
+  finishNote,
   formatCost,
   getStoredGatewayKey,
   getStoredKey,
   modelsOfType,
+  redactionNote,
   sendChat,
   streamChat,
 } from "@/lib/api";
@@ -24,6 +29,10 @@ interface DisplayMessage extends ChatMessage {
   tokens?: number;
   cost?: number | null;
   streaming?: boolean;
+  finishReason?: FinishReason;
+  fallbackUsed?: boolean;
+  cacheSimilarity?: number | null;
+  redacted?: string[] | null;
 }
 
 // Monotonic id for React keys. Index keys shift when regenerate()/clear drop or
@@ -62,7 +71,12 @@ export default function ChatPage() {
     fetchHealth().then(setHealth);
     setHasKey(Boolean(getStoredKey()));
     // Re-check the stored key when returning to the tab (it may be set elsewhere).
-    const onFocus = () => setHasKey(Boolean(getStoredKey()));
+    // Health is also re-read here: `parked_providers` is a live cooldown
+    // countdown, and a snapshot taken once at mount goes stale within seconds.
+    const onFocus = () => {
+      setHasKey(Boolean(getStoredKey()));
+      fetchHealth().then(setHealth);
+    };
     window.addEventListener("focus", onFocus);
     // Restore a previous conversation, if any.
     try {
@@ -82,6 +96,10 @@ export default function ChatPage() {
   const selectedProvider = models.find((m) => m.id === model)?.provider;
   // Chat selector excludes embedding-only models (they live on /embeddings).
   const chatModels = modelsOfType(models, "chat");
+  // Seconds of cooldown left on the selected provider, if it is parked.
+  const parkedFor = cooldownRemaining(
+    selectedProvider ? health?.parked_providers?.[selectedProvider] : undefined,
+  );
   const needsKey =
     selectedProvider != null &&
     health?.provider_status[selectedProvider] === "byok_only" &&
@@ -174,6 +192,10 @@ export default function ChatPage() {
         // Finalize the bubble (mark complete; note if it was stopped early).
         const wasAborted = controller.signal.aborted;
         const finalSummary = summary as StreamSummary | null;
+        // The same slot the non-streaming path fills with res.provider, so the
+        // label means the same thing in both modes. Falls back to the requested
+        // model only when no summary arrived (an aborted or failed stream).
+        const served = finalSummary?.provider ?? model;
         setMessages((prev) => {
           const next = [...prev];
           const last = next[next.length - 1];
@@ -181,9 +203,11 @@ export default function ChatPage() {
             next[next.length - 1] = {
               ...last,
               streaming: false,
-              provider: wasAborted ? `${model} · stopped` : model,
+              provider: wasAborted ? `${served} · stopped` : served,
               tokens: finalSummary?.usage.total_tokens,
               cost: finalSummary?.cost_usd ?? undefined,
+              finishReason: finalSummary?.finish_reason,
+              redacted: finalSummary?.redacted,
             };
           }
           return next;
@@ -209,10 +233,17 @@ export default function ChatPage() {
             cached: res.cached,
             tokens: res.usage.total_tokens,
             cost: res.cost_usd,
+            finishReason: res.finish_reason,
+            fallbackUsed: res.fallback_used,
+            cacheSimilarity: res.cache_similarity,
+            redacted: res.redacted,
           },
         ]);
       }
     } catch (e) {
+      // A 429 or upstream 5xx may have just parked the provider; refresh the
+      // snapshot so the cooldown notice reflects it.
+      fetchHealth().then(setHealth);
       // Drop the half-filled streaming bubble, if any, and surface the error.
       setMessages((prev) =>
         prev.filter((m) => !(m.role === "assistant" && m.streaming)),
@@ -350,9 +381,14 @@ export default function ChatPage() {
             {m.role === "assistant" && !m.streaming && (
               <span className="meta">
                 {m.provider}
-                {m.cached ? " · cached ⚡" : ""}
+                {cacheNote(m.cached, m.cacheSimilarity)
+                  ? ` · ${cacheNote(m.cached, m.cacheSimilarity)}`
+                  : ""}
                 {typeof m.tokens === "number" ? ` · ${m.tokens} tokens` : ""}
                 {formatCost(m.cost) ? ` · ${formatCost(m.cost)}` : ""}
+                {m.fallbackUsed ? " · via fallback" : ""}
+                {finishNote(m.finishReason) ? ` · ${finishNote(m.finishReason)}` : ""}
+                {redactionNote(m.redacted) ? ` · ${redactionNote(m.redacted)}` : ""}
               </span>
             )}
           </div>
@@ -365,6 +401,14 @@ export default function ChatPage() {
         )}
         <div ref={bottomRef} />
       </div>
+
+      {parkedFor && (
+        <div className="notice">
+          <strong>{selectedProvider}</strong> is cooling down after a rate limit (
+          {parkedFor} left). RekAI will use a configured fallback if there is one,
+          so the reply may come from another provider.
+        </div>
+      )}
 
       {needsKey && (
         <div className="notice">

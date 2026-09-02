@@ -96,6 +96,15 @@ A **429** (upstream rate limit) is also retried, but **honours the provider's
 header through to the client** so its SDK can back off precisely (rather than
 blocking the gateway). A 429 with no header falls back to jittered backoff.
 
+Both SDKs draw the same line, and for the same reason. Each honors `Retry-After`
+up to `maxRetryDelay` / `max_retry_delay` (60s by default) and, past that,
+returns the 429 to the caller with its header intact instead of waiting. They
+used to honor it unbounded, which quietly inverted the design above: the gateway
+declines to block on a long `Retry-After` precisely so the caller can decide, and
+the SDK then blocked on it anyway. Measured on the Python client, three retries
+against a `Retry-After: 3600` meant **10,800 seconds of `time.sleep` inside a
+single `chat()` call**, on the calling thread.
+
 Only after a target's retries are exhausted does RekAI move on. A request may
 carry an ordered `fallbacks` list of `(provider, model)` targets; alternatively
 a server-wide chain is set via `REKAI_FALLBACK_ENABLED` +
@@ -103,6 +112,40 @@ a server-wide chain is set via `REKAI_FALLBACK_ENABLED` +
 provider is reflected in the response `provider` field and `fallback_used` is
 set when a non-primary target answered. Each fallback attempt increments
 `rekai_fallbacks_total`. Retry and failover apply to embeddings too.
+
+### Per-try timeout vs. request deadline
+
+`REKAI_REQUEST_TIMEOUT_SECONDS` reads like a request bound but is a **per-call**
+one: it caps a single outbound HTTP call. Attempts multiply it by
+`REKAI_RETRY_MAX_ATTEMPTS`, and the fallback chain multiplies it again, so the
+shipped defaults (60s × 2 attempts × a 3-target chain) let one caller wait
+**~6 minutes** — holding a connection, a concurrency slot and the client's own
+patience — for a request whose "timeout" is 60 seconds. Measured on a hung
+upstream: 6 upstream calls, 6.04s of client wait for a 1.0s per-call bound.
+
+`REKAI_REQUEST_DEADLINE_SECONDS` is the missing half — the total wall-clock
+budget for one non-streaming request, across *every* retry and fallback
+attempt. This is the split Envoy draws between `route.timeout` and
+`retry_policy.per_try_timeout`, and that LiteLLM and Portkey expose as separate
+settings. It is enforced at three points (`rekai/retry.py`,
+`rekai/service.py`):
+
+- **before starting a target** — when the budget is spent, the chain stops
+  rather than walking every remaining fallback;
+- **around each attempt** — a single hung upstream is cut off at the remaining
+  budget instead of running to its own per-call timeout;
+- **before each backoff sleep** — a sleep that would consume the rest of the
+  budget and still leave no time to retry is skipped, and the *real* upstream
+  error is raised immediately instead of after the wait.
+
+Exceeding it returns **504** with `error: provider_error`. When RekAI has a
+genuine upstream failure in hand it surfaces that instead, so the client sees
+the cause rather than the budget. `0` (the default) means unlimited — existing
+deployments are unchanged.
+
+**Streaming is deliberately exempt.** A stream's duration is the length of the
+answer, not a fault; the bound that matters there is occupancy, which
+`REKAI_MAX_CONCURRENT_REQUESTS` already provides.
 
 ### Provider cooldown
 
@@ -172,9 +215,83 @@ Two RekAI extensions select a provider (OpenAI's schema has no provider field):
 an optional `provider` body field, or an OpenRouter-style `"<provider>/<model>"`
 model string (split only when the prefix is a *registered* provider, so a custom
 backend's own slash-containing model ids are left intact). Unknown OpenAI tuning
-params are tolerated and ignored; `n > 1` is a 400; errors use OpenAI's error
-envelope. It is part of the cache key, so a JSON-mode request and a plain one
-never collide.
+params are tolerated and ignored; `n > 1` is a 400. It is part of the cache key,
+so a JSON-mode request and a plain one never collide.
+
+### Errors on the compatible endpoint
+
+Every error on `/v1/chat/completions` — not just the ones the route itself
+raises — is rendered in OpenAI's envelope, so an SDK caller gets a populated
+`exc.body`, `exc.type` and `exc.param`:
+
+```json
+{"error": {"message": "…", "type": "invalid_request_error", "param": "messages", "code": null}}
+```
+
+`OpenAICompatErrorMiddleware` owns that translation. It has to be middleware,
+and installed outside the others, because most errors on this path never reach
+the route function at all: auth (401), the client budget (402), the body cap
+(413), the rate limiter and concurrency cap (429), and FastAPI's own request
+validation (422) all answer before it runs. It rewrites only error bodies; a
+200, including a streamed one, is forwarded chunk by chunk untouched, and a body
+that is already an envelope is left alone.
+
+Consequently the route does **not** wrap its own errors. Letting `ProviderError`
+propagate to `_provider_error_handler` is what keeps an upstream 429's
+`Retry-After` header and its `errors_total` metric — a hand-written `except`
+in the route silently dropped both.
+
+The envelope is scoped to this one path. `/v1/chat`, `/v1/chat/stream`,
+`/v1/embeddings` and `/v1/usage` are RekAI's own API and keep the flat
+`{"error": "<kind>", "detail": "<message>"}` shape that the web app and both
+SDKs parse (`body.detail || body.error`).
+
+One divergence remains, deliberately: a schema-invalid body is FastAPI's **422**,
+where OpenAI's API uses 400, so `except openai.BadRequestError` does not catch
+it (`openai.APIStatusError` does). The envelope and `type` are correct either
+way; changing the status is a visible API change and has not been made.
+
+### Why generation stopped
+
+`finish_reason` is **reported by the provider, not synthesised**. Every backend
+says why it stopped and RekAI normalizes the four vocabularies onto OpenAI's:
+
+| | OpenAI | Anthropic `stop_reason` | Gemini `finishReason` | Ollama `done_reason` |
+|---|---|---|---|---|
+| `stop` | `stop` | `end_turn`, `stop_sequence` | `STOP` | `stop` |
+| `length` | `length` | `max_tokens` | `MAX_TOKENS` | `length` |
+| `tool_calls` | `tool_calls` | `tool_use` | *(inferred from parts)* | — |
+| `content_filter` | `content_filter` | `refusal` | `SAFETY`, `RECITATION`, … | — |
+
+`length` is the one that matters: it means the answer was **cut off by
+`max_tokens` and is incomplete**. RekAI used to discard all four fields and
+synthesise `"tool_calls" if tool_calls else "stop"` at the edge, so a truncated
+answer was indistinguishable from a complete one — the standard "retry with a
+larger budget when `finish_reason == 'length'`" pattern could never fire, and the
+truncated answer was then cached and replayed to everyone else as if whole.
+
+Two provider-specific wrinkles are handled rather than passed through. Gemini
+reports `STOP` even when it stopped to emit a `functionCall`, so a tool call is
+inferred from the parts — otherwise an OpenAI client would never know to run the
+tool. And under Anthropic's forced-tool JSON emulation the reason is `tool_use`,
+which is rewritten to `stop`: the forced tool is RekAI's own device and the
+caller never sees a tool call, so reporting one would describe an implementation
+detail.
+
+`null` means the provider reported nothing — the honest answer for a backend
+that doesn't, and how responses cached before this field existed read. The
+OpenAI-compatible endpoint falls back to the old derivation in that case, so it
+always emits one of the documented values.
+
+The field reaches every consumer, which is the part that makes it useful: both
+SDKs expose it, and the chat UI turns it into a note on the message's metadata
+line — `truncated — raise max tokens` for `length`, `stopped by the provider's
+content filter` for `content_filter`, and nothing at all for `stop` or
+`tool_calls`. Staying silent on the ordinary path is deliberate: a marker that
+fires on every reply is noise that gets ignored exactly when it matters. Without
+it a reader saw the text simply stop, which is what a complete answer also looks
+like — reporting truncation honestly at the API and dropping it at the edge
+would have fixed nothing for the person reading the answer.
 
 ### Structured output
 
@@ -210,6 +327,28 @@ Previously Anthropic and Ollama accepted the field and dropped it with a debug
 log, so a caller who asked for JSON got prose and no signal — while Ollama had
 supported structured output all along and Anthropic had a documented workaround.
 That is the kind of gap a gateway exists to close, not to introduce.
+
+### Generation parameters
+
+The same rule applies to the two generation knobs `ChatRequest` declares. Each
+backend spells them differently, and every backend that can honor one does:
+
+| | `temperature` | `max_tokens` |
+|---|---|---|
+| OpenAI / OpenAI-compatible | `temperature` | `max_tokens` |
+| Anthropic | `temperature` | `max_tokens` (required by the API; falls back to `REKAI_ANTHROPIC_DEFAULT_MAX_TOKENS`) |
+| Gemini | `generationConfig.temperature` | `generationConfig.maxOutputTokens` |
+| Ollama | `options.temperature` | `options.num_predict` |
+
+`max_tokens` is omitted entirely when the caller did not set one, so the
+backend's own default stands rather than being overridden by a number RekAI
+invented.
+
+Ollama sent no cap under any name until 2026-09. The field is declared on
+RekAI's own `ChatRequest`, the other three providers forwarded it, and Ollama's
+`done_reason` mapping already translated `length` — so the code read as though
+the cap were in force while a local model generated to its own stopping point.
+It was not even in `_warn_unsupported_fields`, since it is not unsupported.
 
 ## Idempotency
 
@@ -320,7 +459,10 @@ so everything about it is deliberately conservative:
   on an exact cache hit**, so a value there is precisely the signal that the
   answer is to a *different* prompt than the one asked — a hit at 0.999 and one
   at exactly the threshold are very different claims, and without the number a
-  caller could not tell a semantic hit from an exact one at all.
+  caller could not tell a semantic hit from an exact one at all. The chat UI
+  spends it: a semantic hit reads `cached ⚡ answer to a 75% similar prompt`
+  rather than the bare `cached ⚡` an exact hit gets, since a reader who is told
+  only "cached" reasonably assumes the answer is to the question they asked.
 - **Embedding quality.** `REKAI_SEMANTIC_CACHE_MODEL` has **no default**:
   enabling the cache without naming a model is refused at startup. The threshold
   is meaningless unless the embedding is genuinely semantic — the keyless `echo`
@@ -358,7 +500,28 @@ The same `trace_id` is also forwarded to the **upstream provider** — every
 provider's outbound HTTP call (OpenAI, Anthropic, Gemini, Ollama, and any
 OpenAI-compatible backend; chat, streaming, and embeddings) carries its own
 `traceparent`, continuing the request's trace with a fresh span id rather than
-reusing the one already returned to the client. Previously the trace stopped at
+reusing the one already returned to the client. **`tracestate` is forwarded with
+it** — the spec pairs the two, and propagating one without the other strands
+whatever vendor state (a sampling decision, a vendor's own trace id) the caller
+put there. A gateway is the hop where that matters most, since every call
+crosses it. It is attacker-controlled and goes back out in a header, so it is
+validated rather than echoed verbatim: printable ASCII only, at most 32 list
+members, truncated to 512 bytes **on a member boundary** (a half-member would
+be malformed).
+
+`traceparent` validation follows the spec's ABNF, which builds trace-id and
+parent-id from `HEXDIGLC` — *lowercase* hex and nothing else. Checking with
+`int(value, 16)` was far too permissive: Python accepts a leading sign,
+underscores as digit separators, and surrounding ASCII whitespace, so `+bf92…`,
+`4bf9…47_6` and a tab-padded id all passed, and were then formatted back into
+the response and the outbound provider header — RekAI emitting a `traceparent`
+a conforming parser must reject, silently breaking the correlation the header
+exists to provide. (Not a header-injection vector: a raw CR/LF cannot reach a
+single header value, because the HTTP parser splits the request on it first.)
+A **higher version is parsed, not discarded** — the spec fixes
+`version-trace_id-parent_id-flags` as any future version's first fields and
+allows extra ones, so accepting only `00` would restart every trace the day the
+spec advances. `ff` is the reserved invalid version and is rejected. Previously the trace stopped at
 RekAI's edge — a distributed trace couldn't follow the request into the
 provider that actually served it. This works without threading a `trace_id`
 parameter through every function from the route handler down to the HTTP call:
@@ -384,6 +547,24 @@ hits/misses, errors, tokens and cost, RekAI tracks `fallbacks_total`,
 loaded on startup and the snapshot is flushed to Redis periodically and on
 shutdown, so `/v1/usage` totals survive restarts. Without Redis the store is a
 no-op.
+
+Each process writes its own key, `rekai:metrics:snapshot:<instance-id>`, and
+`/v1/usage` sums the local live counters with every *other* key for a fleet-wide
+view. The instance id is a fresh uuid per process unless `REKAI_INSTANCE_ID` is
+set — deliberately, because uvicorn workers share a host, so a host-derived id
+would collapse N workers onto one key and undercount by a factor of N. Two
+consequences follow. First, the startup **baseline is only restored when
+`REKAI_INSTANCE_ID` is set**; with a generated id a restart begins at zero and
+its own previous run is picked up as a "peer" instead. Fleet totals are the same
+either way — only which side of the sum they arrive on differs. Second, a
+restart never overwrites its predecessor's key, so keys carry a **24-hour TTL**
+refreshed on every flush (floored at three flush intervals, so a long
+`REKAI_METRICS_PERSIST_INTERVAL_SECONDS` can't expire a key between its own
+writes). A live replica therefore never expires; only one that stopped flushing
+does. Without the TTL every process start leaked a permanent key *and* a
+permanent per-request cost, since `load_others()` runs on each `/v1/usage` call
+and does one GET per key: measured against a local Redis, 200 restarts left 200
+keys at `TTL -1` and 194 ms per call, growing linearly and never shrinking.
 
 Per-provider request counts are their own family, `rekai_provider_requests_total
 {provider="…"}`, **not** `rekai_requests_total{provider="…"}`. Emitting a bare
@@ -473,6 +654,20 @@ report `null`. Embeddings responses carry `cost_usd` too (input-only — the
 billing. `/v1/models` also reports each model's `pricing`
 (`input_per_1m`/`output_per_1m`, or `null` when unknown), so clients can build
 cost UIs without hardcoding rates.
+
+When a provider streams without reporting usage, tokens are **estimated** from
+the text (`estimated: true`). That estimate is script-aware, not a word count:
+CJK ideographs, kana, and Hangul are counted ~1 token each, and Latin-script
+text at OpenAI's ~4-chars-per-token rule. This matters because the estimate
+feeds `cost_usd` *and* the per-client budget cap — the earlier `len(text.split())`
+undercounted Latin text ~30% and collapsed a space-free CJK reply to ~1 token
+(a 100×+ undercount), so a Japanese/Chinese app could run past its budget
+effectively unmetered. Measured against `o200k_base` the heuristic lands within
+~15% across English, Japanese, Chinese, and Korean and errs slightly high — the
+safe direction for a spend cap. It stays a heuristic rather than a real
+tokenizer (tiktoken) on purpose: an exact count needs a per-model vocab download
+a self-hosted or air-gapped deployment can't assume, and any provider that
+reports exact usage never reaches this path.
 
 There are two ways to override or extend the table:
 
@@ -575,6 +770,39 @@ optionally be locked behind the same Bearer key too (see below), since it
 carries a per-client cost breakdown that scraping doesn't need to be public.
 This is separate from **BYOK** below, which is the *upstream provider* key.
 
+### The one configuration RekAI refuses to serve
+
+Open is a legitimate default: with no server-side provider key, an open gateway
+can only serve `echo` and BYOK, and the caller pays for their own calls. What is
+*not* legitimate is open **plus** a server-side key
+(`REKAI_OPENAI_API_KEY` and friends): that is an unauthenticated proxy to a paid
+API, where anyone who can reach the port spends the operator's money and every
+request looks legitimate to the provider.
+
+`REKAI_ENVIRONMENT` exists for exactly this. Set it to `production` and RekAI
+**refuses to start** in that combination, naming the keys that are exposed and
+both ways out — configure gateway auth (`REKAI_API_KEYS`, or
+`REKAI_DYNAMIC_KEYS_ENABLED=true`, matching the middleware's own condition), or
+drop the server-side keys and let callers bring their own. On any other value
+the same message is logged as a startup warning and the app starts, so the
+default `development` deployment is never broken by an upgrade.
+
+A wildcard `REKAI_CORS_ORIGINS` was deliberately left out of this check: with
+auth on and no credentials, a foreign origin cannot spend anything, and with
+auth off it changes nothing that is not already open.
+
+Keys are compared as **bytes**, not `str`. `secrets.compare_digest` raises
+`TypeError` on a `str` holding any non-ASCII character, and the presented token
+comes straight from an attacker-controlled header — so
+`Authorization: Bearer ké` used to raise out of the auth middleware as an
+unhandled **500** rather than a 401. Because auth runs *before* the rate
+limiter, those requests consumed no rate-limit budget, never reached
+`metrics.record_error`, and wrote a full stack trace each time: unmetered,
+uncounted log amplification from a one-character header change. Encoding both
+sides (with `surrogatepass`, so a lone surrogate can't reintroduce it) keeps the
+comparison constant-time while making every malformed credential an ordinary
+401.
+
 Rate limiting is **per tenant**: when authenticated, the bucket is keyed by the
 API key (a non-reversible `key:<hash>` id, also attached to the structured
 access log as `client`) rather than the client IP, so one tenant's traffic can't
@@ -589,6 +817,23 @@ the only semantic difference is that the shared window resets at its edge
 rather than refilling continuously. If Redis errors at runtime the limiter
 **fails open** (allows the request, logs a warning) — an outage degrades to
 "no rate limiting", not "no service".
+
+The in-process limiter caps how many buckets it tracks, so a flood of distinct
+client ids can't grow memory without bound. Reclaiming *only* fully-refilled
+buckets used to fail in exactly the case the cap exists for: during a flood
+every bucket is mid-refill and therefore unprunable, so the dict grew past the
+cap **and** the O(n) scan then ran on every subsequent request — the limiter
+degrading quadratically under the abuse it exists to stop (an
+algorithmic-complexity attack in the sense of Crosby & Wallach, USENIX Security
+2003). Measured: 8000 distinct ids against the default 60-per-60s config took
+4.4 s and left 1612 buckets under a 1000 cap; it is now 44 ms and exactly 1000.
+
+When idle buckets aren't enough, the limiter evicts the buckets **closest to
+full**, in batches. The order is a security property: evicting a bucket resets
+its client to full capacity, so eviction hands budget back. Discarding the
+least-throttled clients gives away the least — and never the most-throttled,
+which the opposite policy would, letting an attacker flood distinct keys to
+force their own exhausted bucket out and reset their limit.
 
 ### Concurrency cap
 
@@ -846,3 +1091,13 @@ reuses the OpenAI implementation (including accurate streaming usage and the
 `/embeddings` call) pointed at that endpoint. Select it with `provider="<name>"`
 or `REKAI_DEFAULT_PROVIDER`; any configured embedding models are advertised in
 `/v1/models` with `type="embedding"`.
+
+Unlike every other keyed provider, this one **does not require a key**. Three of
+the backends it exists to reach — vLLM, LM Studio, llama.cpp — serve
+unauthenticated by default, and requiring a key locked RekAI out of them: with
+only `REKAI_CUSTOM_BASE_URL` set, a request was rejected with RekAI's own 401
+(`No custom API key…`) before anything left the process. A key is now sent when
+one is configured (or supplied per request as BYOK) and the `Authorization`
+header is omitted when there is none, so a hosted backend that does need one
+answers with its own 401 rather than RekAI guessing on its behalf. `/health`
+reports such a backend as `ready`, because it is.

@@ -6,48 +6,69 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed
-- **The response cache no longer turns a Redis outage into a site-wide 500.** A
-  configured `REKAI_REDIS_URL` that is unreachable (wrong host, Redis down,
-  network partition) made `RedisCache.get()` raise `redis.exceptions.ConnectionError`
-  on every `/v1/chat`, `/v1/chat/completions`, and `/v1/embeddings` request —
-  so the gateway returned `Internal Server Error` instead of serving, despite
-  Redis being "optional". This broke the repo's own core invariant ("Redis-when-
-  configured, process-local otherwise, **fail-open on Redis errors**"), which the
-  rate limiter and metrics store already honored but the cache did not. `RedisCache`
-  now catches errors on `get`/`set`/`add`/`delete`, returns a miss (and a no-op
-  write) instead of propagating, logs a single `redis cache failing open` warning,
-  and transparently downgrades to an in-process `MemoryCache` for the rest of the
-  process — so a transient Redis blip no longer keeps recomputing every cacheable
-  hit for the server's lifetime. `/health` still reports `cache: "redis"` (the
-  configured backend). Verified live: with `REKAI_REDIS_URL` pointed at a dead
-  port, chat/embeddings now return 200 (was 500) with zero tracebacks; a new
-  `test_redis_cache_fails_open_on_errors` regression test asserts the downgrade.
-- **CI was silently dead — the workflow file lived outside `.github/workflows/`.**
-  GitHub Actions only loads workflows from `.github/workflows/`, but the CI
-  definition was committed as `.github/ci-workflow.yml`, so **no CI ever ran**
-  despite the README badge and the `ci: consolidate the two divergent staged CI
-  workflows into one` commit both pointing at `workflows/ci.yml`. Moved it to
-  `.github/workflows/ci.yml` so push/PR triggers actually fire. Verified the YAML
-  parses and the file now sits at the path GitHub scans.
-
-### Fixed
-- **`text-embedding-004` was advertised as Gemini but routed to OpenAI.** The
-  model registry (`rekai/models.py`) is meant to be the single source of truth
-  for routing, pricing, and the advertised `/v1/models` list, but its two halves
-  disagreed for exactly one id: `MODEL_SPECS` advertises `text-embedding-004` as
-  a **gemini** embedding model, while the broader `("text-embedding", "openai")`
-  family rule in `PROVIDER_PREFIXES` matched it first. A client that read the id
-  straight off `/v1/models` and posted it to `/v1/embeddings` therefore reached
-  **OpenAI**, not Gemini — an unknown-model error against the wrong upstream, or
-  a silent charge on the operator's OpenAI key when one is configured. Fixed by
-  matching the exact `text-embedding-004` prefix ahead of the OpenAI family
-  rule; `text-embedding-3-*` / `-ada-002` still route to OpenAI. The drift
-  survived because `test_models.py` asserted advertised-vs-routed consistency
-  for **chat** models only, so two regression tests now extend that guarantee to
-  every advertised embedding model.
+## [1.3.0] - 2026-08-18
 
 ### Security
+- **RekAI refuses to run as an open proxy for your own provider keys.** A
+  gateway with no client auth *and* a server-side provider key
+  (`REKAI_OPENAI_API_KEY` and friends) is an unauthenticated proxy to a paid
+  API: anyone who can reach the port spends the operator's money, and every
+  request looks legitimate to the provider. Neither half is a hazard alone — an
+  open gateway with no server key can only serve BYOK and `echo`, and a server
+  key behind auth is the ordinary single-tenant deployment — so the check fires
+  only on the combination.
+  `REKAI_ENVIRONMENT=production` now **refuses to start** in that state, with a
+  message naming the exposed keys and both ways out. Any other value logs the
+  same message as a startup warning and starts, so no existing deployment breaks
+  on upgrade. The auth condition mirrors the middleware's exactly (static
+  `REKAI_API_KEYS` *or* `REKAI_DYNAMIC_KEYS_ENABLED`), so an authenticated
+  deployment is never refused. A wildcard `REKAI_CORS_ORIGINS` was considered
+  and deliberately excluded: with auth on and no credentials it lets a foreign
+  origin spend nothing, and with auth off it changes nothing already open.
+  This also gives `REKAI_ENVIRONMENT` its first behavior — it was declared,
+  documented, set by compose and by ~40 tests, and read nowhere in the
+  application.
+- **A non-ASCII `Authorization` header no longer crashes the auth gate.**
+  `secrets.compare_digest` rejects a `str` containing any non-ASCII character
+  with `TypeError`, and the presented token is attacker-controlled — so
+  `Authorization: Bearer ké` raised out of the auth middleware as an unhandled
+  **500 instead of a 401**, on `/v1/*` and `/admin/*` alike. Three things made
+  that more than cosmetic: auth runs *before* the rate limiter, so these
+  requests consumed **no rate-limit budget**; the exception escaped before
+  `metrics.record_error`, so they were **invisible in `rekai_errors_*`**
+  (measured: `errors_total` 1 after 9 crashes); and each one logged a full
+  stack trace. An unauthenticated client could therefore generate unbounded,
+  unmetered, uncounted 500s and log volume by changing one character. Keys are
+  now compared as bytes (`surrogatepass`, so a lone surrogate can't reintroduce
+  it), which keeps the comparison constant-time and turns every malformed
+  credential into an ordinary 401.
+- **The in-process rate limiter no longer degrades under the flood it exists to
+  stop.** Its bucket cap was enforced by reclaiming only *fully-refilled*
+  buckets — which reclaims nothing during a flood of distinct client ids, since
+  every bucket is then mid-refill. So the dict grew past `max_buckets` without
+  limit, and because the reclaim scan ran on every request once at the cap, cost
+  grew quadratically: **8000 distinct ids against the default 60-per-60s config
+  took 4.4 s and left 1612 buckets under a 1000 cap** (an algorithmic-complexity
+  attack, Crosby & Wallach, USENIX Security 2003 — the component meant to stop
+  abuse amplifying it). Reclaim now falls back to evicting the buckets closest
+  to full, in amortized batches: the same workload is **44 ms and exactly 1000
+  buckets**, ~288× faster with the cap actually enforced. Eviction order is
+  deliberate — evicting a bucket resets that client to full capacity, so
+  discarding the *least*-throttled gives away the least budget and can't be used
+  by an attacker to flood their own exhausted bucket out and reset their limit.
+- **Streaming cost/budget estimation is script-aware — CJK no longer counts as
+  ~1 token.** When a provider streams without reporting usage, RekAI estimates
+  the token count, and that estimate feeds both `cost_usd` and the per-client
+  budget cap (`REKAI_CLIENT_BUDGET_USD`). The estimator was `len(text.split())`
+  — a whitespace word count — which undercounts Latin text ~30% and, for scripts
+  without spaces (Japanese, Chinese), collapsed an entire reply to ~1 token: a
+  100×+ undercount that let a CJK-language app run past its spend cap
+  effectively unmetered. It now counts CJK/kana/Hangul characters ~1 token each
+  and the rest at OpenAI's ~4-chars-per-token rule, landing within ~15% of
+  `o200k_base` across English, Japanese, Chinese, and Korean and erring slightly
+  high (the safe direction for a cap). Still a dependency-free heuristic — an
+  exact tokenizer needs a per-model vocab download a self-hosted deployment
+  can't assume, and providers that report exact usage never hit this path.
 - **Output redaction now covers streaming.** `REKAI_OUTPUT_REDACTION_ENABLED`
   scrubbed `/v1/chat` but not `/v1/chat/stream` — the endpoint a chat UI
   actually uses — so a deployment that enabled redaction for compliance got no
@@ -142,7 +163,404 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and full re-verification. All web gates (tsc/lint/vitest/build/E2E) pass on
   vitest 4.
 
+### Fixed
+- **Ollama ignored `max_tokens`.** The field is declared on RekAI's own
+  `ChatRequest`, documented, and forwarded by the other three providers —
+  `max_tokens` on OpenAI and Anthropic, `maxOutputTokens` on Gemini. The Ollama
+  provider sent no cap under any name, on either the chat or the streaming path,
+  so a request that asked for 16 tokens got as many as the local model felt like
+  producing. Measured against all four backends with the HTTP layer captured:
+  three sent the cap, Ollama sent `{"temperature": 0.7}`.
+
+  It was not a known limitation. Ollama spells it `options.num_predict` and has
+  all along, so it never reached `_warn_unsupported_fields` — whose docstring
+  says it exists to log "the request fields this provider can't honor, rather
+  than dropping them without a trace". Everything around it read as though the
+  cap were in force: the `done_reason` mapping already translated Ollama's
+  `length` into the normalized "truncated" reason that this release also made
+  visible to callers. That reason could never fire from a RekAI-set cap.
+
+  Both payloads are now built by one helper, so the chat and streaming paths
+  cannot drift apart again — which is how this arose. An absent `max_tokens`
+  still sends nothing, leaving the model's own default alone. Verified live
+  against a stub Ollama: `options` arrives as
+  `{"temperature": 0.7, "num_predict": 16}` on `/v1/chat`,
+  `/v1/chat/completions` and the streaming path, and as
+  `{"temperature": 0.7}` when no cap is set.
+- **Most errors on the OpenAI-compatible endpoint were not OpenAI-shaped, and
+  one of them said the wrong thing entirely.** `openai_compat.openai_error`
+  existed and was correct, but it was applied *by hand inside the route
+  function*, which can only cover errors that function produces. Everything else
+  on `/v1/chat/completions` escaped it, with five measured consequences:
+  - An upstream provider's **429 lost its `Retry-After`**. The route caught
+    `ProviderError` itself and rebuilt the response, bypassing
+    `_provider_error_handler`, which is what attaches that header. `/v1/chat`
+    kept it; the endpoint that exists *for* the OpenAI SDK was the one denying
+    the SDK the header it backs off by — inverting the same design this release
+    already fixed on the SDK side.
+  - Provider errors on that path were **counted nowhere**. The same bypass
+    skipped `metrics.record_error`, so `/v1/usage` and `rekai_errors_total`
+    under-reported failures for what is, for many deployments, *the* endpoint.
+  - An `Idempotency-Key` conflict was reported as **"Request blocked by
+    prompt-injection guardrail."** `_run_chat` returns a `JSONResponse` for a
+    guardrail block *and* for a key reused with a different body (422) or one
+    already in flight (409) — but its docstring claimed only the first, and the
+    route believed it. A caller with a duplicate key was sent after a security
+    problem they did not have. The docstring is fixed too, since it is the
+    original error.
+  - Auth (401), budget (402), body cap (413) and rate limiting (429) kept
+    RekAI's flat body, which the OpenAI SDK cannot read: `exc.body` arrived as
+    the bare string `'unauthorized'` — so `exc.body.get(...)` is an
+    `AttributeError` — with `exc.type` empty and the real message reachable only
+    by parsing the repr in `exc.message`.
+  - A schema-invalid body kept FastAPI's `{"detail": [ …pydantic dicts… ]}`,
+    which is neither shape. This is the commonest client error there is.
+
+  The envelope now has one owner, `OpenAICompatErrorMiddleware`, installed
+  outside the middlewares whose rejections it rewrites; the route no longer
+  knows about the envelope at all, which is what restores the header and the
+  metric. `param` is populated when a single field is at fault, as OpenAI does.
+  Scoped to `/v1/chat/completions` alone: `/v1/chat`, `/v1/embeddings` and the
+  rest keep the flat shape the web app and both SDKs parse. A 200 — including a
+  stream — is forwarded untouched. Verified live on uvicorn for each case, and
+  through the real `openai` SDK.
+- **A typo'd `fallbacks` entry was silently dropped.** `_build_attempts` runs
+  `ensure_allowed` over request-level fallbacks for a stated reason — "quietly
+  dropping it would leave the client believing it had a fallback chain it
+  doesn't have" — but `ensure_allowed` only checks the operator's allowlist. A
+  provider that simply **does not exist** passed it, then hit the
+  `provider is None` skip further down and was dropped with a log line. The
+  caller got the primary's error and nothing to say their chain had been
+  ignored, and a typo is far likelier than an allowlist violation:
+  `"provider": "opneai"` bought no failover at all. Worse, one good target
+  masked a bad one, so the mistake shipped looking healthy. An unknown
+  request-level fallback is now a **400**, matching how an unknown *primary*
+  provider is already reported. Server-configured `REKAI_FALLBACK_TARGETS`
+  entries are deliberately still skipped with a warning: that is an operator
+  misconfiguration the caller cannot fix and did not ask for, and failing every
+  request over it would be worse. Verified live: `fallbacks: [{"provider":
+  "opneai"}]` returns `400 Unknown fallback provider 'opneai'`, a valid chain
+  still 200.
+- **`RedisCache.add()` failed open by asserting something false.** Found by
+  measuring coverage: at 94% overall, the least-covered module was `cache.py`
+  (79%), and the uncovered lines were the Redis error paths — the error handling
+  of the error handler. Reading them turned up an asymmetry. Every other method
+  fails open by reporting an *absence*: `get` a miss, `set`/`delete` a no-op.
+  `add` returned `False`, which reports a *fact* — "someone else holds this
+  key" — when the truth is that the backend could not be reached. `cache.add` is
+  the codebase's atomic-claim idiom (idempotency's in-progress sentinel), so a
+  caller using it as a lock would deny service on a Redis blip. It now retries
+  against the fallback `_degrade` has just installed, so `True` means it really
+  did claim the key and a second call really is refused — both true statements.
+  To be clear, this was **not** a live bug: `idempotency.claim()` re-reads after
+  a failed claim and gets a miss from that same fallback, so it already came out
+  at `proceed`. That was verified, not assumed, and the end-to-end test added
+  here passes against the old code too — it is kept because the behaviour it
+  pins (a Redis outage must not make the gateway believe a request is already in
+  flight) is worth holding still regardless of which layer provides it.
+- **Both SDKs honored `Retry-After` without a bound, undoing the gateway's own
+  design.** RekAI deliberately refuses to wait longer than
+  `REKAI_RETRY_MAX_DELAY_SECONDS` (default 8s) and passes the header to the
+  client instead — the architecture doc's words: "so its SDK can back off
+  precisely (rather than blocking the gateway)". The SDKs then slept for
+  whatever the header said. Measured through the Python client's `_send` with
+  the default 3 retries against a `Retry-After: 3600`: **10,800 seconds of
+  `time.sleep` inside one `chat()` call**, on the caller's thread; the JS twin
+  parked the event loop the same way. Both now honor `Retry-After` up to a
+  configurable `max_retry_delay` / `maxRetryDelay` (60s default) and, past it,
+  return the 429 with its header intact so the caller decides — mirroring the
+  server. Clamping and retrying anyway would have been wrong: retrying sooner
+  than the server asked just earns another 429. The JS client also treated an
+  empty `Retry-After` as `Number("") === 0` and retried immediately in a hot
+  loop; an unparseable value now falls through to backoff, as an HTTP-date
+  already did on the Python side.
+- **CI had never been green — mypy died inside numpy's stubs.** Installing the
+  workflow made CI run; it did not make it pass. Every run since, on `main` and
+  on every branch, failed the `api` job identically:
+  `numpy/__init__.pyi:737: error: Type statement is only supported in Python 3.12
+  and greater [syntax]` — mypy giving up before checking a single line of RekAI.
+  The mechanism: `[tool.mypy] python_version = "3.10"` pins the *supported floor*
+  (correctly — it is what keeps `requires-python = ">=3.10"` honest), and mypy
+  applies that version to third-party stubs too. numpy's shipped `.pyi` uses the
+  PEP 695 `type` statement, which is 3.12 syntax, so any runner resolving a
+  current numpy hits a syntax error in a dependency. numpy is now skipped for
+  type-checking purposes, which costs nothing: `semantic_cache.py` imports it in
+  a try/except with `type: ignore[import-not-found]`, so it was already `Any` to
+  mypy. Both `follow_imports = "skip"` and `follow_imports_for_stubs = true` are
+  required — the former does not apply to stub files on its own, and without the
+  latter mypy still parses the `.pyi` and still fails.
+  This is also a lesson about local verification: the commit that installed the
+  workflow reported "mypy … 550 passed" locally, and the merge before this one
+  reported 676. Both were true, and neither predicted CI, because a local venv
+  pins yesterday's dependencies while CI resolves today's. Verified the way that
+  gap demands: reproduced the exact failure in a scratch venv built to CI's
+  versions (Python 3.12.3, numpy 2.5.2, mypy 2.3.1), then confirmed the fix
+  green there, on the local 3.11/numpy 2.4.6 environment, and with numpy absent.
+- **The first-party clients no longer lie about the API's response shape, and
+  cannot drift again.** The web app, the JS SDK and the Python SDK each restate
+  the response shape by hand, and nothing kept those restatements honest. All
+  three had drifted: the web `ChatResponse` omitted `fallback_used` and
+  `tool_calls`; both SDKs' `ChatResult` omitted `created`; and the JS SDK's
+  `UsageSummary` omitted `retries_total`, `cooldowns_total` and
+  `usage_by_client`, so a TypeScript caller got a compile error for fields
+  `GET /v1/usage` definitely returns — a type that lies about the payload is
+  worse than no type, because it makes correct code fail to build. A dropped
+  field fails silently: the JSON still parses, the value is just gone.
+  `apps/api/tests/test_client_types_cover_the_api.py` now makes live requests
+  against the app and asserts every response key is declared by every client,
+  parsing the TypeScript interfaces and Python dataclasses textually and
+  **skipping rather than passing** when a declaration cannot be parsed, so a
+  refactor that defeats the regex can never show up as a false green. It caught
+  the two web omissions that a by-hand audit had missed. `fallback_used` is also
+  surfaced now: the chat metadata line reads `via fallback` when a failover
+  answered, since the provider label alone shows *who* replied but not that the
+  caller's own choice had failed.
+- **The response cache no longer turns a Redis outage into a site-wide 500.** A
+  configured `REKAI_REDIS_URL` that is unreachable (wrong host, Redis down,
+  network partition) made `RedisCache.get()` raise `redis.exceptions.ConnectionError`
+  on every `/v1/chat`, `/v1/chat/completions`, and `/v1/embeddings` request —
+  so the gateway returned `Internal Server Error` instead of serving, despite
+  Redis being "optional". This broke the repo's own core invariant ("Redis-when-
+  configured, process-local otherwise, **fail-open on Redis errors**"), which the
+  rate limiter and metrics store already honored but the cache did not. `RedisCache`
+  now catches errors on `get`/`set`/`add`/`delete`, returns a miss (and a no-op
+  write) instead of propagating, logs a single `redis cache failing open` warning,
+  and transparently downgrades to an in-process `MemoryCache` for the rest of the
+  process — so a transient Redis blip no longer keeps recomputing every cacheable
+  hit for the server's lifetime. `/health` still reports `cache: "redis"` (the
+  configured backend). Verified live: with `REKAI_REDIS_URL` pointed at a dead
+  port, chat/embeddings now return 200 (was 500) with zero tracebacks; a new
+  `test_redis_cache_fails_open_on_errors` regression test asserts the downgrade.
+- **CI was silently dead — the workflow file lived outside `.github/workflows/`.**
+  GitHub Actions only loads workflows from `.github/workflows/`, but the CI
+  definition was committed as `.github/ci-workflow.yml`, so **no CI ever ran**
+  despite the README badge and the `ci: consolidate the two divergent staged CI
+  workflows into one` commit both pointing at `workflows/ci.yml`. Moved it to
+  `.github/workflows/ci.yml` so push/PR triggers actually fire. Verified the YAML
+  parses and the file now sits at the path GitHub scans.
+
+- **`text-embedding-004` was advertised as Gemini but routed to OpenAI.** The
+  model registry (`rekai/models.py`) is meant to be the single source of truth
+  for routing, pricing, and the advertised `/v1/models` list, but its two halves
+  disagreed for exactly one id: `MODEL_SPECS` advertises `text-embedding-004` as
+  a **gemini** embedding model, while the broader `("text-embedding", "openai")`
+  family rule in `PROVIDER_PREFIXES` matched it first. A client that read the id
+  straight off `/v1/models` and posted it to `/v1/embeddings` therefore reached
+  **OpenAI**, not Gemini — an unknown-model error against the wrong upstream, or
+  a silent charge on the operator's OpenAI key when one is configured. Fixed by
+  matching the exact `text-embedding-004` prefix ahead of the OpenAI family
+  rule; `text-embedding-3-*` / `-ada-002` still route to OpenAI. The drift
+  survived because `test_models.py` asserted advertised-vs-routed consistency
+  for **chat** models only, so two regression tests now extend that guarantee to
+  every advertised embedding model.
+- **The chat UI warns when the selected provider is cooling down.** `/health`
+  reports `parked_providers` (provider → seconds of cooldown left), and the web
+  client did not carry the field at all. A parked provider is precisely why a
+  reply arrives from somewhere other than the one selected — RekAI skips it in
+  favour of a healthy fallback — so the reroute looked arbitrary. A notice now
+  names the provider and the time left, alongside the existing "needs an API
+  key" notice. `/health` is also re-read when the tab regains focus and after a
+  failed request, since a cooldown countdown taken once at mount goes stale
+  within seconds and the moment a request fails is exactly when one starts.
+  Completes a sweep that diffed every API response the web app consumes against
+  the fields it carries; `EmbeddingsResponse`, `UsageSummary` and `ModelInfo`
+  came back clean.
+- **The usage dashboard's cache hit rate no longer hides approximate matches.**
+  `semantic_cache_hits_total` is a **subset** of `cache_hits_total`, and the
+  dashboard reported only the combined figure — so the one number an operator
+  uses to judge whether the cache is earning its keep silently counted answers
+  to prompts nobody asked. Observed live against a gateway with the semantic
+  cache on: `cache_hits_total 1, semantic_cache_hits_total 1` — every hit was an
+  approximate match, displayed as a plain hit rate. The tile's detail line now
+  reads `12 / 30 · 5 semantic`, and stays exactly as it was when there are none.
+- **A streamed reply is labelled with the provider that served it.** The chat
+  UI's metadata line filled one slot from two different fields depending on a
+  toggle: the non-streaming path put the response's `provider` there, the
+  streaming path put the *requested model* there and discarded the
+  `provider`/`model` the stream summary already carried. So the same label meant
+  two different things, and a request routed by model name never showed which
+  provider actually answered. Streaming now uses the summary's `provider`,
+  falling back to the requested model only when no summary arrived (an aborted
+  or failed stream), which is also where the existing `· stopped` marker lives.
+- **A semantic cache hit and a redacted answer are now visible in the chat UI.**
+  Both are things the API reports and the reader could not see from the text.
+  `cache_similarity` marks a *semantic* hit — the reply is the stored answer to a
+  **different, similar** prompt — and the UI rendered it identically to an exact
+  hit, as a bare `cached ⚡`, telling the reader their question had been answered
+  when a neighbouring one was. Confirmed live with the semantic cache on: asking
+  "what is the capital city of France" returned the stored answer to "what is the
+  capital of France" with `cached: true, cache_similarity: 0.7458`. It now reads
+  `cached ⚡ answer to a 75% similar prompt`, while an exact hit stays a plain
+  `cached ⚡`. Separately, `redacted` names the secret patterns the output
+  guardrail scrubbed; a redaction leaves a placeholder that reads like ordinary
+  content, so the answer is silently not what the model produced. The metadata
+  line now says e.g. `2 secrets redacted`, on both the streamed and non-streamed
+  paths. Four new Playwright specs cover all four states and the two positive
+  ones were confirmed to fail with the render removed.
+- **A truncated reply now looks truncated in the chat UI.** The API was fixed to
+  report the provider's real `finish_reason` instead of synthesising `"stop"`,
+  and both SDKs surface it — but the web app never carried the field at all, so
+  the one place a human actually reads the answer still could not tell a reply
+  cut short by `max_tokens` from a complete one. On screen the text simply stops.
+  `ChatResponse` and `StreamSummary` gain `finish_reason`, and the message
+  metadata line now says `truncated — raise max tokens` for `length` and
+  `stopped by the provider's content filter` for `content_filter`. It stays
+  silent for `stop` and `tool_calls`, which are ordinary completions — a marker
+  that fires on the common path is noise that gets ignored exactly when it
+  matters. Verified end to end against a fake upstream that truncates: RekAI
+  returns `finish_reason: "length"` on `/v1/chat` and in the `/v1/chat/stream`
+  summary, and three new Playwright specs assert the marker appears on both the
+  streamed and non-streamed paths and stays absent on a normal reply — all three
+  confirmed to fail with the render removed.
+- **Persisted metrics snapshots no longer accumulate forever.** Each process
+  writes `rekai:metrics:snapshot:<instance-id>` and the id is a fresh uuid unless
+  `REKAI_INSTANCE_ID` is set — correctly so, since uvicorn workers share a host
+  and a host-derived id would collapse N workers onto one key and undercount by
+  N. But the key was written with a plain `SET` and no expiry, so **every process
+  start leaked one permanently**, and `load_others()` — which runs on every
+  `/v1/usage` request and does one GET per key — got slower with each restart
+  ever performed. Measured against a local Redis: 200 restarts left 200 keys, all
+  at `TTL -1`, and one `/v1/usage` call took **194 ms**, growing linearly and
+  never shrinking. Snapshots now carry a 24-hour TTL refreshed on every flush
+  (floored at three flush intervals so a long
+  `REKAI_METRICS_PERSIST_INTERVAL_SECONDS` cannot expire a key between its own
+  writes), so a live replica never expires and only one that stopped flushing is
+  collected. Totals were never wrong — verified before and after against a real
+  Redis and a real gateway, where three successive runs of two requests each
+  report 2, 4, 6 — the cost was unbounded memory and a read path that decayed.
+  The module docstring also claimed a restart "resumes where it left off", which
+  is only true when `REKAI_INSTANCE_ID` is set; it now says so.
+- **A keyless OpenAI-compatible backend was unreachable.** The README's second
+  feature bullet promises you can point RekAI at "any OpenAI-compatible
+  endpoint (Groq, Together, OpenRouter, Mistral, vLLM, LM Studio…) with one env
+  var" — but `OpenAICompatibleProvider` set `requires_key = True`, so with only
+  `REKAI_CUSTOM_BASE_URL` configured a request was rejected with RekAI's own
+  `401 No custom API key…` before anything left the process. Three of the
+  backends named — vLLM, LM Studio, llama.cpp — serve **unauthenticated** by
+  default, so the gateway was locked out of exactly the case the sentence
+  advertises, and `/health` reported such a backend as not ready. The provider
+  no longer requires a key: `Authorization` is sent when a key is configured or
+  supplied per request as BYOK, and omitted when there is none, so a hosted
+  backend that does need one answers with its own 401 instead of RekAI guessing
+  on its behalf. Verified live against a keyless OpenAI-shaped server: with
+  `REKAI_CUSTOM_BASE_URL` as the only setting, `/v1/chat` returns the upstream's
+  completion and `/health` reports `custom: ready`. Two tests that encoded the
+  old refusal as intended behavior were replaced. The README and
+  `docs/architecture.md` now state exactly which variables each case needs
+  rather than "one env var".
+- **The quickstart's provider keys never reached the container.** The README's
+  three-line Docker path is `cp apps/api/.env.example apps/api/.env` (add keys),
+  then `docker compose up --build` — and the middle step was a **no-op**.
+  `.env` is `.dockerignore`d, correctly (a key must never be baked into an
+  image), but `docker-compose.yml` declared no `env_file`, so nothing carried it
+  into the api service. Verified with `docker compose config`: with
+  `REKAI_ANTHROPIC_API_KEY` in `apps/api/.env`, the rendered api environment
+  contained only `REKAI_CORS_ORIGINS`, `REKAI_OPENAI_API_KEY: ""` and
+  `REKAI_REDIS_URL`. So the documented way to configure a real provider silently
+  did nothing, and the product appeared to work only on `echo`. The api service
+  now reads `apps/api/.env` as an optional `env_file`.
+  Two related traps removed while proving the fix: `REKAI_OPENAI_API_KEY:
+  ${REKAI_OPENAI_API_KEY:-}` resolved to an **explicit empty string**, and an
+  `environment:` entry outranks `env_file:` — so an unset shell would have
+  erased the key the user had just put in `.env`. The value-less form
+  (`REKAI_OPENAI_API_KEY:`) turned out to do the same thing, deleting the
+  variable outright rather than falling through (both measured with `docker
+  compose config`, not assumed). Provider keys are therefore configured in
+  exactly one place now. `REKAI_CORS_ORIGINS: "*"` was dropped from compose as
+  well — it only restated the default.
+- **W3C Trace Context conformance.** `traceparent` was validated with
+  `int(value, 16)`, far more permissive than the spec's `HEXDIGLC` (lowercase
+  hex only): a leading sign, underscore digit separators, and surrounding ASCII
+  whitespace all passed, so values like `+bf92…` and `4bf9…47_6` were accepted
+  as trace ids — then formatted back into the response header *and* the outbound
+  provider header, i.e. RekAI emitted a `traceparent` that a conforming parser
+  must reject, silently breaking the correlation the header exists to provide.
+  (Not header injection: a raw CR/LF can't reach a single header value, since
+  the HTTP parser splits on it first.) Now validated by regex. A **future
+  version is parsed rather than rejected**, per the spec's forward-compatibility
+  rule — the previous code accepted only `00`, so it would have restarted every
+  trace the day the spec advanced, and an existing test had encoded that as
+  intended. `ff` stays reserved and rejected.
+
+### Changed
+- **One CI workflow instead of two divergent staged copies.** `ci/ci.yml` and
+  `.github/ci-workflow.yml` were both complete, both parked (the GitHub App
+  token cannot push `.github/workflows/`), and each shipped its own README
+  telling a maintainer to `git mv` it into place — so whichever was installed
+  first, the other's instructions became wrong. They had also drifted apart in
+  ways that mattered: Python 3.12 vs 3.11, `main`+`claude/**` vs `main` only,
+  and neither was a superset — `ci/ci.yml` alone had smoke and Docker-build
+  jobs, `.github/ci-workflow.yml` alone had Playwright E2E. `ci/` is deleted and
+  the surviving file carries the union, with two changes on top:
+  the `api` job now runs a **3.10 + 3.12 matrix** (the `requires-python` floor
+  and the version the shipped image runs — both confirmed green locally, 645
+  tests each, before the matrix was written, so a red build there is a real
+  regression), and the separate smoke and docker-build jobs are merged into one
+  `stack` job that validates the compose file, builds both images, brings the
+  stack up with `--wait`, and runs `scripts/smoke.sh` against the actual
+  containers. That job is the only build verification the images ever get:
+  agent sessions on this repo have no Docker daemon.
+
 ### Added
+- **The LangChain compatibility claim is now a test, not a promise.** The
+  README's first feature bullet names "any OpenAI SDK, LangChain, or
+  OpenAI-format client"; `test_openai_sdk_e2e.py` covered the first and nothing
+  covered the second, in five places where the claim is made. That is not the
+  same test — `langchain_openai.ChatOpenAI` sends fields the plain SDK does not
+  (notably `stream_options.include_usage`) and maps the response back through
+  its own `AIMessage`, so a gap would surface only there.
+  `tests/test_langchain_e2e.py` drives the real client against the in-process
+  app (ASGITransport, no network) and asserts `ainvoke` content plus
+  `finish_reason`/`model_name`/`usage_metadata`, `astream` reassembly, and the
+  trailing usage-only chunk that `stream_usage=True` depends on — without which
+  every LangChain caller's token accounting would silently read zero. It was
+  verified to fail against a build with `include_usage` forced off. The claim
+  held up on inspection; it is simply checked now. `langchain-openai` joins the
+  optional dev extras and the tests skip when it is absent.
+- **`REKAI_REQUEST_DEADLINE_SECONDS` — a total budget for one request.**
+  `REKAI_REQUEST_TIMEOUT_SECONDS` reads like a request bound and is not one: it
+  caps a *single* outbound call, which `REKAI_RETRY_MAX_ATTEMPTS` multiplies and
+  the fallback chain multiplies again. Measured against a hung upstream with a
+  1.0 s per-call bound: **6 upstream calls and 6.04 s of client wait** — scaled
+  to the shipped defaults (60 s, 2 attempts, a 3-target chain) that is **~6
+  minutes** holding a connection and a concurrency slot for a request whose
+  "timeout" is one minute. The new setting is the missing half — the split Envoy
+  draws between `route.timeout` and `retry_policy.per_try_timeout`, and that
+  LiteLLM/Portkey expose as two settings. It is enforced before starting each
+  fallback target, around each attempt (so one hung upstream cannot overrun the
+  budget by itself), and before each backoff sleep (a sleep that would leave no
+  time to actually retry is skipped, and the real upstream error raised
+  instead). Exceeding it returns **504**; when a genuine upstream failure is in
+  hand that is surfaced instead, so the client sees the cause and not the
+  budget. `0` (the default) keeps today's unlimited behavior. Streaming is
+  exempt — a stream's duration is the length of the answer, not a fault, and
+  `REKAI_MAX_CONCURRENT_REQUESTS` already bounds occupancy there.
+- **`tracestate` is now propagated.** `traceparent`'s companion header carries
+  vendor state (sampling decisions, a vendor's own trace id) and was dropped
+  entirely — the spec pairs the two, and a gateway is the hop every call
+  crosses, so this stranded that state on every request. It is now forwarded to
+  providers alongside `traceparent` and echoed to the client. Since it is
+  attacker-controlled and goes back out in a header, it is validated rather than
+  passed through verbatim: printable ASCII only, at most 32 list members,
+  truncated to 512 bytes on a member boundary.
+- **`finish_reason` now comes from the provider instead of being synthesised.**
+  All five backends report why generation stopped — OpenAI `finish_reason`,
+  Anthropic `stop_reason`, Gemini `finishReason`, Ollama `done_reason` — and
+  RekAI parsed none of them, emitting `"tool_calls" if tool_calls else "stop"`
+  at the edge. So an answer **cut off by `max_tokens` was reported as a normal
+  completion**: the standard "retry with a larger budget when
+  `finish_reason == 'length'`" pattern could never fire, and the truncated
+  answer was cached and replayed to later callers as if it were whole. The four
+  vocabularies are normalized onto OpenAI's (`stop` / `length` / `tool_calls` /
+  `content_filter`) and carried through `ProviderResult`, `StreamEvent`,
+  `ChatResponse` (new nullable `finish_reason` field), both streaming paths, and
+  the OpenAI-compatible translation. Two wrinkles are handled rather than passed
+  through: Gemini says `STOP` even when emitting a `functionCall` (a tool call is
+  inferred from the parts), and Anthropic's forced-tool JSON emulation says
+  `tool_use` (rewritten to `stop`, since the caller never sees a tool call).
+  `null` means the provider said nothing — also how responses cached before this
+  field existed read, and the OpenAI endpoint falls back to the old derivation
+  there. Both SDKs expose it.
 - **`response_format` is now honored by every provider.** RekAI advertised JSON
   mode in its OpenAPI schema and README, but Anthropic and Ollama accepted the
   field and dropped it with only a debug log — a caller who asked for JSON got
@@ -992,6 +1410,8 @@ streaming, fallback, cost estimation, and a built-in web UI.
 - SDK CI now runs `ruff format --check` (previously only `ruff check`), and the
   SDK source was reformatted to match.
 
-[Unreleased]: https://github.com/shizukutanaka/RekAI/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/shizukutanaka/RekAI/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/shizukutanaka/RekAI/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/shizukutanaka/RekAI/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/shizukutanaka/RekAI/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/shizukutanaka/RekAI/releases/tag/v1.0.0
