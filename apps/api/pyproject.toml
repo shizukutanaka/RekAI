@@ -65,3 +65,39 @@ ignore = ["B008"]
 python_version = "3.10"
 ignore_missing_imports = true
 disallow_untyped_defs = false
+
+# `python_version` above is the supported floor, and it is deliberate — it is
+# what keeps `requires-python = ">=3.10"` honest. But mypy applies that version
+# to *third-party stubs* too, and numpy's shipped `.pyi` uses the PEP 695 `type`
+# statement, which is 3.12 syntax. So a CI runner that resolves a current numpy
+# fails with a syntax error inside numpy itself, before checking any RekAI code
+# at all. That is not hypothetical: it is why this repo's CI had never once been
+# green, on main or on any branch (numpy 2.5.2 + mypy 2.3.1).
+#
+# Skipping the import is the right scope rather than a workaround: numpy is an
+# optional accelerator here — `semantic_cache.py` imports it in a try/except and
+# already carries `type: ignore[import-not-found]`, so it is `Any` to mypy
+# either way. Pinning numpy instead would fight the ecosystem forever; raising
+# `python_version` would silently drop the 3.10 guarantee.
+# `python_version` above is the supported floor, and it is deliberate: it is what
+# keeps `requires-python = ">=3.10"` honest. But mypy applies that version to
+# *third-party stubs* too, and numpy's shipped `__init__.pyi` uses the PEP 695
+# `type` statement, which is 3.12 syntax. A CI runner that resolves a current
+# numpy therefore dies with a syntax error inside numpy itself, before checking
+# a single line of RekAI. That is not hypothetical — it is why this repo's CI had
+# never once been green, on main or on any branch (numpy 2.5.2, mypy 2.3.1).
+#
+# Skipping numpy is the right scope rather than a workaround: it is an optional
+# accelerator here. `semantic_cache.py` imports it in a try/except and already
+# carries `type: ignore[import-not-found]`, so it is `Any` to mypy either way,
+# and nothing in RekAI loses type checking. Pinning numpy instead would mean
+# fighting the ecosystem forever; raising `python_version` would silently drop
+# the 3.10 guarantee.
+#
+# Both settings are needed. `follow_imports` alone does not apply to stub files,
+# so without `follow_imports_for_stubs` mypy still parses the .pyi and still
+# reports the syntax error (verified against the CI configuration).
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true

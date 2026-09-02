@@ -164,6 +164,28 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Fixed
+- **CI had never been green — mypy died inside numpy's stubs.** Installing the
+  workflow made CI run; it did not make it pass. Every run since, on `main` and
+  on every branch, failed the `api` job identically:
+  `numpy/__init__.pyi:737: error: Type statement is only supported in Python 3.12
+  and greater [syntax]` — mypy giving up before checking a single line of RekAI.
+  The mechanism: `[tool.mypy] python_version = "3.10"` pins the *supported floor*
+  (correctly — it is what keeps `requires-python = ">=3.10"` honest), and mypy
+  applies that version to third-party stubs too. numpy's shipped `.pyi` uses the
+  PEP 695 `type` statement, which is 3.12 syntax, so any runner resolving a
+  current numpy hits a syntax error in a dependency. numpy is now skipped for
+  type-checking purposes, which costs nothing: `semantic_cache.py` imports it in
+  a try/except with `type: ignore[import-not-found]`, so it was already `Any` to
+  mypy. Both `follow_imports = "skip"` and `follow_imports_for_stubs = true` are
+  required — the former does not apply to stub files on its own, and without the
+  latter mypy still parses the `.pyi` and still fails.
+  This is also a lesson about local verification: the commit that installed the
+  workflow reported "mypy … 550 passed" locally, and the merge before this one
+  reported 676. Both were true, and neither predicted CI, because a local venv
+  pins yesterday's dependencies while CI resolves today's. Verified the way that
+  gap demands: reproduced the exact failure in a scratch venv built to CI's
+  versions (Python 3.12.3, numpy 2.5.2, mypy 2.3.1), then confirmed the fix
+  green there, on the local 3.11/numpy 2.4.6 environment, and with numpy absent.
 - **The first-party clients no longer lie about the API's response shape, and
   cannot drift again.** The web app, the JS SDK and the Python SDK each restate
   the response shape by hand, and nothing kept those restatements honest. All
