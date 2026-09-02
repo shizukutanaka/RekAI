@@ -14,12 +14,30 @@ touching the request pipeline — it is accurate and kept up to date.
 
 ## Verification gates (run before every commit)
 
+**Run CI's exact commands, not narrower ones.** These are copied from
+`.github/workflows/ci.yml`; if they drift apart, CI is the authority and this
+file is the bug. Run each on its own line rather than chaining with `&&` — a
+chain tells you it failed but not which gate did.
+
 API — all four must pass, from `apps/api/`:
 
 ```bash
-.venv/bin/ruff check . && .venv/bin/ruff format --check rekai tests
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .      # NOT `rekai tests`: CI checks README code blocks too
 .venv/bin/mypy rekai
-.venv/bin/python -m pytest -q        # 360+ tests, ~5s
+.venv/bin/python -m pytest -q        # 680+ tests, ~9s
+```
+
+**A green local run does not predict CI.** A local venv pins the dependencies it
+resolved the day it was built; CI resolves them fresh every run. That gap kept
+this repo's CI red from the day the workflow was installed until 2026-09-02 —
+mypy died inside a *newer numpy's* stubs, on a tree whose author had honestly
+reported "mypy … 550 passed" locally. When a change touches typing, dependency
+metadata, or anything version-sensitive, build a scratch venv on the Python CI
+uses and run the suite there too:
+
+```bash
+python3.12 -m venv /tmp/ci && /tmp/ci/bin/pip install -e ".[dev]"
 ```
 
 Web — from `apps/web/`:
@@ -28,7 +46,9 @@ Web — from `apps/web/`:
 npx tsc --noEmit -p . && npm run lint && npx vitest run && npm run build
 ```
 
-SDKs — `packages/python-sdk`: `.venv/bin/python -m pytest -q && .venv/bin/ruff check .`;
+SDKs — `packages/python-sdk`: `.venv/bin/python -m pytest -q`, then
+`.venv/bin/ruff check .` **and `.venv/bin/ruff format --check .`** (CI runs the
+format check here too, and it covers the README's code blocks);
 `packages/js-sdk`: `node --test`.
 
 E2E (optional but preferred for UI-visible changes) — from `apps/web/`:
