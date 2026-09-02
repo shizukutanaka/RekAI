@@ -211,8 +211,8 @@ class RedisCache:
             # lock would deny service on a Redis blip. Today's caller happens to
             # survive that, because idempotency.claim() re-reads and gets a miss
             # from this same fallback, but it should not have to.
-            self._degrade(exc)
-            return await self._local.add(key, value, ttl)
+            local = self._degrade(exc)
+            return await local.add(key, value, ttl)
 
     async def delete(self, key: str) -> None:
         if self._local is not None:
@@ -223,7 +223,7 @@ class RedisCache:
         except Exception as exc:
             self._degrade(exc)
 
-    def _degrade(self, exc: Exception) -> None:
+    def _degrade(self, exc: Exception) -> MemoryCache:
         # Only warn once: the first blip is worth surfacing, the next thousand
         # are noise. Switch to the local fallback so we stop hammering a dead
         # Redis and stop paying the connection-timeout latency on every call.
@@ -231,6 +231,7 @@ class RedisCache:
             logger.warning("redis cache failing open (redis error: %s)", exc)
             self._degraded = True
         self._local = MemoryCache()
+        return self._local
 
     @property
     def label(self) -> str:

@@ -96,6 +96,17 @@ def _build_attempts(
     if request.fallbacks is not None:
         for target in request.fallbacks:
             ensure_allowed(target.provider, settings)
+            # Existence, for the same reason as permission. `ensure_allowed`
+            # only checks the operator's allowlist, so a *nonexistent* name
+            # sailed through it and was then dropped by the `provider is None`
+            # skip below — leaving the caller with the primary's error and no
+            # sign their chain was ignored. A typo'd `"opneai"` is far likelier
+            # than an allowlist violation, and an unknown *primary* is already a
+            # 400 here, so a fallback naming nothing is one too.
+            if get_provider(target.provider) is None:
+                raise ProviderError(
+                    f"Unknown fallback provider '{target.provider}'.", status_code=400
+                )
         targets: list[tuple[str, str | None]] = [(f.provider, f.model) for f in request.fallbacks]
     elif settings.fallback_enabled:
         targets = settings.fallback_target_list

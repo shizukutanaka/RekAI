@@ -164,6 +164,23 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   vitest 4.
 
 ### Fixed
+- **A typo'd `fallbacks` entry was silently dropped.** `_build_attempts` runs
+  `ensure_allowed` over request-level fallbacks for a stated reason — "quietly
+  dropping it would leave the client believing it had a fallback chain it
+  doesn't have" — but `ensure_allowed` only checks the operator's allowlist. A
+  provider that simply **does not exist** passed it, then hit the
+  `provider is None` skip further down and was dropped with a log line. The
+  caller got the primary's error and nothing to say their chain had been
+  ignored, and a typo is far likelier than an allowlist violation:
+  `"provider": "opneai"` bought no failover at all. Worse, one good target
+  masked a bad one, so the mistake shipped looking healthy. An unknown
+  request-level fallback is now a **400**, matching how an unknown *primary*
+  provider is already reported. Server-configured `REKAI_FALLBACK_TARGETS`
+  entries are deliberately still skipped with a warning: that is an operator
+  misconfiguration the caller cannot fix and did not ask for, and failing every
+  request over it would be worse. Verified live: `fallbacks: [{"provider":
+  "opneai"}]` returns `400 Unknown fallback provider 'opneai'`, a valid chain
+  still 200.
 - **`RedisCache.add()` failed open by asserting something false.** Found by
   measuring coverage: at 94% overall, the least-covered module was `cache.py`
   (79%), and the uncovered lines were the Redis error paths — the error handling
