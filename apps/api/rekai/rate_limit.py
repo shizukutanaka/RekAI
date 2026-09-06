@@ -25,6 +25,11 @@ from rekai.logging_config import get_logger
 
 logger = get_logger("rekai.rate_limit")
 
+# Share of the bucket cap reclaimed in one eviction pass. Evicting a single
+# entry per admission would leave every request at the cap paying a full O(n)
+# scan; taking a batch amortizes that scan across the admissions that follow.
+_EVICT_FRACTION = 0.1
+
 
 class RateLimiter:
     """Fixed-window token bucket.
@@ -46,17 +51,47 @@ class RateLimiter:
         refill = (now - last) * (self.capacity / self.window)
         return min(self.capacity, tokens + refill), last
 
-    def _prune(self, now: float) -> None:
-        # Drop buckets that have fully refilled — an idle client is
-        # indistinguishable from a brand-new one, so its entry carries no state.
-        stale = [k for k in list(self._buckets) if self._tokens_now(k, now)[0] >= self.capacity]
-        for k in stale:
-            del self._buckets[k]
+    def _reclaim(self, now: float) -> None:
+        """Bring the bucket count back under ``max_buckets``.
+
+        Fully-refilled buckets go first: an idle client is indistinguishable
+        from a brand-new one, so its entry carries no state and dropping it is
+        free. Reclaiming *only* those was the whole policy, and it silently
+        failed in the case it exists for — a flood of distinct client ids, where
+        every bucket is mid-refill and therefore unprunable. The dict then grew
+        past the cap without limit, and because the scan ran on every subsequent
+        request the limiter degraded quadratically (measured: 8000 distinct ids
+        against the default 60-per-60s config took 4.4s and left 1612 buckets
+        under a 1000 cap). That turns the component meant to *stop* abuse into
+        an algorithmic-complexity amplifier for it.
+
+        So when that isn't enough, evict the buckets **closest to full**. The
+        order is a security property, not tidiness: evicting a bucket resets its
+        client to full capacity, so eviction hands budget back. Discarding the
+        least-throttled clients gives away the least — and never rewards the
+        most-throttled, which the opposite policy would, letting an attacker
+        flood distinct keys to force their own exhausted bucket out and reset
+        their limit.
+
+        Eviction is batched so the O(n) pass is amortized over the next
+        ``max_buckets * _EVICT_FRACTION`` admissions instead of being repeated
+        per request.
+        """
+        levels = [(self._tokens_now(k, now)[0], k) for k in self._buckets]
+        for tokens, key in levels:
+            if tokens >= self.capacity:
+                del self._buckets[key]
+        if len(self._buckets) < self.max_buckets:
+            return
+        target = max(1, int(self.max_buckets * _EVICT_FRACTION))
+        remaining = sorted((t, k) for t, k in levels if k in self._buckets)
+        for _, key in remaining[-target:]:
+            self._buckets.pop(key, None)
 
     def allow(self, key: str) -> bool:
         now = time.time()
         if len(self._buckets) >= self.max_buckets:
-            self._prune(now)
+            self._reclaim(now)
         tokens, _ = self._tokens_now(key, now)
         if tokens < 1.0:
             self._buckets[key] = (tokens, now)

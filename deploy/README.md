@@ -31,7 +31,10 @@ cd RekAI
 docker compose up --build -d
 ```
 
-This starts Redis, the API (`:8000`), and the Web UI (`:3000`). Put a TLS
+This starts Redis, the API (`:8000`), and the Web UI (`:3000`). Server-side
+provider keys go in `apps/api/.env` (`cp apps/api/.env.example apps/api/.env`),
+which compose reads as the api service's `env_file`; it is git- and
+docker-ignored, so nothing is committed or baked into an image. Put a TLS
 reverse proxy (Caddy, nginx, Traefik) in front. If the web UI is served from a
 different host than the API, rebuild the web image with the right API URL:
 

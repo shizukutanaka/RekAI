@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from rekai.auth import client_id, key_allowed, parse_bearer
@@ -75,3 +76,66 @@ def test_health_stays_open_with_keys_configured() -> None:
     # System endpoints aren't under /v1 -> no auth (liveness probes, scraping).
     assert client.get("/health").status_code == 200
     assert client.get("/metrics").status_code == 200
+
+
+# --- non-ASCII credentials ----------------------------------------------------
+# secrets.compare_digest raises TypeError on a str holding any non-ASCII
+# character, and the token comes straight from an attacker-controlled header.
+# `Authorization: Bearer ké` therefore raised out of the auth middleware as an
+# unhandled 500 rather than a 401 — and because auth runs *before* the rate
+# limiter, those requests consumed no budget, were never counted in
+# rekai_errors_by_kind_total, and logged a full stack trace each time.
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "ké-123",  # latin-1 accent
+        "キー",  # non-latin script
+        "sk-ÿ",  # high latin-1 byte, what an ASGI header decodes to
+        "sk-\U0001f600",  # astral plane
+        "sk-\ud800",  # lone surrogate: strict UTF-8 would reject this too
+    ],
+)
+def test_non_ascii_token_is_rejected_not_crashed(token: str) -> None:
+    assert key_allowed(token, ["sk-valid"]) is False
+
+
+def test_non_ascii_configured_key_still_matches_itself() -> None:
+    # An operator may configure a non-ASCII key; it must work, not explode.
+    assert key_allowed("clé-secrète", ["clé-secrète"]) is True
+    assert key_allowed("clé-secrète", ["autre-clé"]) is False
+
+
+def test_client_id_handles_non_ascii() -> None:
+    # client_id hashes the token too — same encoding hazard, same fix.
+    assert client_id("clé").startswith("key:")
+    assert client_id("clé") == client_id("clé")
+    assert client_id("clé") != client_id("cle")
+
+
+def test_non_ascii_bearer_returns_401_not_500() -> None:
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys="sk-valid",
+        rate_limit_enabled=False,
+    )
+    client = TestClient(create_app(settings))
+    body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+    # Sent as bytes: a real Authorization header is bytes on the wire and the
+    # ASGI server decodes it as latin-1, which is how a non-ASCII token reaches
+    # the app at all. (httpx refuses to encode a non-ASCII str header itself.)
+    resp = client.post(
+        "/v1/chat", json=body, headers={"Authorization": "Bearer ké-123".encode("latin-1")}
+    )
+    assert resp.status_code == 401
+    assert resp.json()["error"] == "unauthorized"
+
+
+def test_non_ascii_admin_key_returns_401_not_500() -> None:
+    # /admin/* goes through the same comparison with the shared admin secret.
+    settings = Settings(environment="test", rate_limit_enabled=False, admin_key="sk-admin")
+    client = TestClient(create_app(settings))
+    resp = client.get("/admin/keys", headers={"Authorization": "Bearer é".encode("latin-1")})
+    assert resp.status_code == 401

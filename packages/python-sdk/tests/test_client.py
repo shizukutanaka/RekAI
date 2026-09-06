@@ -694,3 +694,69 @@ def test_async_models_usage_health() -> None:
     assert models[0]["id"] == "echo"
     assert usage["requests_total"] == 5
     assert health["status"] == "ok"
+
+
+# --- Retry-After is bounded ---------------------------------------------------
+# The gateway deliberately refuses to wait longer than REKAI_RETRY_MAX_DELAY_SECONDS
+# and passes the header to the caller instead, "so its SDK can back off precisely
+# (rather than blocking the gateway)". The SDK then slept for whatever the header
+# said — a `Retry-After: 3600` parked `chat()` for an hour, blocking the thread —
+# which undid the server's design rather than completing it.
+
+
+def _resp(retry_after):
+    import httpx
+
+    headers = {"Retry-After": retry_after} if retry_after is not None else {}
+    return httpx.Response(429, headers=headers)
+
+
+def test_retry_after_within_the_cap_is_honored_exactly():
+    from rekai_client.client import _retry_delay
+
+    assert _retry_delay(_resp("30"), 0, 0.5, 60.0) == 30.0
+
+
+def test_retry_after_beyond_the_cap_stops_the_retry():
+    # None means "return the response to the caller", not "wait 0". Retrying
+    # sooner than the server asked would only earn another 429.
+    from rekai_client.client import _retry_delay
+
+    assert _retry_delay(_resp("3600"), 0, 0.5, 60.0) is None
+
+
+def test_an_empty_retry_after_falls_back_to_backoff():
+    from rekai_client.client import _retry_delay
+
+    assert _retry_delay(_resp(""), 0, 0.5, 60.0) == 0.5
+
+
+def test_an_http_date_retry_after_falls_back_to_backoff():
+    from rekai_client.client import _retry_delay
+
+    assert _retry_delay(_resp("Wed, 21 Oct 2015 07:28:00 GMT"), 1, 0.5, 60.0) == 1.0
+
+
+def test_a_long_retry_after_returns_the_response_instead_of_sleeping():
+    # End to end through _send: the caller gets the 429 back, with the header
+    # still on it, rather than the process sitting inside time.sleep(3600).
+    import time
+
+    import httpx
+
+    from rekai_client import RekAIClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, headers={"Retry-After": "3600"}, json={"detail": "slow down"})
+
+    client = RekAIClient("http://testserver", max_retries=3)
+    client._client = httpx.Client(
+        transport=httpx.MockTransport(handler), base_url="http://testserver"
+    )
+
+    started = time.monotonic()
+    resp = client._send("GET", "/v1/usage")
+
+    assert resp.status_code == 429
+    assert resp.headers["Retry-After"] == "3600"
+    assert time.monotonic() - started < 5.0

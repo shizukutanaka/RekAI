@@ -117,6 +117,7 @@ client = RekAIClient(
     "http://localhost:8000",
     max_retries=2,  # default; set 0 to disable
     retry_backoff=0.5,  # seconds, doubled each attempt
+    max_retry_delay=60.0,  # seconds; a longer Retry-After is returned, not slept on
 )
 ```
 

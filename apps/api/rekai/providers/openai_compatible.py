@@ -12,7 +12,15 @@ from rekai.providers.openai import OpenAIProvider
 
 
 class OpenAICompatibleProvider(OpenAIProvider):
-    requires_key = True
+    # Not every OpenAI-compatible backend has a credential. vLLM, LM Studio and
+    # llama.cpp — three of the ones this provider exists to reach — serve
+    # unauthenticated by default, and requiring a key locked RekAI out of them
+    # entirely: pointing REKAI_CUSTOM_BASE_URL at a local server and asking for a
+    # completion returned RekAI's own 401 ("No custom API key...") without a
+    # request ever leaving the process. A key is sent when one is configured (or
+    # supplied per request via BYOK) and omitted when there is none, so a hosted
+    # backend that does need one answers with its own 401 instead.
+    requires_key = False
 
     def __init__(
         self,

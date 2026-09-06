@@ -41,6 +41,11 @@ class ChatResult:
     cached: bool
     fallback_used: bool
     tool_calls: list[dict[str, Any]] | None = None
+    #: Why the model stopped, normalized across providers: "stop", "length"
+    #: (cut off by max_tokens — the answer is INCOMPLETE, retry with a larger
+    #: budget), "tool_calls", or "content_filter". None when the provider didn't
+    #: report one.
+    finish_reason: str | None = None
     #: Cosine similarity to the stored prompt when the semantic cache served
     #: this response — the answer is to a *similar* prompt, not this one. None
     #: on a miss and on an exact cache hit, so a value here is exactly the
@@ -49,6 +54,8 @@ class ChatResult:
     #: Secret patterns scrubbed from ``content`` by the output-redaction
     #: guardrail, or None if nothing was redacted.
     redacted: list[str] | None = None
+    #: Unix timestamp the gateway produced the response.
+    created: int = 0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ChatResult:
@@ -62,8 +69,10 @@ class ChatResult:
             cached=data.get("cached", False),
             fallback_used=data.get("fallback_used", False),
             tool_calls=data.get("tool_calls"),
+            finish_reason=data.get("finish_reason"),
             cache_similarity=data.get("cache_similarity"),
             redacted=data.get("redacted"),
+            created=data.get("created", 0),
         )
 
 
@@ -123,15 +132,28 @@ def _build_headers(
     return headers
 
 
-def _retry_delay(resp: httpx.Response | None, attempt: int, backoff: float) -> float:
-    """Seconds to wait before the next attempt: honor Retry-After, else backoff."""
+def _retry_delay(
+    resp: httpx.Response | None, attempt: int, backoff: float, max_delay: float
+) -> float | None:
+    """Seconds to wait before the next attempt, or None to stop retrying.
+
+    ``Retry-After`` wins when the server sends a usable one, but only up to
+    ``max_delay``. Past that, retrying is the wrong call: waiting parks the
+    caller for as long as the upstream asked (a ``Retry-After: 3600`` used to
+    ``time.sleep`` for an hour inside ``chat()``, blocking the thread), and
+    retrying *sooner* than asked just earns another 429. Returning None hands
+    the response back with its header intact so the caller decides — which is
+    what the gateway itself does at ``REKAI_RETRY_MAX_DELAY_SECONDS``.
+    """
     if resp is not None:
         raw = resp.headers.get("Retry-After")
         if raw:
             try:
-                return max(0.0, float(raw))
+                wait = max(0.0, float(raw))
             except ValueError:
                 pass  # HTTP-date form — fall through to exponential backoff
+            else:
+                return None if wait > max_delay else wait
     return backoff * (2**attempt)
 
 
@@ -234,11 +256,13 @@ class RekAIClient:
         timeout: float = 60.0,
         max_retries: int = 2,
         retry_backoff: float = 0.5,
+        max_retry_delay: float = 60.0,
     ) -> None:
         self._provider_key = provider_key
         self._gateway_key = gateway_key
         self._max_retries = max_retries
         self._retry_backoff = retry_backoff
+        self._max_retry_delay = max_retry_delay
         self._client = httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout)
 
     # -- lifecycle ---------------------------------------------------------
@@ -305,11 +329,16 @@ class RekAIClient:
             except httpx.TransportError:
                 if attempt >= self._max_retries:
                     raise
-                time.sleep(_retry_delay(None, attempt, self._retry_backoff))
+                time.sleep(
+                    _retry_delay(None, attempt, self._retry_backoff, self._max_retry_delay) or 0.0
+                )
                 attempt += 1
                 continue
             if resp.status_code in _RETRYABLE_STATUS and attempt < self._max_retries:
-                time.sleep(_retry_delay(resp, attempt, self._retry_backoff))
+                delay = _retry_delay(resp, attempt, self._retry_backoff, self._max_retry_delay)
+                if delay is None:
+                    return resp  # asked to wait longer than we will
+                time.sleep(delay)
                 attempt += 1
                 continue
             return resp
@@ -485,11 +514,13 @@ class AsyncRekAIClient:
         timeout: float = 60.0,
         max_retries: int = 2,
         retry_backoff: float = 0.5,
+        max_retry_delay: float = 60.0,
     ) -> None:
         self._provider_key = provider_key
         self._gateway_key = gateway_key
         self._max_retries = max_retries
         self._retry_backoff = retry_backoff
+        self._max_retry_delay = max_retry_delay
         self._client = httpx.AsyncClient(base_url=base_url.rstrip("/"), timeout=timeout)
 
     # -- lifecycle ---------------------------------------------------------
@@ -525,11 +556,16 @@ class AsyncRekAIClient:
             except httpx.TransportError:
                 if attempt >= self._max_retries:
                     raise
-                await asyncio.sleep(_retry_delay(None, attempt, self._retry_backoff))
+                await asyncio.sleep(
+                    _retry_delay(None, attempt, self._retry_backoff, self._max_retry_delay) or 0.0
+                )
                 attempt += 1
                 continue
             if resp.status_code in _RETRYABLE_STATUS and attempt < self._max_retries:
-                await asyncio.sleep(_retry_delay(resp, attempt, self._retry_backoff))
+                delay = _retry_delay(resp, attempt, self._retry_backoff, self._max_retry_delay)
+                if delay is None:
+                    return resp  # asked to wait longer than we will
+                await asyncio.sleep(delay)
                 attempt += 1
                 continue
             return resp

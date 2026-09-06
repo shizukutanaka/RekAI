@@ -113,7 +113,12 @@ def to_chat_completion(resp: ChatResponse) -> ChatCompletionResponse:
                     content=resp.content or None,
                     tool_calls=resp.tool_calls,
                 ),
-                finish_reason="tool_calls" if resp.tool_calls else "stop",
+                # The provider's own reason when it gave one. The fallback
+                # is the old behavior, kept only for responses that predate
+                # finish_reason (cached entries, a provider that reports
+                # nothing) — synthesising it for everything is what made a
+                # truncated answer indistinguishable from a complete one.
+                finish_reason=resp.finish_reason or ("tool_calls" if resp.tool_calls else "stop"),
             )
         ],
         usage=resp.usage,
@@ -186,12 +191,18 @@ def _error_type_for_status(status_code: int) -> str:
     return "api_error"
 
 
-def openai_error(status_code: int, message: str) -> dict:
-    """The OpenAI error envelope, so SDK error handling parses RekAI's errors."""
+def openai_error(status_code: int, message: str, param: str | None = None) -> dict:
+    """The OpenAI error envelope, so SDK error handling parses RekAI's errors.
+
+    ``param`` names the offending request field when exactly one is at fault —
+    OpenAI populates it for a bad or missing parameter, and the SDK exposes it
+    as ``exc.param``. It stays None otherwise, as OpenAI leaves it.
+    """
     return {
         "error": {
             "message": message,
             "type": _error_type_for_status(status_code),
+            "param": param,
             "code": None,
         }
     }

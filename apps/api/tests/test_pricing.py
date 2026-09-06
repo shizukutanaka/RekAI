@@ -1,7 +1,7 @@
 import pytest
 
 from rekai.config import Settings
-from rekai.pricing import estimate_cost, price_for_model, register_price
+from rekai.pricing import estimate_cost, estimate_tokens, price_for_model, register_price
 from rekai.schemas import Usage
 
 
@@ -77,3 +77,61 @@ def test_settings_pricing_override_dict_skips_malformed_entries() -> None:
 
 def test_settings_pricing_override_dict_empty_by_default() -> None:
     assert Settings().pricing_override_dict == {}
+
+
+# --- token estimation (streaming fallback) -----------------------------------
+# estimate_tokens only runs when the provider doesn't report usage, but it still
+# feeds cost_usd and the per-client budget cap. The old whitespace word count
+# undercounted Latin text ~30% and collapsed to ~1 token for CJK (no spaces),
+# so a Japanese/Chinese app could blow past its budget effectively unmetered.
+
+
+def test_estimate_tokens_latin_uses_the_chars_per_token_rule() -> None:
+    # 44 chars / 4 ≈ 11; the old word count gave 9 for this sentence.
+    text = "The quick brown fox jumps over the lazy dog."
+    assert estimate_tokens(text) == round(len(text) / 4)
+
+
+def test_estimate_tokens_counts_cjk_per_character() -> None:
+    # No spaces -> the old estimate returned 1. Now each kana/kanji ~1 token.
+    text = "東京の天気は今日は晴れです。"  # 14 chars
+    est = estimate_tokens(text)
+    assert est >= len(text) - 1  # ~1 token/char, allowing rounding
+    # And emphatically not the 1 token the word count produced.
+    assert est > len(text.split())
+
+
+def test_estimate_tokens_mixed_script_adds_both_classes() -> None:
+    # Latin at 1/4, CJK at 1 — a mixed reply must count both, not whichever
+    # class the whitespace happened to land in.
+    text = "Error: レート制限に達しました"
+    cjk = sum(1 for ch in text if "぀" <= ch <= "鿿")
+    latin = len(text) - cjk
+    assert estimate_tokens(text) == max(1, round(cjk + latin / 4))
+
+
+def test_estimate_tokens_errs_high_for_cjk_never_catastrophically_low() -> None:
+    # The safe direction for a budget cap: a long CJK reply must estimate on the
+    # order of its character count, not a handful of tokens.
+    text = "人工知能ゲートウェイは複数のプロバイダを一つのAPIに統合します。" * 4
+    est = estimate_tokens(text)
+    assert est >= 0.8 * len(text)  # within the measured ~15% band, on the high side
+
+
+def test_estimate_tokens_floor_and_empty() -> None:
+    assert estimate_tokens("") == 1
+    assert estimate_tokens(" ") == 1
+    assert estimate_tokens("a") == 1
+
+
+def test_cjk_estimate_changes_the_budget_math() -> None:
+    # The point of the fix, in dollars: the same reply now bills ~its length in
+    # tokens instead of ~one, so the cost estimate is not ~0.
+    usage_old_would_be = Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+    reply = "レート制限に達しましたので、しばらくお待ちください。" * 3
+    tokens = estimate_tokens(reply)
+    usage_now = Usage(prompt_tokens=1, completion_tokens=tokens, total_tokens=1 + tokens)
+    cheap = estimate_cost("openai", "gpt-4o", usage_old_would_be)
+    real = estimate_cost("openai", "gpt-4o", usage_now)
+    assert real is not None and cheap is not None
+    assert real > cheap * 20  # dramatically different, not a rounding nudge

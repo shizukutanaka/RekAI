@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   ApiError,
+  cacheHitDetail,
+  cacheNote,
+  cooldownRemaining,
   cosineSimilarity,
   errorFromResponse,
+  finishNote,
   formatCost,
   gatewayAuthHeaders,
   modelsOfType,
   parseRateLimit,
   parseSSEFrame,
+  redactionNote,
 } from "./api";
 
 describe("formatCost", () => {
@@ -184,5 +189,100 @@ describe("parseSSEFrame", () => {
       kind: "delta",
       text: "x",
     });
+  });
+});
+
+describe("finishNote", () => {
+  // The API reports the provider's real finish_reason so a truncated answer is
+  // distinguishable from a complete one. The UI is where a reader actually finds
+  // out: without this the text just stops, and looks finished.
+  it("says nothing for an answer that simply ended", () => {
+    expect(finishNote("stop")).toBe("");
+    expect(finishNote("tool_calls")).toBe("");
+  });
+
+  it("says nothing when the provider did not report a reason", () => {
+    expect(finishNote(null)).toBe("");
+    expect(finishNote(undefined)).toBe("");
+  });
+
+  it("flags a max-tokens truncation, and says what to change", () => {
+    const note = finishNote("length");
+    expect(note).not.toBe("");
+    expect(note).toContain("truncated");
+    expect(note).toContain("max tokens");
+  });
+
+  it("flags a provider content filter", () => {
+    expect(finishNote("content_filter")).toContain("content filter");
+  });
+});
+
+describe("cacheNote", () => {
+  it("says nothing for a freshly generated answer", () => {
+    expect(cacheNote(false, null)).toBe("");
+    expect(cacheNote(undefined, undefined)).toBe("");
+  });
+
+  it("reports a plain cache hit when the prompt matched exactly", () => {
+    expect(cacheNote(true, null)).toBe("cached ⚡");
+    expect(cacheNote(true, undefined)).toBe("cached ⚡");
+  });
+
+  it("says the answer belongs to a different prompt on a semantic hit", () => {
+    // The API returns cache_similarity only for a semantic hit, and that is the
+    // whole point: the reader is looking at the answer to a *neighbouring*
+    // question. Rendering it as a bare "cached" claims otherwise.
+    const note = cacheNote(true, 0.9123);
+    expect(note).toContain("91%");
+    expect(note).toContain("similar prompt");
+  });
+});
+
+describe("redactionNote", () => {
+  it("says nothing when the answer was untouched", () => {
+    expect(redactionNote(null)).toBe("");
+    expect(redactionNote(undefined)).toBe("");
+    expect(redactionNote([])).toBe("");
+  });
+
+  it("reports how many secrets were scrubbed, with correct plurals", () => {
+    // The text on screen is not what the model produced; a redaction leaves a
+    // placeholder that reads like ordinary content.
+    expect(redactionNote(["aws_key"])).toBe("1 secret redacted");
+    expect(redactionNote(["aws_key", "github_pat"])).toBe("2 secrets redacted");
+  });
+});
+
+describe("cacheHitDetail", () => {
+  it("is just the ratio when nothing was served semantically", () => {
+    expect(cacheHitDetail(12, 30, 0)).toBe("12 / 30");
+    expect(cacheHitDetail(12, 30, undefined)).toBe("12 / 30");
+  });
+
+  it("breaks out semantic hits, which are approximate matches", () => {
+    // semantic_cache_hits_total is a *subset* of cache_hits_total, so the tile's
+    // headline rate silently includes answers to prompts nobody asked. That is
+    // the number an operator uses to decide the cache is earning its keep.
+    expect(cacheHitDetail(12, 30, 5)).toBe("12 / 30 · 5 semantic");
+  });
+});
+
+describe("cooldownRemaining", () => {
+  it("says nothing for a provider that is not parked", () => {
+    expect(cooldownRemaining(undefined)).toBe("");
+    expect(cooldownRemaining(0)).toBe("");
+    expect(cooldownRemaining(-1)).toBe("");
+  });
+
+  it("rounds up to whole seconds under a minute", () => {
+    expect(cooldownRemaining(0.4)).toBe("≈1s");
+    expect(cooldownRemaining(26.2)).toBe("≈27s");
+    expect(cooldownRemaining(59)).toBe("≈59s");
+  });
+
+  it("switches to minutes at a minute", () => {
+    expect(cooldownRemaining(60)).toBe("≈1m");
+    expect(cooldownRemaining(61)).toBe("≈2m");
   });
 });

@@ -8,7 +8,7 @@ from rekai_client.client import (
     RekAIError,
 )
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 __all__ = [
     "RekAIClient",
     "AsyncRekAIClient",

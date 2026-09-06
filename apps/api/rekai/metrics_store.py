@@ -7,12 +7,26 @@ store is a no-op and metrics are simply process-local.
 
 Multi-replica aware: each replica persists to its own key
 ``rekai:metrics:snapshot:<instance-id>``. A replica loads only *its own* prior
-snapshot as its startup baseline (so a restart resumes where it left off without
-double-counting its peers), while the ``/v1/usage`` read path sums this
+snapshot as its startup baseline, while the ``/v1/usage`` read path sums this
 instance's live counters with every *other* replica's persisted snapshot
 (:meth:`MetricsStore.load_others`) for a fleet-wide view. The per-instance
 ``/metrics`` endpoint stays un-aggregated so a Prometheus scraper — which
 already sums across scraped targets — doesn't double-count.
+
+The instance id is a fresh uuid per process unless ``REKAI_INSTANCE_ID`` is set,
+which is deliberate: uvicorn workers share a host, so anything host-derived
+would collapse N workers onto one key and undercount by a factor of N. The
+consequence is that **the startup baseline is only restored when
+``REKAI_INSTANCE_ID`` is set** — with a generated id a restart always begins at
+zero and its previous run is picked up as a "peer" instead. Fleet totals come
+out the same either way; only which side of the sum they arrive on differs.
+
+That also means a process start leaves a snapshot behind that nothing will ever
+overwrite, so keys carry a TTL (:data:`_SNAPSHOT_TTL_SECONDS`), refreshed on
+every flush. Without it each restart leaked a permanent key *and* a permanent
+per-request cost: ``load_others`` runs on every ``/v1/usage`` call and does one
+GET per key (measured against a local Redis: 200 restarts → 200 keys, all with
+``TTL -1``, 194 ms per call, growing linearly and never shrinking).
 """
 
 from __future__ import annotations
@@ -27,6 +41,14 @@ from rekai.logging_config import get_logger
 logger = get_logger("rekai.metrics_store")
 
 _PREFIX = "rekai:metrics:snapshot:"
+
+#: How long a snapshot outlives its last flush. A live replica rewrites its key
+#: every ``metrics_persist_interval_seconds``, so this only ever collects one
+#: that has stopped flushing — replaced by a deploy, or restarted with a fresh
+#: generated id. A day is long enough that a replica down for maintenance still
+#: shows up in the fleet total when it returns, and short enough that restarts
+#: cannot accumulate without bound.
+_SNAPSHOT_TTL_SECONDS = 24 * 60 * 60
 
 
 class MetricsStore(Protocol):
@@ -51,12 +73,15 @@ class NullMetricsStore:
 
 
 class RedisMetricsStore:
-    def __init__(self, url: str, instance_id: str) -> None:
+    def __init__(
+        self, url: str, instance_id: str, ttl_seconds: int = _SNAPSHOT_TTL_SECONDS
+    ) -> None:
         import redis.asyncio as redis
 
         self._client = redis.from_url(url, decode_responses=True)
         self._instance_id = instance_id
         self._key = _PREFIX + instance_id
+        self._ttl = ttl_seconds
 
     async def load(self) -> dict | None:
         try:
@@ -73,7 +98,9 @@ class RedisMetricsStore:
 
     async def save(self, snapshot: dict) -> None:
         try:
-            await self._client.set(self._key, json.dumps(snapshot))
+            # The TTL is set on every flush, so a live replica's key never
+            # expires under it; only one that stopped flushing does.
+            await self._client.set(self._key, json.dumps(snapshot), ex=self._ttl)
         except Exception as exc:  # pragma: no cover - network/redis failure
             logger.warning("could not persist metrics snapshot: %s", exc)
 
@@ -99,8 +126,12 @@ class RedisMetricsStore:
 def build_metrics_store(settings: Settings) -> MetricsStore:
     if settings.redis_url:
         instance_id = settings.instance_id or uuid.uuid4().hex[:12]
+        # Floor the TTL at several flush intervals so an operator who sets a very
+        # long persist interval can't configure a key that expires between its
+        # own flushes.
+        ttl = max(_SNAPSHOT_TTL_SECONDS, settings.metrics_persist_interval_seconds * 3)
         try:
-            return RedisMetricsStore(settings.redis_url, instance_id)
+            return RedisMetricsStore(settings.redis_url, instance_id, ttl)
         except Exception:  # pragma: no cover - redis client init failure
             return NullMetricsStore()
     return NullMetricsStore()

@@ -371,3 +371,69 @@ async def test_every_upstream_failure_is_counted_per_provider() -> None:
 
     assert metrics.provider_errors[("flaky-count", 502)] == 2
     metrics.provider_errors.clear()
+
+
+# --- an unknown request-level fallback is a 400, not a silent drop ------------
+# `_build_attempts` runs `ensure_allowed` over request-level fallbacks because,
+# in its own words, "quietly dropping it would leave the client believing it had
+# a fallback chain it doesn't have". But `ensure_allowed` only checks the
+# operator's allowlist. A *nonexistent* provider passed it and was then dropped
+# by the `provider is None` skip further down — so the caller got the primary's
+# error with no sign their chain had been ignored. A typo is much likelier than
+# an allowlist violation.
+
+
+async def test_unknown_request_level_fallback_is_rejected() -> None:
+    request = _req(
+        model="x",
+        provider="flaky5xx",
+        fallbacks=[{"provider": "totally-made-up", "model": "x"}],
+    )
+
+    with pytest.raises(ProviderError) as excinfo:
+        await handle_chat(request, None, _settings(), NullCache())
+
+    # Matches how an unknown *primary* provider is already reported.
+    assert excinfo.value.status_code == 400
+    assert "totally-made-up" in str(excinfo.value)
+
+
+async def test_an_unknown_fallback_is_not_masked_by_a_working_one() -> None:
+    # The dangerous shape: one good target hides the typo'd one, so the chain
+    # looks like it worked and the mistake ships.
+    request = _req(
+        model="x",
+        provider="flaky5xx",
+        fallbacks=[{"provider": "opneai", "model": "x"}, {"provider": "echo", "model": "echo"}],
+    )
+
+    with pytest.raises(ProviderError) as excinfo:
+        await handle_chat(request, None, _settings(), NullCache())
+
+    assert excinfo.value.status_code == 400
+    assert "opneai" in str(excinfo.value)
+
+
+async def test_a_valid_request_level_fallback_still_works() -> None:
+    request = _req(
+        model="x", provider="flaky5xx", fallbacks=[{"provider": "echo", "model": "echo"}]
+    )
+
+    resp = await handle_chat(request, None, _settings(), NullCache())
+
+    assert resp.provider == "echo"
+    assert resp.fallback_used is True
+
+
+async def test_a_server_configured_unknown_fallback_is_still_skipped() -> None:
+    # Deliberately asymmetric. A bad REKAI_FALLBACK_TARGETS entry is an operator
+    # misconfiguration, and failing every request over it would be worse than
+    # logging and moving on — unlike a request-level target, the caller cannot
+    # fix it and did not ask for it.
+    settings = _settings(fallback_enabled=True, fallback_targets="totally-made-up:x,echo:echo")
+    request = _req(model="x", provider="flaky5xx")
+
+    resp = await handle_chat(request, None, settings, NullCache())
+
+    assert resp.provider == "echo"
+    assert resp.fallback_used is True

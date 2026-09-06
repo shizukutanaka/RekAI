@@ -47,6 +47,10 @@ class EchoProvider(Provider):
                 completion_tokens=completion_tokens,
                 total_tokens=prompt_tokens + completion_tokens,
             ),
+            # Echo always says everything it intends to; it has no budget to
+            # exhaust and no safety layer, so this is genuinely "stop", not a
+            # placeholder standing in for an unknown.
+            finish_reason="stop",
         )
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
@@ -63,7 +67,7 @@ class EchoProvider(Provider):
         for i, word in enumerate(words):
             yield StreamEvent(delta=word if i == 0 else " " + word)
         # echo computes exact usage, so report it (not an estimate).
-        yield StreamEvent(usage=result.usage)
+        yield StreamEvent(usage=result.usage, finish_reason=result.finish_reason)
 
     async def embed(self, inputs: list[str], model: str, api_key: str | None) -> EmbeddingResult:
         tokens = sum(_count_tokens(t) for t in inputs)
