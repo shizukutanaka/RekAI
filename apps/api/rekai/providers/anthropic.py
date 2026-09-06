@@ -370,9 +370,23 @@ def _translate_tools(openai_tools: list[dict]) -> list[dict]:
 
 
 def _translate_tool_choice(choice: object) -> dict | None:
-    """OpenAI tool_choice -> Anthropic tool_choice (None means leave default)."""
-    if choice is None or choice == "none":
+    """OpenAI tool_choice -> Anthropic tool_choice.
+
+    ``None`` (the caller didn't set it) means leave Anthropic's own default —
+    the payload omits ``tool_choice`` entirely, which behaves as ``auto`` once
+    ``tools`` is present. ``"none"`` is a different, explicit instruction: the
+    model must not call *any* tool this turn even though tools are declared (an
+    OpenAI-style "define tools for context, but answer in plain text now").
+    Anthropic has its own ``{"type": "none"}`` for exactly that, distinct from
+    omitting the field — collapsing the two here previously sent Anthropic
+    ``tools`` with no ``tool_choice``, which defaults to ``auto`` and let the
+    model call a tool the caller had explicitly forbidden. The same class of
+    bug has been reported against other gateways translating this same field.
+    """
+    if choice is None:
         return None
+    if choice == "none":
+        return {"type": "none"}
     if choice == "auto":
         return {"type": "auto"}
     if choice == "required":

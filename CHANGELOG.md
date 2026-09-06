@@ -25,6 +25,22 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the response. Verified: 16 new tests, 12 of which fail against the code
   before this fix; live end-to-end against the OpenAI-compatible endpoint with
   both list and bare-string forms.
+- **`tool_choice: "none"` let Anthropic call a tool anyway.** OpenAI's `"none"`
+  means "the tools are declared for context, but do not call one this turn" —
+  a real, documented instruction, not the absence of one. RekAI's own
+  translation collapsed it to the same `None` used for "the caller didn't set
+  this," so `_build_payload` sent Anthropic `tools: [...]` with no
+  `tool_choice` key at all. Anthropic defaults an omitted `tool_choice` to
+  `auto` once tools are present, so the model could call the very tool the
+  caller had just forbidden — measured directly: a request with
+  `tool_choice: "none"` reached a stub Anthropic server with `tools` present
+  and `tool_choice` **absent**. Anthropic's API has a distinct
+  `{"type": "none"}` for exactly this case, confirmed against Anthropic's own
+  docs; other gateways translating this same field (LiteLLM, Vercel's AI SDK)
+  have hit and fixed the identical bug. `_translate_tool_choice` now returns
+  `{"type": "none"}` for `"none"`, distinct from the `None` it still returns
+  for "unset." `"auto"`, an explicit tool name, and the unset case are all
+  unaffected — verified live against a stub Anthropic server for all four.
 
 ## [1.3.0] - 2026-08-18
 

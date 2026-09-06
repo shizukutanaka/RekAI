@@ -42,7 +42,10 @@ def test_translate_tools() -> None:
     [
         ("auto", {"type": "auto"}),
         ("required", {"type": "any"}),
-        ("none", None),
+        # "none" is an explicit "don't call a tool this turn" and must not
+        # collapse to the same None as "unset" — that omitted tool_choice
+        # entirely, which Anthropic defaults to auto once tools is present.
+        ("none", {"type": "none"}),
         (None, None),
         (
             {"type": "function", "function": {"name": "get_weather"}},
@@ -172,3 +175,58 @@ async def test_anthropic_stream_events_assembles_tool_calls(monkeypatch) -> None
     assert tool_calls[0]["id"] == "tu_1"
     assert tool_calls[0]["function"]["name"] == "get_weather"
     assert tool_calls[0]["function"]["arguments"] == '{"city":"Tokyo"}'
+
+
+async def test_anthropic_chat_tool_choice_none_forbids_tool_use(monkeypatch) -> None:
+    """tool_choice="none" must reach Anthropic as an explicit refusal to call a
+    tool, not as an omitted field.
+
+    `tools` and `tool_choice` are set independently in `_build_payload` — the
+    former unconditionally once `request.tools` is truthy, the latter only
+    `if choice is not None`. Because `_translate_tool_choice` used to map
+    "none" to Python's ``None`` (the same value it uses for "the caller didn't
+    set this"), Anthropic received `tools: [...]` with no `tool_choice` key at
+    all, which Anthropic defaults to `auto` — letting the model call the very
+    tool the caller had just forbidden. Anthropic's API has a distinct
+    `{"type": "none"}` for exactly this case."""
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {
+                "model": "claude-sonnet-4-6",
+                "content": [{"type": "text", "text": "It's sunny."}],
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json, headers):
+            captured["payload"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+
+    req = ChatRequest(
+        model="claude-sonnet-4-6",
+        messages=[ChatMessage(role="user", content="weather in Tokyo?")],
+        tools=[OPENAI_TOOL],
+        tool_choice="none",
+    )
+    await AnthropicProvider().chat(req, api_key="sk-ant")
+
+    # The tools stay declared (for context) ...
+    assert captured["payload"]["tools"][0]["name"] == "get_weather"
+    # ... but tool_choice must explicitly forbid using them, not be absent.
+    assert "tool_choice" in captured["payload"]
+    assert captured["payload"]["tool_choice"] == {"type": "none"}
