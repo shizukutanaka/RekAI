@@ -24,6 +24,31 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pattern alone. Verified live end-to-end on both the non-streaming and
   streaming chat endpoints: a Gemini-shaped key in a prompt now comes back as
   `[REDACTED:google_api_key]` on both.
+- **Concurrent `add()`/`revoke()` on the dynamic key store could silently lose
+  one of them — including a revocation.** Both are read-modify-write against a
+  single JSON blob (`list_keys()` then a write), with no synchronization
+  between them. With the Redis-backed store — the shared, multi-worker
+  configuration this feature exists for — `cache.get`/`cache.set` perform real
+  network I/O and each suspends the calling coroutine, so two concurrent
+  writers can both read the same set before either writes, and the second
+  write silently overwrites the first's. Measured directly with a cache stub
+  whose `get`/`set` genuinely suspend (mirroring real Redis I/O, which the
+  process-local `MemoryCache` never does): two concurrent `add()` calls for
+  different keys left only one stored; six concurrent adds left only one of
+  six. The dangerous case is a revocation racing anything else — an operator
+  revoking a key they believe is compromised, concurrently with any other key
+  operation, could have the revocation silently discarded while the API
+  reports success, leaving the compromised key valid. `add`/`revoke` now
+  serialize their critical section behind a short-lived mutex built from
+  `cache.add` (Redis `SET NX`) — this codebase's existing atomic-claim idiom,
+  already used the same way by `idempotency.py`'s in-progress sentinel — with
+  a TTL so a crashed holder can't wedge every future write. Fails open on a
+  lock-backend error or exhausted retries, consistent with the rest of the
+  codebase's Redis posture. Verified: 3 new tests reproduce the race
+  deterministically (a wrapper that forces the same real-I/O suspension a
+  Redis backend has) and fail against the code before this fix; live via real
+  concurrent HTTP requests against a running server's `/admin/keys` — 10
+  concurrent adds all return 201 and all 10 keys persist.
 
 ### Fixed
 - **`stop` was accepted and silently discarded.** OpenAI's `stop` sequences are
