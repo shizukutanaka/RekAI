@@ -124,6 +124,8 @@ class AnthropicProvider(Provider):
             "max_tokens": request.max_tokens or settings.anthropic_default_max_tokens,
             "temperature": request.temperature,
         }
+        if request.stop:
+            payload["stop_sequences"] = request.stop
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
         # Structured output: Anthropic has no `response_format`, but forcing a

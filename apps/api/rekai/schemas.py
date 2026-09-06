@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Role = Literal["system", "user", "assistant", "tool"]
 
@@ -39,6 +39,13 @@ class ChatRequest(BaseModel):
     )
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=None, ge=1)
+    stop: list[str] | None = Field(
+        default=None,
+        description="Sequences that stop generation, as OpenAI's `stop`. A bare "
+        "string is accepted and normalized to a one-element list. Forwarded to "
+        "every provider under its own name; a provider's own limit (OpenAI "
+        "allows 4) surfaces as that provider's error.",
+    )
     cache: bool = Field(default=True, description="Whether this request may be served from cache.")
     fallbacks: list[FallbackTarget] | None = Field(
         default=None,
@@ -68,6 +75,25 @@ class ChatRequest(BaseModel):
         "automatically and ignores it. Per-message placement is also supported "
         "via a message's own cache_control.",
     )
+
+    @field_validator("stop", mode="before")
+    @classmethod
+    def _normalize_stop(cls, v: object) -> object:
+        """Accept OpenAI's `str | list[str]` and hand every provider a list.
+
+        Normalizing here rather than in each provider is deliberate: four
+        payload builders each remembering to widen a string is exactly the
+        duplication that let Ollama miss `max_tokens`. Empty strings are dropped
+        — they would stop generation immediately — and an empty result becomes
+        None so it is omitted from the payload rather than sent as `[]`.
+        """
+        if v is None:
+            return None
+        items = [v] if isinstance(v, str) else v
+        if not isinstance(items, list):
+            return v  # let pydantic report the type error
+        kept = [s for s in items if isinstance(s, str) and s]
+        return kept or None
 
 
 class Usage(BaseModel):
@@ -118,6 +144,7 @@ class ChatCompletionsRequest(BaseModel):
     temperature: float | None = None
     max_tokens: int | None = Field(default=None, ge=1)
     max_completion_tokens: int | None = Field(default=None, ge=1)
+    stop: str | list[str] | None = None
     stream: bool = False
     stream_options: StreamOptions | None = None
     tools: list[dict[str, Any]] | None = None

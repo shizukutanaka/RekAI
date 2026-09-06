@@ -43,6 +43,8 @@ def _options(request: ChatRequest) -> dict:
     options: dict = {"temperature": request.temperature}
     if request.max_tokens is not None:
         options["num_predict"] = request.max_tokens
+    if request.stop:
+        options["stop"] = request.stop
     return options
 
 

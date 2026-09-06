@@ -6,6 +6,26 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **`stop` was accepted and silently discarded.** OpenAI's `stop` sequences are
+  a control parameter — where generation ends — not a tuning knob like `seed`
+  that RekAI deliberately tolerates and ignores. `ChatCompletionsRequest`'s
+  `extra="allow"` meant a caller's `stop` was accepted with a 200 and never
+  reached any provider: measured directly against all four backends with the
+  HTTP layer captured, OpenAI, Anthropic and Gemini already forward
+  `max_tokens` under their own spelling, but none of them received `stop` under
+  any name, and the model ran past the point the caller asked it to stop.
+  `stop` is now a declared field on `ChatRequest`, forwarded as `stop` (OpenAI,
+  Ollama's `options.stop`), `stop_sequences` (Anthropic) or
+  `generationConfig.stopSequences` (Gemini). A bare string (OpenAI's other
+  accepted shape) is normalized to a one-element list in one place, rather than
+  every payload builder remembering to widen it — the kind of duplication that
+  let Ollama's `max_tokens` go missing in the first place. It also now keys
+  both the exact and semantic cache, matching every other field that changes
+  the response. Verified: 16 new tests, 12 of which fail against the code
+  before this fix; live end-to-end against the OpenAI-compatible endpoint with
+  both list and bare-string forms.
+
 ## [1.3.0] - 2026-08-18
 
 ### Security

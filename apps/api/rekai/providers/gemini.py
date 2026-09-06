@@ -84,6 +84,8 @@ class GeminiProvider(Provider):
         }
         if request.max_tokens is not None:
             payload["generationConfig"]["maxOutputTokens"] = request.max_tokens
+        if request.stop:
+            payload["generationConfig"]["stopSequences"] = request.stop
 
         # Best-effort structured output: OpenAI's response_format maps onto
         # Gemini's generationConfig. json_object -> JSON mime type; json_schema
