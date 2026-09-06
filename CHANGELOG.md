@@ -6,6 +6,25 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **Secret redaction had no pattern for Google/Gemini API keys.** RekAI proxies
+  Gemini — one of its four core providers alongside OpenAI, Anthropic and
+  Ollama — but `_SECRET_PATTERNS` only covered OpenAI's and Anthropic's own key
+  formats. A Google API key (`AIza` + 35 more chars, 39 total — Gemini, Maps,
+  every Google Cloud API) echoed back in a model's output — a tool result, RAG
+  context, or an injected instruction asking the model to repeat it — passed
+  through both `/v1/chat` and `/v1/chat/stream` untouched, while the identical
+  scenario with an OpenAI or Anthropic key was already caught. Measured
+  directly: `redact_secrets()` against text containing a synthetic Gemini-shaped
+  key returned zero hits. Added `google_api_key` to `_SECRET_PATTERNS` and its
+  required streaming sentinel (`"AIza"`, so `StreamRedactor` holds back the
+  right span rather than letting the pattern straddle an SSE chunk boundary
+  undetected) — the codebase already has a test enforcing that every secret
+  pattern ships with one, which failed immediately and correctly on the new
+  pattern alone. Verified live end-to-end on both the non-streaming and
+  streaming chat endpoints: a Gemini-shaped key in a prompt now comes back as
+  `[REDACTED:google_api_key]` on both.
+
 ### Fixed
 - **`stop` was accepted and silently discarded.** OpenAI's `stop` sequences are
   a control parameter — where generation ends — not a tuning knob like `seed`

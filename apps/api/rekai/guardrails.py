@@ -118,6 +118,11 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
     ("openai_api_key", re.compile(r"\bsk-(proj-)?[A-Za-z0-9]{20,}\b")),
     ("anthropic_api_key", re.compile(r"\bsk-ant-[A-Za-z0-9\-]{20,}\b")),
+    # Google's own key format: "AIza" + 35 more chars, 39 total (Gemini, Maps,
+    # Firebase, every other Google Cloud API key). RekAI proxies Gemini — one
+    # of its four core providers alongside OpenAI and Anthropic above — and had
+    # patterns for those two but not this one.
+    ("google_api_key", re.compile(r"\bAIza[A-Za-z0-9_\-]{35}\b")),
     ("stripe_secret_key", re.compile(r"\bsk_(live|test)_[A-Za-z0-9]{16,}\b")),
     ("github_token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b")),
     ("slack_token", re.compile(r"\bxox[baprs]-[A-Za-z0-9\-]{10,}\b")),
@@ -163,6 +168,7 @@ _STREAM_SENTINELS: tuple[tuple[str, int], ...] = (
     ("ghr_", 256),
     ("xox", 256),
     ("AKIA", 64),
+    ("AIza", 128),
     ("Bearer", 256),
 )
 _SENTINEL_OVERLAP = max(len(s) for s, _ in _STREAM_SENTINELS) - 1
