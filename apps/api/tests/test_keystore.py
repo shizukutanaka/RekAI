@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from rekai.cache import MemoryCache, NullCache
@@ -97,3 +98,64 @@ async def test_reading_a_plaintext_blob_with_a_cipher_degrades_to_empty() -> Non
     await DynamicKeyStore(cache).add("sk-dyn-a")  # no cipher -> plaintext
     reader = DynamicKeyStore(cache, KeyCipher(generate_key()))
     assert await reader.list_keys() == []
+
+
+class _AsyncIOCache:
+    """Wraps another CacheBackend so get/set/add/delete actually suspend the
+    calling coroutine (an ``asyncio.sleep(0)`` around each), the way a real
+    Redis client's I/O does and ``MemoryCache``'s in-memory calls never do.
+
+    ``MemoryCache.get``/``set`` contain no genuine ``await``, so two coroutines
+    calling ``add()`` back-to-back never actually interleave against it —
+    which would make a concurrency test here pass by accident and prove
+    nothing about the Redis-backed deployment the locking exists for. This
+    forces the real interleaving deterministically instead of depending on
+    timing.
+    """
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+
+    async def get(self, key: str) -> str | None:
+        await asyncio.sleep(0)
+        return await self._inner.get(key)
+
+    async def set(self, key: str, value: str, ttl: int) -> None:
+        await asyncio.sleep(0)
+        await self._inner.set(key, value, ttl)
+
+    async def add(self, key: str, value: str, ttl: int) -> bool:
+        await asyncio.sleep(0)
+        return await self._inner.add(key, value, ttl)
+
+    async def delete(self, key: str) -> None:
+        await asyncio.sleep(0)
+        await self._inner.delete(key)
+
+
+async def test_concurrent_add_does_not_lose_a_key() -> None:
+    """Two admins (or one retried request) adding different keys at the same
+    time must both stick — not have one silently overwritten by the other's
+    stale read. Reproduces the race from the module docstring: without the
+    lock in add(), this leaves only one of the two keys stored."""
+    store = DynamicKeyStore(_AsyncIOCache(MemoryCache()))
+    await asyncio.gather(store.add("sk-dyn-a"), store.add("sk-dyn-b"))
+    assert sorted(await store.list_keys()) == ["sk-dyn-a", "sk-dyn-b"]
+
+
+async def test_concurrent_add_and_revoke_do_not_lose_each_other() -> None:
+    store = DynamicKeyStore(_AsyncIOCache(MemoryCache()))
+    await store.add("sk-existing")
+    await asyncio.gather(store.add("sk-new"), store.revoke("sk-existing"))
+    assert sorted(await store.list_keys()) == ["sk-new"]
+
+
+async def test_many_concurrent_adds_all_survive() -> None:
+    # More than a pair, to show the lock actually serializes N-way contention
+    # rather than only happening to work for two. Kept small: each writer
+    # beyond the one holding the lock waits out a retry poll, and this is an
+    # admin-only, low-frequency operation, not a hot path worth over-testing.
+    store = DynamicKeyStore(_AsyncIOCache(MemoryCache()))
+    keys = [f"sk-dyn-{i}" for i in range(6)]
+    await asyncio.gather(*(store.add(k) for k in keys))
+    assert sorted(await store.list_keys()) == sorted(keys)

@@ -78,22 +78,39 @@ class OpenAIProvider(Provider):
     def server_key_configured(self) -> bool:
         return not self.requires_key or bool(self._server_key())
 
-    async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
-        settings = get_settings()
+    def _build_payload(self, request: ChatRequest, *, stream: bool) -> dict:
+        """The /chat/completions body, shared by the chat and streaming paths.
 
+        They were two literals differing only in the two streaming keys, with
+        every pass-through field written twice — the duplication that let the
+        Ollama provider forget `max_tokens` entirely. Same shape as
+        AnthropicProvider._build_payload.
+        """
         payload: dict = {
             "model": request.model,
             "messages": [m.model_dump(exclude_none=True) for m in request.messages],
             "temperature": request.temperature,
         }
+        if stream:
+            payload["stream"] = True
+            # Ask for a final usage chunk for accurate accounting.
+            payload["stream_options"] = {"include_usage": True}
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
+        if request.stop:
+            payload["stop"] = request.stop
         if request.tools is not None:
             payload["tools"] = request.tools
         if request.tool_choice is not None:
             payload["tool_choice"] = request.tool_choice
         if request.response_format is not None:
             payload["response_format"] = request.response_format
+        return payload
+
+    async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
+        settings = get_settings()
+
+        payload = self._build_payload(request, stream=False)
 
         url = f"{self._base_url().rstrip('/')}/chat/completions"
         try:
@@ -138,22 +155,7 @@ class OpenAIProvider(Provider):
     ) -> AsyncIterator[StreamEvent]:
         settings = get_settings()
 
-        payload: dict = {
-            "model": request.model,
-            "messages": [m.model_dump(exclude_none=True) for m in request.messages],
-            "temperature": request.temperature,
-            "stream": True,
-            # Ask for a final usage chunk for accurate accounting.
-            "stream_options": {"include_usage": True},
-        }
-        if request.max_tokens is not None:
-            payload["max_tokens"] = request.max_tokens
-        if request.tools is not None:
-            payload["tools"] = request.tools
-        if request.tool_choice is not None:
-            payload["tool_choice"] = request.tool_choice
-        if request.response_format is not None:
-            payload["response_format"] = request.response_format
+        payload = self._build_payload(request, stream=True)
 
         url = f"{self._base_url().rstrip('/')}/chat/completions"
         tool_calls_acc: dict[int, dict] = {}

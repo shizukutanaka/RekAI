@@ -153,6 +153,20 @@ def test_redact_aws_key() -> None:
     assert "AKIA1234567890ABCDEF" not in redacted
 
 
+def test_redact_google_api_key() -> None:
+    # RekAI proxies Gemini, one of its four core providers, but the secret
+    # patterns only covered OpenAI and Anthropic's own key formats until now —
+    # a Google/Gemini key echoed back in a response passed through untouched
+    # while the other two would have been caught. Real Google API keys are
+    # "AIza" + 35 more chars, 39 total.
+    key = "AIza" + "".join(str(i % 10) for i in range(35))
+    assert len(key) == 39
+    redacted, hits = redact_secrets(f"here is my key: {key} keep it safe")
+    assert hits == ["google_api_key"]
+    assert key not in redacted
+    assert "[REDACTED:google_api_key]" in redacted
+
+
 def test_redact_private_key_block() -> None:
     block = "-----BEGIN RSA PRIVATE KEY-----\nMIIBogIBAAJ...\n-----END RSA PRIVATE KEY-----"
     redacted, hits = redact_secrets(f"Here's the key:\n{block}\nDone.")
@@ -283,6 +297,7 @@ def test_redaction_survives_an_idempotent_replay() -> None:
 _STREAM_SECRETS = {
     "openai_api_key": "sk-" + "a" * 40,
     "anthropic_api_key": "sk-ant-" + "b" * 30,
+    "google_api_key": "AIza" + "z" * 35,
     "stripe_secret_key": "sk_live_" + "c" * 24,
     "github_token": "ghp_" + "d" * 40,
     "slack_token": "xoxb-" + "e" * 20,

@@ -85,6 +85,11 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         )
     provider, model = _resolve_provider_and_model(req)
     temperature = req.temperature if req.temperature is not None else _DEFAULT_TEMPERATURE
+    # OpenAI accepts `stop` as a bare string; ChatRequest.stop is declared
+    # list[str] | None, so mypy needs this widened before construction even
+    # though ChatRequest's own before-validator would normalize it at runtime
+    # regardless of the caller.
+    stop = [req.stop] if isinstance(req.stop, str) else req.stop
     return ChatRequest(
         model=model,
         messages=[_to_chat_message(m) for m in req.messages],
@@ -92,6 +97,7 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         temperature=temperature,
         # OpenAI renamed max_tokens -> max_completion_tokens; accept either.
         max_tokens=req.max_tokens or req.max_completion_tokens,
+        stop=stop,
         cache=True,
         tools=req.tools,
         tool_choice=req.tool_choice,

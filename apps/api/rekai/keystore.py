@@ -15,12 +15,28 @@ Unlike BYOK (transient, never stored), dynamic keys *are* persisted server-side
 — exactly the case ``rekai.security.KeyCipher`` exists for. Pass a ``cipher`` to
 encrypt the blob at rest (e.g. in a shared Redis an operator doesn't fully
 trust); omit it to store plaintext, same as before this existed.
+
+``add``/``revoke`` are read-modify-write against that one blob, so they need to
+serialize against each other. In the Redis-backed, multi-worker case — the
+deployment this whole feature is *for* — two concurrent writes really can
+interleave: ``cache.get``/``cache.set`` perform real network I/O and each
+suspends the calling coroutine, letting another worker's request run in
+between. Measured directly: two concurrent ``add()`` calls for different keys,
+against a backend whose ``get``/``set`` actually await, left only one of the
+two keys stored — the second writer's ``set`` silently overwrote the first's.
+(The equivalent single-process, in-memory case happens not to race today,
+because ``MemoryCache.get``/``set`` contain no real ``await`` and so never
+yield control between them — but that is an accident of the in-memory
+backend's implementation, not a guarantee, so the locking below applies
+regardless of which backend is configured.) See ``_with_lock``.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
-from typing import TYPE_CHECKING
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, TypeVar
 
 from rekai.cache import CacheBackend
 from rekai.logging_config import get_logger
@@ -34,6 +50,17 @@ _CACHE_KEY = "rekai:api_keys:dynamic"
 # Cache backends require a positive TTL; there's no "forever" option, so this
 # stands in for one (renewed on every write, so it never lapses in practice).
 _TTL_SECONDS = 10 * 365 * 24 * 3600
+
+# A short-lived mutex around add()/revoke()'s critical section, keyed
+# alongside the blob it protects. TTL is a safety net, not the expected hold
+# time: a crashed holder's lock self-expires instead of wedging every future
+# write, the same role a TTL plays for idempotency's in-progress sentinel.
+_LOCK_KEY = _CACHE_KEY + ":lock"
+_LOCK_TTL_SECONDS = 10
+_LOCK_RETRY_DELAY_SECONDS = 0.05
+_LOCK_MAX_ATTEMPTS = 40  # ~2s worst case under contention
+
+T = TypeVar("T")
 
 
 class DynamicKeyStore:
@@ -76,15 +103,52 @@ class DynamicKeyStore:
             payload = self._cipher.encrypt(payload)
         await self._cache.set(_CACHE_KEY, payload, ttl=_TTL_SECONDS)
 
+    async def _with_lock(self, mutate: Callable[[], Awaitable[T]]) -> T:
+        """Run ``mutate`` (a read-modify-write against the key set) holding a
+        short-lived mutex, so a concurrent ``add``/``revoke`` can't observe the
+        same read and silently overwrite this one's write (see module
+        docstring). ``cache.add`` — Redis ``SET NX`` — is this codebase's
+        atomic-claim idiom (``idempotency.py`` uses the same primitive for its
+        in-progress sentinel); reused here as the lock itself.
+
+        Fails open, in both senses, deliberately: a lock-backend error is
+        treated as an acquired lock, and exhausting the retry budget under
+        contention proceeds unlocked rather than failing the request. Either
+        one *can* reproduce the very race this exists to prevent, but refusing
+        to manage keys at all because the *lock* is unavailable is worse for an
+        operator who is, for instance, trying to revoke a compromised key.
+        """
+        for _ in range(_LOCK_MAX_ATTEMPTS):
+            try:
+                acquired = await self._cache.add(_LOCK_KEY, "1", _LOCK_TTL_SECONDS)
+            except Exception:  # pragma: no cover - fail open on backend error
+                acquired = True
+            if acquired:
+                try:
+                    return await mutate()
+                finally:
+                    try:
+                        await self._cache.delete(_LOCK_KEY)
+                    except Exception:  # pragma: no cover - fail open
+                        pass
+            await asyncio.sleep(_LOCK_RETRY_DELAY_SECONDS)
+        return await mutate()
+
     async def add(self, key: str) -> None:
-        keys = set(await self.list_keys())
-        keys.add(key)
-        await self._save(keys)
+        async def _mutate() -> None:
+            keys = set(await self.list_keys())
+            keys.add(key)
+            await self._save(keys)
+
+        await self._with_lock(_mutate)
 
     async def revoke(self, key: str) -> bool:
-        keys = set(await self.list_keys())
-        if key not in keys:
-            return False
-        keys.discard(key)
-        await self._save(keys)
-        return True
+        async def _mutate() -> bool:
+            keys = set(await self.list_keys())
+            if key not in keys:
+                return False
+            keys.discard(key)
+            await self._save(keys)
+            return True
+
+        return await self._with_lock(_mutate)

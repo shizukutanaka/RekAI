@@ -6,6 +6,86 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **Secret redaction had no pattern for Google/Gemini API keys.** RekAI proxies
+  Gemini — one of its four core providers alongside OpenAI, Anthropic and
+  Ollama — but `_SECRET_PATTERNS` only covered OpenAI's and Anthropic's own key
+  formats. A Google API key (`AIza` + 35 more chars, 39 total — Gemini, Maps,
+  every Google Cloud API) echoed back in a model's output — a tool result, RAG
+  context, or an injected instruction asking the model to repeat it — passed
+  through both `/v1/chat` and `/v1/chat/stream` untouched, while the identical
+  scenario with an OpenAI or Anthropic key was already caught. Measured
+  directly: `redact_secrets()` against text containing a synthetic Gemini-shaped
+  key returned zero hits. Added `google_api_key` to `_SECRET_PATTERNS` and its
+  required streaming sentinel (`"AIza"`, so `StreamRedactor` holds back the
+  right span rather than letting the pattern straddle an SSE chunk boundary
+  undetected) — the codebase already has a test enforcing that every secret
+  pattern ships with one, which failed immediately and correctly on the new
+  pattern alone. Verified live end-to-end on both the non-streaming and
+  streaming chat endpoints: a Gemini-shaped key in a prompt now comes back as
+  `[REDACTED:google_api_key]` on both.
+- **Concurrent `add()`/`revoke()` on the dynamic key store could silently lose
+  one of them — including a revocation.** Both are read-modify-write against a
+  single JSON blob (`list_keys()` then a write), with no synchronization
+  between them. With the Redis-backed store — the shared, multi-worker
+  configuration this feature exists for — `cache.get`/`cache.set` perform real
+  network I/O and each suspends the calling coroutine, so two concurrent
+  writers can both read the same set before either writes, and the second
+  write silently overwrites the first's. Measured directly with a cache stub
+  whose `get`/`set` genuinely suspend (mirroring real Redis I/O, which the
+  process-local `MemoryCache` never does): two concurrent `add()` calls for
+  different keys left only one stored; six concurrent adds left only one of
+  six. The dangerous case is a revocation racing anything else — an operator
+  revoking a key they believe is compromised, concurrently with any other key
+  operation, could have the revocation silently discarded while the API
+  reports success, leaving the compromised key valid. `add`/`revoke` now
+  serialize their critical section behind a short-lived mutex built from
+  `cache.add` (Redis `SET NX`) — this codebase's existing atomic-claim idiom,
+  already used the same way by `idempotency.py`'s in-progress sentinel — with
+  a TTL so a crashed holder can't wedge every future write. Fails open on a
+  lock-backend error or exhausted retries, consistent with the rest of the
+  codebase's Redis posture. Verified: 3 new tests reproduce the race
+  deterministically (a wrapper that forces the same real-I/O suspension a
+  Redis backend has) and fail against the code before this fix; live via real
+  concurrent HTTP requests against a running server's `/admin/keys` — 10
+  concurrent adds all return 201 and all 10 keys persist.
+
+### Fixed
+- **`stop` was accepted and silently discarded.** OpenAI's `stop` sequences are
+  a control parameter — where generation ends — not a tuning knob like `seed`
+  that RekAI deliberately tolerates and ignores. `ChatCompletionsRequest`'s
+  `extra="allow"` meant a caller's `stop` was accepted with a 200 and never
+  reached any provider: measured directly against all four backends with the
+  HTTP layer captured, OpenAI, Anthropic and Gemini already forward
+  `max_tokens` under their own spelling, but none of them received `stop` under
+  any name, and the model ran past the point the caller asked it to stop.
+  `stop` is now a declared field on `ChatRequest`, forwarded as `stop` (OpenAI,
+  Ollama's `options.stop`), `stop_sequences` (Anthropic) or
+  `generationConfig.stopSequences` (Gemini). A bare string (OpenAI's other
+  accepted shape) is normalized to a one-element list in one place, rather than
+  every payload builder remembering to widen it — the kind of duplication that
+  let Ollama's `max_tokens` go missing in the first place. It also now keys
+  both the exact and semantic cache, matching every other field that changes
+  the response. Verified: 16 new tests, 12 of which fail against the code
+  before this fix; live end-to-end against the OpenAI-compatible endpoint with
+  both list and bare-string forms.
+- **`tool_choice: "none"` let Anthropic call a tool anyway.** OpenAI's `"none"`
+  means "the tools are declared for context, but do not call one this turn" —
+  a real, documented instruction, not the absence of one. RekAI's own
+  translation collapsed it to the same `None` used for "the caller didn't set
+  this," so `_build_payload` sent Anthropic `tools: [...]` with no
+  `tool_choice` key at all. Anthropic defaults an omitted `tool_choice` to
+  `auto` once tools are present, so the model could call the very tool the
+  caller had just forbidden — measured directly: a request with
+  `tool_choice: "none"` reached a stub Anthropic server with `tools` present
+  and `tool_choice` **absent**. Anthropic's API has a distinct
+  `{"type": "none"}` for exactly this case, confirmed against Anthropic's own
+  docs; other gateways translating this same field (LiteLLM, Vercel's AI SDK)
+  have hit and fixed the identical bug. `_translate_tool_choice` now returns
+  `{"type": "none"}` for `"none"`, distinct from the `None` it still returns
+  for "unset." `"auto"`, an explicit tool name, and the unset case are all
+  unaffected — verified live against a stub Anthropic server for all four.
+
 ## [1.3.0] - 2026-08-18
 
 ### Security
