@@ -42,3 +42,19 @@ def test_clear_resets_everything() -> None:
     tracker.clear()
     assert tracker.record_failure("a") == 1
     assert tracker.record_failure("b") == 1
+
+
+def test_reset_clears_a_single_key() -> None:
+    tracker = ConsecutiveFailureTracker()
+    tracker.record_failure("a")
+    tracker.record_failure("a")
+    tracker.record_failure("b")
+    tracker.reset("a")
+    assert tracker.record_failure("a") == 1  # starts over, not 3
+    assert tracker.record_failure("b") == 2  # untouched by resetting "a"
+
+
+def test_reset_on_an_unknown_key_is_a_noop() -> None:
+    tracker = ConsecutiveFailureTracker()
+    tracker.reset("never-failed")  # must not raise
+    assert tracker.record_failure("never-failed") == 1

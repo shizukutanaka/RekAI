@@ -85,6 +85,24 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `{"type": "none"}` for `"none"`, distinct from the `None` it still returns
   for "unset." `"auto"`, an explicit tool name, and the unset case are all
   unaffected — verified live against a stub Anthropic server for all four.
+- **The 5xx circuit breaker could re-trip on a single failure.** Its own module
+  docstring promises cooldown only after `circuit_breaker_threshold` failures
+  *in a row*; the counter isn't reset anywhere when a trip actually happens —
+  only `record_success` clears it. So the count left behind by a trip
+  (>= threshold) was still sitting in `ConsecutiveFailureTracker` once cooldown
+  expired and the provider was retried, and a single fresh failure added to it
+  crossed the threshold again immediately. Measured directly: threshold 3,
+  three failures trip the breaker as intended (count 1, 2, 3); one more
+  failure after that reads count 4 — one request, not three. `record_failure`
+  and `record_success`/`reset` were always correct in isolation; the gap was
+  that neither call site in `service.py` reset the tracker at the moment of a
+  trip. Both now call the tracker's new `reset()` right after `mark_shared`.
+  Verified: 3 new tests (1 driving `handle_chat_stream` directly with a
+  provider that always 503s, reproducing the exact trip → expire → one-failure
+  sequence) fail against the code before this fix; live against a real uvicorn
+  and a stub 5xx backend — two failures park the provider
+  (`parked_providers: {"custom": ...}`), cooldown expires, one more failure
+  leaves it unparked, and a second fresh consecutive failure parks it again.
 
 ## [1.3.0] - 2026-08-18
 

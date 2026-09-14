@@ -321,6 +321,10 @@ async def handle_chat(
                         cache, attempt.provider_name, settings.provider_cooldown_seconds
                     )
                     metrics.record_cooldown()
+                    # Start the next streak fresh — without this, a single
+                    # failure once cooldown expires trips the breaker again
+                    # immediately (see ConsecutiveFailureTracker.reset).
+                    consecutive_failures.reset(attempt.provider_name)
             # Fall through on upstream failures and rate limits (after in-place
             # retries), but not on other client (4xx) errors.
             transient = exc.status_code >= 500 or exc.status_code == 429
@@ -467,6 +471,8 @@ async def handle_chat_stream(
                     cache, provider_name, settings.provider_cooldown_seconds
                 )
                 metrics.record_cooldown()
+                # Start the next streak fresh (see ConsecutiveFailureTracker.reset).
+                consecutive_failures.reset(provider_name)
         yield ChatStreamEvent(error=exc)
 
     if not errored:
