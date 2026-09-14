@@ -288,6 +288,60 @@ async def test_success_resets_consecutive_failure_count() -> None:
     consecutive_failures.clear()
 
 
+async def test_tripping_the_breaker_resets_the_count_for_the_next_streak() -> None:
+    """A trip alone must not leave the pre-trip count sitting in the tracker.
+
+    `handle_chat_stream` doesn't itself gate on cooldown — that happens one
+    layer out, in provider selection — so nothing here stops a caller from
+    invoking it again immediately after a trip, which is exactly what happens
+    for real once cooldown expires and the provider is retried. Before the
+    fix, the count from the trip (>= threshold) was still sitting in
+    `consecutive_failures` at that point, so a single fresh failure added to
+    it tripped the breaker again immediately — one request, not `threshold`
+    consecutive ones, contradicting the module's own docstring.
+    """
+    provider = Always5xxProvider()
+    register_provider(provider)
+    cooldowns.clear()
+    consecutive_failures.clear()
+    settings = _settings(provider_cooldown_enabled=True, circuit_breaker_threshold=2)
+
+    async def _drive():
+        return [
+            e
+            async for e in handle_chat_stream(
+                _req(provider="svc-always-5xx"),
+                None,
+                settings,
+                NullCache(),
+                "svc-always-5xx",
+                provider,
+                "client-a",
+            )
+        ]
+
+    await _drive()  # failure #1
+    assert cooldowns.active("svc-always-5xx") is False
+    await _drive()  # failure #2 trips the breaker
+    assert cooldowns.active("svc-always-5xx") is True
+
+    # Cooldown has expired and the provider is retried (simulated directly,
+    # since this function doesn't itself consult cooldown state).
+    cooldowns.clear()
+    assert cooldowns.active("svc-always-5xx") is False
+
+    await _drive()  # a single failure right after cooldown
+    assert cooldowns.active("svc-always-5xx") is False, (
+        "one failure re-tripped the breaker — the pre-trip count was never reset"
+    )
+
+    await _drive()  # the genuine 2nd consecutive failure of the new streak
+    assert cooldowns.active("svc-always-5xx") is True
+
+    cooldowns.clear()
+    consecutive_failures.clear()
+
+
 async def test_client_budget_window_recorded_when_configured() -> None:
     provider = UsageReportingProvider()
     register_provider(provider)

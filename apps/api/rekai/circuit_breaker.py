@@ -30,6 +30,19 @@ class ConsecutiveFailureTracker:
             return count
 
     def record_success(self, key: str) -> None:
+        self.reset(key)
+
+    def reset(self, key: str) -> None:
+        """Clear ``key``'s consecutive-failure count.
+
+        Called on success, and also by the caller the moment the breaker trips
+        — the module docstring promises cooldown only after ``threshold``
+        failures *in a row*, but a trip alone doesn't clear this dict. Without
+        an explicit reset here, the count left behind by the trip (>=
+        threshold) carries into the next evaluation once cooldown expires, so
+        a single fresh failure trips the breaker again immediately instead of
+        needing another full streak.
+        """
         with self._lock:
             self._counts.pop(key, None)
 
