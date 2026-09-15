@@ -173,6 +173,112 @@ def test_chat_omits_response_format_when_absent() -> None:
     assert "response_format" not in captured["body"]
 
 
+def test_chat_forwards_stop() -> None:
+    """`stop` reached the server (rekai/schemas.py) but had no path through the
+    SDK's own chat()/achat(): unlike tools, tool_choice, response_format, and
+    fallbacks, it was not a parameter at all, so a caller had to bypass the
+    client entirely to use it."""
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "provider": "echo",
+                "model": "echo",
+                "content": "ok",
+                "usage": {},
+                "cost_usd": None,
+                "cached": False,
+                "fallback_used": False,
+            },
+        )
+
+    client = make_client(handler)
+    client.chat("echo", "hi", stop=["\n", "END"])
+    assert captured["body"]["stop"] == ["\n", "END"]
+
+
+def test_chat_forwards_a_bare_string_stop() -> None:
+    # OpenAI's `stop` accepts a single string too; the server normalizes it,
+    # so the SDK need not.
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "provider": "echo",
+                "model": "echo",
+                "content": "ok",
+                "usage": {},
+                "cost_usd": None,
+                "cached": False,
+                "fallback_used": False,
+            },
+        )
+
+    client = make_client(handler)
+    client.chat("echo", "hi", stop="\n")
+    assert captured["body"]["stop"] == "\n"
+
+
+def test_chat_omits_stop_when_absent() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "provider": "echo",
+                "model": "echo",
+                "content": "ok",
+                "usage": {},
+                "cost_usd": None,
+                "cached": False,
+                "fallback_used": False,
+            },
+        )
+
+    client = make_client(handler)
+    client.chat("echo", "hi")
+    assert "stop" not in captured["body"]
+
+
+def test_achat_forwards_stop() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "provider": "echo",
+                "model": "echo",
+                "content": "ok",
+                "usage": {},
+                "cost_usd": None,
+                "cached": False,
+                "fallback_used": False,
+            },
+        )
+
+    async def run() -> None:
+        client = make_async_client(handler)
+        async with client:
+            await client.chat("echo", "hi", stop=["\n"])
+
+    asyncio.run(run())
+    assert captured["body"]["stop"] == ["\n"]
+
+
 def test_chat_forwards_gateway_key_as_bearer_header() -> None:
     captured = {}
 

@@ -103,6 +103,22 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and a stub 5xx backend — two failures park the provider
   (`parked_providers: {"custom": ...}`), cooldown expires, one more failure
   leaves it unparked, and a second fresh consecutive failure parks it again.
+- **Neither first-party SDK could send `stop`.** The API-side fix above added
+  `stop` to `ChatRequest`, but the Python and JS SDKs' `chat()` methods
+  restate the request shape by hand and neither had a path for it — unlike
+  `tools`, `tool_choice`, `response_format`, and `fallbacks`, which are all
+  typed parameters (Python) or read from `opts` (JS). A caller had to bypass
+  the client and hand-build the HTTP request to use a field the server had
+  supported since the previous entry. Python's `RekAIClient.chat()` and
+  `AsyncRekAIClient.chat()` gain a `stop: list[str] | str | None` parameter,
+  threaded through `_build_payload`; the JS client's `_payload()` now reads
+  `opts.stop`, and `ChatOptions.stop` is declared in `index.d.ts`. Verified: 5
+  new Python tests and 2 new JS tests forwarding a list and a bare string and
+  omitting the field when absent; the "forwards" cases (3 Python, 2 JS) fail
+  against the code before this fix. Live end-to-end against a running RekAI
+  server: the sync client, the async client, and the JS client each send a
+  request the server accepts with `stop` present in the actual payload built
+  by each client's own code.
 
 ## [1.3.0] - 2026-08-18
 

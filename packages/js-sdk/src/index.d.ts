@@ -35,6 +35,11 @@ export interface ChatOptions {
    * that support it (OpenAI/OpenAI-compatible natively, Gemini best-effort).
    */
   responseFormat?: Record<string, unknown>;
+  /**
+   * Sequences that stop generation, as OpenAI's `stop`. A single string is
+   * accepted too; the server normalizes it to a one-element list.
+   */
+  stop?: string | string[];
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
 }
