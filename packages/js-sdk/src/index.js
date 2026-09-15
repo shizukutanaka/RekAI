@@ -137,6 +137,7 @@ export class RekAIClient {
     if (opts.tools != null) payload.tools = opts.tools;
     if (opts.toolChoice != null) payload.tool_choice = opts.toolChoice;
     if (opts.responseFormat != null) payload.response_format = opts.responseFormat;
+    if (opts.stop != null) payload.stop = opts.stop;
     return payload;
   }
 

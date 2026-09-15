@@ -142,6 +142,30 @@ test("chat omits response_format when absent", async () => {
   assert.equal(lastRequest.body.response_format, undefined);
 });
 
+test("chat forwards stop", async () => {
+  // stop reached the server (rekai/schemas.py) but had no path through this
+  // SDK's chat(): unlike tools, toolChoice, responseFormat, and fallbacks, it
+  // was not read from opts at all, so a caller had to bypass the client
+  // entirely to use it.
+  const client = new RekAIClient(baseUrl);
+  await client.chat("echo", "hi", { stop: ["\n", "END"] });
+  assert.deepEqual(lastRequest.body.stop, ["\n", "END"]);
+});
+
+test("chat forwards a bare string stop", async () => {
+  // OpenAI's `stop` accepts a single string too; the server normalizes it, so
+  // the SDK need not.
+  const client = new RekAIClient(baseUrl);
+  await client.chat("echo", "hi", { stop: "\n" });
+  assert.equal(lastRequest.body.stop, "\n");
+});
+
+test("chat omits stop when absent", async () => {
+  const client = new RekAIClient(baseUrl);
+  await client.chat("echo", "hi");
+  assert.equal(lastRequest.body.stop, undefined);
+});
+
 test("chat forwards gateway key as a Bearer header", async () => {
   const client = new RekAIClient(baseUrl, { gatewayKey: "sk-rekai-default" });
   await client.chat("echo", "hi");
