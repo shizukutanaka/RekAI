@@ -158,6 +158,13 @@ export default function ChatPage() {
         const controller = new AbortController();
         abortRef.current = controller;
         let summary: StreamSummary | null = null;
+        // Caught here, not left to the generic catch below: that one drops any
+        // assistant bubble still marked streaming, which is exactly the bubble
+        // holding whatever text arrived before the failure. A user-initiated
+        // stop already got this right ("keep what streamed so far") — a
+        // genuine upstream error hits the same "stream ended early" situation
+        // and deserves the same treatment, not a deleted reply.
+        let streamError: Error | null = null;
         try {
           await streamChat(
             {
@@ -186,10 +193,15 @@ export default function ChatPage() {
             },
           );
         } catch (e) {
-          // A user-initiated stop is not an error — keep what streamed so far.
-          if (!(e instanceof DOMException && e.name === "AbortError")) throw e;
+          if (e instanceof DOMException && e.name === "AbortError") {
+            // A user-initiated stop is not an error — keep what streamed so far.
+          } else {
+            streamError = e instanceof Error ? e : new Error("Something went wrong");
+          }
         }
-        // Finalize the bubble (mark complete; note if it was stopped early).
+        // Finalize the bubble (mark complete; note if it was stopped early or
+        // cut off by an error). If nothing ever arrived, there is no partial
+        // reply worth keeping — drop the empty placeholder, as before.
         const wasAborted = controller.signal.aborted;
         const finalSummary = summary as StreamSummary | null;
         // The same slot the non-streaming path fills with res.provider, so the
@@ -199,19 +211,26 @@ export default function ChatPage() {
         setMessages((prev) => {
           const next = [...prev];
           const last = next[next.length - 1];
-          if (last?.role === "assistant") {
-            next[next.length - 1] = {
-              ...last,
-              streaming: false,
-              provider: wasAborted ? `${served} · stopped` : served,
-              tokens: finalSummary?.usage.total_tokens,
-              cost: finalSummary?.cost_usd ?? undefined,
-              finishReason: finalSummary?.finish_reason,
-              redacted: finalSummary?.redacted,
-            };
-          }
+          if (last?.role !== "assistant") return next;
+          if (streamError && !last.content) return next.slice(0, -1);
+          next[next.length - 1] = {
+            ...last,
+            streaming: false,
+            provider: wasAborted ? `${served} · stopped` : streamError ? `${served} · error` : served,
+            tokens: finalSummary?.usage.total_tokens,
+            cost: finalSummary?.cost_usd ?? undefined,
+            finishReason: finalSummary?.finish_reason,
+            redacted: finalSummary?.redacted,
+          };
           return next;
         });
+        if (streamError) {
+          // Same recovery as the generic catch below: a 429 or upstream 5xx
+          // may have just parked the provider, and the reader still needs to
+          // see what went wrong even though the reply itself survives.
+          fetchHealth().then(setHealth);
+          setError(streamError.message);
+        }
       } else {
         const res = await sendChat({
           model,

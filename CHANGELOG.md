@@ -119,6 +119,26 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   server: the sync client, the async client, and the JS client each send a
   request the server accepts with `stop` present in the actual payload built
   by each client's own code.
+- **A stream that failed partway through erased the reply the reader had
+  already watched appear.** `runChat`'s own comment on the abort path says the
+  right thing — "A user-initiated stop is not an error — keep what streamed so
+  far" — but a genuine upstream error hits the exact same "the stream ended
+  early" situation and was handled differently: it re-threw past that comment
+  to a generic `catch` whose recovery is `prev.filter((m) => !(m.role ===
+  "assistant" && m.streaming))`, deleting *any* assistant bubble still marked
+  `streaming: true` — which is precisely the bubble holding the partial text,
+  since nothing had finalized it yet. Confirmed with a Playwright test that
+  stubs `/v1/chat/stream` to emit a delta and then an `{"error": ...}` frame:
+  the reply text the reader had already seen render on screen was gone,
+  replaced only by a generic error banner. Mid-stream errors are now caught in
+  the same place the abort is, finalizing the bubble with whatever arrived
+  (marked `· error`) instead of deleting it, and still surfacing the error
+  message and refreshing the cooldown snapshot exactly as before — an empty
+  bubble (nothing ever streamed) is still dropped, matching the prior
+  behavior for that case. Verified: the new test fails against the code
+  before this fix; a second test pins the pre-existing abort path is
+  unaffected. Full web suite: `tsc`, lint, 42 vitest, `next build`, and all 22
+  Playwright E2E specs (2 new) pass.
 
 ## [1.3.0] - 2026-08-18
 
