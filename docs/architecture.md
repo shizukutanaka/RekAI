@@ -168,12 +168,17 @@ A 429 is an explicit "back off" signal and parks a provider immediately. A bare
 5xx isn't — one bad request shouldn't take a whole provider out of rotation —
 so `REKAI_CIRCUIT_BREAKER_THRESHOLD` (default 3) requires that many consecutive
 5xx failures *across separate requests* before parking it the same way. A
-single success (from any request) resets the count to zero. This is a
-lightweight circuit breaker: without it, a provider stuck returning 500s paid
-for a full retry-with-backoff cycle on every single request before falling
-over to a fallback; with it, requests after the threshold skip straight past
-it. The failure counter (`rekai/circuit_breaker.py`) is process-local by
-design — unlike the cooldown itself, it doesn't need cross-worker sharing,
+single success (from any request) resets the count to zero — and so does the
+trip itself, the moment the threshold is crossed and cooldown is applied, so
+the next evaluation starts a fresh streak rather than carrying the tripped
+count forward (without that, a single failure right after cooldown expires
+re-parked the provider immediately instead of needing another full streak).
+This is a lightweight circuit breaker: without it, a provider stuck returning
+500s paid for a full retry-with-backoff cycle on every single request before
+falling over to a fallback; with it, requests after the threshold skip
+straight past it. The failure counter (`rekai/circuit_breaker.py`) is
+process-local by design — unlike the cooldown itself, it doesn't need
+cross-worker sharing,
 since each worker converges to the same parked state within a few requests
 anyway. Covers both the fallback-chain path (`/v1/chat`, `/v1/chat/stream`
 falls through the same way) and the streaming path (which has no fallback
