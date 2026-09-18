@@ -6,6 +6,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-09-18
+
 ### Security
 - **Secret redaction had no pattern for Google/Gemini API keys.** RekAI proxies
   Gemini — one of its four core providers alongside OpenAI, Anthropic and
@@ -1544,7 +1546,8 @@ streaming, fallback, cost estimation, and a built-in web UI.
 - SDK CI now runs `ruff format --check` (previously only `ruff check`), and the
   SDK source was reformatted to match.
 
-[Unreleased]: https://github.com/shizukutanaka/RekAI/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/shizukutanaka/RekAI/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/shizukutanaka/RekAI/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/shizukutanaka/RekAI/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/shizukutanaka/RekAI/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/shizukutanaka/RekAI/compare/v1.0.0...v1.1.0

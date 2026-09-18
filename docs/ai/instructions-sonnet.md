@@ -68,9 +68,9 @@
   (`rebuilt.timeout.read` を assert するテスト付き)。
 
 ### S-5. 権限復旧後の後処理 (メンテナが権限を付与したら)
-1. `git tag -a v1.3.0 -m "RekAI 1.3.0" && git push origin v1.3.0`
+1. `git tag -a v1.3.1 -m "RekAI 1.3.1" && git push origin v1.3.1`
    (タグはこの環境では作成も push もできないため、**存在しない**)
-2. GitHub Release (v1.3.0) を CHANGELOG の [1.3.0] 節から作成
+2. GitHub Release (v1.3.1) を CHANGELOG の [1.3.1] 節から作成
 
 CI の設置は**完了済み** — ワークフローは `.github/workflows/ci.yml` から動く
 (詳細は [`.github/README.md`](../../.github/README.md))。

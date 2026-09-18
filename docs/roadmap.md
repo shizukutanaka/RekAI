@@ -55,12 +55,25 @@ with write access, and none can be done by the agent sessions working on this
 repo, whose GitHub App token cannot push tags.
 
 - [x] **Install CI** — done: the workflow runs from `.github/workflows/ci.yml`.
-  It covers every gate in `CLAUDE.md`, on Python 3.10 and 3.12, plus `smoke`
-  (live API) and `docker` (both images build) — the latter being the only build
-  verification the images can get, since the agent sandbox has no Docker daemon.
-- [ ] **Tag the release** — `git tag -a v1.3.0 -m "RekAI 1.3.0" && git push
-  origin v1.3.0`. Every version string in the monorepo is already at 1.3.0 and
-  `CHANGELOG.md [1.3.0]` is the release notes.
+  It covers every gate in `CLAUDE.md`, plus `smoke` (live API) and `docker`
+  (both images build) — the latter being the only build verification the
+  images can get, since the agent sandbox has no Docker daemon.
+- [ ] **Test the declared Python floor, not just 3.12** — `apps/api` and
+  `packages/python-sdk` both declare `requires-python = ">=3.10"`, but every
+  Python job in `ci.yml` (`api`, `python-sdk`, `smoke`, `e2e`) pins
+  `python-version: "3.12"` only; there is no matrix. 3.10 is asserted, never
+  exercised. This is the same class of gap CLAUDE.md's own numpy/mypy story
+  warns about — a promise CI doesn't actually check can quietly stop being
+  true. Checked directly (not just flagged): a scratch Python 3.10.20 venv for
+  both packages — `ruff check`, `ruff format --check`, `mypy` and the full
+  test suite (729 API + 40 python-sdk) — is currently clean, so this is a
+  coverage gap, not a live regression, today. Agent sessions can't add a
+  matrix leg (`ci.yml` can't be pushed — see the git constraints in
+  `CLAUDE.md`); a maintainer adding `python-version: ["3.10", "3.12"]` to
+  those four jobs closes it.
+- [ ] **Tag the release** — `git tag -a v1.3.1 -m "RekAI 1.3.1" && git push
+  origin v1.3.1`. Every version string in the monorepo is already at 1.3.1 and
+  `CHANGELOG.md [1.3.1]` is the release notes.
 - [ ] **Publish the GitHub Release** from that CHANGELOG section.
 - [ ] **Live demo instance** — `deploy/render.yaml` provisions the whole stack.
 
