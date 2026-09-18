@@ -43,6 +43,9 @@ await client.chat("gpt-4o-mini", "hi", {
   fallbacks: [{ provider: "echo", model: "echo" }],
 });
 
+// Stop sequences (a string or an array; forwarded to whichever provider you call)
+await client.chat("gpt-4o-mini", "Count to ten.", { stop: ["5", "six"] });
+
 // Tool / function calling (OpenAI-compatible)
 const res = await client.chat("gpt-4o-mini", "weather in Tokyo?", {
   tools: [{ type: "function", function: { name: "get_weather" } }],
