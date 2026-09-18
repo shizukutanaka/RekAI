@@ -21,6 +21,10 @@ Open http://localhost:3000.
   storage and restored on reload (**Clear** wipes it); **Regenerate** re-runs the
   last turn for a fresh reply. Assistant bubbles show the provider, whether the
   response was cached, token usage, and estimated cost.
+- **/embeddings** — turn text into vectors via `/v1/embeddings`. `echo` works
+  keyless with deterministic vectors; pick a real embeddings model and set a
+  key in Settings for the rest. One input per line; shows vector count,
+  dimensions, cost, and pairwise cosine similarity across all inputs.
 - **/usage** — live dashboard of `/v1/usage`: requests, cache hit rate, tokens,
   estimated cost, fallbacks, errors, and a per-provider request breakdown
   (auto-refreshes every 5s).

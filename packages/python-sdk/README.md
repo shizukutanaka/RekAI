@@ -47,6 +47,9 @@ for chunk in client.stream(
 # Reliability: fall back to echo on upstream errors
 client.chat("gpt-4o-mini", "hi", fallbacks=[{"provider": "echo", "model": "echo"}])
 
+# Stop sequences (a bare string or a list; forwarded to whichever provider you call)
+client.chat("gpt-4o-mini", "Count to ten.", stop=["5", "six"])
+
 # Tool / function calling (OpenAI-compatible)
 res = client.chat(
     "gpt-4o-mini",

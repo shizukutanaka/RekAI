@@ -27,7 +27,9 @@ uvicorn rekai.main:app --reload
 | GET    | `/v1/models`  | Known models per provider (each tagged `type`; filter with `?type=chat\|embedding`) |
 | POST   | `/v1/chat`    | Chat completion (router + cache + BYOK)  |
 | POST   | `/v1/chat/stream` | Streaming chat completion (SSE)      |
+| POST   | `/v1/chat/completions` | OpenAI-compatible chat completion — drop-in for the OpenAI SDK / LangChain (non-streaming and streaming) |
 | POST   | `/v1/embeddings` | Text embeddings (router + cache + BYOK) |
+| GET    | `/admin/usage` | Fleet-wide usage across every tenant (needs `REKAI_ADMIN_KEY`) |
 | GET/POST | `/admin/keys` | List / add runtime API keys (needs `REKAI_ADMIN_KEY`) |
 | DELETE | `/admin/keys/{key}` | Revoke a runtime API key |
 
