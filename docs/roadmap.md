@@ -58,9 +58,9 @@ repo, whose GitHub App token cannot push tags.
   It covers every gate in `CLAUDE.md`, on Python 3.10 and 3.12, plus `smoke`
   (live API) and `docker` (both images build) — the latter being the only build
   verification the images can get, since the agent sandbox has no Docker daemon.
-- [ ] **Tag the release** — `git tag -a v1.3.0 -m "RekAI 1.3.0" && git push
-  origin v1.3.0`. Every version string in the monorepo is already at 1.3.0 and
-  `CHANGELOG.md [1.3.0]` is the release notes.
+- [ ] **Tag the release** — `git tag -a v1.3.1 -m "RekAI 1.3.1" && git push
+  origin v1.3.1`. Every version string in the monorepo is already at 1.3.1 and
+  `CHANGELOG.md [1.3.1]` is the release notes.
 - [ ] **Publish the GitHub Release** from that CHANGELOG section.
 - [ ] **Live demo instance** — `deploy/render.yaml` provisions the whole stack.
 
