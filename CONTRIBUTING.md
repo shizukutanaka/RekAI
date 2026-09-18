@@ -43,9 +43,9 @@ mypy rekai          # type check
 pytest              # tests
 ```
 
-All four must pass before a PR is merged — CI enforces this once activated
-(see [`.github/README.md`](./.github/README.md) to move the workflow into
-`.github/workflows/`).
+All four must pass before a PR is merged — CI enforces this on every push and
+pull request (see [`.github/README.md`](./.github/README.md) for what each
+job covers).
 
 ## Frontend
 
@@ -61,8 +61,9 @@ npm run build
 - Branch off `main` using a descriptive name, e.g. `feat/anthropic-provider`.
 - Keep commits small and focused. Write imperative, present-tense messages
   (`add Redis cache`, not `added`).
-- Open issues are tagged with milestones (M1–M5); pick something small and
-  self-contained for your first contribution.
+- There's no open-issue backlog to pick from right now (see **New issue** to
+  file one) — for a sense of what's built vs. planned, start with
+  [`docs/roadmap.md`](./docs/roadmap.md).
 
 ## Pull requests
 
