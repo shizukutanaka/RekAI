@@ -656,6 +656,14 @@ content blocks, and Anthropic's `tool_use` responses map back to OpenAI-style
 `functionResponse` + `toolConfig`), so tool calling works uniformly across all
 three major cloud providers through one OpenAI-style API.
 
+`tool_choice: "none"` is translated distinctly from an unset `tool_choice` —
+OpenAI's `"none"` means "the tools are declared for context, but do not call
+one this turn," not the absence of an instruction. Anthropic has its own
+`{"type": "none"}` for exactly this; leaving `tool_choice` out of the payload
+instead (what an unset field does) makes Anthropic default to `auto` once
+`tools` is present, so a caller who asked for `"none"` would otherwise still
+get a tool call back.
+
 ## Cost estimation
 
 Each non-streamed response carries an approximate `cost_usd`, computed by
@@ -968,6 +976,13 @@ a gateway key (`rekai.gatewayKey`, sent as `Authorization: Bearer`) for
 deployments with `REKAI_API_KEYS` configured. Every `/v1/*` call from the app
 (`chat`, `chat/stream`, `embeddings`, `models`, `usage`) attaches the gateway
 key when one is set; without it, enabling gateway auth would 401 every page.
+
+The chat page treats a mid-stream failure the same way it treats a
+user-initiated stop: whatever text has already streamed onto the assistant's
+bubble is kept, finalized, and marked (`· error` vs. `· stopped`), rather than
+deleted — a reader who has already watched a partial reply render should not
+have it vanish. An empty bubble (nothing streamed before the failure) is still
+dropped, and the error message is surfaced alongside it either way.
 
 ### Dynamic key management
 
