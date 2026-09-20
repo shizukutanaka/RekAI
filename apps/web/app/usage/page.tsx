@@ -30,7 +30,9 @@ export default function UsagePage() {
   }, []);
 
   useEffect(() => {
-    load();
+    // Deferred one microtask: set-state-in-effect forbids invoking a
+    // state-updating function synchronously in the effect body.
+    queueMicrotask(load);
     const id = setInterval(load, 5000); // live refresh
     return () => clearInterval(id);
   }, [load]);

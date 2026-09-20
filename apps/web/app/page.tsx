@@ -69,7 +69,23 @@ export default function ChatPage() {
       if (m.length) setModels(m);
     });
     fetchHealth().then(setHealth);
-    setHasKey(Boolean(getStoredKey()));
+    // localStorage reads deferred one microtask: set-state-in-effect forbids
+    // synchronous setState in an effect body, and lazy useState init would
+    // hydrate mismatched (SSR renders "", client reads the stored value).
+    queueMicrotask(() => {
+      setHasKey(Boolean(getStoredKey()));
+      // Restore a previous conversation, if any.
+      try {
+        const saved = window.localStorage.getItem(HISTORY_KEY);
+        if (saved) {
+          // Backfill stable ids for conversations persisted before ids existed.
+          const restored: DisplayMessage[] = JSON.parse(saved);
+          setMessages(restored.map((m) => ({ ...m, id: m.id ?? nextMsgId() })));
+        }
+      } catch {
+        /* ignore malformed history */
+      }
+    });
     // Re-check the stored key when returning to the tab (it may be set elsewhere).
     // Health is also re-read here: `parked_providers` is a live cooldown
     // countdown, and a snapshot taken once at mount goes stale within seconds.
@@ -78,17 +94,6 @@ export default function ChatPage() {
       fetchHealth().then(setHealth);
     };
     window.addEventListener("focus", onFocus);
-    // Restore a previous conversation, if any.
-    try {
-      const saved = window.localStorage.getItem(HISTORY_KEY);
-      if (saved) {
-        // Backfill stable ids for conversations persisted before ids existed.
-        const restored: DisplayMessage[] = JSON.parse(saved);
-        setMessages(restored.map((m) => ({ ...m, id: m.id ?? nextMsgId() })));
-      }
-    } catch {
-      /* ignore malformed history */
-    }
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 

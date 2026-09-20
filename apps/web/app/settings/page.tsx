@@ -18,8 +18,14 @@ export default function SettingsPage() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
 
   useEffect(() => {
-    setKey(getStoredKey());
-    setGatewayKey(getStoredGatewayKey());
+    // localStorage reads deferred one microtask: the set-state-in-effect lint
+    // rule forbids *synchronous* setState in an effect body, and lazy useState
+    // initializers can't be used — they run during SSR prerender and hydrate
+    // mismatched (server renders "", client reads the stored key).
+    queueMicrotask(() => {
+      setKey(getStoredKey());
+      setGatewayKey(getStoredGatewayKey());
+    });
     fetchHealth().then(setHealth);
   }, []);
 

@@ -43,9 +43,14 @@ export default function AdminPage() {
   }, []);
 
   useEffect(() => {
-    const stored = getStoredAdminKey();
-    setAdminKey(stored);
-    if (stored) load(stored);
+    // Deferred one microtask: load() synchronously setStates (clearing
+    // error/notConfigured) before its first await, and the
+    // set-state-in-effect rule forbids synchronous setState in an effect.
+    queueMicrotask(() => {
+      const stored = getStoredAdminKey();
+      setAdminKey(stored);
+      if (stored) load(stored);
+    });
   }, [load]);
 
   function save(e: React.FormEvent) {

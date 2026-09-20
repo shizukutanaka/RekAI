@@ -6,6 +6,22 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Web app upgraded to Next.js 16 / React 19 / ESLint 9 flat config**
+  (`apps/web`). This clears the last ten `npm audit` advisories — all in the
+  Next 14 framework tree, which had no 14.x fix (`postcss`, `next`,
+  `eslint-config-next`, `glob`, `@next/eslint-plugin-next`) — audit now
+  reports zero. `next lint` was removed in Next 16, so lint runs `eslint .`
+  against the new `eslint.config.mjs` (`.eslintrc.json` deleted). ESLint stays
+  on 9.x because `eslint-plugin-react` (latest 7.37.5) doesn't yet support
+  ESLint 10's context API. Four pages that synchronously `setState` from
+  `localStorage` inside `useEffect` now defer via `queueMicrotask` — lazy
+  `useState` initializers would hydrate mismatched (SSR renders "", client
+  reads the stored value), so deferring is the correct fix, not suppression.
+  `@types/node` 20→24 satisfies vite's peer range so `npm ci` stays clean.
+  Verified: tsc, `eslint .`, vitest (42), `next build`, standalone output,
+  and all 22 Playwright specs pass.
+
 ## [1.3.1] - 2026-09-18
 
 ### Security
