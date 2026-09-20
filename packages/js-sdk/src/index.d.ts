@@ -118,6 +118,8 @@ export interface UsageSummary {
   tokens_total: number;
   cost_usd_total: number;
   requests_by_provider: Record<string, number>;
+  /** Tokens accounted per provider — same key set as requests_by_provider. */
+  tokens_by_provider: Record<string, number>;
   /** Transient upstream failures retried in place. */
   retries_total: number;
   /** Providers parked after a 429 or repeated 5xx. */

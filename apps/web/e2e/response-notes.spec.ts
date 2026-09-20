@@ -104,6 +104,7 @@ test("the usage dashboard breaks out semantic cache hits", async ({ page }) => {
         tokens_total: 100,
         cost_usd_total: 0,
         requests_by_provider: {},
+        tokens_by_provider: {},
         usage_by_client: {},
       }),
     });

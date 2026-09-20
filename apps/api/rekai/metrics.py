@@ -111,6 +111,9 @@ class Metrics:
         self.tokens_total = 0
         self.cost_usd_total = 0.0
         self.requests_by_provider: dict[str, int] = {}
+        # Provider names come from the registered set (bounded — no per-client
+        # or per-model cardinality), so this dict can't grow with traffic.
+        self.tokens_by_provider: dict[str, int] = {}
         # Error breakdowns. errors_total alone can't distinguish "clients are
         # sending bad keys" from "the upstream is down". Both dicts are keyed
         # by values from fixed sets (RekAI's own error codes; registered
@@ -218,9 +221,10 @@ class Metrics:
         with self._lock:
             self.cooldowns_total += 1
 
-    def record_tokens(self, count: int) -> None:
+    def record_tokens(self, count: int, provider: str) -> None:
         with self._lock:
             self.tokens_total += count
+            self.tokens_by_provider[provider] = self.tokens_by_provider.get(provider, 0) + count
 
     def record_cost(self, cost_usd: float | None) -> None:
         if cost_usd:
@@ -318,6 +322,7 @@ class Metrics:
             self.tokens_total = snapshot.get("tokens_total", 0)
             self.cost_usd_total = snapshot.get("cost_usd_total", 0.0)
             self.requests_by_provider = dict(snapshot.get("requests_by_provider", {}))
+            self.tokens_by_provider = dict(snapshot.get("tokens_by_provider", {}))
             clients = snapshot.get("usage_by_client", {})
             # A snapshot persisted before the cap existed (or under a larger
             # one) may exceed max_tracked_clients — keep the busiest entries.
@@ -342,6 +347,7 @@ class Metrics:
                 "tokens_total": self.tokens_total,
                 "cost_usd_total": round(self.cost_usd_total, 6),
                 "requests_by_provider": dict(self.requests_by_provider),
+                "tokens_by_provider": dict(self.tokens_by_provider),
                 "usage_by_client": {
                     client: dict(usage) for client, usage in self.usage_by_client.items()
                 },
@@ -399,6 +405,13 @@ class Metrics:
         ]
         for provider, count in sorted(self.requests_by_provider.items()):
             lines.append(f'rekai_provider_requests_total{{provider="{provider}"}} {count}')
+
+        lines += [
+            "# HELP rekai_provider_tokens_total Tokens accounted per provider.",
+            "# TYPE rekai_provider_tokens_total counter",
+        ]
+        for provider, count in sorted(self.tokens_by_provider.items()):
+            lines.append(f'rekai_provider_tokens_total{{provider="{provider}"}} {count}')
 
         lines += [
             "# HELP rekai_errors_by_kind_total Errors returned to clients, by cause.",
@@ -488,6 +501,7 @@ def merge_snapshots(snapshots: list[dict], cap: int = 0) -> dict:
     merged: dict = {k: 0 for k in _SCALAR_COUNTERS}
     merged["cost_usd_total"] = 0.0
     providers: dict[str, int] = {}
+    provider_tokens: dict[str, int] = {}
     clients: dict[str, dict[str, float]] = {}
     for snap in snapshots:
         for key in _SCALAR_COUNTERS:
@@ -495,6 +509,8 @@ def merge_snapshots(snapshots: list[dict], cap: int = 0) -> dict:
         merged["cost_usd_total"] += snap.get("cost_usd_total", 0.0)
         for provider, count in snap.get("requests_by_provider", {}).items():
             providers[provider] = providers.get(provider, 0) + count
+        for provider, count in snap.get("tokens_by_provider", {}).items():
+            provider_tokens[provider] = provider_tokens.get(provider, 0) + count
         for client, usage in snap.get("usage_by_client", {}).items():
             acc = clients.setdefault(client, {"requests": 0, "tokens": 0, "cost_usd": 0.0})
             acc["requests"] += usage.get("requests", 0)
@@ -507,5 +523,6 @@ def merge_snapshots(snapshots: list[dict], cap: int = 0) -> dict:
         kept = sorted(clients, key=lambda c: clients[c]["requests"], reverse=True)[:cap]
         clients = {c: clients[c] for c in kept}
     merged["requests_by_provider"] = providers
+    merged["tokens_by_provider"] = provider_tokens
     merged["usage_by_client"] = clients
     return merged

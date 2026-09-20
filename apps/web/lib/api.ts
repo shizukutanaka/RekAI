@@ -203,6 +203,7 @@ export interface UsageSummary {
   tokens_total: number;
   cost_usd_total: number;
   requests_by_provider: Record<string, number>;
+  tokens_by_provider: Record<string, number>;
   usage_by_client: Record<string, ClientUsage>;
 }
 

@@ -121,7 +121,9 @@ export default function UsagePage() {
                       style={{ width: pct(count, usage.requests_total) }}
                     />
                   </div>
-                  <span className="bar-count">{count}</span>
+                  <span className="bar-count">
+                    {count} req · {(usage.tokens_by_provider?.[name] ?? 0).toLocaleString()} tok
+                  </span>
                 </div>
               ))}
             </div>

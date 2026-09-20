@@ -148,7 +148,7 @@ async def _semantic_embed(request: ChatRequest, settings: Settings) -> list[floa
     except ProviderError:
         return None  # embeddings unavailable -> just skip the semantic cache
     metrics.observe_provider_duration(provider_name, "embed", time.perf_counter() - started)
-    metrics.record_tokens(result.usage.total_tokens)
+    metrics.record_tokens(result.usage.total_tokens, provider_name)
     metrics.record_cost(
         estimate_cost(provider_name, result.model, result.usage, settings.pricing_override_dict)
     )
@@ -346,7 +346,7 @@ async def handle_chat(
         cost_usd = estimate_cost(
             attempt.provider_name, result.model, usage, settings.pricing_override_dict
         )
-        metrics.record_tokens(usage.total_tokens)
+        metrics.record_tokens(usage.total_tokens, attempt.provider_name)
         metrics.record_cost(cost_usd)
 
         response = ChatResponse(
@@ -492,7 +492,7 @@ async def handle_chat_stream(
         cost_usd = estimate_cost(
             provider_name, request.model, usage, settings.pricing_override_dict
         )
-        metrics.record_tokens(usage.total_tokens)
+        metrics.record_tokens(usage.total_tokens, provider_name)
         metrics.record_cost(cost_usd)
         metrics.record_client_usage(client_id, usage.total_tokens, cost_usd)
         if settings.client_budget_window_seconds is not None:
@@ -551,7 +551,7 @@ async def handle_embeddings(
         )
     finally:
         metrics.observe_provider_duration(provider_name, "embed", time.perf_counter() - started)
-    metrics.record_tokens(result.usage.total_tokens)
+    metrics.record_tokens(result.usage.total_tokens, provider_name)
     cost_usd = estimate_cost(
         provider_name, result.model, result.usage, settings.pricing_override_dict
     )

@@ -34,7 +34,7 @@ def test_seed_sets_absolute_values() -> None:
 def test_snapshot_seed_roundtrip() -> None:
     m = Metrics()
     m.record_request("echo")
-    m.record_tokens(10)
+    m.record_tokens(10, "echo")
     m.record_cost(0.25)
     m.record_retry()
     m.record_cooldown()
@@ -279,6 +279,7 @@ def test_merge_snapshots_sums_scalars_providers_and_clients() -> None:
         "tokens_total": 10,
         "cost_usd_total": 0.25,
         "requests_by_provider": {"echo": 5},
+        "tokens_by_provider": {"echo": 10},
         "usage_by_client": {"key:local": {"requests": 5, "tokens": 10, "cost_usd": 0.25}},
     }
     b = {
@@ -286,6 +287,7 @@ def test_merge_snapshots_sums_scalars_providers_and_clients() -> None:
         "tokens_total": 500,
         "cost_usd_total": 1.5,
         "requests_by_provider": {"echo": 20, "openai": 80},
+        "tokens_by_provider": {"echo": 100, "openai": 400},
         "usage_by_client": {"key:peer": {"requests": 100, "tokens": 500, "cost_usd": 1.5}},
     }
     merged = merge_snapshots([a, b])
@@ -293,6 +295,7 @@ def test_merge_snapshots_sums_scalars_providers_and_clients() -> None:
     assert merged["tokens_total"] == 510
     assert merged["cost_usd_total"] == 1.75
     assert merged["requests_by_provider"] == {"echo": 25, "openai": 80}
+    assert merged["tokens_by_provider"] == {"echo": 110, "openai": 400}
     assert set(merged["usage_by_client"]) == {"key:local", "key:peer"}
 
 
@@ -534,6 +537,18 @@ def test_per_provider_requests_are_a_separate_metric_family() -> None:
     assert "rekai_requests_total 1" in out
     assert 'rekai_provider_requests_total{provider="echo"} 1' in out
     assert "rekai_requests_total{provider=" not in out
+
+
+def test_per_provider_tokens_are_a_separate_metric_family() -> None:
+    m = Metrics()
+    m.record_tokens(10, "echo")
+    m.record_tokens(5, "echo")
+    m.record_tokens(3, "openai")
+    out = m.render()
+    assert m.tokens_total == 18
+    assert 'rekai_provider_tokens_total{provider="echo"} 15' in out
+    assert 'rekai_provider_tokens_total{provider="openai"} 3' in out
+    assert "rekai_tokens_total{provider=" not in out
 
 
 # --- error dimensions --------------------------------------------------------
