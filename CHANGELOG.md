@@ -28,6 +28,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is `false` (a configured chain that's ignored). `create_app` now logs a
   warning naming the contradiction — same treatment the semantic-cache config
   already got. Request-level `fallbacks` are unaffected.
+- **Production mode now warns on `REKAI_CORS_ORIGINS=*`.** Questioning the
+  wildcard for the hazard guard surfaced the reason it doesn't belong there:
+  RekAI auth is Bearer-key based, so browsers hold no ambient credentials for
+  a foreign page to abuse, and the compose topology genuinely needs it (web on
+  :3000 calls the API on :8000 — cross-origin). Warnable, not refusable: in
+  production it now logs a nudge to pin the web origin; everywhere else it
+  stays silent.
 
 ### Fixed
 - **`test_chain_stops_starting_targets_once_the_budget_is_spent` was a

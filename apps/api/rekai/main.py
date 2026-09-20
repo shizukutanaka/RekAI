@@ -615,6 +615,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise RuntimeError(f"Refusing to start: {hazard}")
         access_logger.warning("%s (REKAI_ENVIRONMENT=production refuses to start.)", hazard)
 
+    # CORS "*" is warnable, not refusable: RekAI auth is Bearer-key based, so
+    # browsers hold no ambient credentials a cross-origin page could abuse —
+    # and the compose topology genuinely needs it (web on :3000 calls the API
+    # on :8000 from the browser, a cross-origin fetch). In production it's
+    # still worth saying out loud so the operator pins it to the web origin.
+    if settings.environment == "production" and "*" in settings.cors_origin_list:
+        access_logger.warning(
+            "REKAI_CORS_ORIGINS=* in production — Bearer auth means this is hygiene, "
+            "not a credential leak, but pin it to your web origin for clarity."
+        )
+
     key_store = DynamicKeyStore(cache, key_cipher) if settings.dynamic_keys_enabled else None
     if settings.dynamic_keys_enabled and not settings.cache_enabled:
         access_logger.warning(
