@@ -6,6 +6,7 @@ import pytest
 
 from rekai.cache import MemoryCache, NullCache
 from rekai.config import Settings
+from rekai.main import create_app
 from rekai.providers import register_provider
 from rekai.providers.base import Provider, ProviderError, ProviderResult
 from rekai.schemas import ChatMessage, ChatRequest
@@ -437,3 +438,20 @@ async def test_a_server_configured_unknown_fallback_is_still_skipped() -> None:
 
     assert resp.provider == "echo"
     assert resp.fallback_used is True
+
+
+# --- startup config warnings --------------------------------------------------
+
+
+def test_fallback_enabled_with_no_targets_warns(capsys) -> None:
+    # Enabled=true with empty targets expects a chain that was never configured.
+    # (capsys, not caplog: configure_logging installs its own stdout handler.)
+    create_app(Settings(environment="test", default_provider="echo", fallback_enabled=True))
+    assert "no server fallback chain" in capsys.readouterr().out
+
+
+def test_fallback_targets_without_enabled_warns(capsys) -> None:
+    # The inverse contradiction: targets configured, gate left off — the chain
+    # is silently ignored without this warning.
+    create_app(Settings(environment="test", default_provider="echo", fallback_targets="echo:x"))
+    assert "targets are ignored" in capsys.readouterr().out

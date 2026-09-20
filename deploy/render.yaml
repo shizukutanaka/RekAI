@@ -29,9 +29,24 @@ services:
           type: redis
           name: rekai-redis
           property: connectionString
+      # Render services are internet-facing, so run in production mode: the
+      # open-proxy guard then *refuses to boot* a deployment that sets
+      # server-side provider keys without gateway auth, rather than only
+      # logging a warning. See apps/api/.env.example for the exact rule.
+      - key: REKAI_ENVIRONMENT
+        value: production
+      # "*" is acceptable here — RekAI uses Bearer keys, not ambient
+      # credentials, so a foreign origin can neither spend nor read without a
+      # key. Pin it to the web origin anyway once the URL settles, e.g.
+      # https://rekai-web.onrender.com.
       - key: REKAI_CORS_ORIGINS
         value: "*"
-      # Optional server-side keys (otherwise users supply their own via BYOK):
+      # Optional server-side keys (otherwise users supply their own via BYOK).
+      # With REKAI_ENVIRONMENT=production these require gateway auth — set
+      # REKAI_API_KEYS (or REKAI_DYNAMIC_KEYS_ENABLED) too, or the API refuses
+      # to start rather than serve as an open proxy for your provider keys.
+      # - key: REKAI_API_KEYS
+      #   value: sk-rekai-...
       # - key: REKAI_OPENAI_API_KEY
       #   sync: false
 

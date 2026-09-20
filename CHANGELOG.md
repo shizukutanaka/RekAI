@@ -6,6 +6,56 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **The Render blueprint now runs the API in production mode.** `deploy/
+  render.yaml` never set `REKAI_ENVIRONMENT`, so the open-proxy guard only
+  *warned* on the one deployment shape that is internet-facing by definition —
+  and `deploy/README.md` tells operators to add `REKAI_OPENAI_API_KEY` to
+  `rekai-api`, which is exactly the combination (server-side provider keys, no
+  gateway auth) the guard exists to refuse. New Render deploys now boot with
+  `REKAI_ENVIRONMENT=production`: adding a provider key without
+  `REKAI_API_KEYS`/`REKAI_DYNAMIC_KEYS_ENABLED` fails fast with the named fixes
+  instead of silently spending the operator's balance on an open port. Existing
+  deployments that already run the unsafe combination will fail to boot on
+  their next deploy — that refusal is the intended behavior, and the error
+  message names both ways out.
+
+### Added
+- **Startup warnings for contradictory fallback config.** Two knobs drive the
+  server fallback chain, and both contradictory combinations used to pass
+  silently: `REKAI_FALLBACK_ENABLED=true` with empty `REKAI_FALLBACK_TARGETS`
+  (expects a chain that was never configured) and targets set while the flag
+  is `false` (a configured chain that's ignored). `create_app` now logs a
+  warning naming the contradiction — same treatment the semantic-cache config
+  already got. Request-level `fallbacks` are unaffected.
+- **Production mode now warns on `REKAI_CORS_ORIGINS=*`.** Questioning the
+  wildcard for the hazard guard surfaced the reason it doesn't belong there:
+  RekAI auth is Bearer-key based, so browsers hold no ambient credentials for
+  a foreign page to abuse, and the compose topology genuinely needs it (web on
+  :3000 calls the API on :8000 — cross-origin). Warnable, not refusable: in
+  production it now logs a nudge to pin the web origin; everywhere else it
+  stays silent.
+
+### Fixed
+- **`test_chain_stops_starting_targets_once_the_budget_is_spent` was a
+  wall-clock flake.** It asserted `elapsed < 0.3s` around a 0.1s deadline, so
+  ordinary scheduler jitter — on a loaded machine or a slower platform — could
+  burn the 0.2s slack and fail a correct implementation (observed at 0.378s).
+  Worse, the bound was too weak for its own purpose: an implementation that let
+  the first attempt run to its full 0.15s failure and *then* stopped the chain
+  also passes it. The test now asserts the observable mechanics instead: the
+  first attempt's cancellation flag (set only when the deadline's `wait_for`
+  fires mid-call), `slow.calls == 1`, and `never.calls == 0` — strictly
+  stronger, and immune to timing noise.
+- **The architecture doc claimed failover applies to embeddings. It doesn't
+  and shouldn't.** `EmbeddingsRequest` has no `fallbacks` field and
+  `handle_embeddings` never consults `REKAI_FALLBACK_TARGETS` — only retry
+  applies. The doc now says so and says why the gap is deliberate: a fallback
+  target naming a different model returns a vector in a different space and
+  dimension, silently corrupting a similarity index. Failing loudly is the
+  safer default; a same-model fallback is the only coherent version and hasn't
+  been needed yet.
+
 ## [1.3.1] - 2026-09-18
 
 ### Security

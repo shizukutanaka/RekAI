@@ -137,3 +137,30 @@ def test_safe_config_starts_silently(monkeypatch) -> None:
     create_app(_settings(environment="production", api_keys="sk-rekai-1"))
 
     assert not any("REKAI_OPENAI_API_KEY" in message for message in warnings)
+
+
+def test_production_cors_wildcard_warns(monkeypatch) -> None:
+    # Hygiene, not hazard: Bearer auth means no ambient credentials for a
+    # foreign page to abuse, so "*" warns instead of refusing — refusing would
+    # break the compose topology (web :3000 -> api :8000 is cross-origin).
+    warnings = _captured_warnings(monkeypatch)
+
+    create_app(_settings(environment="production", cors_origins="*"))
+
+    assert any("REKAI_CORS_ORIGINS" in message for message in warnings)
+
+
+def test_pinned_cors_is_silent_in_production(monkeypatch) -> None:
+    warnings = _captured_warnings(monkeypatch)
+
+    create_app(_settings(environment="production", cors_origins="https://app.example.com"))
+
+    assert not any("REKAI_CORS_ORIGINS" in message for message in warnings)
+
+
+def test_cors_wildcard_is_silent_outside_production(monkeypatch) -> None:
+    warnings = _captured_warnings(monkeypatch)
+
+    create_app(_settings(environment="development", cors_origins="*"))
+
+    assert not any("REKAI_CORS_ORIGINS" in message for message in warnings)
