@@ -588,7 +588,10 @@ Per-provider request counts are their own family, `rekai_provider_requests_total
 {provider="…"}`, **not** `rekai_requests_total{provider="…"}`. Emitting a bare
 series and a labelled one under one metric name makes `sum(rekai_requests_total)`
 count every request twice, and Prometheus treats inconsistent label sets within a
-family as an error.
+family as an error. `rekai_provider_tokens_total{provider="…"}` follows the same
+rule for `rekai_tokens_total`, and the matching `tokens_by_provider` map rides
+the same snapshot/seed/merge path as `requests_by_provider`, so per-provider
+volume survives restarts exactly like request counts do.
 
 ### Errors
 

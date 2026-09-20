@@ -35,6 +35,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   :3000 calls the API on :8000 — cross-origin). Warnable, not refusable: in
   production it now logs a nudge to pin the web origin; everywhere else it
   stays silent.
+- **Per-provider token accounting.** `rekai_tokens_total` was fleet-wide only,
+  so "which provider is spending the budget" needed external archaeology. The
+  metrics store now keeps `tokens_by_provider` (a bounded key set — registered
+  provider names, same bound as `requests_by_provider`), exposes it as
+  `rekai_provider_tokens_total{provider="…"}` (a separate family, for the same
+  double-counting reason requests got one), persists it through snapshot/seed/
+  merge, and returns it as `tokens_by_provider` in `GET /v1/usage`. The web
+  Usage page shows it alongside each provider's request count, and the JS SDK
+  type and the web client's `UsageSummary` declare it — the client-coverage
+  contract test enforces all three staying in sync.
 
 ### Fixed
 - **`test_chain_stops_starting_targets_once_the_budget_is_spent` was a

@@ -288,6 +288,10 @@ class UsageSummary(BaseModel):
     tokens_total: int
     cost_usd_total: float
     requests_by_provider: dict[str, int]
+    tokens_by_provider: dict[str, int] = Field(
+        default_factory=dict,
+        description="Tokens accounted per provider — same bounded key set as requests_by_provider.",
+    )
     usage_by_client: dict[str, ClientUsage] = Field(
         default_factory=dict,
         description="Per-tenant usage keyed by a masked client id ('key:<hash>' "
