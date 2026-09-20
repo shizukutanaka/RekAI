@@ -545,6 +545,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 settings.semantic_cache_model,
             )
 
+    # Two knobs drive the server fallback chain, and their contradictory
+    # combinations silently misconfigure — flag both so the operator fixes one.
+    if settings.fallback_enabled and not settings.fallback_target_list:
+        access_logger.warning(
+            "REKAI_FALLBACK_ENABLED=true but REKAI_FALLBACK_TARGETS is empty — "
+            "no server fallback chain is configured."
+        )
+    elif not settings.fallback_enabled and settings.fallback_target_list:
+        access_logger.warning(
+            "REKAI_FALLBACK_TARGETS is set but REKAI_FALLBACK_ENABLED=false — "
+            "the configured targets are ignored. Request-level 'fallbacks' still work."
+        )
+
     metrics_store = build_metrics_store(settings)
 
     async def _flush_loop(interval: int) -> None:

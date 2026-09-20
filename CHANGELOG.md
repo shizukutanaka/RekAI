@@ -20,6 +20,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   their next deploy — that refusal is the intended behavior, and the error
   message names both ways out.
 
+### Added
+- **Startup warnings for contradictory fallback config.** Two knobs drive the
+  server fallback chain, and both contradictory combinations used to pass
+  silently: `REKAI_FALLBACK_ENABLED=true` with empty `REKAI_FALLBACK_TARGETS`
+  (expects a chain that was never configured) and targets set while the flag
+  is `false` (a configured chain that's ignored). `create_app` now logs a
+  warning naming the contradiction — same treatment the semantic-cache config
+  already got. Request-level `fallbacks` are unaffected.
+
 ### Fixed
 - **`test_chain_stops_starting_targets_once_the_budget_is_spent` was a
   wall-clock flake.** It asserted `elapsed < 0.3s` around a 0.1s deadline, so
