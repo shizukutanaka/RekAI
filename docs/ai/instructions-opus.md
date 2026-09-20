@@ -63,9 +63,12 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
 6. ~~**Idempotency-Key がボディに紐付かない**~~ → **解消** (O-5)。さらに保存キーに
    client_id を混ぜてテナントスコープ化済み。
 7. ~~**metrics スナップショットが単一 Redis キーで last-writer-wins**~~ → **解消** (O-6)。
-8. **セキュアでないデフォルト**: `cors_origins="*"` + `api_keys=""` (認証オフ) が
+8. ~~**セキュアでないデフォルト**: `cors_origins="*"` + `api_keys=""` (認証オフ) が
    config・docker-compose.yml・deploy/render.yaml すべてに。ワンクリックデプロイが
-   全オリジン開放。**未解決 (O-7)**。なお「どの provider に到達できるか」だけは
+   全オリジン開放~~ → **決定済み (O-7)**。`environment=production` でサーバ側
+   プロバイダキー+認証なしの起動は拒否 (既存ガード)、render.yaml は本番化+コメント、
+   本番の `*` CORS は起動時警告、compose は Bearer 認証前提で `*` を意図的に維持
+   (コメント明記)。なお「どの provider に到達できるか」だけは
    `REKAI_ALLOWED_PROVIDERS` で運用者が絞れるようになった (既定は無制限のまま)。
 9. **並行数上限とレートリミッタはプロセスローカル** (Redis 設定時のレート
    リミッタを除く)。N ワーカーなら実効上限は N 倍。文書化済み・許容だが、
@@ -136,10 +139,13 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
   (env or 起動時 uuid) も設計に含める。
 
 ### O-7. セキュアデフォルトの方針決定 (短所 8 の設計部分)
-- `cors_origins` / `api_keys` の安全側デフォルトをどう取るか (破壊的変更の是非)。
-  例: 本番検出時 (`environment=production`) は `*` を警告 or 拒否。決定後の
-  manifest 修正は Sonnet の S-9 へ委譲。web が localStorage にキーを置く前提
-  (`lib/api.ts`) とのトレードオフも判断材料。
+> ✅ **決定・実装済み**: 区分けは「認証のある危険」と「認証なしの危険」。
+> サーバ側プロバイダキー+ゲートウェイ認証なしは `environment=production` で起動拒否
+> (open-proxy ガード — 従来通り) + render.yaml に `REKAI_ENVIRONMENT=production` を
+> 明記してワンクリックデプロイにも適用。`REKAI_CORS_ORIGINS=*` は Bearer 認証のため
+> 資格情報漏洩経路ではなく hygiene 問題 → 本番のみ警告 (拒否しない。compose の
+> web:3000→api:8000 は真に cross-origin で `*` が機能に必須)。compose は `*` 維持の
+> 理由をコメントで明記。S-9 の manifest 修正はこれで完了。
 
 ### O-8. モデル⇔プロバイダ⇔価格の単一情報源化 (F2 の構造部分)
 > ✅ **完了**: `rekai/models.py` に `ModelSpec` レジストリを新設し単一情報源化。

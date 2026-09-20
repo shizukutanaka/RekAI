@@ -30,6 +30,12 @@ services:
     environment:
       # Only what compose knows and .env cannot: the service hostname.
       REKAI_REDIS_URL: redis://redis:6379/0
+      # REKAI_CORS_ORIGINS deliberately stays at its "*" default: the web app
+      # calls this API from the browser (cross-origin :3000 -> :8000), and
+      # Bearer-key auth means a foreign origin holds no ambient credentials to
+      # abuse. Pin it (e.g. http://localhost:3000) only if the web origin is
+      # fixed — reaching the UI via another hostname or port would otherwise
+      # be rejected.
     ports:
       - "8000:8000"
     depends_on:

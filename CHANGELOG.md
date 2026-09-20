@@ -19,6 +19,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   deployments that already run the unsafe combination will fail to boot on
   their next deploy — that refusal is the intended behavior, and the error
   message names both ways out.
+- **`docker-compose.yml` now documents why `REKAI_CORS_ORIGINS` stays `*`.**
+  The default is deliberate — Bearer-key auth holds no ambient credentials a
+  foreign origin could abuse, and pinning it would break reaching the compose
+  web UI via any hostname or port other than `localhost:3000`. The comment
+  says when a pin is safe. Roadmap O-7 (secure-defaults policy) is recorded
+  as decided in `docs/ai/instructions-opus.md`; S-9's manifest work is
+  complete.
 
 ### Added
 - **Startup warnings for contradictory fallback config.** Two knobs drive the
