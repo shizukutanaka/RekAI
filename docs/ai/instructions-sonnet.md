@@ -19,8 +19,8 @@
 
 ## 割当タスク (優先度順)
 
-> **進捗**: S-1, S-2, S-6〜S-8, S-10〜S-13 は実装・push 済み (下記各項の ✅ 参照)。
-> 未着手は S-3 (npm audit), S-4 (小粒改善)、および S-9 (O-7 のデフォルト方針決定待ち)。
+> **進捗**: S-1, S-2, S-4, S-6〜S-13 は実装・push 済み (下記各項の ✅ 参照)。
+> S-3/S-3b は Next.js 16 PR でレビュー待ち (npm audit 10件→0)。
 > S-5 はメンテナ権限待ち。
 
 ### S-1. E2E スイートの v1.2 機能カバー
@@ -54,15 +54,21 @@
   として解消する。依存更新後は web の全検証 (tsc / lint / vitest / build / E2E) を必ず通す。
 
 ### S-3b. Next.js フレームワークメジャー (14→16)
+> ✅ **実装済み** (PR #13): next 16.3.5 / react 19.3.0 / eslint 9.39.5 flat config
+> (next lint 廃止に伴い `.eslintrc.json` → `eslint.config.mjs`) / vitest 4.1.11。
+> react-hooks v7 の set-state-in-effect 4件は queueMicrotask 遅延で修正 (lazy init は
+> hydration mismatch のため不可)。全ゲート緑 (tsc/eslint/vitest/build/standalone/E2E 22件)、
+> npm audit 0。eslint-plugin-react が ESLint 10 未対応のため eslint は 9 止まり。
 - 残る 5 advisory (next/postcss/eslint-config-next/glob/@next/eslint-plugin-next) は
   next 14→16 メジャーでのみ解消。React 19 要件・App Router 挙動変更・eslint 9 flat
   config 移行を伴うため、専用セッション/PR で全ゲート(特に E2E とビルド)を通して実施。
   外向き・不可逆度が高いので単独で。
 
 ### S-4. 小粒の改善 (各 1 コミット)
-- `/metrics` (Prometheus 出力) は現状 per-client 3 系列のみ。retries/cooldowns は
-  出力済みなので、必要なら provider 別トークン等を検討 — ただし cardinality に注意
-  (client id 系列は `REKAI_MAX_TRACKED_CLIENTS` で有界)。**未着手**。
+> ✅ **完了**: `tokens_by_provider` を追加 (PR #14) — provider 名はレジストリ由来の
+> 有界集合なので cardinality 安全。`/metrics` に `rekai_provider_tokens_total` (別
+> family)、`/v1/usage` に同名フィールド、スナップショット/seed/merge 対象、web Usage
+> ページと JS SDK/クライアント型も同期 (client-coverage 契約テストで強制)。
 - ✅ **完了**: `Provider._client()` の timeout をキャッシュキーに含め、
   `request_timeout_seconds` 変更時に client を再構築するように修正
   (`rebuilt.timeout.read` を assert するテスト付き)。
@@ -107,9 +113,10 @@ CI の設置は**完了済み** — ワークフローは `.github/workflows/ci.
   安定 id ベースに。E2E に軽い a11y assert を足すと尚可。
 
 ### S-9. デプロイ manifest の締め付け (F6 の実装部分、O-7 決定後)
-- `docker-compose.yml:19` と `deploy/render.yaml:32` の `REKAI_CORS_ORIGINS: "*"` を
-  コメント付きで安全化 (例: 具体オリジンのプレースホルダ + 認証キー設定の案内)。
-  **O-7 のデフォルト方針が決まってから**着手。
+> ✅ **完了**: O-7 の決定に基づき、render.yaml は `REKAI_ENVIRONMENT=production` +
+> `*` 意図のコメント+認証設定案内済み、docker-compose.yml は `*` 既定維持の理由
+> (Bearer 認証・web origin 不特定) をコメント明記。本番環境では起動時警告が出る
+> (main.py)。
 
 ### S-10. Python 非同期クライアント (F7)
 > ✅ **完了** (`bfcfd73`): `AsyncRekAIClient` を追加(httpx.AsyncClient、`async for`
