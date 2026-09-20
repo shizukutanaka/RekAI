@@ -466,6 +466,22 @@ so everything about it is deliberately conservative:
   question nobody asked. Most conversational prompts contain neither feature, so
   the guard is inert on that traffic. Only the digest is stored, never the
   prompt text — the semantic cache is not a place prompts should accumulate.
+- **Verify band (opt-in).** With `REKAI_SEMANTIC_CACHE_VERIFY_ENABLED=true`,
+  hits stop being binary: similarity ≥ `REKAI_SEMANTIC_CACHE_THRESHOLD` is
+  served outright, below `REKAI_SEMANTIC_CACHE_VERIFY_MIN_SIMILARITY` is a
+  miss, and the band between is checked against the provider before serving —
+  a short "does this answer that question? yes/no" call on the *same* provider
+  that would otherwise answer (the GPTCache two-model pattern, miniaturised:
+  it pays a few output tokens instead of a full generation). An unclear or
+  failed verdict is "not verified" and the request falls through to the normal
+  provider call — verification can only downgrade a hit, never invent one.
+  The judge call is metered (`provider_duration{operation="semantic_verify"}`
+  plus token/cost accounting like the embedding call), and the lookup
+  histogram's `result` label gains `verify_hit`/`verify_miss` — the histogram
+  itself keeps measuring only the scan, so verify latency isn't smuggled into
+  the scan numbers. Why opt-in: it costs one provider call per band hit, and a
+  wrong "yes" is exactly the failure it exists to prevent — the default stays
+  single-threshold.
 - **Model changes.** Entries whose embedding dimension differs from the query's
   are skipped outright, not scored. Switching `REKAI_SEMANTIC_CACHE_MODEL`
   leaves old-model entries in the process-local store, and their coordinates

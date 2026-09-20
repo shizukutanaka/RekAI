@@ -544,6 +544,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "for tests only.",
                 settings.semantic_cache_model,
             )
+        if (
+            settings.semantic_cache_verify_enabled
+            and settings.semantic_cache_verify_min_similarity >= settings.semantic_cache_threshold
+        ):
+            access_logger.warning(
+                "REKAI_SEMANTIC_CACHE_VERIFY_MIN_SIMILARITY=%.3f >= "
+                "REKAI_SEMANTIC_CACHE_THRESHOLD=%.3f — the verify band is empty, so "
+                "verification never runs. Lower the former or raise the latter.",
+                settings.semantic_cache_verify_min_similarity,
+                settings.semantic_cache_threshold,
+            )
 
     # Two knobs drive the server fallback chain, and their contradictory
     # combinations silently misconfigure — flag both so the operator fixes one.

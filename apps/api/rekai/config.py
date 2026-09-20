@@ -208,6 +208,13 @@ class Settings(BaseSettings):
     semantic_cache_enabled: bool = False
     semantic_cache_model: str = ""
     semantic_cache_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+    # Three zones instead of one threshold (O-2): similarity >= threshold is
+    # served outright; below verify_min_similarity is a miss; the band between
+    # is verified against the provider with a yes/no check before being
+    # served. Opt-in — verification costs one short upstream call per band
+    # hit, which is why the whole feature defaults off.
+    semantic_cache_verify_enabled: bool = False
+    semantic_cache_verify_min_similarity: float = Field(default=0.80, ge=0.0, le=1.0)
     semantic_cache_max_entries: int = Field(default=1000, ge=1)
 
     # Provider defaults (server-side keys; BYOK via header overrides these)

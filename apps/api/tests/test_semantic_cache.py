@@ -15,7 +15,12 @@ from rekai.cache import NullCache, semantic_bucket
 from rekai.config import Settings
 from rekai.main import create_app
 from rekai.providers import register_provider
-from rekai.providers.base import EmbeddingResult, Provider, ProviderResult
+from rekai.providers.base import (
+    EmbeddingResult,
+    Provider,
+    ProviderError,
+    ProviderResult,
+)
 from rekai.schemas import ChatMessage, ChatRequest, Usage
 from rekai.semantic_cache import (
     SemanticCache,
@@ -484,3 +489,127 @@ def test_guard_is_inert_on_prompts_with_neither_feature() -> None:
     # costs those requests nothing in hit rate.
     assert discriminators("summarize this article about cats") == ((), 0)
     assert discriminators("write a haiku about the sea") == ((), 0)
+
+
+# --- verify band (O-2) -------------------------------------------------------
+# Between the hit threshold and the miss floor sits an opt-in third zone: the
+# candidate is checked against the provider with a yes/no call before it is
+# served. Judgement can only turn a hit into a miss, never the reverse.
+
+
+class VerifyAwareProvider(StubSemanticProvider):
+    """StubSemanticProvider that recognises the verifier prompt."""
+
+    name = "semverify"
+    _VECTORS = {
+        **StubSemanticProvider._VECTORS,
+        # cos ~ 0.9 against "how do i reset my password" — inside the verify
+        # band when threshold=0.95 and verify_min=0.80.
+        "kind of forgot password": [0.9, 0.436, 0.0],
+    }
+
+    def __init__(self, verdict: str = "yes") -> None:
+        super().__init__()
+        self.verdict = verdict
+        self.verify_calls = 0
+
+    async def chat(self, request, api_key) -> ProviderResult:
+        text = request.messages[-1].content or ""
+        if "Proposed answer:" in text:
+            self.verify_calls += 1
+            if self.verdict == "raise":
+                raise ProviderError("verify call failed", status_code=502)
+            return ProviderResult(content=self.verdict, model=request.model, usage=Usage())
+        return await super().chat(request, api_key)
+
+
+def _verify_settings(**kw) -> Settings:
+    defaults = dict(
+        environment="test",
+        default_provider="semverify",
+        cache_enabled=False,
+        semantic_cache_enabled=True,
+        semantic_cache_model="semverify",
+        semantic_cache_threshold=0.95,
+        semantic_cache_verify_enabled=True,
+        semantic_cache_verify_min_similarity=0.80,
+    )
+    defaults.update(kw)
+    return Settings(**defaults)
+
+
+def _ask(text: str) -> ChatRequest:
+    return ChatRequest(model="semverify", messages=[ChatMessage(role="user", content=text)])
+
+
+async def test_a_band_hit_is_verified_before_being_served() -> None:
+    provider = VerifyAwareProvider(verdict="yes")
+    register_provider(provider)
+    semantic_cache.clear()
+    settings = _verify_settings()
+
+    first = await handle_chat(_ask("how do i reset my password"), None, settings, NullCache(), "c1")
+    band = await handle_chat(_ask("kind of forgot password"), None, settings, NullCache(), "c1")
+    assert band.cached is True
+    assert band.content == first.content
+    assert provider.chat_calls == 1  # only the real call...
+    assert provider.verify_calls == 1  # ...plus the yes/no verdict, not a second answer
+    semantic_cache.clear()
+
+
+async def test_a_no_verdict_falls_through_to_the_real_call() -> None:
+    provider = VerifyAwareProvider(verdict="no")
+    register_provider(provider)
+    semantic_cache.clear()
+    settings = _verify_settings()
+
+    await handle_chat(_ask("how do i reset my password"), None, settings, NullCache(), "c1")
+    band = await handle_chat(_ask("kind of forgot password"), None, settings, NullCache(), "c1")
+    assert band.cached is False
+    assert band.content == "answer to kind of forgot password"
+    assert provider.verify_calls == 1
+    assert provider.chat_calls == 2  # the band candidate cost a verdict AND an answer
+    semantic_cache.clear()
+
+
+async def test_a_failed_verify_call_falls_through_too() -> None:
+    provider = VerifyAwareProvider(verdict="raise")
+    register_provider(provider)
+    semantic_cache.clear()
+    settings = _verify_settings()
+
+    await handle_chat(_ask("how do i reset my password"), None, settings, NullCache(), "c1")
+    band = await handle_chat(_ask("kind of forgot password"), None, settings, NullCache(), "c1")
+    assert band.cached is False
+    assert provider.verify_calls == 1
+    assert provider.chat_calls == 2
+    semantic_cache.clear()
+
+
+async def test_with_verify_off_the_band_is_just_a_miss() -> None:
+    provider = VerifyAwareProvider()
+    register_provider(provider)
+    semantic_cache.clear()
+    settings = _verify_settings(semantic_cache_verify_enabled=False)
+
+    await handle_chat(_ask("how do i reset my password"), None, settings, NullCache(), "c1")
+    band = await handle_chat(_ask("kind of forgot password"), None, settings, NullCache(), "c1")
+    assert band.cached is False
+    assert provider.verify_calls == 0  # no band, no verdict call
+    assert provider.chat_calls == 2
+    semantic_cache.clear()
+
+
+def test_an_inverted_verify_band_warns_at_startup(capsys) -> None:
+    create_app(
+        Settings(
+            environment="test",
+            default_provider="echo",
+            semantic_cache_enabled=True,
+            semantic_cache_model="echo",
+            semantic_cache_verify_enabled=True,
+            semantic_cache_verify_min_similarity=0.95,
+            semantic_cache_threshold=0.85,
+        )
+    )
+    assert "verify band is empty" in capsys.readouterr().out

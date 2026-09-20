@@ -21,6 +21,7 @@ from rekai.providers.base import ProviderError, ProviderResult
 from rekai.retry import DeadlineExceeded, call_with_retry, remaining_budget
 from rekai.router import ensure_allowed, resolve_provider, select_provider
 from rekai.schemas import (
+    ChatMessage,
     ChatRequest,
     ChatResponse,
     EmbeddingsRequest,
@@ -155,6 +156,76 @@ async def _semantic_embed(request: ChatRequest, settings: Settings) -> list[floa
     return result.embeddings[0] if result.embeddings else None
 
 
+# Cosine similarity is not a proof that two prompts have the same answer — it
+# fails hardest on small edits that flip meaning. Below the hit threshold but
+# inside the verify band, RekAI asks the provider itself whether the stored
+# answer addresses this prompt before serving it (the GPTCache two-model
+# pattern, arXiv:2311.13133, miniaturised to one yes/no call on the same
+# provider that would otherwise answer).
+_SEMANTIC_VERIFY_PROMPT = (
+    "Question: {question}\n\nProposed answer: {answer}\n\n"
+    "Does the proposed answer correctly and completely answer the question? "
+    'Reply with only "yes" or "no".'
+)
+
+
+async def _verify_semantic_hit(
+    provider: Provider,
+    provider_name: str,
+    request: ChatRequest,
+    question: str,
+    stored_payload: str,
+    api_key: str | None,
+    settings: Settings,
+) -> bool:
+    """Ask the provider whether a cached answer answers this prompt.
+
+    Runs only inside the verify band — high-confidence hits are served
+    directly and low similarity never reaches a candidate. One short upstream
+    call (a few output tokens instead of a full generation), metered like the
+    embedding lookup is. Anything that isn't a clear "yes" — a failed call, an
+    ambiguous reply, a corrupt payload — is "not verified", i.e. the request
+    falls through to the normal provider call.
+    """
+    try:
+        answer = json.loads(stored_payload).get("content")
+    except json.JSONDecodeError:
+        return False
+    if not answer:
+        return False
+    verifier = request.model_copy(
+        update={
+            "messages": [
+                ChatMessage(
+                    role="user",
+                    content=_SEMANTIC_VERIFY_PROMPT.format(question=question, answer=answer),
+                )
+            ],
+            # A yes/no question: no tools, no formatting, deterministic, a few
+            # tokens, and never itself eligible for cache or fallback.
+            "temperature": 0.0,
+            "max_tokens": 4,
+            "tools": None,
+            "tool_choice": None,
+            "response_format": None,
+            "cache_control": None,
+            "fallbacks": None,
+            "cache": False,
+        }
+    )
+    started = time.perf_counter()
+    result = await provider.chat(verifier, api_key)
+    metrics.observe_provider_duration(
+        provider_name, "semantic_verify", time.perf_counter() - started
+    )
+    usage = result.usage or Usage()
+    metrics.record_tokens(usage.total_tokens)
+    metrics.record_cost(
+        estimate_cost(provider_name, result.model, usage, settings.pricing_override_dict)
+    )
+    return (result.content or "").strip().lower().startswith("yes")
+
+
 def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
     """Scrub secret/API-key patterns out of the assistant's content (OWASP LLM02).
 
@@ -211,19 +282,56 @@ async def handle_chat(
         sem_prompt = _prompt_text(request)
         sem_embedding = await _semantic_embed(request, settings)
         if sem_embedding is not None:
+            # Three zones (O-2): >= threshold serves outright; < verify_min is
+            # a miss; the band between asks the provider to verify the stored
+            # answer against this prompt before it is served. With verification
+            # off, floor == threshold and the band never contains anything.
+            floor = (
+                min(
+                    settings.semantic_cache_threshold,
+                    settings.semantic_cache_verify_min_similarity,
+                )
+                if settings.semantic_cache_verify_enabled
+                else settings.semantic_cache_threshold
+            )
             lookup_started = time.perf_counter()
-            hit = semantic_cache.find(
-                sem_bucket, sem_prompt, sem_embedding, settings.semantic_cache_threshold
-            )
-            metrics.observe_semantic_lookup(
-                "hit" if hit is not None else "miss", time.perf_counter() - lookup_started
-            )
+            hit = semantic_cache.find(sem_bucket, sem_prompt, sem_embedding, floor)
+            # The histogram is documented as the *scan* cost — the verify call
+            # below is provider latency and is metered separately.
+            scan_elapsed = time.perf_counter() - lookup_started
+            outcome = "miss"
+            if hit is not None:
+                payload, similarity = hit
+                outcome = "hit"
+                if similarity < settings.semantic_cache_threshold:
+                    try:
+                        verified = await _verify_semantic_hit(
+                            primary,
+                            primary_name,
+                            request,
+                            sem_prompt,
+                            payload,
+                            api_key,
+                            settings,
+                        )
+                    except ProviderError:
+                        verified = False
+                    # Verification can only downgrade a hit to a miss, never
+                    # the reverse — a judge that can't decide doesn't get to
+                    # serve the answer.
+                    outcome = "verify_hit" if verified else "verify_miss"
+                    if not verified:
+                        hit = None
+            metrics.observe_semantic_lookup(outcome, scan_elapsed)
             if hit is not None:
                 payload, similarity = hit
                 metrics.record_cache(hit=True)
                 metrics.record_semantic_cache_hit()
                 logger.info(
-                    "semantic cache hit model=%s similarity=%.4f", request.model, similarity
+                    "semantic cache %s model=%s similarity=%.4f",
+                    outcome,
+                    request.model,
+                    similarity,
                 )
                 # cache_similarity is what distinguishes this from an exact hit:
                 # the answer is to a *different* prompt, and how different is

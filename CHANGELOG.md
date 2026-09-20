@@ -21,6 +21,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   message names both ways out.
 
 ### Added
+- **Opt-in verify band for the semantic cache** (`REKAI_SEMANTIC_CACHE_VERIFY_*`,
+  roadmap O-2). A single cosine threshold forced every candidate to be served
+  or dropped on embedding distance alone; similarity is not proof two prompts
+  share an answer, and the miss case that fails hardest — the paraphrase that
+  *isn't* one — sits in the middle. With verification enabled, hits in
+  `[verify_min_similarity, threshold)` are checked against the provider with a
+  short "does this answer that question?" call on the same provider that would
+  otherwise answer, paying a few output tokens instead of a full generation.
+  The verdict can only downgrade a hit to a miss; an unclear or failed judge
+  call falls through to the real provider. The lookup histogram's `result`
+  label gains `verify_hit`/`verify_miss` (it keeps measuring only the scan;
+  judge latency is metered under `provider_duration{operation="semantic_verify"}`
+  alongside the token/cost accounting the embedding call already gets).
 - **Startup warnings for contradictory fallback config.** Two knobs drive the
   server fallback chain, and both contradictory combinations used to pass
   silently: `REKAI_FALLBACK_ENABLED=true` with empty `REKAI_FALLBACK_TARGETS`
