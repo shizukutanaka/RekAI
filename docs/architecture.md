@@ -111,7 +111,12 @@ a server-wide chain is set via `REKAI_FALLBACK_ENABLED` +
 `REKAI_FALLBACK_TARGETS`; both 5xx and 429 trigger failover. The serving
 provider is reflected in the response `provider` field and `fallback_used` is
 set when a non-primary target answered. Each fallback attempt increments
-`rekai_fallbacks_total`. Retry and failover apply to embeddings too.
+`rekai_fallbacks_total`. For embeddings only retry applies — failover
+deliberately does not: a fallback target naming a different model returns a
+vector in a different space (and dimension), which silently corrupts a
+similarity index rather than answering "roughly as well". Failing loudly is the
+safer default; a same-model fallback (the identical model served by a second
+provider) is the only coherent version and hasn't been needed yet.
 
 ### Per-try timeout vs. request deadline
 

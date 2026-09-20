@@ -31,6 +31,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   first attempt's cancellation flag (set only when the deadline's `wait_for`
   fires mid-call), `slow.calls == 1`, and `never.calls == 0` — strictly
   stronger, and immune to timing noise.
+- **The architecture doc claimed failover applies to embeddings. It doesn't
+  and shouldn't.** `EmbeddingsRequest` has no `fallbacks` field and
+  `handle_embeddings` never consults `REKAI_FALLBACK_TARGETS` — only retry
+  applies. The doc now says so and says why the gap is deliberate: a fallback
+  target naming a different model returns a vector in a different space and
+  dimension, silently corrupting a similarity index. Failing loudly is the
+  safer default; a same-model fallback is the only coherent version and hasn't
+  been needed yet.
 
 ## [1.3.1] - 2026-09-18
 
