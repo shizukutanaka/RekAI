@@ -35,10 +35,16 @@ class SlowFailingProvider(Provider):
         self.name = name
         self._delay = delay
         self.calls = 0
+        self.cancelled = False
 
     async def chat(self, request, api_key) -> ProviderResult:
         self.calls += 1
-        await asyncio.sleep(self._delay)
+        try:
+            await asyncio.sleep(self._delay)
+        except asyncio.CancelledError:
+            # Reaching here means the request deadline's wait_for fired mid-call.
+            self.cancelled = True
+            raise
         raise ProviderError(f"{self.name} timed out", status_code=504)
 
 
@@ -215,14 +221,15 @@ async def test_chain_stops_starting_targets_once_the_budget_is_spent() -> None:
         request_deadline_seconds=0.1,
     )
 
-    started = time.monotonic()
     with pytest.raises(ProviderError):
         await handle_chat(request, None, settings, NullCache())
-    elapsed = time.monotonic() - started
 
-    # Without a deadline this is 3 x 0.15s. With one, the chain stops after the
-    # budget is spent instead of walking every remaining target.
-    assert elapsed < 0.3
+    # Deterministic, unlike a wall-clock bound (which also couldn't tell a cut
+    # attempt from one that ran its full 0.15s): the first attempt was cancelled
+    # at the deadline rather than allowed to fail on its own, and the chain
+    # stopped instead of walking the remaining targets.
+    assert slow.calls == 1
+    assert slow.cancelled
     assert never.calls == 0
 
 

@@ -6,6 +6,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **`test_chain_stops_starting_targets_once_the_budget_is_spent` was a
+  wall-clock flake.** It asserted `elapsed < 0.3s` around a 0.1s deadline, so
+  ordinary scheduler jitter — on a loaded machine or a slower platform — could
+  burn the 0.2s slack and fail a correct implementation (observed at 0.378s).
+  Worse, the bound was too weak for its own purpose: an implementation that let
+  the first attempt run to its full 0.15s failure and *then* stopped the chain
+  also passes it. The test now asserts the observable mechanics instead: the
+  first attempt's cancellation flag (set only when the deadline's `wait_for`
+  fires mid-call), `slow.calls == 1`, and `never.calls == 0` — strictly
+  stronger, and immune to timing noise.
+
 ## [1.3.1] - 2026-09-18
 
 ### Security
