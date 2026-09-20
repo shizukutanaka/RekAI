@@ -21,6 +21,12 @@ RekAI is a standard 3-service stack: **Redis**, the **API** (FastAPI), and the
 To use a real provider without BYOK, add e.g. `REKAI_OPENAI_API_KEY` to the
 `rekai-api` service (uncomment it in the blueprint or set it in the dashboard).
 
+The blueprint sets `REKAI_ENVIRONMENT=production`, so the open-proxy guard is
+enforced: a server-side provider key **without gateway auth** makes the API
+refuse to boot rather than run as an unauthenticated proxy that spends your
+provider balance. Set `REKAI_API_KEYS` (or `REKAI_DYNAMIC_KEYS_ENABLED=true`)
+alongside provider keys — the commented block in `render.yaml` shows both.
+
 ## Option 2 — Self-host with Docker Compose
 
 On any VM with Docker:

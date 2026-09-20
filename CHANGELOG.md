@@ -6,6 +6,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **The Render blueprint now runs the API in production mode.** `deploy/
+  render.yaml` never set `REKAI_ENVIRONMENT`, so the open-proxy guard only
+  *warned* on the one deployment shape that is internet-facing by definition —
+  and `deploy/README.md` tells operators to add `REKAI_OPENAI_API_KEY` to
+  `rekai-api`, which is exactly the combination (server-side provider keys, no
+  gateway auth) the guard exists to refuse. New Render deploys now boot with
+  `REKAI_ENVIRONMENT=production`: adding a provider key without
+  `REKAI_API_KEYS`/`REKAI_DYNAMIC_KEYS_ENABLED` fails fast with the named fixes
+  instead of silently spending the operator's balance on an open port. Existing
+  deployments that already run the unsafe combination will fail to boot on
+  their next deploy — that refusal is the intended behavior, and the error
+  message names both ways out.
+
 ### Fixed
 - **`test_chain_stops_starting_targets_once_the_budget_is_spent` was a
   wall-clock flake.** It asserted `elapsed < 0.3s` around a 0.1s deadline, so
