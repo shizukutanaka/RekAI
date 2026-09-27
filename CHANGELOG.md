@@ -19,6 +19,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   them (`ChatResult.annotations`, `on_annotations`/`onAnnotations` hooks). The web
   chat renders `url_citation` annotations as a numbered source list under the
   reply.
+  them (`ChatResult.annotations`, `on_annotations`/`onAnnotations` hooks).
+- **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
+  `cache: false` so you can compare a fresh answer against the cached one.
+  It defaults to on; the meta line already marks cache hits.
 - `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
   check (`client.messages.count_tokens`) now works against the compat surface.
   Returns a local script-aware estimate (the same heuristic the pricing path

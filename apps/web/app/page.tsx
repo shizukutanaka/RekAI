@@ -72,6 +72,9 @@ export default function ChatPage() {
   const [system, setSystem] = useState("");
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState("");
+  // A playground exists to see routing/caching behaviour, so the cache toggle
+  // defaults on — turning it off is how you compare a fresh answer to a hit.
+  const [cacheEnabled, setCacheEnabled] = useState(true);
   const [showOptions, setShowOptions] = useState(false);
   const [error, setError] = useState("");
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -193,6 +196,7 @@ export default function ChatPage() {
               temperature,
               maxTokens: maxTokensNum,
               provider: selectedProvider,
+              cache: cacheEnabled,
               onRateLimit: setRateLimit,
             },
             (delta) => {
@@ -259,6 +263,7 @@ export default function ChatPage() {
           temperature,
           maxTokens: maxTokensNum,
           provider: selectedProvider,
+          cache: cacheEnabled,
           onRateLimit: setRateLimit,
         });
         setMessages([
@@ -390,6 +395,17 @@ export default function ChatPage() {
               value={temperature}
               onChange={(e) => setTemperature(Number(e.target.value))}
             />
+          </div>
+          <div className="field">
+            <label htmlFor="cache">
+              <input
+                id="cache"
+                type="checkbox"
+                checked={cacheEnabled}
+                onChange={(e) => setCacheEnabled(e.target.checked)}
+              />{" "}
+              Allow cached answers
+            </label>
           </div>
           <div className="field">
             <label htmlFor="maxtok">Max tokens</label>
