@@ -749,10 +749,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # CORS preflight (OPTIONS) must not consume budget, or the browser sees a
         # 429 on the preflight ("Failed to fetch") instead of the real response.
         if settings.rate_limit_enabled and is_api_write:
-            limit = str(settings.rate_limit_requests)
-            if not await limiter.allow(rl_client):
+            # A per-key override (client_rate_limits) wins over the global
+            # default — keyed on the raw key, same as client_budgets_usd.
+            capacity = settings.rate_limit_requests
+            if token is not None:
+                capacity = settings.client_rate_limit_overrides.get(token, capacity)
+            limit = str(capacity)
+            if not await limiter.allow(rl_client, capacity):
                 metrics.record_error("rate_limited")
-                retry_after = await limiter.retry_after(rl_client)
+                retry_after = await limiter.retry_after(rl_client, capacity)
                 return JSONResponse(
                     status_code=429,
                     content=ErrorResponse(
@@ -767,7 +772,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
             response = await call_next(request)
             response.headers["X-RateLimit-Limit"] = limit
-            response.headers["X-RateLimit-Remaining"] = str(await limiter.remaining(rl_client))
+            response.headers["X-RateLimit-Remaining"] = str(
+                await limiter.remaining(rl_client, capacity)
+            )
             return response
         return await call_next(request)
 
