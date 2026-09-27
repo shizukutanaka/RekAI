@@ -55,6 +55,9 @@ export interface ChatOptions {
    * 'scale'). Forwarded to OpenAI-compatible providers only.
    */
   serviceTier?: string;
+  /** OpenAI's `web_search_options` — hosted web-search config (context size,
+   * user location). OpenAI-compatible providers only. */
+  webSearchOptions?: Record<string, unknown>;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
 }

@@ -85,6 +85,18 @@ class ChatRequest(BaseModel):
         "stay forward-compatible; an unsupported tier surfaces as the "
         "provider's own error. Forwarded to OpenAI-compatible providers only.",
     )
+    web_search_options: dict | None = Field(
+        default=None,
+        description="OpenAI's `web_search_options` — search context size, "
+        "user location, etc. for models with hosted web search. Forwarded "
+        "verbatim to OpenAI-compatible providers only.",
+    )
+    include_obfuscation: bool | None = Field(
+        default=None,
+        description="OpenAI's `stream_options.include_obfuscation`: asks the "
+        "provider to obfuscate streamed tokens. Forwarded into the upstream "
+        "`stream_options` on OpenAI-compatible providers only.",
+    )
     cache: bool = Field(default=True, description="Whether this request may be served from cache.")
     fallbacks: list[FallbackTarget] | None = Field(
         default=None,
@@ -171,6 +183,7 @@ class OpenAIChatMessage(BaseModel):
 
 class StreamOptions(BaseModel):
     include_usage: bool = False
+    include_obfuscation: bool | None = None
 
 
 class ChatCompletionsRequest(BaseModel):
@@ -190,6 +203,7 @@ class ChatCompletionsRequest(BaseModel):
     logit_bias: dict[str, int] | None = None
     stop: str | list[str] | None = None
     service_tier: str | None = None
+    web_search_options: dict[str, Any] | None = None
     stream: bool = False
     stream_options: StreamOptions | None = None
     tools: list[dict[str, Any]] | None = None
@@ -198,6 +212,11 @@ class ChatCompletionsRequest(BaseModel):
     user: str | None = None  # accepted, ignored
     n: int | None = None  # 400 if n > 1 (RekAI returns a single choice)
     provider: str | None = None  # RekAI extension: explicit provider override
+    # OpenAI's pre-tools function-calling API (deprecated since 0613 but still
+    # emitted by older SDKs and codebases). Normalized to tools/tool_choice in
+    # the compat layer; modern `tools` wins when both are sent.
+    functions: list[dict[str, Any]] | None = None
+    function_call: Any | None = None
 
 
 # --- Anthropic Messages API (`POST /v1/messages`) --------------------------

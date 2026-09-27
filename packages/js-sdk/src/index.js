@@ -144,6 +144,8 @@ export class RekAIClient {
     if (opts.presencePenalty != null) payload.presence_penalty = opts.presencePenalty;
     if (opts.logitBias != null) payload.logit_bias = opts.logitBias;
     if (opts.serviceTier != null) payload.service_tier = opts.serviceTier;
+    // OpenAI's hosted web-search config; OpenAI-compatible providers only.
+    if (opts.webSearchOptions != null) payload.web_search_options = opts.webSearchOptions;
     return payload;
   }
 

@@ -47,6 +47,10 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         # the cost breakdown we report back), so they key separately. Per-message
         # cache_control already rides along in `messages` above.
         "cache_control": request.cache_control,
+        # Hosted web search changes what the answer is grounded on.
+        # (include_obfuscation is excluded: it changes the streamed encoding,
+        # not the content — and a cached body is never streamed.)
+        "web_search_options": request.web_search_options,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "rekai:chat:" + hashlib.sha256(raw.encode()).hexdigest()
@@ -85,6 +89,7 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
         "tool_choice": request.tool_choice,
         "response_format": request.response_format,
         "cache_control": request.cache_control,
+        "web_search_options": request.web_search_options,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode()).hexdigest()
