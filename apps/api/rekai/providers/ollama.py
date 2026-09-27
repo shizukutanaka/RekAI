@@ -130,7 +130,15 @@ class OllamaProvider(Provider):
             finish_reason=finish_reason,
         )
 
-    async def embed(self, inputs: list[str], model: str, api_key: str | None) -> EmbeddingResult:
+    async def embed(
+        self,
+        inputs: list[str],
+        model: str,
+        api_key: str | None,
+        *,
+        dimensions: int | None = None,
+        encoding_format: str | None = None,
+    ) -> EmbeddingResult:
         settings = get_settings()
         url = f"{settings.ollama_base_url.rstrip('/')}/api/embed"
         try:

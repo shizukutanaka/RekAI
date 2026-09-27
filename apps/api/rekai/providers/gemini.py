@@ -145,15 +145,25 @@ class GeminiProvider(Provider):
             ),
         )
 
-    async def embed(self, inputs: list[str], model: str, api_key: str | None) -> EmbeddingResult:
+    async def embed(
+        self,
+        inputs: list[str],
+        model: str,
+        api_key: str | None,
+        *,
+        dimensions: int | None = None,
+        encoding_format: str | None = None,
+    ) -> EmbeddingResult:
         settings = get_settings()
         key = self._resolve_key(api_key)
         # Gemini wants the fully-qualified model name in each request.
         qualified = model if model.startswith("models/") else f"models/{model}"
+        per_request: dict = {"model": qualified}
+        # Gemini's name for output sizing; encoding_format is OpenAI-only.
+        if dimensions is not None:
+            per_request["outputDimensionality"] = dimensions
         payload = {
-            "requests": [
-                {"model": qualified, "content": {"parts": [{"text": text}]}} for text in inputs
-            ]
+            "requests": [{**per_request, "content": {"parts": [{"text": text}]}} for text in inputs]
         }
         url = f"{settings.gemini_base_url.rstrip('/')}/{qualified}:batchEmbedContents"
         try:
