@@ -7,6 +7,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+
+- **Embeddings page exposes `dimensions`** — the backend has honoured
+  `dimensions` since it was wired through to providers, but the UI offered
+  no way to set it. An optional input now sends it (blank = model default);
+  the result card already displays the actual vector length, so a provider
+  that ignores the hint is visible rather than silent.
 - `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
   check (`client.messages.count_tokens`) now works against the compat surface.
   Returns a local script-aware estimate (the same heuristic the pricing path

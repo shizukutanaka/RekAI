@@ -23,6 +23,10 @@ export default function EmbeddingsPage() {
   const [result, setResult] = useState<EmbeddingsResponse | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // Empty = the model's native size. Only providers that support output
+  // truncation honour it (OpenAI, Gemini); the result card shows the actual
+  // dimension so a silent ignore is visible rather than hidden.
+  const [dimensions, setDimensions] = useState("");
 
   useEffect(() => {
     fetchModels("embedding", getStoredGatewayKey() || undefined).then((m) => {
@@ -48,6 +52,7 @@ export default function EmbeddingsPage() {
         provider: selectedProvider,
         providerKey: getStoredKey() || undefined,
         gatewayKey: getStoredGatewayKey() || undefined,
+        dimensions: dimensions ? Number(dimensions) : undefined,
       });
       setResult(data);
     } catch (e) {
@@ -106,6 +111,18 @@ export default function EmbeddingsPage() {
             placeholder="echo"
           />
         )}
+      </div>
+
+      <div className="field">
+        <label htmlFor="dimensions">Dimensions (optional)</label>
+        <input
+          id="dimensions"
+          type="number"
+          min={1}
+          value={dimensions}
+          onChange={(e) => setDimensions(e.target.value)}
+          placeholder="model default"
+        />
       </div>
 
       <div className="field">
