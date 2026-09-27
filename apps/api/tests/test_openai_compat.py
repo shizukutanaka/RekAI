@@ -294,3 +294,71 @@ def test_guardrail_block_returns_openai_error() -> None:
     assert resp.status_code == 403
     assert "error" in resp.json()
     assert resp.json()["error"]["message"]
+
+
+# --- Authorization: Bearer doubles as the BYOK key ---------------------------
+
+
+class _KeyedProvider(Provider):
+    name = "keyy"
+    requires_key = True
+    seen: str | None = None
+
+    async def chat(self, request, api_key):  # type: ignore[no-untyped-def]
+        type(self).seen = api_key
+        return ProviderResult(
+            content="hi",
+            model=request.model,
+            usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        )
+
+
+def _app(**kw):
+    kw.setdefault("environment", "test")
+    kw.setdefault("default_provider", "keyy")
+    return create_app(Settings(**kw))
+
+
+def test_bearer_is_the_provider_key_when_gateway_auth_is_off() -> None:
+    """OpenRouter convention: with no gateway keys configured, the SDK's own
+    `Authorization: Bearer` reaches the provider — so
+    `OpenAI(base_url=rekai, api_key="sk-…")` is a true drop-in BYOK."""
+    register_provider(_KeyedProvider())
+    c = TestClient(_app())
+    resp = c.post(
+        "/v1/chat/completions",
+        json={"model": "m", "messages": [{"role": "user", "content": "hi"}]},
+        headers={"Authorization": "Bearer sk-upstream"},
+    )
+    assert resp.status_code == 200
+    assert _KeyedProvider.seen == "sk-upstream"
+
+
+def test_x_provider_key_wins_over_bearer() -> None:
+    register_provider(_KeyedProvider())
+    c = TestClient(_app())
+    resp = c.post(
+        "/v1/chat/completions",
+        json={"model": "m", "messages": [{"role": "user", "content": "hi"}]},
+        headers={
+            "Authorization": "Bearer sk-upstream",
+            "X-Provider-Key": "sk-explicit",
+        },
+    )
+    assert resp.status_code == 200
+    assert _KeyedProvider.seen == "sk-explicit"
+
+
+def test_bearer_stays_gateway_auth_when_keys_are_configured() -> None:
+    """With gateway auth on, Bearer belongs to RekAI — forwarding it upstream
+    too would leak the tenant's gateway key to the provider."""
+    register_provider(_KeyedProvider())
+    _KeyedProvider.seen = None
+    c = TestClient(_app(api_keys="gw-secret"))
+    resp = c.post(
+        "/v1/chat/completions",
+        json={"model": "m", "messages": [{"role": "user", "content": "hi"}]},
+        headers={"Authorization": "Bearer gw-secret"},
+    )
+    assert resp.status_code == 200
+    assert _KeyedProvider.seen is None

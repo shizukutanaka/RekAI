@@ -1082,6 +1082,14 @@ passed straight to the provider call and never logged, cached, or persisted. A
 server-side default key (e.g. `REKAI_OPENAI_API_KEY`) is used only when no BYOK
 header is present.
 
+On the OpenAI-compatible route specifically, the caller's
+`Authorization: Bearer` doubles as the provider key when the gateway itself is
+unauthenticated (no `REKAI_API_KEYS`, dynamic keys off) — the OpenRouter
+convention, which makes `OpenAI(base_url=rekai, api_key="sk-…")` a working
+drop-in BYOK setup with no custom headers. Once gateway auth is configured,
+`Authorization` belongs to RekAI and BYOK stays on `X-Provider-Key`; forwarding
+a tenant's gateway key upstream would leak it.
+
 ### Readiness
 
 `/health` reports `provider_status` per provider: `ready` (usable now — keyless,

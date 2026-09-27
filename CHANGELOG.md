@@ -36,6 +36,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **`Authorization: Bearer` doubles as the BYOK key on
+  `/v1/chat/completions`.** When the gateway itself is unauthenticated (no
+  `REKAI_API_KEYS`, dynamic keys off), the SDK's own Bearer token is forwarded
+  to the provider — the OpenRouter convention — so
+  `OpenAI(base_url=rekai, api_key="sk-…")` works with zero extra headers.
+  `X-Provider-Key` still wins when both are sent, and once gateway auth is on
+  Bearer belongs to RekAI (forwarding a tenant's gateway key upstream would
+  leak it).
 - **Opt-in verify band for the semantic cache** (`REKAI_SEMANTIC_CACHE_VERIFY_*`,
   roadmap O-2). A single cosine threshold forced every candidate to be served
   or dropped on embedding distance alone; similarity is not proof two prompts
