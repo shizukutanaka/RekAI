@@ -36,6 +36,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **Per-client token cap** (`REKAI_CLIENT_TOKEN_LIMIT` +
+  `REKAI_CLIENT_TOKEN_LIMIT_WINDOW_SECONDS`). The USD budget's counterpart
+  counted in tokens instead of dollars, closing the gap where a cost cap can't
+  bite: free/local providers report `cost_usd` = 0 by construction, yet a
+  tenant can still monopolize upstream throughput — and upstream providers'
+  own limits are expressed in tokens-per-minute, so `…WINDOW_SECONDS=60` is
+  the direct TPM equivalent. Checked in the same middleware pass as auth/rate
+  limit/budget before any provider call; exceeding it returns 429
+  `token_limit_exceeded` with `X-TokenLimit-Remaining`, plus
+  `X-TokenLimit-Reset`/`Retry-After` when windowed. Counting is post-response
+  (actual usage attributed through `_record_client_usage`, including
+  embeddings), enforcement is best-effort/process-local like the budget cap,
+  and window counters stay out of the persisted snapshot for the same reason
+  the budget window does.
 - **Opt-in verify band for the semantic cache** (`REKAI_SEMANTIC_CACHE_VERIFY_*`,
   roadmap O-2). A single cosine threshold forced every candidate to be served
   or dropped on embedding distance alone; similarity is not proof two prompts

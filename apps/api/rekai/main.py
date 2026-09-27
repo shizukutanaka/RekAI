@@ -444,6 +444,13 @@ def _record_client_usage(
         metrics.record_client_budget_usage(
             client_id, result.cost_usd, settings.client_budget_window_seconds, time.time()
         )
+    if settings.client_token_limit_window_seconds is not None:
+        metrics.record_client_token_usage(
+            client_id,
+            result.usage.total_tokens,
+            settings.client_token_limit_window_seconds,
+            time.time(),
+        )
     _stash_gen_ai(http_request, operation, result)
 
 
@@ -725,6 +732,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     headers=headers,
                 )
 
+        # Per-client token cap: the USD budget's counterpart in tokens, which
+        # bites where a cost cap can't — free/local providers (cost_usd=0) and
+        # upstream TPM limits. Same window-or-lifetime semantics, same
+        # best-effort process-local enforcement.
+        if is_api_write and settings.client_token_limit is not None:
+            token_window = settings.client_token_limit_window_seconds
+            if token_window is not None:
+                used_tokens = metrics.client_window_tokens(rl_client, token_window, time.time())
+            else:
+                used_tokens = metrics.client_tokens(rl_client)
+            if used_tokens >= settings.client_token_limit:
+                metrics.record_error("token_limit_exceeded")
+                headers = {"X-TokenLimit-Remaining": "0"}
+                if token_window is not None:
+                    now = time.time()
+                    reset = (int(now / token_window) + 1) * token_window
+                    headers["X-TokenLimit-Reset"] = str(reset)
+                    headers["Retry-After"] = str(max(1, int(reset - now)))
+                return JSONResponse(
+                    status_code=429,
+                    content=ErrorResponse(
+                        error="token_limit_exceeded",
+                        detail=(
+                            f"Client token limit of {settings.client_token_limit} exceeded "
+                            f"(used {used_tokens})."
+                        ),
+                    ).model_dump(),
+                    headers=headers,
+                )
+
         # Reject oversized bodies up front (cheap Content-Length check) so a huge
         # payload can't tie up parsing or memory. This is only advisory — a
         # client using chunked transfer-encoding sends no Content-Length at
@@ -873,6 +910,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "X-Cache-Similarity",
             "X-Budget-Remaining",
             "X-Budget-Reset",
+            "X-TokenLimit-Remaining",
+            "X-TokenLimit-Reset",
         ],
     )
 

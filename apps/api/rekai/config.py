@@ -150,8 +150,22 @@ class Settings(BaseSettings):
     # current window's accumulated spend (see docs/architecture.md).
     client_budget_window_seconds: int | None = Field(default=None, ge=1)
 
-    # Cap on distinct clients tracked in usage_by_client and the budget-window
-    # store (0 = unlimited). Without auth the client id is the raw request IP,
+    # Per-client token cap (opt-in) — the same enforcement shape as the USD
+    # budget above, but counted in tokens (prompt+completion) rather than cost.
+    # Distinct protection, not a duplicate: cost is zero for free/local
+    # providers (ollama, self-hosted), where a USD cap never bites but a client
+    # can still monopolize upstream throughput — and upstream provider limits
+    # are themselves expressed in tokens-per-minute. Unset = no cap.
+    client_token_limit: int | None = Field(default=None, ge=1)
+
+    # Time-box the token cap to a fixed window, e.g. 60 for TPM-equivalent
+    # shaping. Same semantics as client_budget_window_seconds: epoch-aligned
+    # fixed windows, not persisted across restarts. Unset = lifetime-cumulative
+    # against usage_by_client's token total.
+    client_token_limit_window_seconds: int | None = Field(default=None, ge=1)
+
+    # Cap on distinct clients tracked in usage_by_client and the budget/token
+    # window stores (0 = unlimited). Without auth the client id is the raw request IP,
     # so an internet-facing deployment would otherwise accumulate one entry per
     # IP forever — the same unbounded-growth risk the rate limiter already
     # guards against with its own bucket cap. When full, the entry with the

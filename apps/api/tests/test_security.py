@@ -322,6 +322,92 @@ def test_client_budget_window_seconds_enforces_cap_within_window(monkeypatch) ->
         main_module.metrics.seed({})
 
 
+def test_client_token_limit_exceeded_returns_429() -> None:
+    # Token caps are the USD budget's counterpart that still bites for
+    # free/local providers — echo's cost_usd is 0, so no USD cap can trigger,
+    # but a token cap bounds raw upstream consumption anyway.
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys="sk-tokens-a",
+        rate_limit_enabled=False,
+        client_token_limit=100,
+    )
+    client = TestClient(create_app(settings))
+    try:
+        main_module.metrics.record_client_usage(client_id("sk-tokens-a"), tokens=150, cost_usd=0.0)
+        body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+        resp = client.post(
+            "/v1/chat",
+            json=body,
+            headers={
+                "Authorization": "Bearer sk-tokens-a",
+                "Origin": "http://localhost:3000",
+            },
+        )
+        assert resp.status_code == 429
+        assert resp.json()["error"] == "token_limit_exceeded"
+        assert resp.headers["X-TokenLimit-Remaining"] == "0"
+        # CORS is outermost, so this short-circuit 429 is browser-readable too.
+        assert "x-tokenlimit-remaining" in resp.headers["access-control-expose-headers"].lower()
+    finally:
+        main_module.metrics.seed({})
+
+
+def test_client_token_limit_allows_requests_under_the_cap() -> None:
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys="sk-tokens-b",
+        rate_limit_enabled=False,
+        client_token_limit=10_000,
+    )
+    client = TestClient(create_app(settings))
+    try:
+        body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+        resp = client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-tokens-b"})
+        assert resp.status_code == 200
+    finally:
+        main_module.metrics.seed({})
+
+
+def test_client_token_limit_window_enforces_cap_within_window(monkeypatch) -> None:
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys="sk-tokens-w",
+        rate_limit_enabled=False,
+        client_token_limit=500,
+        client_token_limit_window_seconds=100,
+    )
+    client = TestClient(create_app(settings))
+    try:
+        monkeypatch.setattr(main_module.time, "time", lambda: 1000.0)
+        # Prior window usage recorded in the same window the check will read.
+        main_module.metrics.record_client_token_usage(
+            client_id("sk-tokens-w"), 600, window_seconds=100, now=1000.0
+        )
+        body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+        resp = client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-tokens-w"})
+        assert resp.status_code == 429
+        assert resp.json()["error"] == "token_limit_exceeded"
+        # Window 10 spans [1000, 1100) -> resets at 1100, retry in 100s.
+        assert resp.headers["X-TokenLimit-Reset"] == "1100"
+        assert resp.headers["Retry-After"] == "100"
+
+        # Rollover: a request in the next window is allowed again and the new
+        # usage was recorded through the response path.
+        monkeypatch.setattr(main_module.time, "time", lambda: 1105.0)
+        ok = client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-tokens-w"})
+        assert ok.status_code == 200
+        used = main_module.metrics.client_window_tokens(
+            client_id("sk-tokens-w"), window_seconds=100, now=1105.0
+        )
+        assert used == ok.json()["usage"]["total_tokens"]
+    finally:
+        main_module.metrics.seed({})
+
+
 def test_client_budget_window_seconds_resets_after_rollover(monkeypatch) -> None:
     settings = Settings(
         environment="test",
