@@ -8,6 +8,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Guardrail scans tool results.** The prompt-injection guardrail now covers
+  `role="tool"` messages on every chat surface (native, OpenAI-, and
+  Anthropic-compat) — tool output is external content and the canonical
+  *indirect* injection vector (OWASP LLM01): a fetched page carrying "ignore
+  previous instructions" never appears in the user's own text. Same flag/block
+  semantics; still opt-in via `REKAI_GUARDRAILS_ENABLED`.
 - **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
   `cache: false` so you can compare a fresh answer against the cached one.
   It defaults to on; the meta line already marks cache hits.
