@@ -1378,6 +1378,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ):
                 if ev.delta is not None:
                     yield f"data: {json.dumps({'delta': ev.delta})}\n\n"
+                elif ev.annotations is not None:
+                    yield f"data: {json.dumps({'annotations': ev.annotations})}\n\n"
                 elif ev.error is not None:
                     payload = {"error": "provider_error", "detail": str(ev.error)}
                     yield f"data: {json.dumps(payload)}\n\n"
@@ -1394,6 +1396,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         summary["tool_calls"] = s.tool_calls
                     if s.finish_reason:
                         summary["finish_reason"] = s.finish_reason
+                    if s.annotations:
+                        summary["annotations"] = s.annotations
                     if s.redacted:
                         summary["redacted"] = s.redacted
                     yield f"data: {json.dumps(summary)}\n\n"
@@ -1512,6 +1516,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ):
                 if ev.delta is not None:
                     yield sse(openai_compat.chunk_delta(chunk_id, created, model, ev.delta))
+                elif ev.annotations is not None:
+                    yield sse(
+                        openai_compat.chunk_annotations(chunk_id, created, model, ev.annotations)
+                    )
                 elif ev.error is not None:
                     yield sse(openai_compat.openai_error(ev.error.status_code, str(ev.error)))
                     yield "data: [DONE]\n\n"

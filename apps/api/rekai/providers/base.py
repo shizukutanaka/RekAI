@@ -116,6 +116,9 @@ class ProviderResult:
     usage: Usage = field(default_factory=Usage)
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    # Web-search citations etc. (OpenAI `message.annotations`) — raw dicts,
+    # passed through verbatim so the caller sees what the model cited.
+    annotations: list[dict] | None = None
 
 
 @dataclass
@@ -135,6 +138,8 @@ class StreamEvent:
     usage: Usage | None = None
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    # OpenAI streams annotations complete inside one delta chunk.
+    annotations: list[dict] | None = None
 
 
 class Provider(ABC):

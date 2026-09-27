@@ -54,6 +54,9 @@ class ChatResult:
     #: Secret patterns scrubbed from ``content`` by the output-redaction
     #: guardrail, or None if nothing was redacted.
     redacted: list[str] | None = None
+    #: Citations etc. attached to the answer (e.g. web-search ``url_citation``
+    #: entries), passed through verbatim; None when the model added none.
+    annotations: list[dict[str, Any]] | None = None
     #: Unix timestamp the gateway produced the response.
     created: int = 0
 
@@ -72,6 +75,7 @@ class ChatResult:
             finish_reason=data.get("finish_reason"),
             cache_similarity=data.get("cache_similarity"),
             redacted=data.get("redacted"),
+            annotations=data.get("annotations"),
             created=data.get("created", 0),
         )
 
@@ -225,6 +229,8 @@ def _classify_stream_event(event: dict[str, Any]) -> tuple[str, Any]:
     """Map one decoded SSE event to ``(kind, value)`` for the stream loops."""
     if "delta" in event:
         return ("delta", event["delta"])
+    if "annotations" in event:
+        return ("annotations", event["annotations"])
     if "usage" in event:
         return ("usage", event)
     if "error" in event:
@@ -430,6 +436,7 @@ class RekAIClient:
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], None] | None = None,
         on_tool_calls: Callable[[list[dict[str, Any]]], None] | None = None,
+        on_annotations: Callable[[list[dict[str, Any]]], None] | None = None,
     ) -> Iterator[str]:
         """Yield response text chunks from the streaming endpoint.
 
@@ -468,6 +475,9 @@ class RekAIClient:
                 kind, value = _classify_stream_event(decoded)
                 if kind == "delta":
                     yield value
+                elif kind == "annotations":
+                    if on_annotations is not None:
+                        on_annotations(value)
                 elif kind == "usage":
                     if on_usage is not None:
                         on_usage(value)
@@ -666,6 +676,7 @@ class AsyncRekAIClient:
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
         on_tool_calls: Callable[[list[dict[str, Any]]], Awaitable[None] | None] | None = None,
+        on_annotations: Callable[[list[dict[str, Any]]], Awaitable[None] | None] | None = None,
     ) -> AsyncIterator[str]:
         """Yield response text chunks from the streaming endpoint.
 
@@ -706,6 +717,11 @@ class AsyncRekAIClient:
                 kind, value = _classify_stream_event(decoded)
                 if kind == "delta":
                     yield value
+                elif kind == "annotations":
+                    if on_annotations is not None:
+                        maybe_a = on_annotations(value)
+                        if maybe_a is not None:
+                            await maybe_a
                 elif kind == "usage":
                     if on_usage is not None:
                         maybe = on_usage(value)

@@ -7,6 +7,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Web-search citations pass through end-to-end.** OpenAI attaches
+  `message.annotations` (e.g. `url_citation` entries) when a web-search model
+  answers; RekAI previously dropped them, so the caller paid for search but
+  could not see what was cited. `ProviderResult`/`StreamEvent`/`ChatResponse`
+  now carry `annotations` verbatim; the native SSE stream emits
+  `{"annotations": [...]}` events and the summary field, the OpenAI-compat
+  surface reproduces `message.annotations`/`delta.annotations`, and the
+  Anthropic-compat surface passes them as a response extra (Anthropic's own
+  citations schema needs `cited_text` upstreams don't send). Both SDKs expose
+  them (`ChatResult.annotations`, `on_annotations`/`onAnnotations` hooks).
 - `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
   check (`client.messages.count_tokens`) now works against the compat surface.
   Returns a local script-aware estimate (the same heuristic the pricing path

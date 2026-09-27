@@ -223,6 +223,7 @@ export class RekAIClient {
           continue;
         }
         if (event.delta) yield event.delta;
+        else if (event.annotations) opts.onAnnotations?.(event.annotations);
         else if (event.usage) {
           opts.onUsage?.(event);
           if (event.tool_calls) opts.onToolCalls?.(event.tool_calls);
