@@ -126,6 +126,11 @@ class Usage(BaseModel):
     # responses and stored snapshots are unchanged.
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    # Reasoning/thinking tokens (OpenAI o- and gpt-5-series, Gemini thinking
+    # models): a *breakdown* of completion_tokens, not additional tokens. 0 for
+    # providers that don't report one (Anthropic folds thinking into
+    # output_tokens without a separate count).
+    reasoning_tokens: int = 0
 
 
 # --- OpenAI-compatible /v1/chat/completions -------------------------------
@@ -256,13 +261,20 @@ class ChatCompletionChoice(BaseModel):
     finish_reason: Literal["stop", "length", "tool_calls", "content_filter"] = "stop"
 
 
+class CompletionUsage(Usage):
+    # OpenAI reports the reasoning-token breakdown nested under
+    # `completion_tokens_details` — internal Usage keeps it flat, the compat
+    # surface re-nests it for SDK parity.
+    completion_tokens_details: dict | None = None
+
+
 class ChatCompletionResponse(BaseModel):
     id: str
     object: Literal["chat.completion"] = "chat.completion"
     created: int
     model: str
     choices: list[ChatCompletionChoice]
-    usage: Usage  # field names already match OpenAI's
+    usage: CompletionUsage  # field names already match OpenAI's
     system_fingerprint: str | None = None
     # RekAI extensions — OpenAI SDKs ignore unknown response fields.
     provider: str | None = None

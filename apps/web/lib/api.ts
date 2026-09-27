@@ -16,7 +16,12 @@ export interface ChatResponse {
   provider: string;
   model: string;
   content: string;
-  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  usage: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    reasoning_tokens?: number;
+  };
   cost_usd: number | null;
   cached: boolean;
   created: number;
@@ -413,7 +418,12 @@ export async function streamChat(
 export interface StreamSummary {
   provider: string;
   model: string;
-  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  usage: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    reasoning_tokens?: number;
+  };
   cost_usd: number | null;
   estimated: boolean;
   tool_calls?: Record<string, unknown>[];

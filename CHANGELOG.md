@@ -7,6 +7,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Reasoning-token accounting in `usage`.** Reasoning models (OpenAI o-series
+  and gpt-5, Gemini thinking models) bill a separate slice of completion tokens
+  for chain-of-thought; the provider-reported count now surfaces as
+  `usage.reasoning_tokens` (a breakdown of `completion_tokens`, not additive).
+  OpenAI's `completion_tokens_details.reasoning_tokens` and Gemini's
+  `thoughtsTokenCount` are parsed on both the unary and streaming paths; the
+  OpenAI-compat surface re-nests the count under `completion_tokens_details`
+  so SDKs read it at the standard location (including the
+  `stream_options.include_usage` chunk). Anthropic and Ollama report no
+  separate count — thinking folds into output tokens there.
 - **Legacy `functions`/`function_call` on `POST /v1/chat/completions` are
   normalized onto `tools`/`tool_choice`.** OpenAI's pre-tools calling fields
   (deprecated since the 0613 models but still emitted by older SDKs and
