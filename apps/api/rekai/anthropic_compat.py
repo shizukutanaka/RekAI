@@ -37,22 +37,34 @@ _FINISH_TO_STOP_REASON = {
 }
 
 
-def _flatten_system(system: str | list[dict[str, Any]] | None) -> str | None:
-    """Anthropic's ``system`` is a string or a list of text blocks."""
-    if system is None or isinstance(system, str):
-        return system
+def _flatten_system(
+    system: str | list[dict[str, Any]] | None,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Anthropic's ``system`` is a string or a list of text blocks. Returns
+    (text, cache_control) — the furthest block's breakpoint, if any."""
+    if system is None:
+        return None, None
+    if isinstance(system, str):
+        return system, None
     texts = [
         block.get("text", "")
         for block in system
         if isinstance(block, dict) and block.get("type") == "text"
     ]
-    return "\n".join(t for t in texts if t) or None
+    # A breakpoint on the last system block caches the whole system prefix;
+    # keep the furthest one when several carry cache_control.
+    cache_control = None
+    for block in system:
+        if isinstance(block, dict) and block.get("cache_control"):
+            cache_control = block["cache_control"]
+    return ("\n".join(t for t in texts if t) or None), cache_control
 
 
 def _flatten_content(
     content: str | list[AnthropicContentBlock], role: str
-) -> tuple[str | None, list[dict], list[ChatMessage]]:
-    """Reduce a Messages-API content array to (text, tool_calls, tool_messages).
+) -> tuple[str | None, list[dict], list[ChatMessage], dict[str, Any] | None]:
+    """Reduce a Messages-API content array to (text, tool_calls, tool_messages,
+    cache_control).
 
     - ``text`` blocks join into the message's plain text.
     - ``tool_use`` blocks on an assistant turn become OpenAI-shaped tool_calls
@@ -65,11 +77,16 @@ def _flatten_content(
       parts.
     """
     if isinstance(content, str):
-        return content, [], []
+        return content, [], [], None
     texts: list[str] = []
     tool_calls: list[dict] = []
     tool_messages: list[ChatMessage] = []
+    cache_control: dict | None = None
     for block in content:
+        if block.cache_control:
+            # Anthropic: a breakpoint marks everything up to it as cacheable;
+            # the furthest one in a message is the one that matters.
+            cache_control = block.cache_control
         if block.type == "text":
             if block.text is not None:
                 texts.append(block.text)
@@ -102,6 +119,7 @@ def _flatten_content(
                     role="tool",
                     content=body or "",
                     tool_call_id=block.tool_use_id,
+                    cache_control=block.cache_control,
                 )
             )
         else:
@@ -110,7 +128,7 @@ def _flatten_content(
                 "RekAI accepts text, tool_use, and tool_result blocks.",
                 status_code=400,
             )
-    return "\n".join(texts) if texts else None, tool_calls, tool_messages
+    return "\n".join(texts) if texts else None, tool_calls, tool_messages, cache_control
 
 
 def _to_openai_tool(tool: AnthropicTool) -> dict:
@@ -139,12 +157,14 @@ def _to_openai_tool_choice(choice) -> Any:
 def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
     """Translate an Anthropic Messages request into RekAI's ChatRequest."""
     messages: list[ChatMessage] = []
-    system = _flatten_system(req.system)
+    system, system_cc = _flatten_system(req.system)
     if system is not None:
-        messages.append(ChatMessage(role="system", content=system))
+        messages.append(ChatMessage(role="system", content=system, cache_control=system_cc))
     for m in req.messages:
-        text, tool_calls, tool_msgs = _flatten_content(m.content, m.role)
-        messages.append(ChatMessage(role=m.role, content=text, tool_calls=tool_calls or None))
+        text, tool_calls, tool_msgs, cc = _flatten_content(m.content, m.role)
+        messages.append(
+            ChatMessage(role=m.role, content=text, tool_calls=tool_calls or None, cache_control=cc)
+        )
         messages.extend(tool_msgs)
     return ChatRequest(
         model=req.model,

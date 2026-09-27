@@ -208,6 +208,9 @@ class AnthropicContentBlock(BaseModel):
     input: dict[str, Any] | None = None  # tool_use
     tool_use_id: str | None = None  # tool_result
     content: str | list[dict[str, Any]] | None = None  # tool_result body
+    # Prompt-cache breakpoint ({type: "ephemeral", ttl?...}), attachable to any
+    # block — system, message text, tool_use, or tool_result alike.
+    cache_control: dict[str, Any] | None = None
 
 
 class AnthropicMessage(BaseModel):

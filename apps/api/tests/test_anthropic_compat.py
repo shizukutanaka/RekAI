@@ -273,3 +273,82 @@ def test_stream_error_arrives_as_error_event(client: TestClient) -> None:
     else:
         body = resp.json()
         assert body["type"] == "error"
+
+
+def test_system_block_cache_control_survives_flattening() -> None:
+    """A cache_control breakpoint on a system block must reach the internal
+    ChatMessage — Anthropic SDK users lose prompt caching otherwise."""
+    from rekai.anthropic_compat import to_chat_request
+    from rekai.schemas import AnthropicMessagesRequest
+
+    req = AnthropicMessagesRequest.model_validate(
+        _payload(
+            system=[
+                {"type": "text", "text": "Be terse."},
+                {
+                    "type": "text",
+                    "text": "Big context.",
+                    "cache_control": {"type": "ephemeral"},
+                },
+            ]
+        )
+    )
+    chat = to_chat_request(req)
+    sys_msg = next(m for m in chat.messages if m.role == "system")
+    assert sys_msg.content == "Be terse.\nBig context."
+    assert sys_msg.cache_control == {"type": "ephemeral"}
+
+
+def test_message_block_cache_control_maps_to_chat_message() -> None:
+    """cache_control on a text block and on a tool_result block each land on
+    the ChatMessage they flatten into (furthest breakpoint wins)."""
+    from rekai.anthropic_compat import to_chat_request
+    from rekai.schemas import AnthropicMessagesRequest
+
+    req = AnthropicMessagesRequest.model_validate(
+        _payload(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "first"},
+                        {
+                            "type": "text",
+                            "text": "second",
+                            "cache_control": {"type": "ephemeral"},
+                        },
+                    ],
+                },
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_1",
+                            "name": "get",
+                            "input": {},
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_1",
+                            "content": "42",
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ],
+                },
+            ]
+        )
+    )
+    chat = to_chat_request(req)
+    user_msg = next(m for m in chat.messages if m.role == "user")
+    tool_msg = next(m for m in chat.messages if m.role == "tool")
+    assert user_msg.cache_control == {"type": "ephemeral"}
+    assert tool_msg.cache_control == {"type": "ephemeral"}
+    # Messages without a breakpoint stay unset.
+    assistant_msg = next(m for m in chat.messages if m.role == "assistant")
+    assert assistant_msg.cache_control is None

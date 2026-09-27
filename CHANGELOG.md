@@ -7,6 +7,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+
+- `POST /v1/messages`: `cache_control` breakpoints on system blocks, message
+  content blocks, and `tool_result` blocks now survive translation to the
+  internal request — Anthropic SDK callers keep prompt caching through the
+  compat surface (previously dropped by block flattening). The furthest
+  breakpoint per message wins, matching Anthropic semantics.
 - **Reasoning-token accounting in `usage`.** Reasoning models (OpenAI o-series
   and gpt-5, Gemini thinking models) bill a separate slice of completion tokens
   for chain-of-thought; the provider-reported count now surfaces as
