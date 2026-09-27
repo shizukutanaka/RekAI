@@ -12,6 +12,7 @@ must not reach them.
 from __future__ import annotations
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from rekai.cache import embedding_cache_key
@@ -102,3 +103,36 @@ def test_dimensions_validated_at_schema(client: TestClient) -> None:
     assert resp.status_code == 422
     resp = client.post("/v1/embeddings", json={"model": "echo", "input": "hi", "dimensions": 8})
     assert resp.status_code == 200
+
+
+class _Base64Resp(_Resp):
+    """An upstream that honored encoding_format=base64 — the wire carries a
+    base64 float32 string instead of a JSON array."""
+
+    def json(self) -> dict:
+        import base64
+        import struct
+
+        packed = base64.b64encode(struct.pack("<3f", 0.1, 0.2, 0.3)).decode()
+        return {
+            "model": "text-embedding-3-small",
+            "data": [{"index": 0, "embedding": packed}],
+            "usage": {"prompt_tokens": 1, "total_tokens": 1},
+        }
+
+
+class _Base64Client(_Client):
+    async def post(self, url, json=None, headers=None, **kw):
+        _Client.captured = json or {}
+        return _Base64Resp()
+
+
+async def test_base64_embedding_is_decoded_to_floats(monkeypatch) -> None:
+    # With encoding_format honored upstream, RekAI's canonical
+    # list[list[float]] response shape must hold — a raw base64 string would
+    # fail EmbeddingsResponse validation (500) instead of decoding.
+    monkeypatch.setattr(httpx, "AsyncClient", _Base64Client)
+    result = await OpenAIProvider().embed(
+        ["hi"], "text-embedding-3-small", "sk-x", encoding_format="base64"
+    )
+    assert result.embeddings == [[pytest.approx(0.1), pytest.approx(0.2), pytest.approx(0.3)]]

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import struct
 from collections.abc import AsyncIterator
 
 import httpx
@@ -22,6 +24,21 @@ from rekai.providers.base import (
 from rekai.schemas import ChatRequest, Usage
 
 _OPENAI_FINISH_REASONS = {"stop", "length", "tool_calls", "content_filter"}
+
+
+def _decode_embedding(value: object) -> list[float]:
+    """Normalize one embedding row to ``list[float]``.
+
+    When ``encoding_format: "base64"`` is forwarded and the provider honors
+    it, the wire carries a base64 string of little-endian float32s instead of
+    a JSON array — decode it back so RekAI's canonical ``list[list[float]]``
+    response shape holds regardless of the requested wire encoding.
+    """
+    if isinstance(value, str):
+        raw = base64.b64decode(value)
+        count = len(raw) // 4
+        return list(struct.unpack(f"<{count}f", raw))
+    return value  # type: ignore[return-value]
 
 
 def _finish_reason(raw: object) -> FinishReason | None:
@@ -222,7 +239,7 @@ class OpenAIProvider(Provider):
         rows = sorted(data.get("data", []), key=lambda d: d.get("index", 0))
         usage = data.get("usage", {})
         return EmbeddingResult(
-            embeddings=[r["embedding"] for r in rows],
+            embeddings=[_decode_embedding(r["embedding"]) for r in rows],
             model=data.get("model", model),
             usage=Usage(
                 prompt_tokens=usage.get("prompt_tokens", 0),

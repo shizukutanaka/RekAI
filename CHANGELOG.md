@@ -28,6 +28,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   arrive.
 
 ### Fixed
+- **`encoding_format: "base64"` on `POST /v1/embeddings` no longer breaks
+  the response when a provider honors it.** An upstream that returns a
+  base64 float32 string per row used to fail the `list[list[float]]`
+  response validation (a 500 after a successful upstream call); the provider
+  now decodes base64 rows back to floats so RekAI's canonical embedding
+  shape holds regardless of wire encoding.
 - **`dimensions`/`encoding_format` on `POST /v1/embeddings` now reach the
   provider instead of being silently ignored.** `EmbeddingsRequest` accepted
   only the OpenAI core fields, so a caller asking text-embedding-3-small for
