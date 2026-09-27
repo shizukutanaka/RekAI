@@ -67,6 +67,12 @@ class ChatRequest(BaseModel):
         "that support it (OpenAI/OpenAI-compatible natively, Gemini best-effort); "
         "ignored by others.",
     )
+    user: str | None = Field(
+        default=None,
+        description="End-user identifier (OpenAI's `user`). Not sent to the "
+        "provider; used only for RekAI's per-user usage accounting "
+        "(usage_by_user in /v1/usage).",
+    )
     cache_control: dict[str, Any] | None = Field(
         default=None,
         description="Provider-native prompt-cache breakpoint applied to the last "
@@ -150,7 +156,7 @@ class ChatCompletionsRequest(BaseModel):
     tools: list[dict[str, Any]] | None = None
     tool_choice: Any | None = None
     response_format: dict[str, Any] | None = None
-    user: str | None = None  # accepted, ignored
+    user: str | None = None  # end-user id — usage accounting only, not forwarded
     n: int | None = None  # 400 if n > 1 (RekAI returns a single choice)
     provider: str | None = None  # RekAI extension: explicit provider override
 
@@ -231,6 +237,11 @@ class EmbeddingsRequest(BaseModel):
     input: str | list[str] = Field(..., description="A string or list of strings to embed.")
     provider: str | None = Field(default=None, description="Force a provider (else routed).")
     cache: bool = Field(default=True)
+    user: str | None = Field(
+        default=None,
+        description="End-user identifier for per-user usage accounting "
+        "(usage_by_user in /v1/usage). Not sent to the provider.",
+    )
 
 
 class EmbeddingsResponse(BaseModel):
@@ -296,6 +307,13 @@ class UsageSummary(BaseModel):
         default_factory=dict,
         description="Per-tenant usage keyed by a masked client id ('key:<hash>' "
         "when gateway auth is on, else the client IP).",
+    )
+    usage_by_user: dict[str, dict[str, ClientUsage]] = Field(
+        default_factory=dict,
+        description="Per-end-user usage nested under the owning client "
+        "{client_id: {user: usage}} — populated only for requests that carry "
+        "the OpenAI `user` field. Under gateway auth /v1/usage returns only "
+        "the caller's inner map.",
     )
 
 

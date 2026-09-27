@@ -426,6 +426,7 @@ def _record_client_usage(
     result: _HasUsageAndCost,
     settings: Settings,
     operation: str = "chat",
+    user: str | None = None,
 ) -> None:
     """Attribute a chat/embeddings response's tokens and cost to the requesting
     client (the masked API-key id, or the client IP with no gateway auth).
@@ -440,6 +441,7 @@ def _record_client_usage(
     current window's bucket used by the budget-cap check."""
     client_id = _client_id(http_request)
     metrics.record_client_usage(client_id, result.usage.total_tokens, result.cost_usd)
+    metrics.record_user_usage(client_id, user, result.usage.total_tokens, result.cost_usd)
     if settings.client_budget_window_seconds is not None:
         metrics.record_client_budget_usage(
             client_id, result.cost_usd, settings.client_budget_window_seconds, time.time()
@@ -491,7 +493,7 @@ async def _run_chat(
         if outcome.kind == "replay" and outcome.response is not None:
             response.headers["Idempotent-Replay"] = "true"
             replayed = _redact_output(ChatResponse(**outcome.response), settings, response)
-            _record_client_usage(http_request, replayed, settings)
+            _record_client_usage(http_request, replayed, settings, user=request.user)
             return replayed
         claimed = True  # we hold the in-progress sentinel
     try:
@@ -507,7 +509,7 @@ async def _run_chat(
         # Disclose that this answer is to a *similar* prompt, not this one —
         # otherwise a semantic hit is indistinguishable from an exact one.
         response.headers["X-Cache-Similarity"] = f"{result.cache_similarity:.4f}"
-    _record_client_usage(http_request, result, settings)
+    _record_client_usage(http_request, result, settings, user=request.user)
     if idempotency_key and fingerprint is not None:
         await idempotency.complete(
             cache_backend,
@@ -969,7 +971,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # tenants to separate and the full map is the local operator's own.
             client_id = _client_id(http_request)
             own = snapshot.get("usage_by_client", {}).get(client_id)
-            snapshot = {**snapshot, "usage_by_client": {client_id: own} if own else {}}
+            own_users = snapshot.get("usage_by_user", {}).get(client_id)
+            snapshot = {
+                **snapshot,
+                "usage_by_client": {client_id: own} if own else {},
+                "usage_by_user": {client_id: own_users} if own_users else {},
+            }
         return UsageSummary(**snapshot)
 
     # --- admin: runtime key management (only registered when configured) --
@@ -1237,7 +1244,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if outcome.kind == "replay" and outcome.response is not None:
                 response.headers["Idempotent-Replay"] = "true"
                 replayed = EmbeddingsResponse(**outcome.response)
-                _record_client_usage(http_request, replayed, config, operation="embeddings")
+                _record_client_usage(
+                    http_request, replayed, config, operation="embeddings", user=request.user
+                )
                 return replayed
             claimed = True
         try:
@@ -1246,7 +1255,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if claimed:
                 await idempotency.release(cache_backend, client_id, idempotency_key)  # type: ignore[arg-type]
             raise
-        _record_client_usage(http_request, result, config, operation="embeddings")
+        _record_client_usage(
+            http_request, result, config, operation="embeddings", user=request.user
+        )
         if idempotency_key and fingerprint is not None:
             await idempotency.complete(
                 cache_backend,

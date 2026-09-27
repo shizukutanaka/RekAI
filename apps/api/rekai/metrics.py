@@ -123,6 +123,12 @@ class Metrics:
         # Per-tenant usage, keyed by the masked "key:<hash>" client id (or the
         # client IP when the gateway has no auth configured).
         self.usage_by_client: dict[str, dict[str, float]] = {}
+        # Per-end-user usage, nested under the owning client so /v1/usage can
+        # scope a tenant to its own users: {client_id: {user: usage}}. The
+        # `user` field is caller-supplied and arbitrary, so this is bounded by
+        # the same cap as usage_by_client — counted across ALL (client, user)
+        # pairs, not per client.
+        self.usage_by_user: dict[str, dict[str, dict[str, float]]] = {}
         # Per-client cost within the *current* budget window only (see
         # record_client_budget_usage) — client_id -> (window_index, cost in
         # that window). Deliberately separate from usage_by_client (lifetime,
@@ -257,6 +263,44 @@ class Metrics:
             if cost_usd:
                 usage["cost_usd"] += cost_usd
 
+    def record_user_usage(
+        self, client_id: str, user: str | None, tokens: int, cost_usd: float | None
+    ) -> None:
+        """Attribute tokens/cost to an end user under the owning client, so a
+        tenant can see which of *its* users spend — the dimension below the
+        API key that ``user`` was always meant to supply (OpenAI forwards it
+        for abuse monitoring; RekAI keeps it for accounting only).
+
+        Bounded by ``max_tracked_clients`` across all (client, user) pairs:
+        at the cap the globally-quietest pair is evicted."""
+        if not user:
+            return
+        with self._lock:
+            per_user = self.usage_by_user.setdefault(client_id, {})
+            usage = per_user.get(user)
+            if usage is None:
+                cap = self.max_tracked_clients
+                total = sum(len(u) for u in self.usage_by_user.values())
+                if cap and total >= cap:
+                    coldest_client: str | None = None
+                    coldest_user: str | None = None
+                    coldest_requests = float("inf")
+                    for c, u in self.usage_by_user.items():
+                        for uid, us in u.items():
+                            if us["requests"] < coldest_requests:
+                                coldest_client, coldest_user = c, uid
+                                coldest_requests = us["requests"]
+                    if coldest_client is not None and coldest_user is not None:
+                        del self.usage_by_user[coldest_client][coldest_user]
+                        if not self.usage_by_user[coldest_client]:
+                            del self.usage_by_user[coldest_client]
+                usage = {"requests": 0, "tokens": 0, "cost_usd": 0.0}
+                per_user[user] = usage
+            usage["requests"] += 1
+            usage["tokens"] += tokens
+            if cost_usd:
+                usage["cost_usd"] += cost_usd
+
     def client_cost_usd(self, client_id: str) -> float:
         """Read a client's cumulative cost so far (0.0 if never recorded)."""
         with self._lock:
@@ -331,6 +375,28 @@ class Metrics:
                 kept = sorted(clients, key=lambda c: clients[c].get("requests", 0), reverse=True)
                 clients = {c: clients[c] for c in kept[:cap]}
             self.usage_by_client = {client: dict(usage) for client, usage in clients.items()}
+            users = snapshot.get("usage_by_user", {})
+            if cap:
+                # Same bound as record_user_usage, applied across all pairs.
+                pairs = sorted(
+                    (
+                        (client, user, usage.get("requests", 0))
+                        for client, per_user in users.items()
+                        for user, usage in per_user.items()
+                    ),
+                    key=lambda cu: cu[2],
+                    reverse=True,
+                )[:cap]
+                kept_pairs = {(c, u) for c, u, _ in pairs}
+                users = {
+                    c: {u: us for u, us in per_user.items() if (c, u) in kept_pairs}
+                    for c, per_user in users.items()
+                }
+            self.usage_by_user = {
+                client: {user: dict(usage) for user, usage in per_user.items()}
+                for client, per_user in users.items()
+                if per_user
+            }
 
     def snapshot(self) -> dict:
         """Return a copy of the current counters as plain data."""
@@ -350,6 +416,10 @@ class Metrics:
                 "tokens_by_provider": dict(self.tokens_by_provider),
                 "usage_by_client": {
                     client: dict(usage) for client, usage in self.usage_by_client.items()
+                },
+                "usage_by_user": {
+                    client: {user: dict(usage) for user, usage in per_user.items()}
+                    for client, per_user in self.usage_by_user.items()
                 },
             }
 
@@ -471,6 +541,43 @@ class Metrics:
             cost = round(usage["cost_usd"], 6)
             lines.append(f'rekai_client_cost_usd_total{{client="{client}"}} {cost}')
 
+        def _escape_label(v: str) -> str:
+            # Caller-supplied ids (unlike client ids, which are hashes or IPs)
+            # can carry quotes/newlines that would corrupt the exposition.
+            return v.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+        if self.usage_by_user:
+            lines += [
+                "# HELP rekai_user_requests_total Requests per end user, per client.",
+                "# TYPE rekai_user_requests_total counter",
+            ]
+            for client, per_user in sorted(self.usage_by_user.items()):
+                for user, usage in sorted(per_user.items()):
+                    lines.append(
+                        f'rekai_user_requests_total{{client="{_escape_label(client)}",'
+                        f'user="{_escape_label(user)}"}} {int(usage["requests"])}'
+                    )
+            lines += [
+                "# HELP rekai_user_tokens_total Tokens accounted per end user, per client.",
+                "# TYPE rekai_user_tokens_total counter",
+            ]
+            for client, per_user in sorted(self.usage_by_user.items()):
+                for user, usage in sorted(per_user.items()):
+                    lines.append(
+                        f'rekai_user_tokens_total{{client="{_escape_label(client)}",'
+                        f'user="{_escape_label(user)}"}} {int(usage["tokens"])}'
+                    )
+            lines += [
+                "# HELP rekai_user_cost_usd_total Approximate USD cost per end user, per client.",
+                "# TYPE rekai_user_cost_usd_total counter",
+            ]
+            for client, per_user in sorted(self.usage_by_user.items()):
+                for user, usage in sorted(per_user.items()):
+                    lines.append(
+                        f'rekai_user_cost_usd_total{{client="{_escape_label(client)}",'
+                        f'user="{_escape_label(user)}"}} {round(usage["cost_usd"], 6)}'
+                    )
+
         return "\n".join(lines) + "\n"
 
 
@@ -503,6 +610,7 @@ def merge_snapshots(snapshots: list[dict], cap: int = 0) -> dict:
     providers: dict[str, int] = {}
     provider_tokens: dict[str, int] = {}
     clients: dict[str, dict[str, float]] = {}
+    users: dict[str, dict[str, dict[str, float]]] = {}
     for snap in snapshots:
         for key in _SCALAR_COUNTERS:
             merged[key] += snap.get(key, 0)
@@ -516,13 +624,38 @@ def merge_snapshots(snapshots: list[dict], cap: int = 0) -> dict:
             acc["requests"] += usage.get("requests", 0)
             acc["tokens"] += usage.get("tokens", 0)
             acc["cost_usd"] += usage.get("cost_usd", 0.0)
+        for client, per_user in snap.get("usage_by_user", {}).items():
+            client_users = users.setdefault(client, {})
+            for user, usage in per_user.items():
+                acc = client_users.setdefault(user, {"requests": 0, "tokens": 0, "cost_usd": 0.0})
+                acc["requests"] += usage.get("requests", 0)
+                acc["tokens"] += usage.get("tokens", 0)
+                acc["cost_usd"] += usage.get("cost_usd", 0.0)
     merged["cost_usd_total"] = round(merged["cost_usd_total"], 6)
     for usage in clients.values():
         usage["cost_usd"] = round(usage["cost_usd"], 6)
     if cap and len(clients) > cap:
         kept = sorted(clients, key=lambda c: clients[c]["requests"], reverse=True)[:cap]
         clients = {c: clients[c] for c in kept}
+    if cap:
+        total_users = sum(len(u) for u in users.values())
+        if total_users > cap:
+            kept_pairs = sorted(
+                ((client, user) for client, per_user in users.items() for user in per_user),
+                key=lambda cu: users[cu[0]][cu[1]]["requests"],
+                reverse=True,
+            )[:cap]
+            kept_set = set(kept_pairs)
+            users = {
+                c: {u: us for u, us in per_user.items() if (c, u) in kept_set}
+                for c, per_user in users.items()
+                if any((c, u) in kept_set for u in per_user)
+            }
+    for per_user in users.values():
+        for usage in per_user.values():
+            usage["cost_usd"] = round(usage["cost_usd"], 6)
     merged["requests_by_provider"] = providers
     merged["tokens_by_provider"] = provider_tokens
     merged["usage_by_client"] = clients
+    merged["usage_by_user"] = users
     return merged

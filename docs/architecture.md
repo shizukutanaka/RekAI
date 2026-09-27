@@ -940,6 +940,23 @@ operator who wants the *whole* endpoint behind the key still sets
 either way, same fallback as `/v1/*`). With no gateway auth configured there are
 no tenants to separate and nothing is withheld anywhere.
 
+### Per-end-user usage
+
+Requests may carry the OpenAI `user` field — an end-user id within the calling
+tenant's own system. RekAI never forwards it to a provider; it powers
+`usage_by_user` (`{client: {user: {requests, tokens, cost_usd}}}`) and the
+`rekai_user_requests_total`/`rekai_user_tokens_total`/`rekai_user_cost_usd_total`
+series labelled `{client, user}`. This is the per-end-user spend tracking
+LiteLLM/Portkey operators use to bill their own customers — per-key
+`usage_by_client` answers "which tenant spent it", `usage_by_user` answers
+"which of that tenant's users spent it".
+
+The map is nested under the client specifically so the `/v1/usage` tenant
+scoping above slices it without leaking another tenant's end-user ids. It shares
+`max_tracked_clients` as a *pair* cap (a flood of unique `(client, user)` pairs
+evicts the quietest pair first, never blocking accounting for a busy existing
+pair). User strings are label-escaped in the Prometheus exposition.
+
 ### Per-client budget cap
 
 `REKAI_CLIENT_BUDGET_USD` (opt-in, unset by default) turns that same

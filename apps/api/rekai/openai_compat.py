@@ -102,6 +102,7 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         tools=req.tools,
         tool_choice=req.tool_choice,
         response_format=req.response_format,
+        user=req.user,
     )
 
 

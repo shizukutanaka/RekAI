@@ -36,6 +36,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **Per-end-user usage accounting via the OpenAI `user` field.** The gateway
+  has always accepted `user` on chat/embeddings requests (OpenAI
+  compatibility); it now drives `usage_by_user` in `/v1/usage` and
+  `/admin/usage` — `{client: {user: {requests, tokens, cost_usd}}}` — plus
+  `rekai_user_*_total{client,user}` series in `/metrics` and a "Usage by end
+  user" section on the web usage page. This is the per-end-user spend tracking
+  operators need to bill their own customers. The map is nested under the
+  owning client so tenant scoping slices it without leaking other tenants'
+  end-user ids; the pair cap shares `max_tracked_clients`. Verified live:
+  `POST /v1/chat` with `"user":"u1"` → `/v1/usage` shows u1 under the caller's
+  client; under `REKAI_API_KEYS` sk-b's view does not contain sk-a's users.
 - **Opt-in verify band for the semantic cache** (`REKAI_SEMANTIC_CACHE_VERIFY_*`,
   roadmap O-2). A single cosine threshold forced every candidate to be served
   or dropped on embedding distance alone; similarity is not proof two prompts
