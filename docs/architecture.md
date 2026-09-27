@@ -809,10 +809,13 @@ Two distinct keys are in play. The **gateway** key authenticates the *client to
 RekAI*: set `REKAI_API_KEYS` (comma-separated) and `/v1/*` then requires
 `Authorization: Bearer <key>`, compared in constant time; missing/invalid →
 `401` with `WWW-Authenticate: Bearer`. With no keys configured the gateway is
-open (the default). System endpoints (`/health`, `/metrics`, `/`, `/docs`) stay
+open (the default). System endpoints (`/health`, `/metrics`, `/`) stay
 open for liveness probes and scraping — except `/metrics`, which can
 optionally be locked behind the same Bearer key too (see below), since it
 carries a per-client cost breakdown that scraping doesn't need to be public.
+`/docs`, `/redoc` and `/openapi.json` are served by default but **off in
+`production`** (`REKAI_DOCS_ENABLED` overrides either way): a public Swagger
+UI enumerates the request schema of every route, including `/admin/*`.
 This is separate from **BYOK** below, which is the *upstream provider* key.
 
 ### The one configuration RekAI refuses to serve

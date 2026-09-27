@@ -25,7 +25,7 @@ RekAI sits between your application and multiple LLM providers (OpenAI, Anthropi
 - **Auth & BYOK** — optionally gate the gateway with client API keys (`Authorization: Bearer`, constant-time); users supply their own upstream provider key per request (`X-Provider-Key`), never persisted.
 - **Rate limiting** — per-client token bucket with `Retry-After` and `X-RateLimit-*` headers; oversized bodies are rejected with 413.
 - **Observability** — structured text or JSON logging (with OpenTelemetry GenAI semantic-convention attributes — `gen_ai.request.model`, `gen_ai.usage.*` — on chat/embeddings log lines), per-request `X-Request-ID`/`X-Response-Time-Ms`/`X-RekAI-Version` headers, and a Prometheus-style `/metrics` endpoint.
-- **OpenAPI** — auto-generated docs at `/docs` and a machine-readable schema at `/openapi.json`.
+- **OpenAPI** — auto-generated docs at `/docs` and a machine-readable schema at `/openapi.json` (off in `REKAI_ENVIRONMENT=production`; `REKAI_DOCS_ENABLED` overrides).
 - **SDKs** — official Python (`rekai-client`) and JS/TS (`@rekai/client`) clients.
 - **Chat UI** — a Next.js front-end to try it all in the browser.
 

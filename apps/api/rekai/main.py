@@ -591,12 +591,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await flush_task
             await metrics_store.save(metrics.snapshot())
 
+    docs_on = (
+        settings.docs_enabled
+        if settings.docs_enabled is not None
+        else settings.environment != "production"
+    )
+
     app = FastAPI(
         title="RekAI",
         version=__version__,
         description="A lightweight AI router & gateway with provider abstraction, "
         "caching and BYOK.",
         lifespan=lifespan,
+        docs_url="/docs" if docs_on else None,
+        redoc_url="/redoc" if docs_on else None,
+        openapi_url="/openapi.json" if docs_on else None,
     )
 
     cache: CacheBackend = build_cache(settings)
@@ -883,7 +892,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             name=settings.app_name,
             version=__version__,
             description="A lightweight AI router & gateway. See /docs for the API.",
-            docs="/docs",
+            docs="/docs" if docs_on else None,
             health="/health",
         )
 
