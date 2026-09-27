@@ -276,7 +276,9 @@ async def test_embeddings_concurrent_misses_coalesce_to_one_provider_call() -> N
         async def chat(self, request, api_key):
             raise NotImplementedError
 
-        async def embed(self, inputs, model, api_key) -> EmbeddingResult:
+        async def embed(
+            self, inputs, model, api_key, *, dimensions=None, encoding_format=None
+        ) -> EmbeddingResult:
             nonlocal calls
             calls += 1
             await asyncio.sleep(0.4)
