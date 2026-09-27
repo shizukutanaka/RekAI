@@ -265,6 +265,40 @@ where OpenAI's API uses 400, so `except openai.BadRequestError` does not catch
 it (`openai.APIStatusError` does). The envelope and `type` are correct either
 way; changing the status is a visible API change and has not been made.
 
+## Anthropic compatibility
+
+`POST /v1/messages` is the same pattern for the Anthropic Messages API — a
+thin translation layer (`rekai/anthropic_compat.py`, pure functions, no I/O)
+over the identical internal pipeline, so routing, cache, retries, fallback,
+budgets and metrics apply exactly as they do to `/v1/chat`. An Anthropic SDK
+pointed at RekAI's base URL (`Anthropic(base_url=...)`, no `/v1` suffix — the
+SDK appends `v1/messages` itself) works unmodified:
+
+- **Requests** translate Anthropic's vocabulary into `ChatRequest`: `system`
+  (string or text-block list) becomes the system message, `tool_use` blocks on
+  an assistant turn become OpenAI-shaped `tool_calls`, `tool_result` blocks
+  become `role="tool"` messages, and `tool_choice` `{type: auto|none|any|tool}`
+  maps to `auto`/`none`/`required`/named function. Non-text blocks RekAI
+  cannot carry (images, documents, thinking) are a readable 400, never a
+  silent drop. `max_tokens` stays required, as upstream. A RekAI `provider`
+  extension field is accepted alongside model-prefix routing.
+- **Responses** translate back to Anthropic's `type: "message"` shape with
+  `stop_reason` mapped (`stop`→`end_turn`, `length`→`max_tokens`,
+  `tool_calls`→`tool_use`, `content_filter`→`refusal`), plus RekAI's
+  observability extras (`provider`, `cost_usd`, `cached`) that SDKs ignore.
+- **Streams** emit Anthropic's typed event sequence — `message_start`,
+  `content_block_start`/`*_delta`/`content_block_stop` per block (text and one
+  block per tool call, arguments delivered as `input_json_delta`),
+  `message_delta` (stop_reason + usage), `message_stop`.
+- **Auth** accepts the SDK's `x-api-key` header as the gateway credential on
+  this path, alongside `Authorization: Bearer`.
+- **Errors** ride the same compat-error middleware with Anthropic's envelope
+  — `{"type": "error", "error": {"type": "...", "message": "..."}}` — so auth,
+  budget, body-cap, rate-limit, and validation failures are all readable by
+  the SDK. Type map: 401 `authentication_error`, 403 `permission_error`,
+  400/422 `invalid_request_error`, 429 `rate_limit_error`, 529
+  `overloaded_error`, otherwise `api_error`.
+
 ### Why generation stopped
 
 `finish_reason` is **reported by the provider, not synthesised**. Every backend
