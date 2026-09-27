@@ -180,6 +180,18 @@ def _content_blocks(resp: ChatResponse) -> list[dict]:
     return blocks or [{"type": "text", "text": ""}]
 
 
+def _usage_dict(usage: Usage) -> dict[str, int]:
+    """Anthropic's usage shape. `input_tokens` EXCLUDES prompt-cache tokens on
+    the wire — RekAI's `prompt_tokens` includes them — so subtract the cached
+    slices and report them under Anthropic's own key names."""
+    return {
+        "input_tokens": (usage.prompt_tokens - usage.cache_read_tokens - usage.cache_write_tokens),
+        "output_tokens": usage.completion_tokens,
+        "cache_creation_input_tokens": usage.cache_write_tokens,
+        "cache_read_input_tokens": usage.cache_read_tokens,
+    }
+
+
 def to_message(resp: ChatResponse) -> dict:
     """Translate RekAI's ChatResponse into an Anthropic Message object."""
     finish = resp.finish_reason or ("tool_calls" if resp.tool_calls else "stop")
@@ -191,10 +203,7 @@ def to_message(resp: ChatResponse) -> dict:
         "model": resp.model,
         "stop_reason": _FINISH_TO_STOP_REASON.get(finish, "end_turn"),
         "stop_sequence": None,
-        "usage": {
-            "input_tokens": resp.usage.prompt_tokens,
-            "output_tokens": resp.usage.completion_tokens,
-        },
+        "usage": _usage_dict(resp.usage),
         # RekAI observability extras — ignored by the SDK, useful to operators.
         "provider": resp.provider,
         "cost_usd": resp.cost_usd,
@@ -274,10 +283,7 @@ def ev_message_delta(stop_reason: str, usage: Usage | None) -> str:
         # Anthropic only defines output_tokens here, but we also report
         # input_tokens — we could not populate them in message_start (the
         # provider had not answered yet) and the SDK just accumulates the dict.
-        data["usage"] = {
-            "input_tokens": usage.prompt_tokens,
-            "output_tokens": usage.completion_tokens,
-        }
+        data["usage"] = _usage_dict(usage)
     return sse("message_delta", data)
 
 

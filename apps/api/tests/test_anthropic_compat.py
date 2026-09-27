@@ -6,8 +6,10 @@ import json
 
 from fastapi.testclient import TestClient
 
+from rekai import anthropic_compat
 from rekai.config import Settings
 from rekai.main import create_app
+from rekai.schemas import ChatResponse, Usage
 
 
 def _parse_sse(text: str) -> list[tuple[str, dict]]:
@@ -273,3 +275,45 @@ def test_stream_error_arrives_as_error_event(client: TestClient) -> None:
     else:
         body = resp.json()
         assert body["type"] == "error"
+
+
+# --- prompt-cache accounting on the wire ------------------------------------
+
+
+def test_usage_reports_anthropic_cache_breakdown() -> None:
+    # Anthropic's usage excludes cached prompt tokens from input_tokens and
+    # reports them under their own keys — the compat layer must decompose
+    # RekAI's all-inclusive prompt_tokens back out, or callers overcount.
+    resp = ChatResponse(
+        id="x",
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        content="ok",
+        created=0,
+        usage=Usage(
+            prompt_tokens=1000,  # input 50 + cache_write 50 + cache_read 900
+            completion_tokens=7,
+            total_tokens=1007,
+            cache_read_tokens=900,
+            cache_write_tokens=50,
+        ),
+    )
+    usage = anthropic_compat.to_message(resp)["usage"]
+    assert usage["input_tokens"] == 50
+    assert usage["cache_read_input_tokens"] == 900
+    assert usage["cache_creation_input_tokens"] == 50
+    assert usage["output_tokens"] == 7
+
+
+def test_stream_message_delta_uses_same_breakdown() -> None:
+    usage = Usage(
+        prompt_tokens=100,
+        completion_tokens=5,
+        total_tokens=105,
+        cache_read_tokens=90,
+    )
+    frame = anthropic_compat.ev_message_delta("end_turn", usage)
+    data = json.loads(frame.split("data:", 1)[1])
+    assert data["usage"]["input_tokens"] == 10
+    assert data["usage"]["cache_read_input_tokens"] == 90
+    assert data["usage"]["cache_creation_input_tokens"] == 0
