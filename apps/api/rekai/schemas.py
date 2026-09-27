@@ -162,6 +162,11 @@ class ChatCompletionsRequest(BaseModel):
     user: str | None = None  # accepted, ignored
     n: int | None = None  # 400 if n > 1 (RekAI returns a single choice)
     provider: str | None = None  # RekAI extension: explicit provider override
+    # OpenAI's pre-tools function-calling API (deprecated since 0613 but still
+    # emitted by older SDKs and codebases). Normalized to tools/tool_choice in
+    # the compat layer; modern `tools` wins when both are sent.
+    functions: list[dict[str, Any]] | None = None
+    function_call: Any | None = None
 
 
 # --- Anthropic Messages API (`POST /v1/messages`) --------------------------
