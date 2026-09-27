@@ -186,6 +186,7 @@ def _build_payload(
     response_format: dict[str, Any] | None = None,
     stop: list[str] | str | None = None,
     service_tier: str | None = None,
+    web_search_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -211,6 +212,8 @@ def _build_payload(
         payload["stop"] = stop
     if service_tier is not None:
         payload["service_tier"] = service_tier
+    if web_search_options is not None:
+        payload["web_search_options"] = web_search_options
     return payload
 
 
@@ -303,6 +306,7 @@ class RekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
+        web_search_options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -318,6 +322,7 @@ class RekAIClient:
             response_format,
             stop,
             service_tier,
+            web_search_options,
         )
 
     @staticmethod
@@ -375,6 +380,7 @@ class RekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
+        web_search_options: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -409,6 +415,7 @@ class RekAIClient:
             response_format,
             stop,
             service_tier,
+            web_search_options,
         )
         headers = _build_headers(
             self._provider_key,
@@ -490,11 +497,20 @@ class RekAIClient:
         cache: bool = True,
         provider_key: str | None = None,
         gateway_key: str | None = None,
+        dimensions: int | None = None,
+        encoding_format: str | None = None,
     ) -> EmbeddingsResult:
-        """Create embeddings for a string or list of strings."""
+        """Create embeddings for a string or list of strings.
+
+        ``dimensions``/``encoding_format`` map to OpenAI's embeddings fields
+        (supported providers only)."""
         payload: dict[str, Any] = {"model": model, "input": input, "cache": cache}
         if provider is not None:
             payload["provider"] = provider
+        if dimensions is not None:
+            payload["dimensions"] = dimensions
+        if encoding_format is not None:
+            payload["encoding_format"] = encoding_format
         resp = self._send(
             "POST", "/v1/embeddings", json=payload, headers=self._headers(provider_key, gateway_key)
         )
@@ -617,6 +633,7 @@ class AsyncRekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
+        web_search_options: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -636,6 +653,7 @@ class AsyncRekAIClient:
             response_format,
             stop,
             service_tier,
+            web_search_options,
         )
         headers = _build_headers(
             self._provider_key,
@@ -723,11 +741,20 @@ class AsyncRekAIClient:
         cache: bool = True,
         provider_key: str | None = None,
         gateway_key: str | None = None,
+        dimensions: int | None = None,
+        encoding_format: str | None = None,
     ) -> EmbeddingsResult:
-        """Create embeddings for a string or list of strings."""
+        """Create embeddings for a string or list of strings.
+
+        ``dimensions``/``encoding_format`` map to OpenAI's embeddings fields
+        (supported providers only)."""
         payload: dict[str, Any] = {"model": model, "input": input, "cache": cache}
         if provider is not None:
             payload["provider"] = provider
+        if dimensions is not None:
+            payload["dimensions"] = dimensions
+        if encoding_format is not None:
+            payload["encoding_format"] = encoding_format
         resp = await self._send(
             "POST", "/v1/embeddings", json=payload, headers=self._headers(provider_key, gateway_key)
         )

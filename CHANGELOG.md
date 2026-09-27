@@ -18,6 +18,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   arrive.
 
 ### Fixed
+- **`dimensions`/`encoding_format` on `POST /v1/embeddings` now reach the
+  provider instead of being silently ignored.** `EmbeddingsRequest` accepted
+  only the OpenAI core fields, so a caller asking text-embedding-3-small for
+  a 256-dim vector silently got the 1536-dim one — the request schema's
+  default `extra="ignore"` dropped the sizing field. The provider `embed()`
+  contract gained the two keyword args: OpenAI-compatible providers forward
+  both verbatim, Gemini maps `dimensions` to its `outputDimensionality`,
+  Ollama and echo ignore them (no upstream equivalent). The embeddings cache
+  key now mixes both fields in, so differently-sized results can't collide;
+  both SDKs expose them (`dimensions=`, `encoding_format=` / `dimensions`,
+  `encodingFormat`).
 - **`_verify_semantic_hit` no longer raises `TypeError` on every verified
   lookup.** The semantic-verify feature and the per-provider token metric
   landed through separate PRs whose CI each passed — but the verify helper
@@ -53,6 +64,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   several tool calls in one turn. Now typed, forwarded to OpenAI-compatible
   providers, part of the cache key and semantic bucket, and exposed on both
   SDKs (`parallelToolCalls` in JS).
+- **`web_search_options` and `stream_options.include_obfuscation` forwarding.**
+  Two more OpenAI request fields the compat layer accepted and dropped now
+  reach OpenAI-compatible providers: `web_search_options` (hosted web-search
+  config — keyed into the cache since it changes what the answer is grounded
+  on) and `include_obfuscation` (merged into the upstream `stream_options`
+  RekAI already sends; keyed out of the cache since it only scrambles the
+  streamed encoding). Both are on `ChatRequest` too, and both SDKs expose
+  `web_search_options`/`webSearchOptions`.
 - **Anthropic-compatible `POST /v1/messages`.** Point an Anthropic SDK at
   RekAI — `Anthropic(base_url="http://localhost:8000")`, the SDK appends
   `/v1/messages` itself — and it works unmodified: Anthropic's request shape

@@ -140,6 +140,8 @@ export class RekAIClient {
     if (opts.responseFormat != null) payload.response_format = opts.responseFormat;
     if (opts.stop != null) payload.stop = opts.stop;
     if (opts.serviceTier != null) payload.service_tier = opts.serviceTier;
+    // OpenAI's hosted web-search config; OpenAI-compatible providers only.
+    if (opts.webSearchOptions != null) payload.web_search_options = opts.webSearchOptions;
     return payload;
   }
 
@@ -240,6 +242,9 @@ export class RekAIClient {
   async embeddings(model, input, opts = {}) {
     const payload = { model, input, cache: opts.cache ?? true };
     if (opts.provider != null) payload.provider = opts.provider;
+    // OpenAI embeddings fields; providers without them ignore them.
+    if (opts.dimensions != null) payload.dimensions = opts.dimensions;
+    if (opts.encodingFormat != null) payload.encoding_format = opts.encodingFormat;
     const res = await this._send("/v1/embeddings", {
       method: "POST",
       headers: this._headers(opts.providerKey, opts.gatewayKey),

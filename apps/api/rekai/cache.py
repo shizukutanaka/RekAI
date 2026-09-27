@@ -43,6 +43,10 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         # the cost breakdown we report back), so they key separately. Per-message
         # cache_control already rides along in `messages` above.
         "cache_control": request.cache_control,
+        # Hosted web search changes what the answer is grounded on.
+        # (include_obfuscation is excluded: it changes the streamed encoding,
+        # not the content — and a cached body is never streamed.)
+        "web_search_options": request.web_search_options,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "rekai:chat:" + hashlib.sha256(raw.encode()).hexdigest()
@@ -77,14 +81,35 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
         "parallel_tool_calls": request.parallel_tool_calls,
         "response_format": request.response_format,
         "cache_control": request.cache_control,
+        "web_search_options": request.web_search_options,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def embedding_cache_key(provider: str, model: str, inputs: list[str]) -> str:
-    """A deterministic key for an embeddings request."""
-    payload = {"provider": provider, "model": model, "inputs": inputs}
+def embedding_cache_key(
+    provider: str,
+    model: str,
+    inputs: list[str],
+    *,
+    dimensions: int | None = None,
+    encoding_format: str | None = None,
+) -> str:
+    """A deterministic key for an embeddings request.
+
+    ``dimensions`` keys separately: a 256-dim vector must not answer a
+    1536-dim request (the two differ only in a param, not the input text).
+    ``encoding_format`` changes only the wire encoding of the same vectors,
+    but keys on it anyway — it's cheap and keeps the cache contract "same
+    response for same key".
+    """
+    payload = {
+        "provider": provider,
+        "model": model,
+        "inputs": inputs,
+        "dimensions": dimensions,
+        "encoding_format": encoding_format,
+    }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "rekai:embed:" + hashlib.sha256(raw.encode()).hexdigest()
 
