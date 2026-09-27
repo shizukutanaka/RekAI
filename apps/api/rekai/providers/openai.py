@@ -101,6 +101,10 @@ class OpenAIProvider(Provider):
             payload["stop"] = request.stop
         if request.service_tier is not None:
             payload["service_tier"] = request.service_tier
+        if request.modalities is not None:
+            payload["modalities"] = request.modalities
+        if request.audio is not None:
+            payload["audio"] = request.audio
         if request.tools is not None:
             payload["tools"] = request.tools
         if request.tool_choice is not None:
@@ -145,6 +149,7 @@ class OpenAIProvider(Provider):
             ),
             tool_calls=message.get("tool_calls"),
             finish_reason=_finish_reason(data["choices"][0].get("finish_reason")),
+            audio=message.get("audio"),
         )
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
@@ -246,12 +251,14 @@ def _parse_openai_sse_event(line: str) -> StreamEvent | None:
         return None
     choices = chunk.get("choices") or []
     if choices:
-        delta = choices[0].get("delta", {}).get("content")
+        delta_obj = choices[0].get("delta", {})
+        delta = delta_obj.get("content")
         reason = _finish_reason(choices[0].get("finish_reason"))
-        if delta or reason:
+        audio = delta_obj.get("audio")
+        if delta or reason or audio:
             # The terminal chunk usually carries a finish_reason and an empty
             # delta; a provider may also send both at once.
-            return StreamEvent(delta=delta or None, finish_reason=reason)
+            return StreamEvent(delta=delta or None, finish_reason=reason, audio=audio)
     usage = chunk.get("usage")
     if usage:
         return StreamEvent(

@@ -139,6 +139,9 @@ export class RekAIClient {
     if (opts.responseFormat != null) payload.response_format = opts.responseFormat;
     if (opts.stop != null) payload.stop = opts.stop;
     if (opts.serviceTier != null) payload.service_tier = opts.serviceTier;
+    // OpenAI's audio-output config; OpenAI-compatible providers only.
+    if (opts.modalities != null) payload.modalities = opts.modalities;
+    if (opts.audio != null) payload.audio = opts.audio;
     return payload;
   }
 

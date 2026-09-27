@@ -45,6 +45,11 @@ export interface ChatOptions {
    * 'scale'). Forwarded to OpenAI-compatible providers only.
    */
   serviceTier?: string;
+  /** OpenAI's `modalities` — e.g. ['text','audio'] on audio-capable models.
+   * OpenAI-compatible providers only. */
+  modalities?: string[];
+  /** OpenAI's `audio` — {voice, format}; required with an 'audio' modality. */
+  audio?: Record<string, unknown>;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
 }
@@ -80,6 +85,9 @@ export interface ChatResult {
   fallback_used: boolean;
   /** Secret patterns scrubbed from `content` by the output-redaction guardrail. */
   redacted: string[] | null;
+  /** The provider's audio output verbatim (OpenAI message.audio:
+   * {id, data(base64), transcript, expires_at}). */
+  audio: Record<string, unknown> | null;
   /** Unix timestamp the gateway produced the response. */
   created: number;
 }

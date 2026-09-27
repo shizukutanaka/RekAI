@@ -25,6 +25,9 @@ export interface ChatResponse {
   redacted?: string[] | null;
   /** True when a fallback target answered because the primary failed. */
   fallback_used?: boolean;
+  /** The provider's audio output verbatim (OpenAI message.audio), when an
+   * 'audio' modality was requested. */
+  audio?: Record<string, unknown> | null;
   tool_calls?: Record<string, unknown>[] | null;
 }
 

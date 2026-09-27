@@ -1368,7 +1368,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             async for ev in handle_chat_stream(
                 request, x_provider_key, config, cache_backend, provider_name, provider, client_id
             ):
-                if ev.delta is not None:
+                if ev.audio is not None:
+                    yield f"data: {json.dumps({'audio': ev.audio})}\n\n"
+                elif ev.delta is not None:
                     yield f"data: {json.dumps({'delta': ev.delta})}\n\n"
                 elif ev.error is not None:
                     payload = {"error": "provider_error", "detail": str(ev.error)}
@@ -1502,7 +1504,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 provider,
                 client_id,
             ):
-                if ev.delta is not None:
+                if ev.audio is not None:
+                    yield sse(openai_compat.chunk_audio(chunk_id, created, model, ev.audio))
+                elif ev.delta is not None:
                     yield sse(openai_compat.chunk_delta(chunk_id, created, model, ev.delta))
                 elif ev.error is not None:
                     yield sse(openai_compat.openai_error(ev.error.status_code, str(ev.error)))

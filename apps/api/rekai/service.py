@@ -70,6 +70,10 @@ class ChatStreamEvent:
     delta: str | None = None
     error: ProviderError | None = None
     summary: StreamSummary | None = None
+    # A streamed audio delta (OpenAI choices[].delta.audio) — carried
+    # separately from text deltas; never fed to the text accumulator or the
+    # redactor (it's base64 audio, not prose).
+    audio: dict | None = None
 
 
 def _chat_factory(
@@ -468,6 +472,7 @@ async def handle_chat(
             cached=False,
             fallback_used=is_fallback,
             finish_reason=result.finish_reason,
+            audio=result.audio,
             created=int(time.time()),
         )
         # Redact before *any* store below sees the content (see _redact).

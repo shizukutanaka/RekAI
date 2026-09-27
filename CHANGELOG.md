@@ -36,6 +36,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **Audio output (`modalities`/`audio`) end-to-end.** OpenAI's audio-capable
+  models need `modalities: ["text","audio"]` plus an `audio` config
+  (`{voice, format}`), and return the clip at `choices[].message.audio` — both
+  request fields were accepted and silently dropped. They now reach
+  OpenAI-compatible providers, and the audio object comes back on the native
+  response's `audio` field and the compat response's `message.audio`; on the
+  stream, `delta.audio` chunks ride a separate event (never mixed into the text
+  delta). Both fields join the cache key and semantic bucket, and both SDKs
+  expose them.
 - **Anthropic-compatible `POST /v1/messages`.** Point an Anthropic SDK at
   RekAI — `Anthropic(base_url="http://localhost:8000")`, the SDK appends
   `/v1/messages` itself — and it works unmodified: Anthropic's request shape

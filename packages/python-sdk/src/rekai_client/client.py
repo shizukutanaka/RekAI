@@ -54,6 +54,9 @@ class ChatResult:
     #: Secret patterns scrubbed from ``content`` by the output-redaction
     #: guardrail, or None if nothing was redacted.
     redacted: list[str] | None = None
+    #: The provider's audio output object verbatim (OpenAI message.audio),
+    #: when the request asked for an 'audio' modality.
+    audio: dict[str, Any] | None = None
     #: Unix timestamp the gateway produced the response.
     created: int = 0
 
@@ -72,6 +75,7 @@ class ChatResult:
             finish_reason=data.get("finish_reason"),
             cache_similarity=data.get("cache_similarity"),
             redacted=data.get("redacted"),
+            audio=data.get("audio"),
             created=data.get("created", 0),
         )
 
@@ -185,6 +189,8 @@ def _build_payload(
     response_format: dict[str, Any] | None = None,
     stop: list[str] | str | None = None,
     service_tier: str | None = None,
+    modalities: list[str] | None = None,
+    audio: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -208,6 +214,10 @@ def _build_payload(
         payload["stop"] = stop
     if service_tier is not None:
         payload["service_tier"] = service_tier
+    if modalities is not None:
+        payload["modalities"] = modalities
+    if audio is not None:
+        payload["audio"] = audio
     return payload
 
 
@@ -299,6 +309,8 @@ class RekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
+        modalities: list[str] | None = None,
+        audio: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -313,6 +325,8 @@ class RekAIClient:
             response_format,
             stop,
             service_tier,
+            modalities,
+            audio,
         )
 
     @staticmethod
@@ -369,6 +383,8 @@ class RekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
+        modalities: list[str] | None = None,
+        audio: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -398,6 +414,8 @@ class RekAIClient:
             response_format,
             stop,
             service_tier,
+            modalities,
+            audio,
         )
         headers = _build_headers(
             self._provider_key,
@@ -605,6 +623,8 @@ class AsyncRekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
+        modalities: list[str] | None = None,
+        audio: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -623,6 +643,8 @@ class AsyncRekAIClient:
             response_format,
             stop,
             service_tier,
+            modalities,
+            audio,
         )
         headers = _build_headers(
             self._provider_key,

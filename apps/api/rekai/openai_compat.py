@@ -99,6 +99,8 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         max_tokens=req.max_tokens or req.max_completion_tokens,
         stop=stop,
         service_tier=req.service_tier,
+        modalities=req.modalities,
+        audio=req.audio,
         cache=True,
         tools=req.tools,
         tool_choice=req.tool_choice,
@@ -119,6 +121,7 @@ def to_chat_completion(resp: ChatResponse) -> ChatCompletionResponse:
                     role="assistant",
                     content=resp.content or None,
                     tool_calls=resp.tool_calls,
+                    audio=resp.audio,
                 ),
                 # The provider's own reason when it gave one. The fallback
                 # is the old behavior, kept only for responses that predate
@@ -157,6 +160,13 @@ def chunk_first(chunk_id: str, created: int, model: str) -> dict:
 def chunk_delta(chunk_id: str, created: int, model: str, text: str) -> dict:
     chunk = _chunk_base(chunk_id, created, model)
     chunk["choices"] = [{"index": 0, "delta": {"content": text}, "finish_reason": None}]
+    return chunk
+
+
+def chunk_audio(chunk_id: str, created: int, model: str, audio: dict) -> dict:
+    """An audio delta chunk: OpenAI streams audio at ``choices[].delta.audio``."""
+    chunk = _chunk_base(chunk_id, created, model)
+    chunk["choices"] = [{"index": 0, "delta": {"audio": audio}, "finish_reason": None}]
     return chunk
 
 

@@ -54,6 +54,19 @@ class ChatRequest(BaseModel):
         "stay forward-compatible; an unsupported tier surfaces as the "
         "provider's own error. Forwarded to OpenAI-compatible providers only.",
     )
+    modalities: list[str] | None = Field(
+        default=None,
+        description="Output modalities, as OpenAI's `modalities` "
+        "(['text', 'audio'] for audio-capable models). Forwarded verbatim to "
+        "OpenAI-compatible providers only.",
+    )
+    audio: dict | None = Field(
+        default=None,
+        description="Audio-output config, as OpenAI's `audio` "
+        "({'voice': ..., 'format': 'wav'|'mp3'|...} — required when a modality "
+        "includes 'audio'). Forwarded verbatim to OpenAI-compatible providers "
+        "only; the response's audio object rides ``audio`` on the reply.",
+    )
     cache: bool = Field(default=True, description="Whether this request may be served from cache.")
     fallbacks: list[FallbackTarget] | None = Field(
         default=None,
@@ -154,6 +167,8 @@ class ChatCompletionsRequest(BaseModel):
     max_completion_tokens: int | None = Field(default=None, ge=1)
     stop: str | list[str] | None = None
     service_tier: str | None = None
+    modalities: list[str] | None = None
+    audio: dict[str, Any] | None = None
     stream: bool = False
     stream_options: StreamOptions | None = None
     tools: list[dict[str, Any]] | None = None
@@ -227,6 +242,9 @@ class ChatCompletionMessage(BaseModel):
     role: Literal["assistant"] = "assistant"
     content: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
+    # OpenAI's audio output lives on the message: {id, data(base64),
+    # transcript, expires_at}.
+    audio: dict[str, Any] | None = None
 
 
 class ChatCompletionChoice(BaseModel):
@@ -290,6 +308,12 @@ class ChatResponse(BaseModel):
         "redaction guardrail, or null if nothing was redacted. Mirrors the X-Redacted "
         "header, and survives a cache hit or Idempotency-Key replay because redaction "
         "runs before the response is stored.",
+    )
+    audio: dict | None = Field(
+        default=None,
+        description="The provider's audio output verbatim (OpenAI's "
+        "choices[].message.audio: {id, data(base64), transcript, expires_at}), "
+        "present only when the request asked for an 'audio' modality.",
     )
     created: int
 

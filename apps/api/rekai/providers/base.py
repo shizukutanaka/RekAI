@@ -115,6 +115,8 @@ class ProviderResult:
     usage: Usage = field(default_factory=Usage)
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    # The provider's audio output object verbatim (OpenAI message.audio).
+    audio: dict | None = None
 
 
 @dataclass
@@ -134,6 +136,9 @@ class StreamEvent:
     usage: Usage | None = None
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    # A streamed audio delta (OpenAI choices[].delta.audio), carried
+    # separately from text deltas so it can't corrupt the completion text.
+    audio: dict | None = None
 
 
 class Provider(ABC):
