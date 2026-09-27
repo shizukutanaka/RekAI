@@ -12,7 +12,6 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   scope, ...); a compat caller's header was dropped, silently disabling the
   gated feature. It's now forwarded verbatim to Anthropic upstream and keyed
   into the response cache (beta flags can change the response shape).
-||||||| 0e4ac30
 - **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
   `cache: false` so you can compare a fresh answer against the cached one.
   It defaults to on; the meta line already marks cache hits.
