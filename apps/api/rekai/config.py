@@ -92,6 +92,16 @@ class Settings(BaseSettings):
     # one" — every authenticated caller can name any of them.
     allowed_providers: str = ""
 
+    # Per-key model allowlists (opt-in): "sk-a:gpt-4o*;gpt-4o-mini,sk-b:echo".
+    # Entries are comma-separated (same as client_budgets_usd); a key's
+    # patterns are ;-separated since , already delimits entries. Glob matching
+    # (fnmatch: *, ?). A key absent from the map is unrestricted; a key listed
+    # with no patterns can call nothing. Applies to the request model and every
+    # fallback model — a restricted key can't reach a disallowed model through
+    # the fallback chain. Only meaningful with gateway auth: the map is keyed
+    # by the raw API key, so per-IP clients can't be distinguished anyway.
+    key_models: str = ""
+
     # Fallback: ordered "provider:model" targets tried on upstream (5xx) errors.
     # e.g. "openai:gpt-4o-mini,echo" — model is optional (defaults to request model).
     fallback_enabled: bool = False
@@ -337,6 +347,25 @@ class Settings(BaseSettings):
             except ValueError:
                 continue
         return overrides
+
+    @property
+    def key_model_allowlists(self) -> dict[str, list[str]]:
+        """Parse ``key_models`` into ``{raw_key: [glob, ...]}``, keyed
+        by the raw API key like client_budget_overrides. ``key:`` with no
+        patterns maps to an empty list (deny-all — an operator listing a key
+        intends to restrict it; silently unrestricted would be the footgun).
+        Malformed entries (no ``:``) are skipped."""
+        allowlists: dict[str, list[str]] = {}
+        for raw in self.key_models.split(","):
+            raw = raw.strip()
+            if not raw or ":" not in raw:
+                continue
+            key, _, patterns = raw.partition(":")
+            key = key.strip()
+            if not key:
+                continue
+            allowlists[key] = [p.strip() for p in patterns.split(";") if p.strip()]
+        return allowlists
 
     @property
     def pricing_override_dict(self) -> dict[str, tuple[float, float]]:

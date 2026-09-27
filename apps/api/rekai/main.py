@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import fnmatch
 import json
 import time
 import uuid
@@ -354,6 +355,37 @@ _IDEM_MISMATCH = "Idempotency-Key was already used with a different request body
 _IDEM_CONFLICT = "A request with this Idempotency-Key is already being processed."
 
 
+def _model_acl_denied(http_request: Request, models: list[str]) -> JSONResponse | None:
+    """Enforce the key's model allowlist (REKAI_KEY_MODELS). The middleware
+    stashes the matched patterns on request.state.key_model_allowlist — None
+    means the key has no entry and is unrestricted. Every model the request
+    can reach (its own plus each fallback's override) must match a glob, or a
+    restricted key could reach a disallowed model through the fallback chain."""
+    allowlist: list[str] | None = getattr(http_request.state, "key_model_allowlist", None)
+    if allowlist is None:
+        return None
+    for model in models:
+        if not any(fnmatch.fnmatchcase(model, pattern) for pattern in allowlist):
+            metrics.record_error("model_not_allowed")
+            return JSONResponse(
+                status_code=403,
+                content=ErrorResponse(
+                    error="model_not_allowed",
+                    detail=f"This API key is not permitted to use model '{model}'.",
+                ).model_dump(),
+            )
+    return None
+
+
+def _acl_models(request: ChatRequest | EmbeddingsRequest) -> list[str]:
+    """Every model the request could route to: its own plus per-fallback
+    overrides (a fallback without an explicit model inherits request.model)."""
+    models = [request.model]
+    for target in getattr(request, "fallbacks", None) or []:
+        models.append(target.model or request.model)
+    return models
+
+
 def _client_id(http_request: Request) -> str:
     """The requesting tenant: the masked API-key id under gateway auth, else the
     client IP (set by the ``_rate_limit`` middleware)."""
@@ -469,6 +501,9 @@ async def _run_chat(
     assume which — this docstring used to say "when the guardrail blocks the
     request", and the OpenAI-compatible route believed it and reported every
     idempotency conflict as a prompt-injection block."""
+    denied = _model_acl_denied(http_request, _acl_models(request))
+    if denied is not None:
+        return denied
     blocked = _guardrail_response(request.messages, settings, response)
     if blocked is not None:
         return blocked
@@ -698,6 +733,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
             rl_client = auth.client_id(token)
         request.state.client_id = rl_client
+        # Per-key model allowlist (REKAI_KEY_MODELS): None = no entry, no
+        # restriction. Read at auth time so handlers can enforce it cheaply.
+        request.state.key_model_allowlist = (
+            settings.key_model_allowlists.get(token) if token is not None else None
+        )
 
         # Per-client spend cap: once exceeded, block before doing any real work
         # (parsing, provider calls) so an over-budget client can't rack up more.
@@ -1142,10 +1182,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/v1/models", response_model=ModelsResponse, tags=["chat"])
     async def list_models(
+        http_request: Request,
         type: Literal["chat", "embedding"] | None = Query(
             None, description="Filter by model type: 'chat' or 'embedding'."
         ),
     ) -> ModelsResponse:
+        # A restricted key sees only the models it may call — same allowlist
+        # the ACL enforces on /v1/chat and /v1/embeddings.
+        allowlist: list[str] | None = getattr(http_request.state, "key_model_allowlist", None)
+
         def _info(model: str, name: str, kind: Literal["chat", "embedding"]) -> ModelInfo:
             price = price_for_model(model, settings.pricing_override_dict)
             pricing = (
@@ -1162,10 +1207,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 continue
             if type != "embedding":
                 for model in await provider.list_models(None):
-                    data.append(_info(model, name, "chat"))
+                    if allowlist is None or any(fnmatch.fnmatchcase(model, p) for p in allowlist):
+                        data.append(_info(model, name, "chat"))
             if type != "chat":
                 for model in await provider.list_embedding_models(None):
-                    data.append(_info(model, name, "embedding"))
+                    if allowlist is None or any(fnmatch.fnmatchcase(model, p) for p in allowlist):
+                        data.append(_info(model, name, "embedding"))
         return ModelsResponse(data=data)
 
     @app.post(
@@ -1221,6 +1268,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         fingerprint: str | None = None
         claimed = False
         client_id = _client_id(http_request)
+        denied = _model_acl_denied(http_request, _acl_models(request))
+        if denied is not None:
+            return denied
         if idempotency_key:
             fingerprint = idempotency.fingerprint(request.model_dump_json())
             outcome = await idempotency.claim(
@@ -1286,6 +1336,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         and do not accept ``Idempotency-Key`` (unlike ``/v1/chat``) — a retried
         streaming request always re-runs; see docs/architecture.md.
         """
+        denied = _model_acl_denied(http_request, _acl_models(request))
+        if denied is not None:
+            return denied
         blocked = _guardrail_response(request.messages, config, response)
         if blocked is not None:
             return blocked
@@ -1404,6 +1457,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return openai_compat.to_chat_completion(result)
 
         # Streaming.
+        denied = _model_acl_denied(http_request, _acl_models(chat_request))
+        if denied is not None:
+            return denied
         blocked = _guardrail_response(chat_request.messages, config, response)
         if blocked is not None:
             return blocked

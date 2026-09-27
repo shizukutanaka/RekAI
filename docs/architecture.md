@@ -977,6 +977,19 @@ feature, so nothing that worked before regresses. When a window is configured,
 a 402 also carries an `X-Budget-Reset` header (the unix timestamp of the next
 window boundary), so a client knows exactly when it can retry.
 
+`REKAI_KEY_MODELS` (opt-in, unset by default) is the per-tenant counterpart of
+`REKAI_ALLOWED_PROVIDERS`: `"sk-a:gpt-4o*;gpt-4o-mini,sk-b:echo"` gives each
+named key a glob allowlist (fnmatch: `*`, `?`), so tenants can be scoped to
+the models their tier pays for. A key with no entry is unrestricted; `key:`
+with no patterns can call nothing (fail-closed). The check covers every model
+the request can reach — `request.model` plus each `fallbacks[].model` — since
+the fallback chain is otherwise a straight path around the allowlist, and it
+runs on all four call surfaces (`/v1/chat`, `/v1/chat/stream`,
+`/v1/chat/completions` both modes, `/v1/embeddings`) plus `GET /v1/models`,
+which lists only what the caller's key may use. It's keyed by the raw API
+key, so per-IP clients without gateway auth can't be scoped — the same reason
+per-key budget overrides don't exist for IPs.
+
 Both per-client structures are **bounded**: `REKAI_MAX_TRACKED_CLIENTS`
 (default 10,000; `0` = unlimited) caps how many distinct client ids are kept in
 `usage_by_client` and the budget-window store. Without gateway auth the client
