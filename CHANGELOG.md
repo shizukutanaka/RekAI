@@ -7,6 +7,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Per-request provider timeout: `timeout_seconds` on the native API and
+  `timeout` on the OpenAI-compat surface (LiteLLM's body convention).
+  Tighten-only — min()ed with `request_timeout_seconds`, so a caller can
+  demand a faster answer but never stretch the gateway's ceiling. Applied
+  per-request on the pooled httpx client; excluded from the cache key since
+  it changes latency, not content. Both SDKs (`timeout_seconds=` /
+  `timeoutSeconds`).
 - **Reasoning-token accounting in `usage`.** Reasoning models (OpenAI o-series
   and gpt-5, Gemini thinking models) bill a separate slice of completion tokens
   for chain-of-thought; the provider-reported count now surfaces as
