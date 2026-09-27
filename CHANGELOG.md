@@ -13,6 +13,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no way to set it. An optional input now sends it (blank = model default);
   the result card already displays the actual vector length, so a provider
   that ignores the hint is visible rather than silent.
+||||||| 0e4ac30
+- **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
+  `cache: false` so you can compare a fresh answer against the cached one.
+  It defaults to on; the meta line already marks cache hits.
 - `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
   check (`client.messages.count_tokens`) now works against the compat surface.
   Returns a local script-aware estimate (the same heuristic the pricing path
