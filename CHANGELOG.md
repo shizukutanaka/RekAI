@@ -36,6 +36,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **`reasoning_effort` request parameter** — OpenAI's reasoning models
+  (o-series, gpt-5) take it to trade latency/cost for answer depth; the compat
+  layer tolerated it via `extra="allow"` and silently dropped it, so a caller
+  routing o3 through RekAI had no way to dial it. Forwarded to
+  OpenAI-compatible providers only (Anthropic/Gemini/Ollama have no such
+  field); part of the cache key and semantic bucket. Exposed in both SDKs
+  (`reasoning_effort=` / `reasoningEffort`).
 - **Opt-in verify band for the semantic cache** (`REKAI_SEMANTIC_CACHE_VERIFY_*`,
   roadmap O-2). A single cosine threshold forced every candidate to be served
   or dropped on embedding distance alone; similarity is not proof two prompts

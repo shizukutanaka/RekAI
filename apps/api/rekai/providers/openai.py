@@ -99,6 +99,8 @@ class OpenAIProvider(Provider):
             payload["max_tokens"] = request.max_tokens
         if request.stop:
             payload["stop"] = request.stop
+        if request.reasoning_effort is not None:
+            payload["reasoning_effort"] = request.reasoning_effort
         if request.tools is not None:
             payload["tools"] = request.tools
         if request.tool_choice is not None:

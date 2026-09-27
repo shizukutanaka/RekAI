@@ -184,6 +184,7 @@ def _build_payload(
     tool_choice: Any | None = None,
     response_format: dict[str, Any] | None = None,
     stop: list[str] | str | None = None,
+    reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -205,6 +206,8 @@ def _build_payload(
         payload["response_format"] = response_format
     if stop is not None:
         payload["stop"] = stop
+    if reasoning_effort is not None:
+        payload["reasoning_effort"] = reasoning_effort
     return payload
 
 
@@ -295,6 +298,7 @@ class RekAIClient:
         tool_choice: Any | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
+        reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -308,6 +312,7 @@ class RekAIClient:
             tool_choice,
             response_format,
             stop,
+            reasoning_effort,
         )
 
     @staticmethod
@@ -363,6 +368,7 @@ class RekAIClient:
         tool_choice: Any | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
+        reasoning_effort: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -371,6 +377,8 @@ class RekAIClient:
 
         ``stop`` is one or more sequences that end generation, as OpenAI's
         ``stop`` (a bare string is fine; the server normalizes it to a list).
+        ``reasoning_effort`` ('low' | 'medium' | 'high' | …) reaches
+        OpenAI-compatible reasoning models; other providers ignore it.
 
         ``idempotency_key`` is sent as the ``Idempotency-Key`` header so the
         server replays the first response on a retry instead of re-processing.
@@ -389,6 +397,7 @@ class RekAIClient:
             tool_choice,
             response_format,
             stop,
+            reasoning_effort,
         )
         headers = _build_headers(
             self._provider_key,
@@ -595,6 +604,7 @@ class AsyncRekAIClient:
         tool_choice: Any | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
+        reasoning_effort: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -612,6 +622,7 @@ class AsyncRekAIClient:
             tool_choice,
             response_format,
             stop,
+            reasoning_effort,
         )
         headers = _build_headers(
             self._provider_key,

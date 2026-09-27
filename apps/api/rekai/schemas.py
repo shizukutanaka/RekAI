@@ -46,6 +46,14 @@ class ChatRequest(BaseModel):
         "every provider under its own name; a provider's own limit (OpenAI "
         "allows 4) surfaces as that provider's error.",
     )
+    reasoning_effort: str | None = Field(
+        default=None,
+        description="Reasoning effort for OpenAI's reasoning models "
+        "(o-series, gpt-5): 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'. "
+        "Not enum-validated so newer levels stay forward-compatible; an "
+        "unsupported level surfaces as the provider's own error. Forwarded to "
+        "OpenAI-compatible providers only.",
+    )
     cache: bool = Field(default=True, description="Whether this request may be served from cache.")
     fallbacks: list[FallbackTarget] | None = Field(
         default=None,
@@ -145,6 +153,7 @@ class ChatCompletionsRequest(BaseModel):
     max_tokens: int | None = Field(default=None, ge=1)
     max_completion_tokens: int | None = Field(default=None, ge=1)
     stop: str | list[str] | None = None
+    reasoning_effort: str | None = None
     stream: bool = False
     stream_options: StreamOptions | None = None
     tools: list[dict[str, Any]] | None = None

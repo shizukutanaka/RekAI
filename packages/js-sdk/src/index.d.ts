@@ -40,6 +40,12 @@ export interface ChatOptions {
    * accepted too; the server normalizes it to a one-element list.
    */
   stop?: string | string[];
+  /**
+   * Reasoning effort for OpenAI's reasoning models ('minimal' | 'low' |
+   * 'medium' | 'high' | 'xhigh'). Forwarded to OpenAI-compatible providers
+   * only; Anthropic/Gemini/Ollama ignore it.
+   */
+  reasoningEffort?: string;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
 }
