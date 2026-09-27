@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
@@ -259,6 +260,48 @@ def _request_deadline(settings: Settings) -> float | None:
     return time.monotonic() + settings.request_deadline_seconds
 
 
+# Singleflight on a cache miss: how long the `key:inflight` claim lives when
+# there is no request deadline to bound it. Long enough to cover a slow
+# provider call; if a winner outlives it, a waiter simply becomes a second
+# winner — a duplicate upstream call, never a hang.
+_INFLIGHT_LOCK_TTL = 120
+# How long a request that lost the claim polls for the winner's cached result
+# before calling the provider itself. Small on purpose: a slow winner must not
+# turn its followers' latency into its own, so a miss that can't be coalesced
+# quickly degrades to the pre-singleflight behavior (everyone calls upstream).
+_CACHE_FILL_BUDGET_SECONDS = 10.0
+_CACHE_FILL_POLL_SECONDS = 0.2
+
+
+def _inflight_ttl(deadline: float | None) -> int:
+    left = remaining_budget(deadline)
+    if left is None:
+        return _INFLIGHT_LOCK_TTL
+    # Bound the claim by the caller's own budget plus slack for the write.
+    return max(5, int(left) + 30)
+
+
+async def _await_cache_fill(
+    cache: CacheBackend, key: str, inflight_key: str, deadline: float | None
+) -> str | None:
+    """Poll for the value a concurrent in-flight caller is about to store under
+    ``key``. Returns it on arrival, or None when the claim vanished without a
+    stored result (winner failed) or the poll budget ran out — the caller then
+    proceeds to the provider itself."""
+    left = remaining_budget(deadline)
+    budget = _CACHE_FILL_BUDGET_SECONDS if left is None else min(left, _CACHE_FILL_BUDGET_SECONDS)
+    end = time.monotonic() + budget
+    while time.monotonic() < end:
+        raw = await cache.get(key)
+        if raw is not None:
+            metrics.record_cache_fill_coalesced()
+            return raw
+        if await cache.get(inflight_key) is None:
+            return None
+        await asyncio.sleep(_CACHE_FILL_POLL_SECONDS)
+    return await cache.get(key)
+
+
 async def handle_chat(
     request: ChatRequest,
     api_key: str | None,
@@ -378,6 +421,8 @@ async def handle_chat(
             metrics.record_fallback()
 
         key = cache_key(attempt_request, attempt.provider_name)
+        inflight_key = ""
+        holds_inflight = False
         if use_cache:
             cached_raw = await cache.get(key)
             if cached_raw is not None:
@@ -385,6 +430,22 @@ async def handle_chat(
                 logger.info("cache hit provider=%s model=%s", attempt.provider_name, attempt.model)
                 payload = json.loads(cached_raw)
                 return ChatResponse(**{**payload, "cached": True})
+            # Singleflight: N concurrent misses on the same key would all call
+            # the provider for what becomes the same entry. The first to claim
+            # `key:inflight` computes; the rest poll briefly for the result and
+            # proceed to the provider themselves if none arrives — fail-open,
+            # never a deadlock.
+            inflight_key = key + ":inflight"
+            holds_inflight = await cache.add(inflight_key, "1", _inflight_ttl(deadline))
+            if not holds_inflight:
+                served = await _await_cache_fill(cache, key, inflight_key, deadline)
+                if served is not None:
+                    metrics.record_cache(hit=True)
+                    return ChatResponse(**{**json.loads(served), "cached": True})
+                # The winner finished without storing (failure or expiry) — try
+                # to take over the claim; if another waiter beat us to it, we
+                # just call the provider without further polling.
+                holds_inflight = await cache.add(inflight_key, "1", _inflight_ttl(deadline))
             metrics.record_cache(hit=False)
 
         started = time.perf_counter()
@@ -398,6 +459,11 @@ async def handle_chat(
                 deadline=deadline,
             )
         except ProviderError as exc:
+            if holds_inflight:
+                # Free a waiting duplicate immediately instead of letting it
+                # poll until timeout — the value will never arrive for this key.
+                await cache.delete(inflight_key)
+                holds_inflight = False
             metrics.observe_provider_duration(
                 attempt.provider_name, "chat", time.perf_counter() - started
             )
@@ -475,6 +541,8 @@ async def handle_chat(
 
         if use_cache:
             await cache.set(key, response.model_dump_json(), settings.cache_ttl_seconds)
+        if holds_inflight:
+            await cache.delete(inflight_key)
         if sem_enabled and sem_embedding is not None:
             semantic_cache.add(
                 sem_bucket,

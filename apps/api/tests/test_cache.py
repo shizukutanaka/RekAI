@@ -168,3 +168,88 @@ async def test_idempotency_claim_proceeds_when_redis_is_down() -> None:
     first = await idempotency.claim(cache, "client-a", "key-1", "fingerprint", 60)
 
     assert first.kind == "proceed"
+
+
+async def test_concurrent_misses_coalesce_to_one_provider_call() -> None:
+    # Two identical requests in flight at once: the loser waits for the winner's
+    # stored result instead of stampeding the provider for a duplicate answer.
+    import asyncio
+
+    from rekai.config import Settings
+    from rekai.metrics import metrics
+    from rekai.providers import register_provider
+    from rekai.providers.base import Provider, ProviderResult
+    from rekai.schemas import Usage
+    from rekai.service import handle_chat
+
+    calls = 0
+
+    class SlowProvider(Provider):
+        requires_key = False
+        name = "slowcoalesce"
+
+        async def chat(self, request, api_key) -> ProviderResult:
+            nonlocal calls
+            calls += 1
+            await asyncio.sleep(0.4)
+            return ProviderResult(model="slowcoalesce", content="ok", usage=Usage(total_tokens=1))
+
+    register_provider(SlowProvider())
+    cache = MemoryCache()
+    settings = Settings(environment="test", default_provider="slowcoalesce", cache_enabled=True)
+    before = metrics.cache_fills_coalesced_total
+    req = _req(content="coalesce-me", provider="slowcoalesce")
+    r1, r2 = await asyncio.gather(
+        handle_chat(req, None, settings, cache),
+        handle_chat(req, None, settings, cache),
+    )
+    assert calls == 1
+    assert (r1.cached, r2.cached).count(True) == 1
+    assert metrics.cache_fills_coalesced_total == before + 1
+
+
+async def test_coalesced_waiter_proceeds_when_winner_fails() -> None:
+    # Fail-open: if the claim holder errors out, the waiter must call the
+    # provider itself rather than returning an error or waiting forever.
+    import asyncio
+
+    from rekai.config import Settings
+    from rekai.providers import register_provider
+    from rekai.providers.base import Provider, ProviderError, ProviderResult
+    from rekai.schemas import Usage
+    from rekai.service import handle_chat
+
+    calls = 0
+
+    class FlakyCoalesceProvider(Provider):
+        requires_key = False
+        name = "flakycoalesce"
+
+        async def chat(self, request, api_key) -> ProviderResult:
+            nonlocal calls
+            calls += 1
+            await asyncio.sleep(0.3)
+            if calls == 1:
+                raise ProviderError("boom", status_code=503)
+            return ProviderResult(model="flakycoalesce", content="ok", usage=Usage(total_tokens=1))
+
+    register_provider(FlakyCoalesceProvider())
+    cache = MemoryCache()
+    settings = Settings(
+        environment="test",
+        default_provider="flakycoalesce",
+        cache_enabled=True,
+        retry_max_attempts=1,
+    )
+    req = _req(content="coalesce-fail", provider="flakycoalesce")
+    results = await asyncio.gather(
+        handle_chat(req, None, settings, cache),
+        handle_chat(req, None, settings, cache),
+        return_exceptions=True,
+    )
+    # One raised, the other proceeded to its own provider call after the
+    # winner's claim vanished.
+    errors = [r for r in results if isinstance(r, Exception)]
+    ok = [r for r in results if not isinstance(r, Exception)]
+    assert calls == 2
+    assert len(errors) == 1 and len(ok) == 1 and ok[0].cached is False

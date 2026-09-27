@@ -407,6 +407,18 @@ share an entry. Backends:
 
 A client can opt a single request out with `"cache": false`.
 
+**Concurrent misses coalesce** (singleflight). N identical requests arriving
+before the first completes would each call the provider for what becomes the
+same entry — a stampede. The first miss claims an atomic `key:inflight`
+sentinel (`cache.add`, the same primitive the idempotency store uses, so it
+holds across processes under Redis); the others poll briefly for the stored
+result — up to 10s or the request's own deadline, whichever is shorter — and
+call the provider themselves when nothing arrives or the claim vanishes early
+(winner failed). It can only reduce upstream calls, never add latency beyond
+the bounded poll or block a request on another's failure — fail-open, same as
+every other degraded-cache path. `rekai_cache_fills_coalesced_total` (a subset
+of `rekai_cache_hits_total`) counts the duplicates absorbed.
+
 ### Semantic cache
 
 Exact-match caching misses paraphrases ("hi" vs "hello there"), keeping hit

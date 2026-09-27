@@ -36,6 +36,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **Cache-miss singleflight.** N concurrent identical requests that all miss
+  the exact cache no longer all call the provider: the first claims an atomic
+  in-flight sentinel and the rest poll briefly (bounded by 10s and the request
+  deadline) for the stored result — served with `cached: true` — or proceed to
+  the provider themselves when the claim holder fails. Fail-open; counts
+  absorbed duplicates as `rekai_cache_fills_coalesced_total` (subset of
+  `rekai_cache_hits_total`, also in `/v1/usage` as `cache_fills_coalesced_total`).
+  Verified live: two simultaneous identical requests → one provider call.
 - **Opt-in verify band for the semantic cache** (`REKAI_SEMANTIC_CACHE_VERIFY_*`,
   roadmap O-2). A single cosine threshold forced every candidate to be served
   or dropped on embedding distance alone; similarity is not proof two prompts

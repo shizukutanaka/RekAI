@@ -281,6 +281,12 @@ class UsageSummary(BaseModel):
         description="Subset of cache_hits_total served by approximate (embedding) "
         "match rather than an exact prompt match.",
     )
+    cache_fills_coalesced_total: int = Field(
+        default=0,
+        description="Subset of cache_hits_total that were coalesced onto an "
+        "in-flight identical request (singleflight) instead of calling the "
+        "provider again.",
+    )
     errors_total: int
     fallbacks_total: int
     retries_total: int = 0

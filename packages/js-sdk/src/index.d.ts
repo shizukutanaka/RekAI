@@ -113,6 +113,8 @@ export interface UsageSummary {
   cache_misses_total: number;
   /** Subset of cache_hits_total served by approximate (embedding) match. */
   semantic_cache_hits_total: number;
+  /** Subset of cache_hits_total coalesced onto an in-flight identical request. */
+  cache_fills_coalesced_total: number;
   errors_total: number;
   fallbacks_total: number;
   tokens_total: number;

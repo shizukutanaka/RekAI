@@ -104,6 +104,10 @@ class Metrics:
         # an exact hit returns the answer to this prompt, a semantic hit returns
         # the answer to a different one.
         self.semantic_cache_hits_total = 0
+        # Also a subset of cache_hits_total: misses that were *coalesced* onto
+        # an in-flight identical request and then served its stored result
+        # rather than calling the provider a second time (singleflight).
+        self.cache_fills_coalesced_total = 0
         self.errors_total = 0
         self.fallbacks_total = 0
         self.retries_total = 0
@@ -186,6 +190,10 @@ class Metrics:
     def record_semantic_cache_hit(self) -> None:
         with self._lock:
             self.semantic_cache_hits_total += 1
+
+    def record_cache_fill_coalesced(self) -> None:
+        with self._lock:
+            self.cache_fills_coalesced_total += 1
 
     def record_error(self, kind: str = "unknown") -> None:
         """Count one error returned to a client, tagged by *why*.
@@ -315,6 +323,7 @@ class Metrics:
             self.cache_hits_total = snapshot.get("cache_hits_total", 0)
             self.cache_misses_total = snapshot.get("cache_misses_total", 0)
             self.semantic_cache_hits_total = snapshot.get("semantic_cache_hits_total", 0)
+            self.cache_fills_coalesced_total = snapshot.get("cache_fills_coalesced_total", 0)
             self.errors_total = snapshot.get("errors_total", 0)
             self.fallbacks_total = snapshot.get("fallbacks_total", 0)
             self.retries_total = snapshot.get("retries_total", 0)
@@ -340,6 +349,7 @@ class Metrics:
                 "cache_hits_total": self.cache_hits_total,
                 "cache_misses_total": self.cache_misses_total,
                 "semantic_cache_hits_total": self.semantic_cache_hits_total,
+                "cache_fills_coalesced_total": self.cache_fills_coalesced_total,
                 "errors_total": self.errors_total,
                 "fallbacks_total": self.fallbacks_total,
                 "retries_total": self.retries_total,
@@ -376,6 +386,11 @@ class Metrics:
             "approximate (embedding) match; a subset of rekai_cache_hits_total.",
             "# TYPE rekai_semantic_cache_hits_total counter",
             f"rekai_semantic_cache_hits_total {self.semantic_cache_hits_total}",
+            "# HELP rekai_cache_fills_coalesced_total Cache misses coalesced "
+            "onto an in-flight identical request (singleflight); a subset of "
+            "rekai_cache_hits_total.",
+            "# TYPE rekai_cache_fills_coalesced_total counter",
+            f"rekai_cache_fills_coalesced_total {self.cache_fills_coalesced_total}",
             "# HELP rekai_errors_total Errors returned to clients.",
             "# TYPE rekai_errors_total counter",
             f"rekai_errors_total {self.errors_total}",
@@ -482,6 +497,7 @@ _SCALAR_COUNTERS = (
     "cache_hits_total",
     "cache_misses_total",
     "semantic_cache_hits_total",
+    "cache_fills_coalesced_total",
     "errors_total",
     "fallbacks_total",
     "retries_total",
