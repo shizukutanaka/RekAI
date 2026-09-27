@@ -104,6 +104,12 @@ export interface EmbeddingsOptions {
   cache?: boolean;
   providerKey?: string;
   gatewayKey?: string;
+  /** Output dimensionality for models that support it (OpenAI
+   * text-embedding-3+, Gemini via outputDimensionality). */
+  dimensions?: number;
+  /** OpenAI's encoding_format ("float" | "base64"); OpenAI-compatible
+   * providers only. */
+  encodingFormat?: string;
 }
 
 export interface EmbeddingsResult {
