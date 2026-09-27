@@ -107,6 +107,14 @@ class OpenAIProvider(Provider):
             payload["tool_choice"] = request.tool_choice
         if request.response_format is not None:
             payload["response_format"] = request.response_format
+        # OpenAI extras: prediction changes generation (it's in the cache
+        # key); store/metadata are upstream bookkeeping that don't.
+        if request.prediction is not None:
+            payload["prediction"] = request.prediction
+        if request.store is not None:
+            payload["store"] = request.store
+        if request.metadata is not None:
+            payload["metadata"] = request.metadata
         return payload
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:

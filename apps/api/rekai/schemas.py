@@ -83,6 +83,26 @@ class ChatRequest(BaseModel):
         "automatically and ignores it. Per-message placement is also supported "
         "via a message's own cache_control.",
     )
+    prediction: dict[str, Any] | None = Field(
+        default=None,
+        description="OpenAI's Predicted Outputs, e.g. "
+        "{'type': 'content', 'content': '<expected text>'} — lets the model "
+        "speculatively reuse known content (a real latency win for edit-style "
+        "tasks). Forwarded to OpenAI-compatible providers only.",
+    )
+    store: bool | None = Field(
+        default=None,
+        description="OpenAI's `store` flag — retain the completion server-side "
+        "for evals/distillation pipelines. Bookkeeping only (does not change "
+        "the response); forwarded to OpenAI-compatible providers. Note a "
+        "cached reply means the upstream provider never saw the request.",
+    )
+    metadata: dict[str, str] | None = Field(
+        default=None,
+        description="OpenAI's `metadata` — caller labels for upstream "
+        "dashboard filtering. Bookkeeping only (does not change the "
+        "response); forwarded to OpenAI-compatible providers only.",
+    )
 
     @field_validator("stop", mode="before")
     @classmethod
@@ -162,6 +182,10 @@ class ChatCompletionsRequest(BaseModel):
     user: str | None = None  # accepted, ignored
     n: int | None = None  # 400 if n > 1 (RekAI returns a single choice)
     provider: str | None = None  # RekAI extension: explicit provider override
+    # OpenAI extras that are real features, forwarded verbatim upstream.
+    prediction: dict[str, Any] | None = None
+    store: bool | None = None
+    metadata: dict[str, str] | None = None
 
 
 # --- Anthropic Messages API (`POST /v1/messages`) --------------------------

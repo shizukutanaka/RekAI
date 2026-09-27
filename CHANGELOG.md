@@ -6,6 +6,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`prediction`/`store`/`metadata` now reach OpenAI-compatible providers
+  on the chat surfaces.** All three were tolerated as extras and silently
+  dropped: `prediction` is OpenAI's Predicted Outputs (speculative reuse of
+  known content — a real latency lever for edit-style tasks), `store`
+  retains completions upstream for evals/distillation pipelines, and
+  `metadata` carries the caller labels OpenAI's dashboard filters on.
+  `prediction` is mixed into the exact- and semantic-cache keys (it changes
+  what gets generated); `store`/`metadata` are not, since they don't change
+  the response and keying on them would only fragment the cache. Caveat,
+  inherent to any gateway cache: a cache hit means the upstream provider
+  never saw the request, so `store`-flagged bookkeeping only happens on
+  misses. Both SDKs expose the fields.
+
 ### Fixed
 - **`_verify_semantic_hit` no longer raises `TypeError` on every verified
   lookup.** The semantic-verify feature and the per-provider token metric

@@ -40,6 +40,10 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         # the cost breakdown we report back), so they key separately. Per-message
         # cache_control already rides along in `messages` above.
         "cache_control": request.cache_control,
+        # Predicted outputs change the generated response. store/metadata are
+        # upstream bookkeeping that doesn't — keying on them would only
+        # fragment the cache.
+        "prediction": request.prediction,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "rekai:chat:" + hashlib.sha256(raw.encode()).hexdigest()
@@ -73,6 +77,7 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
         "tool_choice": request.tool_choice,
         "response_format": request.response_format,
         "cache_control": request.cache_control,
+        "prediction": request.prediction,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode()).hexdigest()

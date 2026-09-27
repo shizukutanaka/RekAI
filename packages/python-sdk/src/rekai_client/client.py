@@ -185,6 +185,9 @@ def _build_payload(
     response_format: dict[str, Any] | None = None,
     stop: list[str] | str | None = None,
     service_tier: str | None = None,
+    prediction: dict[str, Any] | None = None,
+    store: bool | None = None,
+    metadata: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -208,6 +211,12 @@ def _build_payload(
         payload["stop"] = stop
     if service_tier is not None:
         payload["service_tier"] = service_tier
+    if prediction is not None:
+        payload["prediction"] = prediction
+    if store is not None:
+        payload["store"] = store
+    if metadata is not None:
+        payload["metadata"] = metadata
     return payload
 
 
@@ -299,6 +308,9 @@ class RekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
+        prediction: dict[str, Any] | None = None,
+        store: bool | None = None,
+        metadata: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -313,6 +325,9 @@ class RekAIClient:
             response_format,
             stop,
             service_tier,
+            prediction,
+            store,
+            metadata,
         )
 
     @staticmethod
@@ -369,6 +384,9 @@ class RekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
+        prediction: dict[str, Any] | None = None,
+        store: bool | None = None,
+        metadata: dict[str, str] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -378,7 +396,9 @@ class RekAIClient:
         ``stop`` is one or more sequences that end generation, as OpenAI's
         ``stop`` (a bare string is fine; the server normalizes it to a list).
         ``service_tier`` ('auto' | 'flex' | 'priority' | …) reaches
-        OpenAI-compatible providers only.
+        OpenAI-compatible providers only. So do ``prediction`` (Predicted
+        Outputs — content the model can speculatively reuse), ``store``
+        (upstream retention for evals), and ``metadata`` (upstream labels).
 
         ``idempotency_key`` is sent as the ``Idempotency-Key`` header so the
         server replays the first response on a retry instead of re-processing.
@@ -398,6 +418,9 @@ class RekAIClient:
             response_format,
             stop,
             service_tier,
+            prediction,
+            store,
+            metadata,
         )
         headers = _build_headers(
             self._provider_key,
@@ -605,6 +628,9 @@ class AsyncRekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
+        prediction: dict[str, Any] | None = None,
+        store: bool | None = None,
+        metadata: dict[str, str] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -623,6 +649,9 @@ class AsyncRekAIClient:
             response_format,
             stop,
             service_tier,
+            prediction,
+            store,
+            metadata,
         )
         headers = _build_headers(
             self._provider_key,

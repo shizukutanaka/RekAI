@@ -139,6 +139,10 @@ export class RekAIClient {
     if (opts.responseFormat != null) payload.response_format = opts.responseFormat;
     if (opts.stop != null) payload.stop = opts.stop;
     if (opts.serviceTier != null) payload.service_tier = opts.serviceTier;
+    // OpenAI extras, forwarded to OpenAI-compatible providers only.
+    if (opts.prediction != null) payload.prediction = opts.prediction;
+    if (opts.store != null) payload.store = opts.store;
+    if (opts.metadata != null) payload.metadata = opts.metadata;
     return payload;
   }
 

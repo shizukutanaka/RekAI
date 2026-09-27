@@ -45,6 +45,14 @@ export interface ChatOptions {
    * 'scale'). Forwarded to OpenAI-compatible providers only.
    */
   serviceTier?: string;
+  /** OpenAI's Predicted Outputs ({ type: 'content', content: '...' }) —
+   * lets the model speculatively reuse known content. OpenAI-compatible
+   * providers only. */
+  prediction?: Record<string, unknown>;
+  /** OpenAI's `store` — retain the completion upstream for evals. */
+  store?: boolean;
+  /** OpenAI's `metadata` — caller labels for upstream dashboard filtering. */
+  metadata?: Record<string, string>;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
 }
