@@ -273,3 +273,61 @@ def test_stream_error_arrives_as_error_event(client: TestClient) -> None:
     else:
         body = resp.json()
         assert body["type"] == "error"
+
+
+# --- count_tokens ------------------------------------------------------------
+
+
+def test_count_tokens_returns_input_tokens(client: TestClient) -> None:
+    resp = client.post("/v1/messages/count_tokens", json=_payload())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["input_tokens"] > 0
+    assert set(body) == {"input_tokens"}
+
+
+def test_count_tokens_without_max_tokens(client: TestClient) -> None:
+    # Anthropic's counter doesn't need max_tokens — omitting it must not 422.
+    body = _payload()
+    del body["max_tokens"]
+    resp = client.post("/v1/messages/count_tokens", json=body)
+    assert resp.status_code == 200
+    assert resp.json()["input_tokens"] > 0
+
+
+def test_count_tokens_scales_with_content(client: TestClient) -> None:
+    short = client.post("/v1/messages/count_tokens", json=_payload()).json()
+    long = client.post(
+        "/v1/messages/count_tokens",
+        json=_payload(messages=[{"role": "user", "content": "word " * 2000}]),
+    ).json()
+    assert long["input_tokens"] > short["input_tokens"]
+
+
+def test_count_tokens_counts_system_and_tools(client: TestClient) -> None:
+    bare = client.post("/v1/messages/count_tokens", json=_payload()).json()
+    rich = client.post(
+        "/v1/messages/count_tokens",
+        json=_payload(
+            system="You are a meticulous assistant.",
+            tools=[
+                {
+                    "name": "lookup",
+                    "description": "Look up a record by id",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"id": {"type": "string"}},
+                    },
+                }
+            ],
+        ),
+    ).json()
+    assert rich["input_tokens"] > bare["input_tokens"]
+
+
+def test_count_tokens_errors_in_anthropic_envelope(client: TestClient) -> None:
+    resp = client.post("/v1/messages/count_tokens", json={"model": "echo"})
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["type"] == "error"
+    assert body["error"]["type"] == "invalid_request_error"

@@ -7,6 +7,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
+  check (`client.messages.count_tokens`) now works against the compat surface.
+  Returns a local script-aware estimate (the same heuristic the pricing path
+  uses); it makes no upstream call and has no billing side effects.
 - **Reasoning-token accounting in `usage`.** Reasoning models (OpenAI o-series
   and gpt-5, Gemini thinking models) bill a separate slice of completion tokens
   for chain-of-thought; the provider-reported count now surfaces as
