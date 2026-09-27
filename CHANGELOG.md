@@ -16,7 +16,6 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   keep every field (`max_uses`, `allowed_domains`, ...) through to the
   Anthropic payload; a non-Anthropic upstream surfaces a readable provider
   error instead of a silent miswire.
-||||||| 0e4ac30
 - **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
   `cache: false` so you can compare a fresh answer against the cached one.
   It defaults to on; the meta line already marks cache hits.
