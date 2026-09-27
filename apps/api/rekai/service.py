@@ -19,7 +19,12 @@ from rekai.pricing import estimate_cost, estimate_tokens
 from rekai.providers import Provider, get_provider
 from rekai.providers.base import ProviderError, ProviderResult
 from rekai.retry import DeadlineExceeded, call_with_retry, remaining_budget
-from rekai.router import ensure_allowed, resolve_provider, select_provider
+from rekai.router import (
+    ensure_allowed,
+    expand_alias,
+    resolve_provider,
+    select_provider,
+)
 from rekai.schemas import (
     ChatMessage,
     ChatRequest,
@@ -627,6 +632,7 @@ async def handle_embeddings(
     settings: Settings,
     cache: CacheBackend,
 ) -> EmbeddingsResponse:
+    expand_alias(request, settings)
     provider_name = resolve_provider(request.provider, request.model, settings)
     ensure_allowed(provider_name, settings)
     provider = get_provider(provider_name)

@@ -1173,6 +1173,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if type != "chat":
                 for model in await provider.list_embedding_models(None):
                     data.append(_info(model, name, "embedding"))
+        if type != "embedding":
+            # Aliases are virtual chat models the operator owns; advertise them
+            # so clients can discover the stable names (provider="alias").
+            for alias in settings.model_alias_map:
+                data.append(ModelInfo(id=alias, provider="alias", type="chat"))
         return ModelsResponse(data=data)
 
     @app.post(

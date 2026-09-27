@@ -36,6 +36,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **Model aliases with weighted load balancing** (`REKAI_MODEL_ALIASES`, e.g.
+  `"fast=ollama:llama3.2@2,openai:gpt-4o-mini@1;premium=anthropic:claude-sonnet-4"`).
+  A virtual model name clients call as `model` resolves to a weighted-random
+  pool target per request — the load-balancing half a fixed fallback chain
+  can't express (it only reacts to failures) — while the rest of the pool
+  becomes the request's implicit fallback chain, so failover still works. The
+  rewrite happens before routing/cache keys/provider calls, so every layer
+  sees concrete names and different backends never share cache entries. An
+  explicit request `provider` narrows the pool; explicit request `fallbacks`
+  win over it (same precedence as the server fallback chain). Aliases are
+  advertised in `GET /v1/models` as `provider="alias"` chat models.
 - **Per-key rate-limit overrides** (`REKAI_CLIENT_RATE_LIMITS`, e.g.
   `"sk-premium:600,sk-trial:5"`): the global `REKAI_RATE_LIMIT_REQUESTS`
   applied the same ceiling to every tenant — there was no way to sell a

@@ -97,6 +97,17 @@ class Settings(BaseSettings):
     fallback_enabled: bool = False
     fallback_targets: str = ""
 
+    # Model aliases: virtual model names mapped to a weighted pool of real
+    # "provider:model" targets — "fast=ollama:llama3.2@2,openai:gpt-4o-mini@1;
+    # premium=anthropic:claude-sonnet-4". A request whose `model` names an alias
+    # gets a weighted-random target as its primary (load balancing) and the rest
+    # of the pool appended to its fallback chain (failover), reusing the normal
+    # retry/fallback machinery. An explicit request `provider` narrows the pool;
+    # explicit request `fallbacks` win over the pool (same precedence as the
+    # server fallback chain). Weights are integers, default 1; every target
+    # must name a model.
+    model_aliases: str = ""
+
     # Cache
     cache_enabled: bool = True
     cache_ttl_seconds: int = Field(default=3600, ge=0)
@@ -411,6 +422,31 @@ class Settings(BaseSettings):
             if provider:
                 targets.append((provider, model.strip() or None))
         return targets
+
+    @property
+    def model_alias_map(self) -> dict[str, list[tuple[str, str, int]]]:
+        """Parse ``model_aliases`` — ``alias -> [(provider, model, weight)]``."""
+        aliases: dict[str, list[tuple[str, str, int]]] = {}
+        for group in self.model_aliases.split(";"):
+            name, sep, raw_targets = group.partition("=")
+            name = name.strip()
+            if not sep or not name:
+                continue
+            pool: list[tuple[str, str, int]] = []
+            for raw in raw_targets.split(","):
+                target, _, weight = raw.partition("@")
+                provider, _, model = target.partition(":")
+                provider, model = provider.strip(), model.strip()
+                if not provider or not model:
+                    continue  # an alias target must name both — see field comment
+                try:
+                    w = int(weight) if weight.strip() else 1
+                except ValueError:
+                    w = 1
+                pool.append((provider, model, max(w, 1)))
+            if pool:
+                aliases[name] = pool
+        return aliases
 
 
 @lru_cache

@@ -63,6 +63,20 @@ ChatResponse
    `llama*`, `mistral*`, `qwen*`, `gemma*`, `phi*` → Ollama; `echo` → Echo).
 3. Otherwise the configured `REKAI_DEFAULT_PROVIDER` is used.
 
+Before any of that, **model aliases** expand: `REKAI_MODEL_ALIASES` maps a
+virtual name to a weighted pool of `provider:model` targets
+(`fast=ollama:llama3.2@2,openai:gpt-4o-mini@1`). A request naming an alias is
+rewritten in place (`router.expand_alias`) — a weighted-random target becomes
+the primary (load balancing across backends, the half `REKAI_FALLBACK_TARGETS`
+does not cover since it only reacts to failure) and, when the request did not
+bring its own `fallbacks`, the rest of the pool becomes the implicit chain
+(failover). Because the rewrite happens before routing, cache keying, and the
+provider call, everything downstream sees concrete names — two backends can
+never collide in the cache under the alias string, and `X-RekAI-Provider`
+reports who actually answered. A request `provider` narrows the pool to that
+provider (empty pool → 400); the weights are integers, default 1. Aliases are
+advertised in `GET /v1/models` with `provider="alias"`.
+
 These prefixes, the price table, and each provider's advertised `/v1/models`
 list all derive from a single registry — `rekai/models.py` — so they can't drift
 apart (a `test_models.py` invariant asserts every advertised model routes back to
