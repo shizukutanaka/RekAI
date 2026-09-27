@@ -40,7 +40,9 @@ from rekai.schemas import (
     AdminKeyList,
     AdminKeyRequest,
     AdminKeyResponse,
+    AnthropicCountTokensRequest,
     AnthropicMessagesRequest,
+    AnthropicTokenCount,
     ChatCompletionsRequest,
     ChatMessage,
     ChatRequest,
@@ -214,7 +216,7 @@ class ConcurrencyLimitMiddleware:
 # the three first-party clients read `detail || error` off their error bodies,
 # so their shape must not change.
 _OPENAI_COMPAT_PATHS = frozenset({"/v1/chat/completions"})
-_ANTHROPIC_COMPAT_PATHS = frozenset({"/v1/messages"})
+_ANTHROPIC_COMPAT_PATHS = frozenset({"/v1/messages", "/v1/messages/count_tokens"})
 
 
 def _validation_message(detail: list) -> tuple[str, str | None]:
@@ -747,7 +749,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             token = auth.parse_bearer(request.headers.get("authorization"))
             # Anthropic's SDK authenticates with `x-api-key`, not Authorization:
             # Bearer — on /v1/messages it is the gateway credential.
-            if token is None and request.url.path == "/v1/messages":
+            if token is None and request.url.path in _ANTHROPIC_COMPAT_PATHS:
                 token = request.headers.get("x-api-key")
             if token is None or not auth.key_allowed(token, await _allowed_keys()):
                 metrics.record_error("unauthorized")
@@ -1674,6 +1676,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             media_type="text/event-stream",
             headers=stream_headers,
         )
+
+    @app.post(
+        "/v1/messages/count_tokens",
+        response_model=AnthropicTokenCount,
+        tags=["chat"],
+        responses={
+            400: {"model": ErrorResponse},
+            401: {"model": ErrorResponse},
+            413: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            429: {"model": ErrorResponse},
+        },
+    )
+    async def anthropic_count_tokens(request: AnthropicCountTokensRequest):
+        """Anthropic-compatible token counter (``/v1/messages/count_tokens``).
+
+        Anthropic's own endpoint returns an exact tokenizer count; a
+        self-hosted gateway can't reproduce that offline, so this returns the
+        same script-aware estimate the pricing path uses — good enough for
+        pre-flight budget checks, and honest about CJK text. No upstream call,
+        no billing side effects.
+        """
+        return AnthropicTokenCount(input_tokens=anthropic_compat.count_tokens(request))
 
     return app
 
