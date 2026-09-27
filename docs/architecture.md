@@ -417,7 +417,9 @@ call the provider themselves when nothing arrives or the claim vanishes early
 (winner failed). It can only reduce upstream calls, never add latency beyond
 the bounded poll or block a request on another's failure — fail-open, same as
 every other degraded-cache path. `rekai_cache_fills_coalesced_total` (a subset
-of `rekai_cache_hits_total`) counts the duplicates absorbed.
+of `rekai_cache_hits_total`) counts the duplicates absorbed. `/v1/embeddings`
+gets the same treatment — bulk-indexing jobs issue identical embedding calls
+in bursts, which is exactly the stampede shape.
 
 ### Semantic cache
 

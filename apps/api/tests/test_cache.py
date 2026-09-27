@@ -253,3 +253,48 @@ async def test_coalesced_waiter_proceeds_when_winner_fails() -> None:
     ok = [r for r in results if not isinstance(r, Exception)]
     assert calls == 2
     assert len(errors) == 1 and len(ok) == 1 and ok[0].cached is False
+
+
+async def test_embeddings_concurrent_misses_coalesce_to_one_provider_call() -> None:
+    # The embeddings surface has the same stampede shape as chat — bulk
+    # indexing jobs issue identical embedding calls in bursts.
+    import asyncio
+
+    from rekai.config import Settings
+    from rekai.metrics import metrics
+    from rekai.providers import register_provider
+    from rekai.providers.base import EmbeddingResult, Provider
+    from rekai.schemas import EmbeddingsRequest, Usage
+    from rekai.service import handle_embeddings
+
+    calls = 0
+
+    class SlowEmbedProvider(Provider):
+        requires_key = False
+        name = "slowembed"
+
+        async def chat(self, request, api_key):
+            raise NotImplementedError
+
+        async def embed(self, inputs, model, api_key) -> EmbeddingResult:
+            nonlocal calls
+            calls += 1
+            await asyncio.sleep(0.4)
+            return EmbeddingResult(
+                embeddings=[[0.1] * 4 for _ in inputs],
+                model="slowembed",
+                usage=Usage(total_tokens=len(inputs)),
+            )
+
+    register_provider(SlowEmbedProvider())
+    cache = MemoryCache()
+    settings = Settings(environment="test", default_provider="slowembed", cache_enabled=True)
+    before = metrics.cache_fills_coalesced_total
+    req = EmbeddingsRequest(model="slowembed", input=["embed-me"], provider="slowembed")
+    r1, r2 = await asyncio.gather(
+        handle_embeddings(req, None, settings, cache),
+        handle_embeddings(req, None, settings, cache),
+    )
+    assert calls == 1
+    assert (r1.cached, r2.cached).count(True) == 1
+    assert metrics.cache_fills_coalesced_total == before + 1

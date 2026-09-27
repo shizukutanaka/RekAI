@@ -708,11 +708,24 @@ async def handle_embeddings(
 
     use_cache = settings.cache_enabled and request.cache
     key = embedding_cache_key(provider_name, request.model, inputs)
+    inflight_key = ""
+    holds_inflight = False
+    deadline = _request_deadline(settings)
     if use_cache:
         cached_raw = await cache.get(key)
         if cached_raw is not None:
             metrics.record_cache(hit=True)
             return EmbeddingsResponse(**{**json.loads(cached_raw), "cached": True})
+        # Same singleflight as handle_chat — embedding calls are at least as
+        # expensive, and bulk-indexing jobs fire them in identical bursts.
+        inflight_key = key + ":inflight"
+        holds_inflight = await cache.add(inflight_key, "1", _inflight_ttl(deadline))
+        if not holds_inflight:
+            served = await _await_cache_fill(cache, key, inflight_key, deadline)
+            if served is not None:
+                metrics.record_cache(hit=True)
+                return EmbeddingsResponse(**{**json.loads(served), "cached": True})
+            holds_inflight = await cache.add(inflight_key, "1", _inflight_ttl(deadline))
         metrics.record_cache(hit=False)
 
     started = time.perf_counter()
@@ -723,8 +736,13 @@ async def handle_embeddings(
             base_delay=settings.retry_base_delay_seconds,
             max_delay=settings.retry_max_delay_seconds,
             on_retry=metrics.record_retry,
-            deadline=_request_deadline(settings),
+            deadline=deadline,
         )
+    except BaseException:
+        if holds_inflight:
+            await cache.delete(inflight_key)
+            holds_inflight = False
+        raise
     finally:
         metrics.observe_provider_duration(provider_name, "embed", time.perf_counter() - started)
     metrics.record_tokens(result.usage.total_tokens, provider_name)
@@ -742,5 +760,7 @@ async def handle_embeddings(
     )
     if use_cache:
         await cache.set(key, response.model_dump_json(), settings.cache_ttl_seconds)
+    if holds_inflight:
+        await cache.delete(inflight_key)
     logger.info("embeddings ok provider=%s model=%s n=%s", provider_name, result.model, len(inputs))
     return response
