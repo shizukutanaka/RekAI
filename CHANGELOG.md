@@ -6,6 +6,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Legacy `functions`/`function_call` on `POST /v1/chat/completions` are
+  normalized onto `tools`/`tool_choice`.** OpenAI's pre-tools calling fields
+  (deprecated since the 0613 models but still emitted by older SDKs and
+  codebases) were silently ignored — the caller's declared function never
+  reached the provider. `functions=[{name,description,parameters}]` becomes
+  `tools=[{"type":"function","function":…}]`; `function_call={"name":"f"}`
+  becomes the equivalent `tool_choice` object, and the `"auto"`/`"none"`
+  strings pass through. Modern `tools`/`tool_choice` win when both spellings
+  arrive.
+
 ### Fixed
 - **`_verify_semantic_hit` no longer raises `TypeError` on every verified
   lookup.** The semantic-verify feature and the per-provider token metric
@@ -42,6 +53,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   envelope (`type: invalid_request_error`, `code: model_not_found`), matching
   api.openai.com. `openai_compat.openai_error` gained optional `code` /
   `error_type` overrides for this.
+- **`web_search_options` and `stream_options.include_obfuscation` forwarding.**
+  Two more OpenAI request fields the compat layer accepted and dropped now
+  reach OpenAI-compatible providers: `web_search_options` (hosted web-search
+  config — keyed into the cache since it changes what the answer is grounded
+  on) and `include_obfuscation` (merged into the upstream `stream_options`
+  RekAI already sends; keyed out of the cache since it only scrambles the
+  streamed encoding). Both are on `ChatRequest` too, and both SDKs expose
+  `web_search_options`/`webSearchOptions`.
 - **Anthropic-compatible `POST /v1/messages`.** Point an Anthropic SDK at
   RekAI — `Anthropic(base_url="http://localhost:8000")`, the SDK appends
   `/v1/messages` itself — and it works unmodified: Anthropic's request shape
