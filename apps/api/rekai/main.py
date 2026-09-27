@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import ValidationError
 
-from rekai import __version__, auth, guardrails, idempotency, openai_compat, tracing
+from rekai import __version__, alerts, auth, guardrails, idempotency, openai_compat, tracing
 from rekai.cache import CacheBackend, build_cache
 from rekai.config import Settings, get_settings
 from rekai.cooldown import cooldowns
@@ -713,6 +713,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 spent = metrics.client_cost_usd(rl_client)
             if spent >= budget:
                 metrics.record_error("budget_exceeded")
+                alerts.notify(
+                    settings,
+                    "budget_exceeded",
+                    rl_client,
+                    {"budget_usd": budget, "spent_usd": round(spent, 4)},
+                )
                 headers = {"X-Budget-Remaining": "0"}
                 if window is not None:
                     headers["X-Budget-Reset"] = str((int(time.time() / window) + 1) * window)

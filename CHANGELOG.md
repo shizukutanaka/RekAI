@@ -36,6 +36,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **Ops alert webhook** (`REKAI_ALERT_WEBHOOK_URL`, opt-in). A self-hosted
+  gateway has no managed pager — an operator not watching `/metrics` never
+  learns that a provider parked itself (429 / repeated 5xx) or a client
+  tripped its budget. RekAI POSTs `{"event","subject","detail","timestamp"}`
+  to any JSON endpoint (Slack/Discord incoming webhook, ntfy, a local
+  listener). Fire-and-forget with a short timeout, failures logged and
+  dropped, and a 5-minute dedupe per (event, subject) so a client hammering
+  an over-budget key produces one alert per window, not one per request.
 - **Opt-in verify band for the semantic cache** (`REKAI_SEMANTIC_CACHE_VERIFY_*`,
   roadmap O-2). A single cosine threshold forced every candidate to be served
   or dropped on embedding distance alone; similarity is not proof two prompts

@@ -185,6 +185,14 @@ class Settings(BaseSettings):
     provider_cooldown_enabled: bool = True
     provider_cooldown_seconds: float = Field(default=30.0, ge=0.0)
 
+    # Ops alerts: POST {"event","subject","detail","timestamp"} here when a
+    # provider parks itself or a client trips its budget — a self-hosted
+    # gateway has no managed pager, and an operator not watching /metrics
+    # otherwise never learns. Unset = off; delivery is fire-and-forget,
+    # failures logged-and-dropped, deduped per subject so a retry storm can't
+    # spam the hook.
+    alert_webhook_url: str | None = None
+
     # A 429 parks a provider immediately (see above); a 5xx needs this many
     # consecutive failures (across separate requests, resets on any success)
     # before it's parked the same way — a lightweight circuit breaker so a

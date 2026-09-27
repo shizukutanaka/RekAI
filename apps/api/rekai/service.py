@@ -8,7 +8,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 
-from rekai import guardrails
+from rekai import alerts, guardrails
 from rekai.cache import CacheBackend, cache_key, embedding_cache_key, semantic_bucket
 from rekai.circuit_breaker import consecutive_failures
 from rekai.config import Settings
@@ -411,14 +411,19 @@ async def handle_chat(
                 # An explicit "back off" signal — park this provider immediately
                 # (locally and in the shared backend, when configured) so later
                 # requests, including on other workers/nodes, route around it.
-                await cooldowns.mark_shared(
-                    cache,
-                    attempt.provider_name,
+                parked_seconds = (
                     exc.retry_after
                     if exc.retry_after is not None
-                    else settings.provider_cooldown_seconds,
+                    else settings.provider_cooldown_seconds
                 )
+                await cooldowns.mark_shared(cache, attempt.provider_name, parked_seconds)
                 metrics.record_cooldown()
+                alerts.notify(
+                    settings,
+                    "provider_parked",
+                    attempt.provider_name,
+                    {"seconds": parked_seconds, "status": 429},
+                )
             elif settings.provider_cooldown_enabled and exc.status_code >= 500:
                 # No explicit signal here, so require a few consecutive failures
                 # (across separate requests) before parking — a lightweight
@@ -429,6 +434,15 @@ async def handle_chat(
                         cache, attempt.provider_name, settings.provider_cooldown_seconds
                     )
                     metrics.record_cooldown()
+                    alerts.notify(
+                        settings,
+                        "provider_parked",
+                        attempt.provider_name,
+                        {
+                            "seconds": settings.provider_cooldown_seconds,
+                            "consecutive_failures": failures,
+                        },
+                    )
                     # Start the next streak fresh — without this, a single
                     # failure once cooldown expires trips the breaker again
                     # immediately (see ConsecutiveFailureTracker.reset).
@@ -564,14 +578,18 @@ async def handle_chat_stream(
         metrics.record_provider_error(provider_name, exc.status_code)
         metrics.observe_provider_duration(provider_name, "stream", time.perf_counter() - started)
         if settings.provider_cooldown_enabled and exc.status_code == 429:
-            await cooldowns.mark_shared(
-                cache,
-                provider_name,
+            parked_seconds = (
                 exc.retry_after
                 if exc.retry_after is not None
-                else settings.provider_cooldown_seconds,
+                else settings.provider_cooldown_seconds
             )
-            metrics.record_cooldown()
+            await cooldowns.mark_shared(cache, provider_name, parked_seconds)
+            alerts.notify(
+                settings,
+                "provider_parked",
+                provider_name,
+                {"seconds": parked_seconds, "status": 429},
+            )
         elif settings.provider_cooldown_enabled and exc.status_code >= 500:
             failures = consecutive_failures.record_failure(provider_name)
             if failures >= settings.circuit_breaker_threshold:
@@ -579,6 +597,15 @@ async def handle_chat_stream(
                     cache, provider_name, settings.provider_cooldown_seconds
                 )
                 metrics.record_cooldown()
+                alerts.notify(
+                    settings,
+                    "provider_parked",
+                    provider_name,
+                    {
+                        "seconds": settings.provider_cooldown_seconds,
+                        "consecutive_failures": failures,
+                    },
+                )
                 # Start the next streak fresh (see ConsecutiveFailureTracker.reset).
                 consecutive_failures.reset(provider_name)
         yield ChatStreamEvent(error=exc)
