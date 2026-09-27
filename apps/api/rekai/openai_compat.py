@@ -112,6 +112,10 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         max_tokens=req.max_tokens or req.max_completion_tokens,
         stop=stop,
         service_tier=req.service_tier,
+        web_search_options=req.web_search_options,
+        include_obfuscation=(
+            req.stream_options.include_obfuscation if req.stream_options else None
+        ),
         cache=True,
         tools=tools,
         tool_choice=tool_choice,
