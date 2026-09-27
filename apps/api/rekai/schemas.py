@@ -46,6 +46,14 @@ class ChatRequest(BaseModel):
         "every provider under its own name; a provider's own limit (OpenAI "
         "allows 4) surfaces as that provider's error.",
     )
+    service_tier: str | None = Field(
+        default=None,
+        description="OpenAI's processing tier ('auto' | 'default' | 'flex' | "
+        "'priority' | 'scale'): flex trades latency for a large discount, "
+        "priority pays for lower latency. Not enum-validated so newer tiers "
+        "stay forward-compatible; an unsupported tier surfaces as the "
+        "provider's own error. Forwarded to OpenAI-compatible providers only.",
+    )
     cache: bool = Field(default=True, description="Whether this request may be served from cache.")
     fallbacks: list[FallbackTarget] | None = Field(
         default=None,
@@ -145,6 +153,7 @@ class ChatCompletionsRequest(BaseModel):
     max_tokens: int | None = Field(default=None, ge=1)
     max_completion_tokens: int | None = Field(default=None, ge=1)
     stop: str | list[str] | None = None
+    service_tier: str | None = None
     stream: bool = False
     stream_options: StreamOptions | None = None
     tools: list[dict[str, Any]] | None = None
