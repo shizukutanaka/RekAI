@@ -47,6 +47,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   four call surfaces (`/v1/chat`, `/v1/chat/stream`, `/v1/chat/completions`
   both modes, `/v1/embeddings`). `GET /v1/models` is also filtered to what
   the caller's key may use. Denied requests return 403 `model_not_allowed`.
+- **Anthropic-compatible `POST /v1/messages`.** Point an Anthropic SDK at
+  RekAI — `Anthropic(base_url="http://localhost:8000")`, the SDK appends
+  `/v1/messages` itself — and it works unmodified: Anthropic's request shape
+  (`system`, `max_tokens` required, content-block arrays, `tool_use`/
+  `tool_result` blocks, `tool_choice`), its response shape (`type: "message"`,
+  `stop_reason`, `usage.{input,output}_tokens`), its typed SSE stream
+  (`message_start` → `content_block_*` → `message_delta` → `message_stop`),
+  and its `{type: "error", error: {type, message}}` error envelope — including
+  for errors raised before the route runs (auth 401, budget 402, body cap 413,
+  rate limit 429, validation 422). Auth accepts the SDK's `x-api-key` header
+  as the gateway credential alongside `Authorization: Bearer`. A thin
+  translation layer (`rekai/anthropic_compat.py`, pure functions) over the
+  same pipeline as `/v1/chat` — routing, cache, retries, fallback, budgets,
+  metrics all apply — so `"model": "claude-*"` still routes to Anthropic by
+  prefix and a RekAI `provider` extension field overrides it.
 - **Per-key rate-limit overrides** (`REKAI_CLIENT_RATE_LIMITS`, e.g.
   `"sk-premium:600,sk-trial:5"`): the global `REKAI_RATE_LIMIT_REQUESTS`
   applied the same ceiling to every tenant — there was no way to sell a
