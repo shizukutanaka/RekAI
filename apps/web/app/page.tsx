@@ -22,6 +22,23 @@ import {
   streamChat,
 } from "@/lib/api";
 
+function Citations({ annotations }: { annotations?: Record<string, unknown>[] }) {
+  const cites = (annotations ?? []).filter(
+    (a): a is { url: string; title?: string } =>
+      a?.type === "url_citation" && typeof a?.url === "string",
+  );
+  if (!cites.length) return null;
+  return (
+    <span className="citations">
+      {cites.map((c, i) => (
+        <a key={i} href={c.url} target="_blank" rel="noreferrer">
+          [{i + 1}] {c.title || c.url}
+        </a>
+      ))}
+    </span>
+  );
+}
+
 interface DisplayMessage extends ChatMessage {
   id?: string;
   provider?: string;
@@ -33,6 +50,7 @@ interface DisplayMessage extends ChatMessage {
   fallbackUsed?: boolean;
   cacheSimilarity?: number | null;
   redacted?: string[] | null;
+  annotations?: Record<string, unknown>[];
 }
 
 // Monotonic id for React keys. Index keys shift when regenerate()/clear drop or
@@ -221,6 +239,7 @@ export default function ChatPage() {
             cost: finalSummary?.cost_usd ?? undefined,
             finishReason: finalSummary?.finish_reason,
             redacted: finalSummary?.redacted,
+            annotations: finalSummary?.annotations,
           };
           return next;
         });
@@ -256,6 +275,7 @@ export default function ChatPage() {
             fallbackUsed: res.fallback_used,
             cacheSimilarity: res.cache_similarity,
             redacted: res.redacted,
+            annotations: res.annotations ?? undefined,
           },
         ]);
       }
@@ -397,6 +417,7 @@ export default function ChatPage() {
           <div key={m.id ?? i} className={`msg ${m.role}`}>
             {m.content}
             {m.streaming && <span className="cursor">▌</span>}
+            <Citations annotations={m.annotations} />
             {m.role === "assistant" && !m.streaming && (
               <span className="meta">
                 {m.provider}

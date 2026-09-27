@@ -16,7 +16,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   surface reproduces `message.annotations`/`delta.annotations`, and the
   Anthropic-compat surface passes them as a response extra (Anthropic's own
   citations schema needs `cited_text` upstreams don't send). Both SDKs expose
-  them (`ChatResult.annotations`, `on_annotations`/`onAnnotations` hooks).
+  them (`ChatResult.annotations`, `on_annotations`/`onAnnotations` hooks). The web
+  chat renders `url_citation` annotations as a numbered source list under the
+  reply.
 - `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
   check (`client.messages.count_tokens`) now works against the compat surface.
   Returns a local script-aware estimate (the same heuristic the pricing path
