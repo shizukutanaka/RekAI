@@ -219,7 +219,7 @@ async def _verify_semantic_hit(
         provider_name, "semantic_verify", time.perf_counter() - started
     )
     usage = result.usage or Usage()
-    metrics.record_tokens(usage.total_tokens)
+    metrics.record_tokens(usage.total_tokens, provider_name)
     metrics.record_cost(
         estimate_cost(provider_name, result.model, usage, settings.pricing_override_dict)
     )

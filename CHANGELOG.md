@@ -6,6 +6,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **`_verify_semantic_hit` no longer raises `TypeError` on every verified
+  lookup.** The semantic-verify feature and the per-provider token metric
+  landed through separate PRs whose CI each passed — but the verify helper
+  still called the old one-argument `record_tokens()`, which only exists in a
+  merge that combines both. The verify call now passes its provider name like
+  every other call site.
+
 ### Security
 - **The Render blueprint now runs the API in production mode.** `deploy/
   render.yaml` never set `REKAI_ENVIRONMENT`, so the open-proxy guard only
