@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   cacheHitDetail,
@@ -284,5 +284,62 @@ describe("cooldownRemaining", () => {
   it("switches to minutes at a minute", () => {
     expect(cooldownRemaining(60)).toBe("≈1m");
     expect(cooldownRemaining(61)).toBe("≈2m");
+  });
+});
+
+// --- request-body composition (fetch is stubbed) ----------------------------
+
+function stubFetch(capture: (body: Record<string, unknown>) => void) {
+  return async (_url: string | URL | Request, init?: RequestInit) => {
+    capture(JSON.parse((init?.body as string) ?? "{}"));
+    return new Response(
+      JSON.stringify({
+        provider: "echo",
+        model: "echo",
+        content: "ok",
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        finish_reason: "stop",
+        cached: false,
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  };
+}
+
+describe("cache toggle", () => {
+  const msgs = [{ role: "user" as const, content: "hi" }];
+
+  it("sends cache:false on the unary path only when disabled", async () => {
+    const { sendChat } = await import("./api");
+    let body: Record<string, unknown> = {};
+    vi.stubGlobal("fetch", stubFetch((b) => (body = b)));
+    await sendChat({ model: "echo", messages: msgs, cache: false });
+    expect(body.cache).toBe(false);
+    await sendChat({ model: "echo", messages: msgs });
+    expect("cache" in body).toBe(false); // default: server-side cache allowed
+    vi.unstubAllGlobals();
+  });
+
+  it("sends cache:false on the streamed path too", async () => {
+    const { streamChat } = await import("./api");
+    let body: Record<string, unknown> = {};
+    vi.stubGlobal(
+      "fetch",
+      async (_url: string | URL | Request, init?: RequestInit) => {
+        body = JSON.parse((init?.body as string) ?? "{}");
+        return new Response('data: {"delta": "ok"}\n\ndata: [DONE]\n\n', {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      },
+    );
+    const deltas: string[] = [];
+    await streamChat(
+      { model: "echo", messages: msgs, cache: false },
+      (t) => deltas.push(t),
+    );
+    expect(body.cache).toBe(false);
+    expect(deltas).toEqual(["ok"]);
+    vi.unstubAllGlobals();
   });
 });
