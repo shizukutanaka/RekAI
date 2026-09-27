@@ -294,3 +294,68 @@ def test_guardrail_block_returns_openai_error() -> None:
     assert resp.status_code == 403
     assert "error" in resp.json()
     assert resp.json()["error"]["message"]
+
+
+class _CaptureClient:
+    captured: dict = {}
+
+    def __init__(self, *a: object, **k: object) -> None:
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a: object):
+        return False
+
+    async def aclose(self) -> None:
+        return None
+
+    async def post(self, url, json=None, headers=None, **kw):
+        _CaptureClient.captured = json or {}
+        return _CaptureResp()
+
+
+class _CaptureResp:
+    status_code = 200
+    headers: dict = {}
+    text = ""
+
+    def json(self) -> dict:
+        return {
+            "model": "m",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+
+async def test_parallel_tool_calls_forwarded_to_provider(monkeypatch) -> None:
+    """parallel_tool_calls was tolerated-and-dropped like the tuning params —
+    a caller could not stop a model from emitting several tool calls at once.
+    It now reaches OpenAI-compatible providers and keys the cache."""
+    import httpx
+
+    from rekai.providers.openai import OpenAIProvider
+    from rekai.schemas import ChatMessage, ChatRequest
+
+    monkeypatch.setattr(httpx, "AsyncClient", _CaptureClient)
+    req = ChatRequest(
+        model="m",
+        messages=[ChatMessage(role="user", content="hi")],
+        parallel_tool_calls=False,
+    )
+    await OpenAIProvider().chat(req, api_key="sk-x")
+    assert _CaptureClient.captured["parallel_tool_calls"] is False
+
+
+def test_parallel_tool_calls_keys_the_cache() -> None:
+    from rekai.cache import cache_key
+    from rekai.schemas import ChatMessage, ChatRequest
+
+    plain = ChatRequest(model="m", messages=[ChatMessage(role="user", content="hi")])
+    parallel_off = ChatRequest(
+        model="m",
+        messages=[ChatMessage(role="user", content="hi")],
+        parallel_tool_calls=False,
+    )
+    assert cache_key(plain, "openai") != cache_key(parallel_off, "openai")

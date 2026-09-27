@@ -33,6 +33,9 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         "messages": [m.model_dump() for m in request.messages],
         "tools": request.tools,
         "tool_choice": request.tool_choice,
+        # Changes whether the model may emit several tool calls per turn —
+        # the answers differ, so the keys must.
+        "parallel_tool_calls": request.parallel_tool_calls,
         # A JSON-mode request and a plain one must not share a cache entry.
         "response_format": request.response_format,
         # Prompt-cache breakpoints change what the provider is asked to do (and
@@ -69,6 +72,7 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
         "stop": request.stop,
         "tools": request.tools,
         "tool_choice": request.tool_choice,
+        "parallel_tool_calls": request.parallel_tool_calls,
         "response_format": request.response_format,
         "cache_control": request.cache_control,
     }

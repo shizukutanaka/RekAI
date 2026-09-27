@@ -101,6 +101,7 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         cache=True,
         tools=req.tools,
         tool_choice=req.tool_choice,
+        parallel_tool_calls=req.parallel_tool_calls,
         response_format=req.response_format,
     )
 

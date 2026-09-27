@@ -60,6 +60,12 @@ class ChatRequest(BaseModel):
         default=None,
         description="Tool choice ('auto' | 'none' | 'required' | {...}), passed through.",
     )
+    parallel_tool_calls: bool | None = Field(
+        default=None,
+        description="OpenAI's parallel_tool_calls — whether the model may emit "
+        "several tool calls in one turn. Forwarded to providers that support it "
+        "(OpenAI/OpenAI-compatible); ignored by others.",
+    )
     response_format: dict[str, Any] | None = Field(
         default=None,
         description="OpenAI-style response_format, e.g. {'type': 'json_object'} or "
@@ -149,6 +155,7 @@ class ChatCompletionsRequest(BaseModel):
     stream_options: StreamOptions | None = None
     tools: list[dict[str, Any]] | None = None
     tool_choice: Any | None = None
+    parallel_tool_calls: bool | None = None
     response_format: dict[str, Any] | None = None
     user: str | None = None  # accepted, ignored
     n: int | None = None  # 400 if n > 1 (RekAI returns a single choice)

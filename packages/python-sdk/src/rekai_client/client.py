@@ -182,6 +182,7 @@ def _build_payload(
     fallbacks: list[dict[str, Any]] | None,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: Any | None = None,
+    parallel_tool_calls: bool | None = None,
     response_format: dict[str, Any] | None = None,
     stop: list[str] | str | None = None,
 ) -> dict[str, Any]:
@@ -201,6 +202,8 @@ def _build_payload(
         payload["tools"] = tools
     if tool_choice is not None:
         payload["tool_choice"] = tool_choice
+    if parallel_tool_calls is not None:
+        payload["parallel_tool_calls"] = parallel_tool_calls
     if response_format is not None:
         payload["response_format"] = response_format
     if stop is not None:
@@ -293,6 +296,7 @@ class RekAIClient:
         fallbacks: list[dict[str, Any]] | None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any | None = None,
+        parallel_tool_calls: bool | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
     ) -> dict[str, Any]:
@@ -306,6 +310,7 @@ class RekAIClient:
             fallbacks,
             tools,
             tool_choice,
+            parallel_tool_calls,
             response_format,
             stop,
         )
@@ -361,6 +366,7 @@ class RekAIClient:
         fallbacks: list[dict[str, Any]] | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any | None = None,
+        parallel_tool_calls: bool | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         provider_key: str | None = None,
@@ -371,6 +377,10 @@ class RekAIClient:
 
         ``stop`` is one or more sequences that end generation, as OpenAI's
         ``stop`` (a bare string is fine; the server normalizes it to a list).
+
+        ``parallel_tool_calls`` mirrors OpenAI's flag — whether the model may
+        emit several tool calls in one turn — forwarded to providers that
+        support it.
 
         ``idempotency_key`` is sent as the ``Idempotency-Key`` header so the
         server replays the first response on a retry instead of re-processing.
@@ -387,6 +397,7 @@ class RekAIClient:
             fallbacks,
             tools,
             tool_choice,
+            parallel_tool_calls,
             response_format,
             stop,
         )
@@ -593,6 +604,7 @@ class AsyncRekAIClient:
         fallbacks: list[dict[str, Any]] | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any | None = None,
+        parallel_tool_calls: bool | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         provider_key: str | None = None,
@@ -610,6 +622,7 @@ class AsyncRekAIClient:
             fallbacks,
             tools,
             tool_choice,
+            parallel_tool_calls,
             response_format,
             stop,
         )

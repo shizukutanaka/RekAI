@@ -36,6 +36,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **`parallel_tool_calls` is forwarded, not just tolerated.** The flag was
+  accepted on both request schemas (the compat surface via `extra="allow"`)
+  and silently dropped — a caller could not stop a model from emitting
+  several tool calls in one turn. Now typed, forwarded to OpenAI-compatible
+  providers, part of the cache key and semantic bucket, and exposed on both
+  SDKs (`parallelToolCalls` in JS).
 - **Opt-in verify band for the semantic cache** (`REKAI_SEMANTIC_CACHE_VERIFY_*`,
   roadmap O-2). A single cosine threshold forced every candidate to be served
   or dropped on embedding distance alone; similarity is not proof two prompts
