@@ -19,6 +19,7 @@ from rekai import (
     __version__,
     anthropic_compat,
     auth,
+    gemini_compat,
     guardrails,
     idempotency,
     openai_compat,
@@ -48,6 +49,7 @@ from rekai.schemas import (
     EmbeddingsRequest,
     EmbeddingsResponse,
     ErrorResponse,
+    GeminiGenerateContentRequest,
     HealthResponse,
     ModelInfo,
     ModelPricing,
@@ -94,7 +96,7 @@ class MaxBodySizeMiddleware:
         if (
             scope["type"] != "http"
             or self.max_bytes <= 0
-            or not scope["path"].startswith("/v1/")
+            or not scope["path"].startswith(_API_WRITE_PREFIXES)
             or scope["method"] == "OPTIONS"
         ):
             await self.app(scope, receive, send)
@@ -179,7 +181,7 @@ class ConcurrencyLimitMiddleware:
         if (
             scope["type"] != "http"
             or self.max_concurrent <= 0
-            or not scope["path"].startswith("/v1/")
+            or not scope["path"].startswith(_API_WRITE_PREFIXES)
             or scope["method"] == "OPTIONS"
         ):
             await self.app(scope, receive, send)
@@ -208,13 +210,21 @@ class ConcurrencyLimitMiddleware:
             self._in_flight -= 1
 
 
+# Path prefixes that count as API surface for the middleware gate (body cap,
+# concurrency cap, auth, rate limit): RekAI's own /v1/* plus the Google SDK's
+# /v1beta/* compat surface.
+_API_WRITE_PREFIXES = ("/v1/", "/v1beta/")
+
+
 # Paths a provider SDK talks to that RekAI promises to serve *in that SDK's own
 # error envelope*. /v1/chat/completions answers as OpenAI; /v1/messages answers
-# as Anthropic. /v1/chat, /v1/embeddings and /v1/usage are RekAI's own API, and
-# the three first-party clients read `detail || error` off their error bodies,
-# so their shape must not change.
+# as Anthropic; Google's SDK addresses /v1beta/models/{model}:<action> — a
+# prefix, not a set. /v1/chat, /v1/embeddings and /v1/usage are RekAI's own
+# API, and the three first-party clients read `detail || error` off their
+# error bodies, so their shape must not change.
 _OPENAI_COMPAT_PATHS = frozenset({"/v1/chat/completions"})
 _ANTHROPIC_COMPAT_PATHS = frozenset({"/v1/messages"})
+_GEMINI_COMPAT_PREFIX = "/v1beta/models/"
 
 
 def _validation_message(detail: list) -> tuple[str, str | None]:
@@ -306,6 +316,32 @@ def _anthropic_error_body(raw: bytes, status_code: int) -> bytes:
     return json.dumps(anthropic_compat.anthropic_error(status_code, message)).encode()
 
 
+def _gemini_error_body(raw: bytes, status_code: int) -> bytes:
+    """The ``/v1beta/*`` counterpart of :func:`_openai_error_body` — errors on
+    the generateContent surface leave as Google's ``{error: {code, message,
+    status}}`` so the genai SDK can read them. Same pass-through rules: only
+    RekAI-shaped JSON bodies are rewritten."""
+    try:
+        payload = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        return raw
+    if not isinstance(payload, dict):
+        return raw
+    error = payload.get("error")
+    if isinstance(error, dict) and "status" in error and "code" in error:
+        return raw  # already the Google envelope
+    detail = payload.get("detail")
+    if isinstance(detail, list):
+        message, _param = _validation_message(detail)
+    elif isinstance(detail, str):
+        message = detail
+    elif isinstance(error, str):
+        message = error
+    else:
+        return raw
+    return json.dumps(gemini_compat.gemini_error(status_code, message)).encode()
+
+
 _COMPAT_ERROR_TRANSLATORS = {
     **{p: _openai_error_body for p in _OPENAI_COMPAT_PATHS},
     **{p: _anthropic_error_body for p in _ANTHROPIC_COMPAT_PATHS},
@@ -334,8 +370,10 @@ class OpenAICompatErrorMiddleware:
     bodies of error responses are buffered; a 200 (including a streamed one) is
     forwarded chunk by chunk, untouched.
 
-    ``/v1/messages`` rides the same machinery with Anthropic's envelope — the
-    per-path translator is looked up in ``_COMPAT_ERROR_TRANSLATORS``.
+    ``/v1/messages`` and ``/v1beta/models/*`` ride the same machinery with
+    Anthropic's and Google's envelopes — the per-surface translator is looked
+    up in ``_COMPAT_ERROR_TRANSLATORS`` (exact paths), with the Google surface
+    matched by prefix since the model is part of the path.
     """
 
     def __init__(self, app) -> None:
@@ -345,7 +383,10 @@ class OpenAICompatErrorMiddleware:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        translate = _COMPAT_ERROR_TRANSLATORS.get(scope["path"])
+        path = scope["path"]
+        translate = _COMPAT_ERROR_TRANSLATORS.get(path)
+        if translate is None and path.startswith(_GEMINI_COMPAT_PREFIX):
+            translate = _gemini_error_body
         if translate is None:
             await self.app(scope, receive, send)
             return
@@ -733,7 +774,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # --- middleware: auth + body size + rate limiting (the /v1 gate) ------
     @app.middleware("http")
     async def _rate_limit(request: Request, call_next):
-        is_api_write = request.method != "OPTIONS" and request.url.path.startswith("/v1/")
+        is_api_write = request.method != "OPTIONS" and request.url.path.startswith(
+            _API_WRITE_PREFIXES
+        )
 
         # The rate-limit bucket: the authenticated key (per-tenant) when present,
         # otherwise the client IP. Stashed for the access log.
@@ -749,6 +792,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # Bearer — on /v1/messages it is the gateway credential.
             if token is None and request.url.path == "/v1/messages":
                 token = request.headers.get("x-api-key")
+            # Google's genai SDK sends `x-goog-api-key` — on /v1beta/* it is
+            # the gateway credential. (Google's `?key=` query param is
+            # deliberately not honored — credentials in URLs land in logs.)
+            if token is None and request.url.path.startswith(_GEMINI_COMPAT_PREFIX):
+                token = request.headers.get("x-goog-api-key")
             if token is None or not auth.key_allowed(token, await _allowed_keys()):
                 metrics.record_error("unauthorized")
                 return JSONResponse(
@@ -1673,6 +1721,175 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             event_source(),
             media_type="text/event-stream",
             headers=stream_headers,
+        )
+
+    # --- Gemini-compatible generateContent surface (/v1beta/models/*) -----
+
+    def _gemini_stream_response(
+        request, chat_request, http_request, response, config, cache_backend
+    ):
+        """Shared streaming path for streamGenerateContent (alt=sse is the
+        genai SDK's transport; the only one RekAI serves)."""
+        blocked = _guardrail_response(chat_request.messages, config, response)
+        if blocked is not None:
+            return blocked
+        guardrail_flag = response.headers.get("X-Guardrail-Flag")
+        client_id = _client_id(http_request)
+        provider_name, provider = select_provider(chat_request, config)
+        metrics.record_request(provider_name)
+        _stash_gen_ai_prestream(http_request, provider_name, chat_request.model)
+
+        async def event_source():
+            finish_reason = "stop"
+            usage = None
+            async for ev in handle_chat_stream(
+                chat_request,
+                None,
+                config,
+                cache_backend,
+                provider_name,
+                provider,
+                client_id,
+            ):
+                if ev.delta is not None:
+                    yield gemini_compat.stream_chunk(chat_request.model, ev.delta)
+                elif ev.error is not None:
+                    yield gemini_compat.stream_error(ev.error.status_code, str(ev.error))
+                    return
+                elif ev.summary is not None:
+                    s = ev.summary
+                    if s.finish_reason:
+                        finish_reason = s.finish_reason
+                    if s.tool_calls:
+                        finish_reason = "tool_calls"
+                        # Tool calls arrive as whole parts on the final chunk
+                        # (RekAI accumulates arguments upstream); each is a
+                        # functionCall part on the terminal candidate.
+                        for tc in s.tool_calls:
+                            fn = tc.get("function", {})
+                            try:
+                                args = json.loads(fn.get("arguments") or "{}")
+                            except (TypeError, ValueError):
+                                args = {}
+                            yield (
+                                "data: "
+                                + json.dumps(
+                                    {
+                                        "candidates": [
+                                            {
+                                                "content": {
+                                                    "role": "model",
+                                                    "parts": [
+                                                        {
+                                                            "functionCall": {
+                                                                "name": fn.get("name"),
+                                                                "args": args,
+                                                            }
+                                                        }
+                                                    ],
+                                                },
+                                                "index": 0,
+                                            }
+                                        ]
+                                    }
+                                )
+                                + "\n\n"
+                            )
+                    usage = s.usage
+            yield gemini_compat.stream_final(chat_request.model, finish_reason, usage)
+
+        stream_headers = {
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "X-RekAI-Provider": provider_name,
+        }
+        if guardrail_flag:
+            stream_headers["X-Guardrail-Flag"] = guardrail_flag
+        return StreamingResponse(
+            event_source(),
+            media_type="text/event-stream",
+            headers=stream_headers,
+        )
+
+    @app.post(
+        "/v1beta/models/{model}:generateContent",
+        tags=["chat"],
+        response_model=None,
+        responses={
+            400: {"model": ErrorResponse},
+            401: {"model": ErrorResponse},
+            413: {"model": ErrorResponse},
+            429: {"model": ErrorResponse},
+            502: {"model": ErrorResponse},
+        },
+    )
+    async def gemini_generate_content(
+        response: Response,
+        model: str,
+        request: GeminiGenerateContentRequest,
+        http_request: Request,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        config: Settings = Depends(get_config),
+        cache_backend: CacheBackend = Depends(get_cache),
+    ):
+        """Gemini-compatible generateContent endpoint.
+
+        Point the Google genai SDK at RekAI — ``genai.Client(http_options={
+        'base_url': ...})`` — and this behaves like
+        ``POST .../v1beta/models/{model}:generateContent``: same request shape
+        (contents/systemInstruction/generationConfig/tools), same response
+        shape (candidates + usageMetadata), and errors in Google's
+        ``{error: {code, message, status}}`` envelope. A thin translation over
+        the same pipeline as ``/v1/chat``. Auth: ``x-goog-api-key`` or
+        ``Authorization: Bearer`` (the ``?key=`` query credential is not
+        honored — keys in URLs land in access logs).
+        """
+        try:
+            chat_request = gemini_compat.to_chat_request(model, request)
+        except ValidationError as exc:
+            return JSONResponse(
+                status_code=400,
+                content=ErrorResponse(error="invalid_request", detail=str(exc)).model_dump(),
+            )
+        result = await _run_chat(
+            chat_request,
+            http_request,
+            response,
+            None,
+            idempotency_key,
+            config,
+            cache_backend,
+        )
+        if isinstance(result, JSONResponse):
+            return result
+        return gemini_compat.to_generate_content_response(result)
+
+    @app.post(
+        "/v1beta/models/{model}:streamGenerateContent",
+        tags=["chat"],
+        response_model=None,
+        responses={200: {"content": {"text/event-stream": {}}}},
+    )
+    async def gemini_stream_generate_content(
+        response: Response,
+        model: str,
+        request: GeminiGenerateContentRequest,
+        http_request: Request,
+        config: Settings = Depends(get_config),
+        cache_backend: CacheBackend = Depends(get_cache),
+    ):
+        """Gemini-compatible streaming (``streamGenerateContent?alt=sse``).
+        Emits generateContent chunks over SSE — one ``data:`` object per text
+        delta, then a final chunk carrying finishReason + usageMetadata."""
+        try:
+            chat_request = gemini_compat.to_chat_request(model, request)
+        except ValidationError as exc:
+            return JSONResponse(
+                status_code=400,
+                content=ErrorResponse(error="invalid_request", detail=str(exc)).model_dump(),
+            )
+        return _gemini_stream_response(
+            request, chat_request, http_request, response, config, cache_backend
         )
 
     return app

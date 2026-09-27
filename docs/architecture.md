@@ -295,6 +295,39 @@ SDK appends `v1/messages` itself) works unmodified:
   400/422 `invalid_request_error`, 429 `rate_limit_error`, 529
   `overloaded_error`, otherwise `api_error`.
 
+## Gemini compatibility
+
+`POST /v1beta/models/{model}:generateContent` and
+`:streamGenerateContent?alt=sse` are the same pattern for the Google genai
+SDK — a thin translation layer (`rekai/gemini_compat.py`, pure functions, no
+I/O) over the identical internal pipeline. The SDK's `base_url` override makes
+RekAI a drop-in:
+
+- **Requests** translate `contents[].parts` into `ChatMessage`s — `model` role
+  → assistant, `functionCall` parts → OpenAI-shaped `tool_calls`,
+  `functionResponse` parts → their text body, `systemInstruction` → the system
+  message, `generationConfig` fields → `temperature`/`max_tokens`/`stop`/
+  `topP`, `toolConfig.functionCallingConfig` (AUTO/ANY/NONE +
+  `allowedFunctionNames`) → `tool_choice`. The model lives in the path.
+  Unsupported parts (inline_data, file_data, thought) are a readable 400.
+- **Responses** come back as `{candidates: [{content: {role: "model", parts}},
+  finishReason, index}], usageMetadata}`, with `stop`→STOP, `length`→MAX_TOKENS,
+  `tool_calls`→STOP (a function call is a turn end upstream),
+  `content_filter`→SAFETY, plus `rekaiProvider`/`rekaiCostUsd`/`rekaiCached`
+  extras SDKs ignore.
+- **Streams** (`alt=sse`) emit one `data:` candidate chunk per text delta, then
+  a final chunk with `finishReason` + `usageMetadata` — matching upstream's
+  shape.
+- **Auth** accepts the SDK's `x-goog-api-key` header on `/v1beta/*` alongside
+  `Authorization: Bearer`. The `?key=` query credential is deliberately not
+  honored — keys in URLs land in access logs.
+- **Errors** ride the same compat-error middleware with Google's envelope —
+  `{"error": {"code": <http>, "message", "status": "<ENUM>"}}` — including
+  errors raised before the route runs (auth 401, budget 402, body cap 413,
+  rate limit 429, validation 422). The `/v1beta/` prefix is inside the
+  API-write middleware gate (body cap, concurrency cap, auth, rate limit), so
+  the surface gets the same protections as `/v1/*`.
+
 ### Why generation stopped
 
 `finish_reason` is **reported by the provider, not synthesised**. Every backend

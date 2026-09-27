@@ -223,6 +223,28 @@ class AnthropicMessagesRequest(BaseModel):
     provider: str | None = None  # RekAI extension: explicit provider override
 
 
+
+# --- Gemini generateContent API (`POST /v1beta/models/{m}:generateContent`) --
+
+
+class GeminiGenerateContentRequest(BaseModel):
+    """POST /v1beta/models/{model}:generateContent — the Google genai SDK shape.
+
+    The model itself arrives in the path, not the body. Field names stay
+    camelCase, matching upstream exactly.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    contents: list[dict[str, Any]] = Field(
+        ..., min_length=1, description="[{role: user|model, parts: [...]}]"
+    )
+    systemInstruction: dict[str, Any] | None = None
+    generationConfig: dict[str, Any] | None = None
+    tools: list[dict[str, Any]] | None = None
+    toolConfig: dict[str, Any] | None = None
+
+
 class ChatCompletionMessage(BaseModel):
     role: Literal["assistant"] = "assistant"
     content: str | None = None

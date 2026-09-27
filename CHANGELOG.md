@@ -51,6 +51,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   same pipeline as `/v1/chat` — routing, cache, retries, fallback, budgets,
   metrics all apply — so `"model": "claude-*"` still routes to Anthropic by
   prefix and a RekAI `provider` extension field overrides it.
+- **Gemini-compatible `POST /v1beta/models/{model}:generateContent` and
+  `:streamGenerateContent`** (`?alt=sse`). Point the Google genai SDK at RekAI
+  (`genai.Client(http_options={"base_url": ...})`) and it works unmodified:
+  contents/systemInstruction/generationConfig/tools in, candidates +
+  usageMetadata out, SSE chunk-per-delta streaming, and Google's
+  `{error: {code, message, status}}` envelope for every error on the surface —
+  including middleware-raised ones (auth 401, budget 402, body cap 413, rate
+  limit 429, validation 422). Auth accepts the SDK's `x-goog-api-key` header
+  alongside `Authorization: Bearer`; the `?key=` query credential is
+  deliberately not honored (keys in URLs land in access logs). The `/v1beta/`
+  prefix is now inside the API-write middleware gate (body cap, concurrency,
+  auth, rate limit), and a thin pure-function `rekai/gemini_compat.py` mirrors
+  the other compat layers — same pipeline as `/v1/chat`, so routing, cache,
+  retries, fallback, budgets and metrics all apply.
 - **Per-key rate-limit overrides** (`REKAI_CLIENT_RATE_LIMITS`, e.g.
   `"sk-premium:600,sk-trial:5"`): the global `REKAI_RATE_LIMIT_REQUESTS`
   applied the same ceiling to every tenant — there was no way to sell a
