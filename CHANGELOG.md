@@ -36,6 +36,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **`web_search_options` and `stream_options.include_obfuscation` forwarding.**
+  Two more OpenAI request fields the compat layer accepted and dropped now
+  reach OpenAI-compatible providers: `web_search_options` (hosted web-search
+  config — keyed into the cache since it changes what the answer is grounded
+  on) and `include_obfuscation` (merged into the upstream `stream_options`
+  RekAI already sends; keyed out of the cache since it only scrambles the
+  streamed encoding). Both are on `ChatRequest` too, and both SDKs expose
+  `web_search_options`/`webSearchOptions`.
 - **Anthropic-compatible `POST /v1/messages`.** Point an Anthropic SDK at
   RekAI — `Anthropic(base_url="http://localhost:8000")`, the SDK appends
   `/v1/messages` itself — and it works unmodified: Anthropic's request shape
