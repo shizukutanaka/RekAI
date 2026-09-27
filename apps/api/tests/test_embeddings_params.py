@@ -12,9 +12,11 @@ must not reach them.
 from __future__ import annotations
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from rekai.cache import embedding_cache_key
+from rekai.providers.base import ProviderError
 from rekai.providers.gemini import GeminiProvider
 from rekai.providers.ollama import OllamaProvider
 from rekai.providers.openai import OpenAIProvider
@@ -102,3 +104,47 @@ def test_dimensions_validated_at_schema(client: TestClient) -> None:
     assert resp.status_code == 422
     resp = client.post("/v1/embeddings", json={"model": "echo", "input": "hi", "dimensions": 8})
     assert resp.status_code == 200
+
+
+async def test_token_array_input_reaches_openai_verbatim(monkeypatch) -> None:
+    """Pre-tokenized input (OpenAI's list[int] / list[list[int]] form) forwards
+    to the provider unchanged — token arrays are a first-class input there."""
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    result = await OpenAIProvider().embed([[1, 2, 3]], "text-embedding-3-small", "sk-x")
+    assert _Client.captured["input"] == [[1, 2, 3]]
+    assert result.embeddings
+
+
+async def test_token_array_rejected_by_text_only_providers() -> None:
+    """Gemini/Ollama have no token-array form — reject honestly rather than
+    mangling ids into a text field."""
+    for provider, model, key in (
+        (GeminiProvider(), "gemini-embedding-001", "gk"),
+        (OllamaProvider(), "m", None),
+    ):
+        with pytest.raises(ProviderError) as ei:
+            await provider.embed([[1, 2, 3]], model, key)
+        assert ei.value.status_code == 400
+
+
+def test_token_array_input_accepted_and_embedded(client: TestClient) -> None:
+    resp = client.post("/v1/embeddings", json={"model": "echo", "input": [1, 2, 3]})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["embeddings"]) == 1
+    assert body["usage"]["prompt_tokens"] == 3
+
+
+def test_token_array_batch_accepted(client: TestClient) -> None:
+    resp = client.post("/v1/embeddings", json={"model": "echo", "input": [[1, 2], [3]]})
+    assert resp.status_code == 200
+    assert len(resp.json()["embeddings"]) == 2
+
+
+def test_mixed_text_and_tokens_rejected_at_schema(client: TestClient) -> None:
+    resp = client.post("/v1/embeddings", json={"model": "echo", "input": ["hi", [1]]})
+    assert resp.status_code == 422
+
+
+def test_empty_token_array_input_rejected(client: TestClient) -> None:
+    assert client.post("/v1/embeddings", json={"model": "echo", "input": [[]]}).status_code == 422

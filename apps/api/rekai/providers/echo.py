@@ -10,19 +10,32 @@ import hashlib
 from collections.abc import AsyncIterator
 
 from rekai import models
-from rekai.providers.base import EmbeddingResult, Provider, ProviderResult, StreamEvent
+from rekai.providers.base import (
+    EmbeddingInput,
+    EmbeddingResult,
+    Provider,
+    ProviderResult,
+    StreamEvent,
+)
 from rekai.schemas import ChatRequest, Usage
 
 _EMBED_DIM = 16
 
 
-def _count_tokens(text: str) -> int:
-    # Deliberately naive — good enough for a demo provider.
-    return max(1, len(text.split()))
+def _count_tokens(input_: EmbeddingInput) -> int:
+    # Deliberately naive — good enough for a demo provider. A pre-tokenized
+    # input already knows its token count.
+    if isinstance(input_, list):
+        return len(input_)
+    return max(1, len(input_.split()))
 
 
-def _embed_text(text: str, dim: int = _EMBED_DIM) -> list[float]:
+def _embed_text(input_: EmbeddingInput, dim: int = _EMBED_DIM) -> list[float]:
     """A deterministic pseudo-embedding from a hash — no model needed for demos/tests."""
+    if isinstance(input_, list):
+        text = ",".join(str(i) for i in input_)
+    else:
+        text = input_
     digest = hashlib.sha256(text.encode()).digest()
     return [digest[i % len(digest)] / 255.0 for i in range(dim)]
 
@@ -71,7 +84,7 @@ class EchoProvider(Provider):
 
     async def embed(
         self,
-        inputs: list[str],
+        inputs: list[EmbeddingInput],
         model: str,
         api_key: str | None,
         *,

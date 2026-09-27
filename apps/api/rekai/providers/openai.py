@@ -10,6 +10,7 @@ import httpx
 from rekai import models
 from rekai.config import get_settings
 from rekai.providers.base import (
+    EmbeddingInput,
     EmbeddingResult,
     FinishReason,
     Provider,
@@ -193,7 +194,7 @@ class OpenAIProvider(Provider):
 
     async def embed(
         self,
-        inputs: list[str],
+        inputs: list[EmbeddingInput],
         model: str,
         api_key: str | None,
         *,

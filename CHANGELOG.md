@@ -7,6 +7,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Pre-tokenized `input` on `POST /v1/embeddings`.** OpenAI's embeddings API
+  accepts token id arrays (`input: [1,2,3]` for one input, `[[1,2],[3]]` for a
+  batch) — SDK callers who tokenize client-side used to hit a 422. OpenAI-
+  compatible providers forward token arrays verbatim; text-only providers
+  (Gemini, Ollama) reject them with a readable 400 instead of mangling ids
+  into a text field, and echo counts each id as a token.
 - **Reasoning-token accounting in `usage`.** Reasoning models (OpenAI o-series
   and gpt-5, Gemini thinking models) bill a separate slice of completion tokens
   for chain-of-thought; the provider-reported count now surfaces as

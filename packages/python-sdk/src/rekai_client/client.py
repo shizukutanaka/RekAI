@@ -480,7 +480,7 @@ class RekAIClient:
     def embeddings(
         self,
         model: str,
-        input: str | list[str],
+        input: str | list[str] | list[int] | list[list[int]],
         *,
         provider: str | None = None,
         cache: bool = True,
@@ -489,7 +489,7 @@ class RekAIClient:
         dimensions: int | None = None,
         encoding_format: str | None = None,
     ) -> EmbeddingsResult:
-        """Create embeddings for a string or list of strings.
+        """Create embeddings for a string, list of strings, or pre-tokenized int array(s).
 
         ``dimensions``/``encoding_format`` map to OpenAI's embeddings fields
         (supported providers only)."""
@@ -722,7 +722,7 @@ class AsyncRekAIClient:
     async def embeddings(
         self,
         model: str,
-        input: str | list[str],
+        input: str | list[str] | list[int] | list[list[int]],
         *,
         provider: str | None = None,
         cache: bool = True,
@@ -731,7 +731,7 @@ class AsyncRekAIClient:
         dimensions: int | None = None,
         encoding_format: str | None = None,
     ) -> EmbeddingsResult:
-        """Create embeddings for a string or list of strings.
+        """Create embeddings for a string, list of strings, or pre-tokenized int array(s).
 
         ``dimensions``/``encoding_format`` map to OpenAI's embeddings fields
         (supported providers only)."""

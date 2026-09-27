@@ -327,7 +327,12 @@ class ChatResponse(BaseModel):
 
 class EmbeddingsRequest(BaseModel):
     model: str = Field(..., description="Embedding model, e.g. 'text-embedding-3-small' or 'echo'.")
-    input: str | list[str] = Field(..., description="A string or list of strings to embed.")
+    # OpenAI also accepts pre-tokenized input: one int array (a single input)
+    # or an array of int arrays. Providers that only take text reject those
+    # honestly instead of mangling them.
+    input: str | list[str] | list[int] | list[list[int]] = Field(
+        ..., description="A string, list of strings, or pre-tokenized int array(s) to embed."
+    )
     provider: str | None = Field(default=None, description="Force a provider (else routed).")
     cache: bool = Field(default=True)
     dimensions: int | None = Field(

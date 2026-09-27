@@ -232,7 +232,7 @@ export class RekAIClient {
   }
 
   /**
-   * Create embeddings for a string or array of strings.
+   * Create embeddings for a string, string array, or pre-tokenized int array(s).
    * @param {string} model
    * @param {string|string[]} input
    * @param {object} [opts]

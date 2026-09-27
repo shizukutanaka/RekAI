@@ -7,6 +7,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
+from typing import cast
 
 from rekai import guardrails
 from rekai.cache import CacheBackend, cache_key, embedding_cache_key, semantic_bucket
@@ -17,7 +18,7 @@ from rekai.logging_config import get_logger
 from rekai.metrics import metrics
 from rekai.pricing import estimate_cost, estimate_tokens
 from rekai.providers import Provider, get_provider
-from rekai.providers.base import ProviderError, ProviderResult
+from rekai.providers.base import EmbeddingInput, ProviderError, ProviderResult
 from rekai.retry import DeadlineExceeded, call_with_retry, remaining_budget
 from rekai.router import ensure_allowed, resolve_provider, select_provider
 from rekai.schemas import (
@@ -634,8 +635,16 @@ async def handle_embeddings(
         raise ProviderError(f"Unknown provider '{provider_name}'.", status_code=400)
     metrics.record_request(provider_name)
 
-    inputs = [request.input] if isinstance(request.input, str) else list(request.input)
-    if not inputs:
+    # str = one text; list[int] = one pre-tokenized input; list[str] /
+    # list[list[int]] = a batch. Anything else arrived empty.
+    raw_input = request.input
+    if isinstance(raw_input, str) or (
+        isinstance(raw_input, list) and (not raw_input or isinstance(raw_input[0], int))
+    ):
+        inputs = cast(list[EmbeddingInput], [raw_input])
+    else:
+        inputs = cast(list[EmbeddingInput], list(raw_input))
+    if not inputs or all(not t for t in inputs):
         raise ProviderError("'input' must not be empty.", status_code=422)
 
     use_cache = settings.cache_enabled and request.cache

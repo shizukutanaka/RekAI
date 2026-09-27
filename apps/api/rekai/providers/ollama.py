@@ -10,6 +10,7 @@ import httpx
 from rekai.config import get_settings
 from rekai.logging_config import get_logger
 from rekai.providers.base import (
+    EmbeddingInput,
     EmbeddingResult,
     FinishReason,
     Provider,
@@ -128,13 +129,19 @@ class OllamaProvider(Provider):
 
     async def embed(
         self,
-        inputs: list[str],
+        inputs: list[EmbeddingInput],
         model: str,
         api_key: str | None,
         *,
         dimensions: int | None = None,
         encoding_format: str | None = None,
     ) -> EmbeddingResult:
+        if any(not isinstance(t, str) for t in inputs):
+            raise ProviderError(
+                "ollama embeddings accept text only — pre-tokenized int arrays "
+                "are an OpenAI feature.",
+                status_code=400,
+            )
         settings = get_settings()
         url = f"{settings.ollama_base_url.rstrip('/')}/api/embed"
         try:

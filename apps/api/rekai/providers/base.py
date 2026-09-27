@@ -124,6 +124,11 @@ class EmbeddingResult:
     usage: Usage = field(default_factory=Usage)
 
 
+EmbeddingInput = str | list[int]
+"""One embedding input: raw text or a pre-tokenized int array (OpenAI accepts
+either; providers that only take text must reject int arrays honestly)."""
+
+
 @dataclass
 class StreamEvent:
     """One event from a streaming completion: a text ``delta``, and/or (yielded
@@ -227,7 +232,7 @@ class Provider(ABC):
 
     async def embed(
         self,
-        inputs: list[str],
+        inputs: list[EmbeddingInput],
         model: str,
         api_key: str | None,
         *,
