@@ -85,6 +85,9 @@ CI の設置は**完了済み** — ワークフローは `.github/workflows/ci.
 > ✅ **完了** (`57b4522`): openai/gemini の `list_models()` に o1/o3/gemini-2.5-pro を
 > 追加し、「広告する全モデルは価格表にあり同プロバイダへルーティングされる」不変条件を
 > `test_providers.py` に追加。
+> ✅ **値の更新も完了**: 2026-09 の公式価格で MODEL_SPECS を刷新
+> (gpt-6/gpt-5.4-5.6、claude-fable-5-1/opus-5/sonnet-5、gemini-3.x)。出典は
+> CHANGELOG の [Unreleased] エントリ参照。
 - `pricing.py:27-50` の価格表と各 `list_models()` (`providers/openai.py:180`、
   `providers/gemini.py:200-204`) が相互不整合。openai は o1/o3 系を出さず、gemini は
   `gemini-2.5-pro` を欠く。`gpt-4.1`/`gpt-5`/`o4-mini`/`gemini-2.5-flash` も未収録。

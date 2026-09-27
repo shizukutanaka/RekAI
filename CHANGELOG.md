@@ -6,6 +6,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Model registry refreshed to current lineups and list prices** (S-6).
+  `/v1/models` and cost estimates now cover the current generations —
+  OpenAI gpt-6 family (astra/sol/luna) and gpt-5.4–5.6, Anthropic
+  claude-fable-5-1 / opus-5 / sonnet-5 / haiku-4-5, and Gemini 3.x
+  (3.1-pro-preview, 3.x-flash family) — at their current standard-tier
+  prices (e.g. claude-opus repriced 15/75 → 5/25 per 1M tokens, haiku
+  0.80/4 → 1/5). Legacy ids (gpt-4*, o1*, sonnet-4.x, gemini-1.5/2.x) stay
+  priced so existing integrations still get cost estimates, and
+  longest-prefix matching still resolves dated variants.
+  Sources: developers.openai.com/api/docs/pricing,
+  platform.claude.com/docs/en/about-claude/pricing,
+  ai.google.dev/gemini-api/docs/pricing (all as of 2026-09).
+
 ### Fixed
 - **`_verify_semantic_hit` no longer raises `TypeError` on every verified
   lookup.** The semantic-verify feature and the per-provider token metric

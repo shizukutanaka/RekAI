@@ -28,9 +28,9 @@ def test_every_advertised_chat_model_routes_and_prices() -> None:
         if spec.kind != "chat":
             continue
         for model in spec.advertised:
-            assert resolve_provider(None, model, settings) == spec.provider, (
-                f"{model} advertised by {spec.provider} but routes elsewhere"
-            )
+            assert (
+                resolve_provider(None, model, settings) == spec.provider
+            ), f"{model} advertised by {spec.provider} but routes elsewhere"
             # echo is free/keyless and intentionally unpriced.
             if spec.provider != "echo":
                 assert price_for_model(model) is not None, f"{model} advertised but unpriced"
@@ -48,9 +48,9 @@ def test_every_advertised_embedding_model_routes_to_its_provider() -> None:
         if spec.kind != "embedding":
             continue
         for model in spec.advertised:
-            assert resolve_provider(None, model, settings) == spec.provider, (
-                f"{model} advertised by {spec.provider} but routes elsewhere"
-            )
+            assert (
+                resolve_provider(None, model, settings) == spec.provider
+            ), f"{model} advertised by {spec.provider} but routes elsewhere"
 
 
 def test_openai_embedding_family_still_routes_to_openai() -> None:
@@ -63,6 +63,8 @@ def test_openai_embedding_family_still_routes_to_openai() -> None:
 def test_advertised_models_groups_by_provider_and_kind() -> None:
     assert models.advertised_models("openai", "chat")[0].startswith("gpt-")
     assert models.advertised_models("gemini", "chat") == [
+        "gemini-3.1-pro-preview",
+        "gemini-3.8-flash",
         "gemini-2.5-pro",
         "gemini-2.0-flash",
         "gemini-1.5-pro",

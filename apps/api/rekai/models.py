@@ -41,20 +41,35 @@ class ModelSpec:
 # Ordered so /v1/models advertises models in this order. Pricing uses longest-
 # prefix matching (order-independent); routing uses PROVIDER_PREFIXES below.
 MODEL_SPECS: tuple[ModelSpec, ...] = (
-    # --- OpenAI chat ---
+    # --- OpenAI chat (standard tier, short context) ---
+    ModelSpec("gpt-6-astra", "openai", "chat", (10.00, 50.00), ("gpt-6-astra",)),
+    ModelSpec("gpt-6-sol", "openai", "chat", (2.00, 10.00), ("gpt-6-sol",)),
+    ModelSpec("gpt-6-luna", "openai", "chat", (0.10, 0.50), ("gpt-6-luna",)),
+    ModelSpec("gpt-5.6-sol", "openai", "chat", (4.00, 20.00), ("gpt-5.6-sol",)),
+    ModelSpec("gpt-5.6-cyber", "openai", "chat", (12.50, 75.00), ("gpt-5.6-cyber",)),
+    ModelSpec("gpt-5.5", "openai", "chat", (5.00, 30.00), ("gpt-5.5",)),
+    ModelSpec("gpt-5.4-mini", "openai", "chat", (0.75, 4.50), ("gpt-5.4-mini",)),
+    ModelSpec("gpt-5.4", "openai", "chat", (2.50, 15.00), ("gpt-5.4",)),
+    # Legacy OpenAI: gpt-4o/-mini are still live (advertised); the rest are
+    # kept priced-only so historical ids still estimate cost.
     ModelSpec("gpt-4o", "openai", "chat", (2.50, 10.00), ("gpt-4o",)),
     ModelSpec("gpt-4o-mini", "openai", "chat", (0.15, 0.60), ("gpt-4o-mini",)),
-    ModelSpec("gpt-4-turbo", "openai", "chat", (10.00, 30.00), ("gpt-4-turbo",)),
-    ModelSpec("gpt-4", "openai", "chat", (30.00, 60.00)),  # priced, not advertised
-    ModelSpec("gpt-3.5-turbo", "openai", "chat", (0.50, 1.50), ("gpt-3.5-turbo",)),
-    ModelSpec("o1", "openai", "chat", (15.00, 60.00), ("o1",)),
-    ModelSpec("o1-mini", "openai", "chat", (1.10, 4.40), ("o1-mini",)),
-    ModelSpec("o3-mini", "openai", "chat", (1.10, 4.40), ("o3-mini",)),
+    ModelSpec("gpt-4-turbo", "openai", "chat", (10.00, 30.00)),
+    ModelSpec("gpt-4", "openai", "chat", (30.00, 60.00)),
+    ModelSpec("gpt-3.5-turbo", "openai", "chat", (0.50, 1.50)),
+    ModelSpec("o1", "openai", "chat", (15.00, 60.00)),
+    ModelSpec("o1-mini", "openai", "chat", (1.10, 4.40)),
+    ModelSpec("o3-mini", "openai", "chat", (1.10, 4.40)),
     # --- Anthropic chat ---
-    ModelSpec("claude-opus", "anthropic", "chat", (15.00, 75.00), ("claude-opus-4-8",)),
-    ModelSpec("claude-sonnet", "anthropic", "chat", (3.00, 15.00), ("claude-sonnet-4-6",)),
-    ModelSpec("claude-haiku", "anthropic", "chat", (0.80, 4.00), ("claude-haiku-4-5",)),
-    # --- Google Gemini chat ---
+    ModelSpec("claude-fable", "anthropic", "chat", (10.00, 50.00), ("claude-fable-5-1",)),
+    ModelSpec("claude-mythos", "anthropic", "chat", (10.00, 50.00)),  # limited availability
+    ModelSpec("claude-opus", "anthropic", "chat", (5.00, 25.00), ("claude-opus-5",)),
+    ModelSpec("claude-sonnet-5", "anthropic", "chat", (2.00, 10.00), ("claude-sonnet-5",)),
+    ModelSpec("claude-sonnet", "anthropic", "chat", (3.00, 15.00)),  # sonnet-4.x and older
+    ModelSpec("claude-haiku", "anthropic", "chat", (1.00, 5.00), ("claude-haiku-4-5",)),
+    # --- Google Gemini chat (paid tier; 3.x flash promo price ends 2026-12-31) ---
+    ModelSpec("gemini-3.1-pro", "gemini", "chat", (2.00, 12.00), ("gemini-3.1-pro-preview",)),
+    ModelSpec("gemini-3.", "gemini", "chat", (0.75, 3.75), ("gemini-3.8-flash",)),
     ModelSpec("gemini-2.5-pro", "gemini", "chat", (1.25, 10.00), ("gemini-2.5-pro",)),
     ModelSpec("gemini-2.0-flash", "gemini", "chat", (0.10, 0.40), ("gemini-2.0-flash",)),
     ModelSpec("gemini-1.5-pro", "gemini", "chat", (1.25, 5.00), ("gemini-1.5-pro",)),
