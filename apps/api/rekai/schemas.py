@@ -46,6 +46,26 @@ class ChatRequest(BaseModel):
         "every provider under its own name; a provider's own limit (OpenAI "
         "allows 4) surfaces as that provider's error.",
     )
+    service_tier: str | None = Field(
+        default=None,
+        description="OpenAI's processing tier ('auto' | 'default' | 'flex' | "
+        "'priority' | 'scale'): flex trades latency for a large discount, "
+        "priority pays for lower latency. Not enum-validated so newer tiers "
+        "stay forward-compatible; an unsupported tier surfaces as the "
+        "provider's own error. Forwarded to OpenAI-compatible providers only.",
+    )
+    web_search_options: dict | None = Field(
+        default=None,
+        description="OpenAI's `web_search_options` — search context size, "
+        "user location, etc. for models with hosted web search. Forwarded "
+        "verbatim to OpenAI-compatible providers only.",
+    )
+    include_obfuscation: bool | None = Field(
+        default=None,
+        description="OpenAI's `stream_options.include_obfuscation`: asks the "
+        "provider to obfuscate streamed tokens. Forwarded into the upstream "
+        "`stream_options` on OpenAI-compatible providers only.",
+    )
     cache: bool = Field(default=True, description="Whether this request may be served from cache.")
     fallbacks: list[FallbackTarget] | None = Field(
         default=None,
@@ -132,6 +152,7 @@ class OpenAIChatMessage(BaseModel):
 
 class StreamOptions(BaseModel):
     include_usage: bool = False
+    include_obfuscation: bool | None = None
 
 
 class ChatCompletionsRequest(BaseModel):
@@ -145,6 +166,8 @@ class ChatCompletionsRequest(BaseModel):
     max_tokens: int | None = Field(default=None, ge=1)
     max_completion_tokens: int | None = Field(default=None, ge=1)
     stop: str | list[str] | None = None
+    service_tier: str | None = None
+    web_search_options: dict[str, Any] | None = None
     stream: bool = False
     stream_options: StreamOptions | None = None
     tools: list[dict[str, Any]] | None = None
@@ -152,6 +175,70 @@ class ChatCompletionsRequest(BaseModel):
     response_format: dict[str, Any] | None = None
     user: str | None = None  # accepted, ignored
     n: int | None = None  # 400 if n > 1 (RekAI returns a single choice)
+    provider: str | None = None  # RekAI extension: explicit provider override
+    # OpenAI's pre-tools function-calling API (deprecated since 0613 but still
+    # emitted by older SDKs and codebases). Normalized to tools/tool_choice in
+    # the compat layer; modern `tools` wins when both are sent.
+    functions: list[dict[str, Any]] | None = None
+    function_call: Any | None = None
+
+
+# --- Anthropic Messages API (`POST /v1/messages`) --------------------------
+# These mirror Anthropic's Messages API so RekAI is a drop-in `base_url` for
+# the Anthropic SDKs too. They are translated to/from the internal
+# ChatRequest/ChatResponse in rekai/anthropic_compat.py.
+
+
+class AnthropicContentBlock(BaseModel):
+    """One element of a Messages-API content array (text, tool_use, tool_result,
+    ...). Fields beyond `type` stay loose — the compat layer validates the
+    ones it maps and rejects the rest with a readable 400."""
+
+    model_config = ConfigDict(extra="allow")
+
+    type: str
+    text: str | None = None
+    id: str | None = None  # tool_use
+    name: str | None = None  # tool_use
+    input: dict[str, Any] | None = None  # tool_use
+    tool_use_id: str | None = None  # tool_result
+    content: str | list[dict[str, Any]] | None = None  # tool_result body
+
+
+class AnthropicMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str | list[AnthropicContentBlock]
+
+
+class AnthropicTool(BaseModel):
+    name: str
+    description: str | None = None
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+
+
+class AnthropicToolChoice(BaseModel):
+    type: Literal["auto", "none", "any", "tool"]
+    name: str | None = None
+    # disable_parallel_tool_use is Anthropic-specific; the OpenAI-equivalent
+    # flag (parallel_tool_calls) lives on the request, not on tool_choice.
+
+
+class AnthropicMessagesRequest(BaseModel):
+    """`POST /v1/messages` body. max_tokens is required by Anthropic (unlike
+    OpenAI) and stays required here — an SDK caller always sends it."""
+
+    model_config = ConfigDict(extra="allow")
+
+    model: str
+    messages: list[AnthropicMessage] = Field(..., min_length=1)
+    max_tokens: int = Field(..., ge=1)
+    system: str | list[dict[str, Any]] | None = None
+    temperature: float | None = Field(default=None, ge=0.0, le=1.0)
+    top_p: float | None = Field(default=None, ge=0.0, le=1.0)
+    stop_sequences: list[str] | None = None
+    stream: bool = False
+    tools: list[AnthropicTool] | None = None
+    tool_choice: AnthropicToolChoice | None = None
     provider: str | None = None  # RekAI extension: explicit provider override
 
 

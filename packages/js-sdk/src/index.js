@@ -138,6 +138,9 @@ export class RekAIClient {
     if (opts.toolChoice != null) payload.tool_choice = opts.toolChoice;
     if (opts.responseFormat != null) payload.response_format = opts.responseFormat;
     if (opts.stop != null) payload.stop = opts.stop;
+    if (opts.serviceTier != null) payload.service_tier = opts.serviceTier;
+    // OpenAI's hosted web-search config; OpenAI-compatible providers only.
+    if (opts.webSearchOptions != null) payload.web_search_options = opts.webSearchOptions;
     return payload;
   }
 
