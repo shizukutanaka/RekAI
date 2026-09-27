@@ -20,8 +20,10 @@ from rekai.schemas import (
     ChatMessage,
     ChatRequest,
     ChatResponse,
+    CompletionUsage,
     ContentPart,
     OpenAIChatMessage,
+    PromptTokensDetails,
     Usage,
 )
 
@@ -127,7 +129,16 @@ def to_chat_completion(resp: ChatResponse) -> ChatCompletionResponse:
                 finish_reason=resp.finish_reason or ("tool_calls" if resp.tool_calls else "stop"),
             )
         ],
-        usage=resp.usage,
+        usage=CompletionUsage(
+            **resp.usage.model_dump(),
+            # OpenAI nests the cached-token count under prompt_tokens_details;
+            # emit it only when a provider cache actually engaged, like OpenAI.
+            prompt_tokens_details=(
+                PromptTokensDetails(cached_tokens=resp.usage.cache_read_tokens)
+                if resp.usage.cache_read_tokens
+                else None
+            ),
+        ),
         provider=resp.provider,
         cost_usd=resp.cost_usd,
         cached=resp.cached,
@@ -180,7 +191,10 @@ def chunk_usage(chunk_id: str, created: int, model: str, usage: Usage) -> dict:
     # choices array and the usage totals.
     chunk = _chunk_base(chunk_id, created, model)
     chunk["choices"] = []
-    chunk["usage"] = usage.model_dump()
+    body = usage.model_dump()
+    if usage.cache_read_tokens:
+        body["prompt_tokens_details"] = {"cached_tokens": usage.cache_read_tokens}
+    chunk["usage"] = body
     return chunk
 
 

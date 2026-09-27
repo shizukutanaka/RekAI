@@ -36,6 +36,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **`prompt_tokens_details.cached_tokens` on the OpenAI-compat surface.**
+  RekAI's flat `cache_read_tokens` was invisible to OpenAI SDKs, which read the
+  nested field — prompt-cache hits went unreported for drop-in callers. The
+  compat response (and `stream_options.include_usage` chunk) now emits the
+  nested object whenever a provider cache engaged; absent otherwise, matching
+  api.openai.com.
 - **Opt-in verify band for the semantic cache** (`REKAI_SEMANTIC_CACHE_VERIFY_*`,
   roadmap O-2). A single cosine threshold forced every candidate to be served
   or dropped on embedding distance alone; similarity is not proof two prompts

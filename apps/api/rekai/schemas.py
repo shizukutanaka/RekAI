@@ -161,6 +161,20 @@ class ChatCompletionMessage(BaseModel):
     tool_calls: list[dict[str, Any]] | None = None
 
 
+class PromptTokensDetails(BaseModel):
+    """OpenAI's `usage.prompt_tokens_details` — where its SDKs look for
+    prompt-cache hits. RekAI reports the same numbers flat as
+    ``cache_read_tokens`` / ``cache_write_tokens``; the nested copy exists so
+    ``usage.prompt_tokens_details.cached_tokens`` resolves on the compat
+    surface exactly as it does against api.openai.com."""
+
+    cached_tokens: int = 0
+
+
+class CompletionUsage(Usage):
+    prompt_tokens_details: PromptTokensDetails | None = None
+
+
 class ChatCompletionChoice(BaseModel):
     index: int = 0
     message: ChatCompletionMessage
@@ -175,7 +189,7 @@ class ChatCompletionResponse(BaseModel):
     created: int
     model: str
     choices: list[ChatCompletionChoice]
-    usage: Usage  # field names already match OpenAI's
+    usage: CompletionUsage  # flat fields already match; *Details is OpenAI's nesting
     system_fingerprint: str | None = None
     # RekAI extensions — OpenAI SDKs ignore unknown response fields.
     provider: str | None = None
