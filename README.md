@@ -12,6 +12,7 @@ RekAI sits between your application and multiple LLM providers (OpenAI, Anthropi
 ## ✨ Features
 
 - **OpenAI-compatible API** — a drop-in `POST /v1/chat/completions` (non-streaming and streaming). Point any OpenAI SDK, LangChain, or OpenAI-format client at RekAI's base URL (`.../v1`) and it just works — no client changes. `response_format` (JSON mode / json_schema) is honored by **every** provider — natively on OpenAI-compatible backends, via `responseSchema` on Gemini, via `format` on Ollama, and via forced tool use on Anthropic (whose API has no `response_format` field), with the result unwrapped back into ordinary JSON content.
+- **Anthropic-compatible API** — a drop-in `POST /v1/messages` (non-streaming and streaming). Point an Anthropic SDK at RekAI's base URL and it just works — Anthropic's request/response shapes, typed SSE events, error envelope, and `x-api-key` auth included.
 - **Provider abstraction** — one API, many backends (`openai`, `anthropic`, `gemini`, `ollama`, plus an `echo` provider for local dev/tests). Point at **any OpenAI-compatible endpoint** (Groq, Together, OpenRouter, Mistral, vLLM, LM Studio…) with `REKAI_CUSTOM_BASE_URL` — that alone is enough for a keyless local server; add `REKAI_CUSTOM_API_KEY` for a hosted one (or send it per request as BYOK), and `REKAI_CUSTOM_MODELS` to have them listed at `/v1/models`.
 - **Smart routing** — pick a provider explicitly, or let RekAI choose by model name / configured default.
 - **Resilience** — transient upstream errors (5xx/timeouts) are retried in place with exponential backoff + jitter, then fall over down a configured chain of `(provider, model)` targets.
@@ -140,6 +141,18 @@ otherwise it is forwarded as the BYOK provider key (the OpenRouter
 convention). When gateway auth is on, BYOK goes through `X-Provider-Key` via
 `default_headers`; either way pass a real provider model (`gpt-4o-mini`,
 `claude-...`, `anthropic/claude-...`).
+
+The Anthropic SDK works the same way — RekAI exposes a drop-in
+`POST /v1/messages`:
+
+```python
+import anthropic
+
+client = anthropic.Anthropic(base_url="http://localhost:8000")  # no trailing /v1
+print(client.messages.create(
+    model="echo", max_tokens=64, messages=[{"role": "user", "content": "hello"}]
+).content[0].text)
+```
 
 Runnable client snippets (curl, Python incl. streaming/tools/embeddings,
 JavaScript) live in [`examples/`](./examples), and there are installable
