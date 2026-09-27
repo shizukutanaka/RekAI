@@ -190,14 +190,27 @@ class OpenAIProvider(Provider):
             assembled = [tool_calls_acc[i] for i in sorted(tool_calls_acc)]
             yield StreamEvent(tool_calls=assembled)
 
-    async def embed(self, inputs: list[str], model: str, api_key: str | None) -> EmbeddingResult:
+    async def embed(
+        self,
+        inputs: list[str],
+        model: str,
+        api_key: str | None,
+        *,
+        dimensions: int | None = None,
+        encoding_format: str | None = None,
+    ) -> EmbeddingResult:
         settings = get_settings()
         url = f"{self._base_url().rstrip('/')}/embeddings"
+        body: dict = {"model": model, "input": inputs}
+        if dimensions is not None:
+            body["dimensions"] = dimensions
+        if encoding_format is not None:
+            body["encoding_format"] = encoding_format
         try:
             client = self._client(settings.request_timeout_seconds)
             resp = await client.post(
                 url,
-                json={"model": model, "input": inputs},
+                json=body,
                 headers=self._request_headers(api_key),
             )
         except httpx.HTTPError as exc:
