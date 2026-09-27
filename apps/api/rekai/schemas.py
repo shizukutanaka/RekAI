@@ -21,6 +21,10 @@ class ChatMessage(BaseModel):
     # Anthropic's {"type": "ephemeral"}). Providers that cache automatically
     # (OpenAI) ignore it.
     cache_control: dict[str, Any] | None = None
+    # True when this `role="tool"` message reports a *failed* tool call
+    # (Anthropic `tool_result.is_error`). Surfaces that can't express it
+    # (OpenAI tool messages) drop it — the error text rides in `content`.
+    is_error: bool = False
 
 
 class FallbackTarget(BaseModel):
@@ -153,6 +157,10 @@ class OpenAIChatMessage(BaseModel):
     name: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
+    # True when this `role="tool"` message reports a *failed* tool call
+    # (Anthropic `tool_result.is_error`). Surfaces that can't express it
+    # (OpenAI tool messages) drop it — the error text rides in `content`.
+    is_error: bool = False
 
 
 class StreamOptions(BaseModel):
@@ -208,6 +216,7 @@ class AnthropicContentBlock(BaseModel):
     input: dict[str, Any] | None = None  # tool_use
     tool_use_id: str | None = None  # tool_result
     content: str | list[dict[str, Any]] | None = None  # tool_result body
+    is_error: bool = False  # tool_result: the tool call failed
 
 
 class AnthropicMessage(BaseModel):

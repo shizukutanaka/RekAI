@@ -7,6 +7,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+
+- **`tool_result.is_error` round-trips through the compat layer** — a failed
+  tool call on `POST /v1/messages` used to flatten into an indistinguishable
+  tool message, so the model couldn't tell failure from success. The flag now
+  rides on `ChatMessage.is_error` and the Anthropic provider re-emits
+  `is_error: true` upstream; surfaces without the concept (OpenAI tool
+  messages) drop the flag and keep the error text in `content`.
 - `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
   check (`client.messages.count_tokens`) now works against the compat surface.
   Returns a local script-aware estimate (the same heuristic the pricing path

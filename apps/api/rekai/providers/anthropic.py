@@ -431,18 +431,14 @@ def _translate_messages(messages: list) -> list[dict]:
             continue
         if m.role == "tool":
             # A tool result becomes a user message with a tool_result block.
-            out.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": m.tool_call_id or "",
-                            "content": m.content or "",
-                        }
-                    ],
-                }
-            )
+            block: dict = {
+                "type": "tool_result",
+                "tool_use_id": m.tool_call_id or "",
+                "content": m.content or "",
+            }
+            if m.is_error:
+                block["is_error"] = True
+            out.append({"role": "user", "content": [block]})
         elif m.role == "assistant" and m.tool_calls:
             blocks: list[dict] = []
             if m.content:

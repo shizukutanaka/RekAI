@@ -104,6 +104,7 @@ def _flatten_content(
                     role="tool",
                     content=body or "",
                     tool_call_id=block.tool_use_id,
+                    is_error=block.is_error,
                 )
             )
         else:
