@@ -114,3 +114,95 @@ async def test_chat_propagates_http_error(monkeypatch) -> None:
 )
 def test_gemini_sse_parser(line, expected) -> None:
     assert _parse_gemini_sse_line(line) == expected
+
+
+# --- streaming ---------------------------------------------------------------
+
+
+class _GeminiStreamClient:
+    """Replays a Gemini SSE sequence: text deltas, a functionCall chunk, a
+    malformed line, then a terminal chunk with usageMetadata."""
+
+    captured: dict = {}
+
+    def __init__(self, *a, **k) -> None:
+        pass
+
+    async def aclose(self) -> None:
+        return None
+
+    def stream(self, method, url, json=None, headers=None):
+        _GeminiStreamClient.captured = {"url": url, "json": json}
+
+        class _Resp:
+            status_code = 200
+
+            async def aiter_lines(self):
+                yield 'data: {"candidates":[{"content":{"parts":[{"text":"Hello "}]}}]}'
+                yield (
+                    'data: {"candidates":[{"content":{"parts":'
+                    '[{"functionCall":{"name":"lookup","args":{"id":1}}}]}}]}'
+                )
+                yield "data: not-json"
+                yield (
+                    'data: {"candidates":[{"content":{"parts":[{"text":"world"}]},'
+                    '"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,'
+                    '"candidatesTokenCount":3,"totalTokenCount":8}}'
+                )
+
+            async def aread(self) -> bytes:
+                return b""
+
+        class _Ctx:
+            async def __aenter__(self):
+                return _Resp()
+
+            async def __aexit__(self, *a):
+                return False
+
+        return _Ctx()
+
+
+async def test_gemini_stream_events_yields_deltas_usage_and_tool_calls(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", _GeminiStreamClient)
+    events = [ev async for ev in GeminiProvider().stream_events(_req(), "gk")]
+    deltas = [e.delta for e in events if e.delta]
+    assert deltas == ["Hello ", "world"]
+    usage = next(e.usage for e in events if e.usage)
+    assert usage.total_tokens == 8
+    calls = next(e.tool_calls for e in events if e.tool_calls)
+    assert calls[0]["function"]["name"] == "lookup"
+    finish = next(e.finish_reason for e in events if e.finish_reason)
+    # Gemini STOP with pending function calls normalizes to tool_calls.
+    assert finish == "tool_calls"
+
+
+class _GeminiStreamErrorClient(_GeminiStreamClient):
+    def stream(self, method, url, json=None, headers=None):
+        class _Resp:
+            status_code = 503
+
+            async def aiter_lines(self):
+                return
+                yield
+
+            async def aread(self) -> bytes:
+                return b"upstream exploded"
+
+        class _Ctx:
+            async def __aenter__(self):
+                return _Resp()
+
+            async def __aexit__(self, *a):
+                return False
+
+        return _Ctx()
+
+
+async def test_gemini_stream_error_maps_5xx_to_502(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", _GeminiStreamErrorClient)
+    with pytest.raises(ProviderError) as exc:
+        async for _ in GeminiProvider().stream_events(_req(), "gk"):
+            pass
+    assert exc.value.status_code == 502
+    assert "upstream exploded" in str(exc.value)
