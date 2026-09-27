@@ -126,6 +126,8 @@ class AnthropicProvider(Provider):
         }
         if request.stop:
             payload["stop_sequences"] = request.stop
+        if request.top_k is not None:
+            payload["top_k"] = request.top_k
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
         # Structured output: Anthropic has no `response_format`, but forcing a

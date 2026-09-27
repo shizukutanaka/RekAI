@@ -40,6 +40,11 @@ export interface ChatOptions {
    * accepted too; the server normalizes it to a one-element list.
    */
   stop?: string | string[];
+  /**
+   * Top-k sampling. OpenAI's chat API has no such field; the server forwards
+   * it to Anthropic, Gemini, and Ollama under their own names.
+   */
+  topK?: number;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
 }

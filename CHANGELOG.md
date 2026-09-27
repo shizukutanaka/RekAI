@@ -36,6 +36,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **`top_k` request parameter** on `ChatRequest` and as a RekAI extension on
+  `/v1/chat/completions`. Anthropic (`top_k`), Gemini (`topK`), and Ollama
+  (`top_k` in `options`) all take a top-k bound — a caller had no way to narrow
+  the sampling pool on them; OpenAI's chat API has no such field, so it is
+  *not* forwarded there. It is part of the cache key and semantic bucket like
+  `stop`. Exposed in both SDKs (`top_k=` / `topK`).
 - **Opt-in verify band for the semantic cache** (`REKAI_SEMANTIC_CACHE_VERIFY_*`,
   roadmap O-2). A single cosine threshold forced every candidate to be served
   or dropped on embedding distance alone; similarity is not proof two prompts

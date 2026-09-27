@@ -46,6 +46,13 @@ class ChatRequest(BaseModel):
         "every provider under its own name; a provider's own limit (OpenAI "
         "allows 4) surfaces as that provider's error.",
     )
+    top_k: int | None = Field(
+        default=None,
+        gt=0,
+        description="Top-k sampling. OpenAI's chat API has no such field; it is "
+        "forwarded to Anthropic (`top_k`), Gemini (`topK`), and Ollama "
+        "(`top_k`) under their own names.",
+    )
     cache: bool = Field(default=True, description="Whether this request may be served from cache.")
     fallbacks: list[FallbackTarget] | None = Field(
         default=None,
@@ -145,6 +152,10 @@ class ChatCompletionsRequest(BaseModel):
     max_tokens: int | None = Field(default=None, ge=1)
     max_completion_tokens: int | None = Field(default=None, ge=1)
     stop: str | list[str] | None = None
+    # RekAI extension: top-k sampling for the providers that support it
+    # (Anthropic, Gemini, Ollama). OpenAI's chat API doesn't; sending it to
+    # OpenAI-compatible upstreams would 400.
+    top_k: int | None = Field(default=None, gt=0)
     stream: bool = False
     stream_options: StreamOptions | None = None
     tools: list[dict[str, Any]] | None = None
