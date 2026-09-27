@@ -140,6 +140,10 @@ class GeminiProvider(Provider):
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 total_tokens=meta.get("totalTokenCount", prompt_tokens + completion_tokens),
+                # Thinking models report reasoning as thoughtsTokenCount — a
+                # breakdown of candidatesTokenCount, like OpenAI's
+                # completion_tokens_details.reasoning_tokens.
+                reasoning_tokens=meta.get("thoughtsTokenCount", 0) or 0,
             ),
         )
 
@@ -246,6 +250,7 @@ class GeminiProvider(Provider):
                         total_tokens=last_usage.get(
                             "totalTokenCount", prompt_tokens + completion_tokens
                         ),
+                        reasoning_tokens=last_usage.get("thoughtsTokenCount", 0) or 0,
                     )
                     if last_usage is not None
                     else None
