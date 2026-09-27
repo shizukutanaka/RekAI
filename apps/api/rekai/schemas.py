@@ -95,6 +95,12 @@ class ChatRequest(BaseModel):
         "automatically and ignores it. Per-message placement is also supported "
         "via a message's own cache_control.",
     )
+    user: str | None = Field(
+        default=None,
+        description="End-user id for upstream abuse detection — OpenAI's "
+        "`user`, Anthropic's `metadata.user_id`. Forwarded to providers that "
+        "take one; a routing hint only, so it does not join the cache key.",
+    )
 
     @field_validator("stop", mode="before")
     @classmethod
@@ -178,7 +184,7 @@ class ChatCompletionsRequest(BaseModel):
     tools: list[dict[str, Any]] | None = None
     tool_choice: Any | None = None
     response_format: dict[str, Any] | None = None
-    user: str | None = None  # accepted, ignored
+    user: str | None = None  # forwarded to the provider as its end-user id
     n: int | None = None  # 400 if n > 1 (RekAI returns a single choice)
     provider: str | None = None  # RekAI extension: explicit provider override
     # OpenAI's pre-tools function-calling API (deprecated since 0613 but still
@@ -228,6 +234,13 @@ class AnthropicToolChoice(BaseModel):
     # flag (parallel_tool_calls) lives on the request, not on tool_choice.
 
 
+class AnthropicMetadata(BaseModel):
+    """Messages-API ``metadata`` object — Anthropic defines only ``user_id``,
+    an abuse-detection end-user id (the counterpart of OpenAI's ``user``)."""
+
+    user_id: str | None = None
+
+
 class _AnthropicMessagesBase(BaseModel):
     """Fields shared by `/v1/messages` and `/v1/messages/count_tokens` —
     everything except `max_tokens`, which the counter doesn't require."""
@@ -243,6 +256,7 @@ class _AnthropicMessagesBase(BaseModel):
     stream: bool = False
     tools: list[AnthropicTool] | None = None
     tool_choice: AnthropicToolChoice | None = None
+    metadata: AnthropicMetadata | None = None
     provider: str | None = None  # RekAI extension: explicit provider override
 
 

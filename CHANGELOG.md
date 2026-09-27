@@ -8,6 +8,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **End-user id forwarded to providers.** The accepted-but-ignored `user`
+  field now reaches the provider under its own name — `user` to
+  OpenAI-compatible upstreams, `metadata.user_id` to Anthropic — so
+  provider-side abuse detection sees the caller's end-user id. On the
+  Anthropic-compat surface, `metadata.user_id` maps to it (and now parses
+  instead of being dropped by `extra="allow"`). It's a routing/billing hint,
+  not a response-shaping field, so it does not join the cache key. Gemini and
+  Ollama have no such field and don't receive it.
 - **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
   `cache: false` so you can compare a fresh answer against the cached one.
   It defaults to on; the meta line already marks cache hits.

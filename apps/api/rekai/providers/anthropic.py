@@ -157,6 +157,9 @@ class AnthropicProvider(Provider):
         # order) so everything before it is cached.
         if request.cache_control and payload["messages"]:
             _apply_cache_control(payload["messages"][-1], request.cache_control)
+        if request.user is not None:
+            # Anthropic's abuse-detection end-user id.
+            payload["metadata"] = {"user_id": request.user}
         if stream:
             payload["stream"] = True
         return payload
