@@ -36,6 +36,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **Expiring dynamic API keys**: `POST /admin/keys` accepts
+  `expires_in_seconds` and echoes `expires_at`; `GET /admin/keys` returns
+  `dynamic_expires_at` (masked key → unix timestamp), and the `/admin` page
+  shows each key's expiry plus an optional TTL field on the add form. An
+  expired key fails auth exactly like a revoked one — trial tenants and
+  incident access no longer need a manual revoke (LiteLLM's `expires`
+  equivalent). Store blobs written before expiry existed (a bare key list)
+  migrate to `{key: expires_at|null}` on first write.
 - **Opt-in verify band for the semantic cache** (`REKAI_SEMANTIC_CACHE_VERIFY_*`,
   roadmap O-2). A single cosine threshold forced every candidate to be served
   or dropped on embedding distance alone; similarity is not proof two prompts

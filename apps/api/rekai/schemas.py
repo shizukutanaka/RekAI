@@ -329,13 +329,23 @@ class ErrorResponse(BaseModel):
 
 class AdminKeyRequest(BaseModel):
     key: str = Field(..., min_length=1, description="The raw API key to add.")
+    expires_in_seconds: int | None = Field(
+        default=None,
+        gt=0,
+        description="Optional TTL for the key, in seconds (e.g. 86400 = 1 day).",
+    )
 
 
 class AdminKeyList(BaseModel):
     static: list[str] = Field(description="Masked REKAI_API_KEYS entries.")
     dynamic: list[str] = Field(description="Masked runtime-added keys.")
+    dynamic_expires_at: dict[str, float] = Field(
+        default_factory=dict,
+        description="Masked dynamic key → expiry unix timestamp (expiring keys only).",
+    )
 
 
 class AdminKeyResponse(BaseModel):
     status: Literal["added", "revoked"]
     key: str
+    expires_at: float | None = None

@@ -1073,7 +1073,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return rate_limited
             if not _admin_authorized(request):
                 return _admin_auth_error()
-            dynamic = await key_store.list_keys() if key_store is not None else []
+            expiries = await key_store.key_expiries() if key_store is not None else {}
             admin_logger.info(
                 "admin listed keys ip=%s",
                 _admin_ip(request),
@@ -1081,7 +1081,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             return AdminKeyList(
                 static=[mask_key(k) for k in settings.api_key_list],
-                dynamic=[mask_key(k) for k in dynamic],
+                dynamic=[mask_key(k) for k in expiries],
+                dynamic_expires_at={
+                    mask_key(k): ts for k, ts in expiries.items() if ts is not None
+                },
             )
 
         @app.post("/admin/keys", response_model=AdminKeyResponse, tags=["admin"], status_code=201)
@@ -1093,7 +1096,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return _admin_auth_error()
             if key_store is None:
                 return _dynamic_keys_disabled_error()
-            await key_store.add(payload.key)
+            expires_at = (
+                time.time() + payload.expires_in_seconds
+                if payload.expires_in_seconds is not None
+                else None
+            )
+            await key_store.add(payload.key, expires_at=expires_at)
             masked = mask_key(payload.key)
             admin_logger.info(
                 "admin added key=%s ip=%s",
@@ -1101,7 +1109,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 _admin_ip(request),
                 extra={"admin_action": "add_key", "key": masked, "ip": _admin_ip(request)},
             )
-            return AdminKeyResponse(status="added", key=masked)
+            return AdminKeyResponse(status="added", key=masked, expires_at=expires_at)
 
         @app.delete("/admin/keys/{key}", response_model=AdminKeyResponse, tags=["admin"])
         async def revoke_admin_key(key: str, request: Request):
