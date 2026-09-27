@@ -23,6 +23,12 @@ export interface ChatOptions {
   maxTokens?: number;
   cache?: boolean;
   fallbacks?: FallbackTarget[];
+  /**
+   * Escalate through `fallbacks` on judged-inadequate answers too, not only on
+   * upstream errors. Non-streaming chat only; each judged attempt costs one
+   * extra verdict call on that provider.
+   */
+  cascade?: boolean;
   providerKey?: string;
   gatewayKey?: string;
   /** OpenAI-style tool/function definitions, passed through. */
@@ -124,6 +130,8 @@ export interface UsageSummary {
   retries_total: number;
   /** Providers parked after a 429 or repeated 5xx. */
   cooldowns_total: number;
+  /** Answers judged inadequate by the cascade judge and escalated. */
+  cascade_escalations_total: number;
   /** Per-client volume and spend, keyed by the non-reversible client id. */
   usage_by_client: Record<
     string,

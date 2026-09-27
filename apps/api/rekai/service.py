@@ -169,6 +169,58 @@ _SEMANTIC_VERIFY_PROMPT = (
 )
 
 
+async def _judge_answer(
+    provider: Provider,
+    provider_name: str,
+    request: ChatRequest,
+    question: str,
+    answer: str,
+    api_key: str | None,
+    settings: Settings,
+    operation: str,
+) -> bool:
+    """Yes/no adequacy verdict from the provider itself — one tiny call.
+
+    Shared by the semantic-cache verify band and cascade quality routing: both
+    ask whether ``answer`` actually addresses ``question``. A few output tokens
+    on the provider that produced (or would produce) the real answer, metered
+    under ``operation`` so the two uses stay distinguishable in the latency
+    histogram. Raises ProviderError on upstream failure; callers decide the
+    direction of failure (verify fails closed to a miss, cascade fails open to
+    the answer it already has).
+    """
+    verifier = request.model_copy(
+        update={
+            "messages": [
+                ChatMessage(
+                    role="user",
+                    content=_SEMANTIC_VERIFY_PROMPT.format(question=question, answer=answer),
+                )
+            ],
+            # A yes/no question: no tools, no formatting, deterministic, a few
+            # tokens, and never itself eligible for cache or fallback.
+            "temperature": 0.0,
+            "max_tokens": 4,
+            "tools": None,
+            "tool_choice": None,
+            "response_format": None,
+            "cache_control": None,
+            "fallbacks": None,
+            "cascade": False,
+            "cache": False,
+        }
+    )
+    started = time.perf_counter()
+    result = await provider.chat(verifier, api_key)
+    metrics.observe_provider_duration(provider_name, operation, time.perf_counter() - started)
+    usage = result.usage or Usage()
+    metrics.record_tokens(usage.total_tokens, provider_name)
+    metrics.record_cost(
+        estimate_cost(provider_name, result.model, usage, settings.pricing_override_dict)
+    )
+    return (result.content or "").strip().lower().startswith("yes")
+
+
 async def _verify_semantic_hit(
     provider: Provider,
     provider_name: str,
@@ -193,37 +245,16 @@ async def _verify_semantic_hit(
         return False
     if not answer:
         return False
-    verifier = request.model_copy(
-        update={
-            "messages": [
-                ChatMessage(
-                    role="user",
-                    content=_SEMANTIC_VERIFY_PROMPT.format(question=question, answer=answer),
-                )
-            ],
-            # A yes/no question: no tools, no formatting, deterministic, a few
-            # tokens, and never itself eligible for cache or fallback.
-            "temperature": 0.0,
-            "max_tokens": 4,
-            "tools": None,
-            "tool_choice": None,
-            "response_format": None,
-            "cache_control": None,
-            "fallbacks": None,
-            "cache": False,
-        }
+    return await _judge_answer(
+        provider,
+        provider_name,
+        request,
+        question,
+        answer,
+        api_key,
+        settings,
+        "semantic_verify",
     )
-    started = time.perf_counter()
-    result = await provider.chat(verifier, api_key)
-    metrics.observe_provider_duration(
-        provider_name, "semantic_verify", time.perf_counter() - started
-    )
-    usage = result.usage or Usage()
-    metrics.record_tokens(usage.total_tokens, provider_name)
-    metrics.record_cost(
-        estimate_cost(provider_name, result.model, usage, settings.pricing_override_dict)
-    )
-    return (result.content or "").strip().lower().startswith("yes")
 
 
 def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
@@ -456,6 +487,45 @@ async def handle_chat(
         )
         metrics.record_tokens(usage.total_tokens, attempt.provider_name)
         metrics.record_cost(cost_usd)
+
+        # Cascade (opt-in, non-streaming only): the fallback chain doubles as a
+        # quality ladder — cheap tier answers, judge verifies, inadequate
+        # answers escalate. The judged-inadequate response is spent (its tokens
+        # and cost are recorded above) but is deliberately NOT cached or
+        # returned; the provider itself is not "failed" — no cooldown, no
+        # provider_error — this was a quality verdict, not an outage.
+        if request.cascade and index + 1 < len(attempts):
+            answer = (result.content or "").strip()
+            if not answer:
+                adequate = False  # an empty completion is never adequate
+            else:
+                try:
+                    adequate = await _judge_answer(
+                        attempt.provider,
+                        attempt.provider_name,
+                        attempt_request,
+                        _prompt_text(request),
+                        answer,
+                        api_key,
+                        settings,
+                        "cascade_judge",
+                    )
+                except ProviderError:
+                    # Judge broken -> keep the answer in hand rather than burn
+                    # the next tier's budget on a verdict outage.
+                    adequate = True
+            if not adequate:
+                # An exhausted deadline serves what we have instead of turning
+                # a quality escalation into an error for the caller.
+                left = remaining_budget(deadline)
+                if left is None or left > 0:
+                    metrics.record_cascade()
+                    logger.info(
+                        "cascade: %s answer judged inadequate; escalating to %s",
+                        attempt.provider_name,
+                        attempts[index + 1].provider_name,
+                    )
+                    continue
 
         response = ChatResponse(
             id=f"rekai-{uuid.uuid4().hex[:24]}",

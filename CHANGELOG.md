@@ -6,6 +6,24 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Cascade routing (O-3): `"cascade": true` escalates on inadequate answers,
+  not just failures.** A chat request with `cascade` set treats its `fallbacks`
+  chain (or the server chain) as a quality ladder: after a provider answers,
+  the provider itself judges the answer with one tiny yes/no call (the same
+  verdict primitive the semantic-cache verify band uses), and a judged- or
+  empty-inadequate answer moves to the next target exactly like a 5xx would —
+  `fallback_used` set, next provider serves. The judged answer is spent (tokens
+  and cost recorded) but never cached and never returned; the provider is not
+  parked and no error is recorded, since this is a quality verdict, not an
+  outage. Judge failures fail open to the answer in hand. Non-streaming
+  `/v1/chat` only; per-request opt-in only (no server default — every judged
+  attempt costs one extra verdict call). Counted in
+  `rekai_cascade_escalations_total` and `/v1/usage`'s
+  `cascade_escalations_total` (a subset of `fallbacks_total`), shown on the
+  usage dashboard, and exposed in both SDKs (`cascade` on `chat()` /
+  `ChatOptions`).
+
 ### Fixed
 - **`_verify_semantic_hit` no longer raises `TypeError` on every verified
   lookup.** The semantic-verify feature and the per-provider token metric

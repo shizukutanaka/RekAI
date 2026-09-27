@@ -118,6 +118,45 @@ similarity index rather than answering "roughly as well". Failing loudly is the
 safer default; a same-model fallback (the identical model served by a second
 provider) is the only coherent version and hasn't been needed yet.
 
+### Cascade: quality escalation, not just failure escalation
+
+`fallbacks` escalate on upstream *failure*. Setting `"cascade": true` on a chat
+request adds escalation on upstream *quality*: after a successful response, the
+provider that produced it is asked (one extra call, a handful of output tokens,
+`temperature 0`) whether the answer actually addresses the prompt — the same
+yes/no verdict the semantic cache's verify band uses. A "yes" (or an
+unparseable or failed verdict — the judge **fails open** to the answer already
+in hand) returns the response unchanged. A "no" — or an empty completion —
+moves to the next target in the chain exactly as a 5xx would: `fallback_used`
+is set and the next provider answers instead.
+
+This is the request-level version of RouteLLM-style cost×quality routing —
+answer on the cheap tier first, pay for the strong tier only when the answer
+wasn't good enough. The chain is the same `fallbacks` list (or the server
+chain); ordering cheapest-first makes it a cascade. Distinctions that matter:
+
+- **No fallback is misused.** The provider isn't parked, no `provider_error` is
+  recorded — it answered fine, its answer just wasn't good enough. Only
+  `rekai_cascade_escalations_total` counts the event (also in `/v1/usage` as
+  `cascade_escalations_total`, a subset of `fallbacks_total`).
+- **The judged-inadequate answer is spent but never cached or returned** —
+  caching it would serve the bad answer to the next identical prompt for the
+  full TTL. Its tokens and cost are still recorded.
+- **Fail-open everywhere.** A judge error serves the answer in hand rather than
+  spending the next tier's budget on a verdict outage (the opposite asymmetry
+  from semantic verify, where a wrong cached answer is worse than a fresh
+  call). An exhausted request deadline likewise serves what it has.
+- **Non-streaming `/v1/chat` only**, and opt-in per request — there is no
+  server default, because every judged attempt costs one extra verdict call
+  (~4 output tokens) and that spend should be the caller's choice. Streams
+  have no completed answer to judge.
+- **The judge is the responding provider itself.** RekAI has no second model to
+  judge with; a self-verdict is weaker than an independent judge (it can't see
+  its own blind spots) but needs no extra credentials, latency, or plumbing.
+  The verdict prompt is deliberately answer-independence-neutral ("does the
+  proposed answer address the question"), which worked well enough for the
+  verify band to reuse.
+
 ### Per-try timeout vs. request deadline
 
 `REKAI_REQUEST_TIMEOUT_SECONDS` reads like a request bound but is a **per-call**

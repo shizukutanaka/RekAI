@@ -134,6 +134,7 @@ export class RekAIClient {
     if (opts.provider != null) payload.provider = opts.provider;
     if (opts.maxTokens != null) payload.max_tokens = opts.maxTokens;
     if (opts.fallbacks != null) payload.fallbacks = opts.fallbacks;
+    if (opts.cascade != null) payload.cascade = opts.cascade;
     if (opts.tools != null) payload.tools = opts.tools;
     if (opts.toolChoice != null) payload.tool_choice = opts.toolChoice;
     if (opts.responseFormat != null) payload.response_format = opts.responseFormat;

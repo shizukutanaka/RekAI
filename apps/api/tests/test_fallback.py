@@ -455,3 +455,128 @@ def test_fallback_targets_without_enabled_warns(capsys) -> None:
     # is silently ignored without this warning.
     create_app(Settings(environment="test", default_provider="echo", fallback_targets="echo:x"))
     assert "targets are ignored" in capsys.readouterr().out
+
+
+# --- cascade: quality escalation through the fallback chain (O-3) -------------
+# `fallbacks` escalate on upstream failure; `cascade=True` adds escalation on a
+# *successful* answer the provider itself judges inadequate.
+
+
+class CascadingProvider(Provider):
+    """Answers the real request, and answers its own judge prompt with a
+    canned verdict ("yes" / "no" / "raise" to simulate the judge failing)."""
+
+    requires_key = False
+
+    def __init__(self, name: str, answer: str = "a thin answer", verdict: str = "no") -> None:
+        self.name = name
+        self.answer = answer
+        self.verdict = verdict
+        self.calls = 0
+        self.judge_calls = 0
+
+    async def chat(self, request, api_key) -> ProviderResult:
+        content = request.messages[-1].content or ""
+        if "Proposed answer:" in content:
+            self.judge_calls += 1
+            if self.verdict == "raise":
+                raise ProviderError("judge down", status_code=503)
+            return ProviderResult(content=self.verdict, model=request.model)
+        self.calls += 1
+        return ProviderResult(content=self.answer, model=request.model)
+
+
+def _cascade_req(**kwargs) -> ChatRequest:
+    kwargs.setdefault("cascade", True)
+    kwargs.setdefault("fallbacks", [{"provider": "echo", "model": "echo"}])
+    return _req(**kwargs)
+
+
+async def test_cascade_escalates_on_judged_inadequate_answer() -> None:
+    provider = CascadingProvider("cheap", verdict="no")
+    register_provider(provider)
+    resp = await handle_chat(
+        _cascade_req(model="x", provider="cheap"), None, _settings(), NullCache()
+    )
+    assert resp.provider == "echo" and resp.fallback_used is True
+    assert provider.calls == 1 and provider.judge_calls == 1
+
+
+async def test_cascade_serves_judged_adequate_answer() -> None:
+    provider = CascadingProvider("adequate", verdict="yes")
+    register_provider(provider)
+    resp = await handle_chat(
+        _cascade_req(model="x", provider="adequate"), None, _settings(), NullCache()
+    )
+    assert resp.provider == "adequate" and resp.fallback_used is False
+    assert resp.content == "a thin answer"
+    assert provider.calls == 1 and provider.judge_calls == 1
+
+
+async def test_cascade_fails_open_when_the_judge_errors() -> None:
+    # A judge outage must not burn the next tier's budget: serve the answer in
+    # hand. (Opposite asymmetry from semantic verify, which fails closed to a
+    # miss because serving a wrong cached answer is worse than a fresh call.)
+    provider = CascadingProvider("judgebroken", verdict="raise")
+    register_provider(provider)
+    resp = await handle_chat(
+        _cascade_req(model="x", provider="judgebroken"), None, _settings(), NullCache()
+    )
+    assert resp.provider == "judgebroken" and resp.fallback_used is False
+    assert provider.judge_calls == 1
+
+
+async def test_cascade_with_no_fallbacks_never_judges() -> None:
+    provider = CascadingProvider("solo", verdict="no")
+    register_provider(provider)
+    resp = await handle_chat(
+        _req(model="x", provider="solo", cascade=True), None, _settings(), NullCache()
+    )
+    assert resp.provider == "solo"
+    assert provider.judge_calls == 0
+
+
+async def test_no_judge_calls_when_cascade_is_off() -> None:
+    provider = CascadingProvider("plain", verdict="no")
+    register_provider(provider)
+    resp = await handle_chat(
+        _req(model="x", provider="plain", fallbacks=[{"provider": "echo"}]),
+        None,
+        _settings(),
+        NullCache(),
+    )
+    assert resp.provider == "plain" and resp.fallback_used is False
+    assert provider.judge_calls == 0
+
+
+async def test_cascade_escalates_an_empty_answer_without_a_judge_call() -> None:
+    provider = CascadingProvider("empty", answer="", verdict="yes")
+    register_provider(provider)
+    resp = await handle_chat(
+        _cascade_req(model="x", provider="empty"), None, _settings(), NullCache()
+    )
+    assert resp.provider == "echo" and resp.fallback_used is True
+    assert provider.judge_calls == 0  # nothing to judge
+
+
+async def test_cascade_still_escalates_on_upstream_error_without_judging() -> None:
+    # The original fallback semantics are untouched: a 5xx skips the judge
+    # entirely — there is no answer to judge.
+    provider = FlakyProvider("cascade5xx", 503)
+    register_provider(provider)
+    resp = await handle_chat(
+        _cascade_req(model="x", provider="cascade5xx"), None, _settings(), NullCache()
+    )
+    assert resp.provider == "echo" and resp.fallback_used is True
+
+
+async def test_cascade_escalations_are_counted() -> None:
+    from rekai.metrics import metrics
+
+    provider = CascadingProvider("cheap-count", verdict="no")
+    register_provider(provider)
+    before = metrics.cascade_escalations_total
+    await handle_chat(
+        _cascade_req(model="x", provider="cheap-count"), None, _settings(), NullCache()
+    )
+    assert metrics.cascade_escalations_total == before + 1

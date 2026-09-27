@@ -108,6 +108,9 @@ class Metrics:
         self.fallbacks_total = 0
         self.retries_total = 0
         self.cooldowns_total = 0
+        # Quality escalations: a cascade (request.cascade) attempt whose answer
+        # was judged inadequate by the provider itself, not an upstream error.
+        self.cascade_escalations_total = 0
         self.tokens_total = 0
         self.cost_usd_total = 0.0
         self.requests_by_provider: dict[str, int] = {}
@@ -221,6 +224,13 @@ class Metrics:
         with self._lock:
             self.cooldowns_total += 1
 
+    def record_cascade(self) -> None:
+        """Count one quality escalation: the answer succeeded upstream but the
+        cascade judge ruled it inadequate, so the request moves to the next
+        fallback target."""
+        with self._lock:
+            self.cascade_escalations_total += 1
+
     def record_tokens(self, count: int, provider: str) -> None:
         with self._lock:
             self.tokens_total += count
@@ -319,6 +329,7 @@ class Metrics:
             self.fallbacks_total = snapshot.get("fallbacks_total", 0)
             self.retries_total = snapshot.get("retries_total", 0)
             self.cooldowns_total = snapshot.get("cooldowns_total", 0)
+            self.cascade_escalations_total = snapshot.get("cascade_escalations_total", 0)
             self.tokens_total = snapshot.get("tokens_total", 0)
             self.cost_usd_total = snapshot.get("cost_usd_total", 0.0)
             self.requests_by_provider = dict(snapshot.get("requests_by_provider", {}))
@@ -344,6 +355,7 @@ class Metrics:
                 "fallbacks_total": self.fallbacks_total,
                 "retries_total": self.retries_total,
                 "cooldowns_total": self.cooldowns_total,
+                "cascade_escalations_total": self.cascade_escalations_total,
                 "tokens_total": self.tokens_total,
                 "cost_usd_total": round(self.cost_usd_total, 6),
                 "requests_by_provider": dict(self.requests_by_provider),
@@ -388,6 +400,10 @@ class Metrics:
             "# HELP rekai_cooldowns_total Times a provider was parked after a 429.",
             "# TYPE rekai_cooldowns_total counter",
             f"rekai_cooldowns_total {self.cooldowns_total}",
+            "# HELP rekai_cascade_escalations_total Answers judged inadequate by "
+            "the cascade judge and escalated to the next fallback target.",
+            "# TYPE rekai_cascade_escalations_total counter",
+            f"rekai_cascade_escalations_total {self.cascade_escalations_total}",
             "# HELP rekai_tokens_total Total tokens accounted across responses.",
             "# TYPE rekai_tokens_total counter",
             f"rekai_tokens_total {self.tokens_total}",
@@ -486,6 +502,7 @@ _SCALAR_COUNTERS = (
     "fallbacks_total",
     "retries_total",
     "cooldowns_total",
+    "cascade_escalations_total",
     "tokens_total",
 )
 

@@ -200,6 +200,7 @@ export interface UsageSummary {
   fallbacks_total: number;
   retries_total: number;
   cooldowns_total: number;
+  cascade_escalations_total?: number;
   tokens_total: number;
   cost_usd_total: number;
   requests_by_provider: Record<string, number>;

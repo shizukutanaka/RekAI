@@ -52,6 +52,16 @@ class ChatRequest(BaseModel):
         description="Ordered fallbacks tried on upstream (5xx) errors. "
         "Overrides the server default chain.",
     )
+    cascade: bool = Field(
+        default=False,
+        description="Also treat the fallback chain as a quality escalation "
+        "ladder: when true, a successful answer is judged by the responding "
+        "provider itself (one small yes/no call) and an inadequate answer "
+        "escalates to the next fallback target. Fallbacks keep their existing "
+        "meaning — upstream errors still escalate whether or not cascade is "
+        "set. Applies to non-streaming chat only; each judged attempt costs "
+        "one extra verdict call on that provider.",
+    )
     tools: list[dict[str, Any]] | None = Field(
         default=None,
         description="OpenAI-style tool/function definitions, passed through to the provider.",
@@ -285,6 +295,11 @@ class UsageSummary(BaseModel):
     fallbacks_total: int
     retries_total: int = 0
     cooldowns_total: int = 0
+    cascade_escalations_total: int = Field(
+        default=0,
+        description="Times a cascade-judged-inadequate answer was escalated "
+        "to the next fallback target (subset of fallbacks_total).",
+    )
     tokens_total: int
     cost_usd_total: float
     requests_by_provider: dict[str, int]

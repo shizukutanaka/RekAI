@@ -96,6 +96,16 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
 - 併せて `docs/architecture.md` の Semantic cache 節を更新。
 
 ### O-3. コスト×品質カスケードルーティング
+> ✅ **完了**: `ChatRequest.cascade` (既定 false、リクエスト単位 opt-in) で、
+> 成功したが不十分と判定された応答も次の fallback ターゲットへエスカレーション
+> (非ストリーム `/v1/chat` のみ)。信頼判定は `_judge_answer` — 応答した
+> プロバイダ自身への yes/no 判定呼出 (semantic-cache verify band と同じ判定
+> プリミティブを共通化、operation ラベル `cascade_judge` で区別)。判定失敗は
+> fail-open で手元の応答を返す (verify band の fail-closed と逆の非対称 —
+> エスカレーションは余計なコスト、誤キャッシュ応答は誤り)。不十分応答は
+> キャッシュせず・返さず、トークン/コストのみ計上。`rekai_cascade_escalations_total`
+> (`/v1/usage` の `cascade_escalations_total`、`fallbacks_total` の部分集合)。
+> 既存 fallbacks の 5xx/429 意味は不変。仕様は docs/architecture.md の Cascade 節。
 - 既存 `fallbacks` 機構 (service.py `_build_attempts`) を土台に、「安い先行モデルで
   試し、低信頼応答のときだけ上位モデルへエスカレーション」を opt-in で追加。
   信頼判定の設計 (長さ/logprobs は取れないので、応答の自己申告 or 分類器) が本体。

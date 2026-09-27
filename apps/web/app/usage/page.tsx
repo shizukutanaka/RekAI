@@ -59,6 +59,10 @@ export default function UsagePage() {
         { label: "Fallbacks", value: usage.fallbacks_total.toLocaleString() },
         { label: "Retries", value: (usage.retries_total ?? 0).toLocaleString() },
         { label: "Cooldowns", value: (usage.cooldowns_total ?? 0).toLocaleString() },
+        {
+          label: "Cascade escalations",
+          value: (usage.cascade_escalations_total ?? 0).toLocaleString(),
+        },
         { label: "Errors", value: usage.errors_total.toLocaleString() },
       ]
     : [];

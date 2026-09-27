@@ -184,6 +184,7 @@ def _build_payload(
     tool_choice: Any | None = None,
     response_format: dict[str, Any] | None = None,
     stop: list[str] | str | None = None,
+    cascade: bool | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -197,6 +198,8 @@ def _build_payload(
         payload["max_tokens"] = max_tokens
     if fallbacks is not None:
         payload["fallbacks"] = fallbacks
+    if cascade is not None:
+        payload["cascade"] = cascade
     if tools is not None:
         payload["tools"] = tools
     if tool_choice is not None:
@@ -295,6 +298,7 @@ class RekAIClient:
         tool_choice: Any | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
+        cascade: bool | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -308,6 +312,7 @@ class RekAIClient:
             tool_choice,
             response_format,
             stop,
+            cascade=cascade,
         )
 
     @staticmethod
@@ -359,6 +364,7 @@ class RekAIClient:
         max_tokens: int | None = None,
         cache: bool = True,
         fallbacks: list[dict[str, Any]] | None = None,
+        cascade: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any | None = None,
         response_format: dict[str, Any] | None = None,
@@ -371,6 +377,12 @@ class RekAIClient:
 
         ``stop`` is one or more sequences that end generation, as OpenAI's
         ``stop`` (a bare string is fine; the server normalizes it to a list).
+
+        ``cascade=True`` treats ``fallbacks`` as a quality escalation ladder:
+        a successful-but-inadequate answer (judged by the provider itself)
+        escalates to the next target, not only a failed call. Non-streaming
+        only; each judged attempt costs one extra verdict call on that
+        provider.
 
         ``idempotency_key`` is sent as the ``Idempotency-Key`` header so the
         server replays the first response on a retry instead of re-processing.
@@ -389,6 +401,7 @@ class RekAIClient:
             tool_choice,
             response_format,
             stop,
+            cascade=cascade,
         )
         headers = _build_headers(
             self._provider_key,
@@ -591,6 +604,7 @@ class AsyncRekAIClient:
         max_tokens: int | None = None,
         cache: bool = True,
         fallbacks: list[dict[str, Any]] | None = None,
+        cascade: bool | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any | None = None,
         response_format: dict[str, Any] | None = None,
@@ -599,7 +613,8 @@ class AsyncRekAIClient:
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
     ) -> ChatResult:
-        """Run a completion. ``idempotency_key`` mirrors :meth:`RekAIClient.chat`."""
+        """Run a completion. ``idempotency_key`` and ``cascade`` mirror
+        :meth:`RekAIClient.chat`."""
         payload = _build_payload(
             model,
             messages,
@@ -612,6 +627,7 @@ class AsyncRekAIClient:
             tool_choice,
             response_format,
             stop,
+            cascade=cascade,
         )
         headers = _build_headers(
             self._provider_key,
