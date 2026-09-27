@@ -69,7 +69,15 @@ class EchoProvider(Provider):
         # echo computes exact usage, so report it (not an estimate).
         yield StreamEvent(usage=result.usage, finish_reason=result.finish_reason)
 
-    async def embed(self, inputs: list[str], model: str, api_key: str | None) -> EmbeddingResult:
+    async def embed(
+        self,
+        inputs: list[str],
+        model: str,
+        api_key: str | None,
+        *,
+        dimensions: int | None = None,
+        encoding_format: str | None = None,
+    ) -> EmbeddingResult:
         tokens = sum(_count_tokens(t) for t in inputs)
         return EmbeddingResult(
             embeddings=[_embed_text(t) for t in inputs],

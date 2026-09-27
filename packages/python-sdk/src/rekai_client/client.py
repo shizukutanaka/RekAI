@@ -479,11 +479,20 @@ class RekAIClient:
         cache: bool = True,
         provider_key: str | None = None,
         gateway_key: str | None = None,
+        dimensions: int | None = None,
+        encoding_format: str | None = None,
     ) -> EmbeddingsResult:
-        """Create embeddings for a string or list of strings."""
+        """Create embeddings for a string or list of strings.
+
+        ``dimensions``/``encoding_format`` map to OpenAI's embeddings fields
+        (supported providers only)."""
         payload: dict[str, Any] = {"model": model, "input": input, "cache": cache}
         if provider is not None:
             payload["provider"] = provider
+        if dimensions is not None:
+            payload["dimensions"] = dimensions
+        if encoding_format is not None:
+            payload["encoding_format"] = encoding_format
         resp = self._send(
             "POST", "/v1/embeddings", json=payload, headers=self._headers(provider_key, gateway_key)
         )
@@ -710,11 +719,20 @@ class AsyncRekAIClient:
         cache: bool = True,
         provider_key: str | None = None,
         gateway_key: str | None = None,
+        dimensions: int | None = None,
+        encoding_format: str | None = None,
     ) -> EmbeddingsResult:
-        """Create embeddings for a string or list of strings."""
+        """Create embeddings for a string or list of strings.
+
+        ``dimensions``/``encoding_format`` map to OpenAI's embeddings fields
+        (supported providers only)."""
         payload: dict[str, Any] = {"model": model, "input": input, "cache": cache}
         if provider is not None:
             payload["provider"] = provider
+        if dimensions is not None:
+            payload["dimensions"] = dimensions
+        if encoding_format is not None:
+            payload["encoding_format"] = encoding_format
         resp = await self._send(
             "POST", "/v1/embeddings", json=payload, headers=self._headers(provider_key, gateway_key)
         )

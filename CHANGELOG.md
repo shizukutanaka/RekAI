@@ -7,6 +7,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **`dimensions`/`encoding_format` on `POST /v1/embeddings` now reach the
+  provider instead of being silently ignored.** `EmbeddingsRequest` accepted
+  only the OpenAI core fields, so a caller asking text-embedding-3-small for
+  a 256-dim vector silently got the 1536-dim one — the request schema's
+  default `extra="ignore"` dropped the sizing field. The provider `embed()`
+  contract gained the two keyword args: OpenAI-compatible providers forward
+  both verbatim, Gemini maps `dimensions` to its `outputDimensionality`,
+  Ollama and echo ignore them (no upstream equivalent). The embeddings cache
+  key now mixes both fields in, so differently-sized results can't collide;
+  both SDKs expose them (`dimensions=`, `encoding_format=` / `dimensions`,
+  `encodingFormat`).
 - **`_verify_semantic_hit` no longer raises `TypeError` on every verified
   lookup.** The semantic-verify feature and the per-provider token metric
   landed through separate PRs whose CI each passed — but the verify helper
