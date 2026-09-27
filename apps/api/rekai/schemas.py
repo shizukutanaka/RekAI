@@ -54,6 +54,19 @@ class ChatRequest(BaseModel):
         "stay forward-compatible; an unsupported tier surfaces as the "
         "provider's own error. Forwarded to OpenAI-compatible providers only.",
     )
+    prompt_cache_key: str | None = Field(
+        default=None,
+        description="OpenAI's prompt-cache affinity key: requests sharing it "
+        "are routed to the same cache backend for better prefix-cache hits. A "
+        "routing hint, not a response input — excluded from RekAI's own cache "
+        "key. Forwarded to OpenAI-compatible providers only.",
+    )
+    prompt_cache_retention: str | None = Field(
+        default=None,
+        description="OpenAI's prompt-cache retention ('in-memory' default, "
+        "'24h' extended on supported models). Also a routing/lifecycle hint — "
+        "excluded from RekAI's cache key. OpenAI-compatible providers only.",
+    )
     web_search_options: dict | None = Field(
         default=None,
         description="OpenAI's `web_search_options` — search context size, "
@@ -172,6 +185,8 @@ class ChatCompletionsRequest(BaseModel):
     max_completion_tokens: int | None = Field(default=None, ge=1)
     stop: str | list[str] | None = None
     service_tier: str | None = None
+    prompt_cache_key: str | None = None
+    prompt_cache_retention: str | None = None
     web_search_options: dict[str, Any] | None = None
     stream: bool = False
     stream_options: StreamOptions | None = None

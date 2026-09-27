@@ -103,6 +103,10 @@ class OpenAIProvider(Provider):
             payload["stop"] = request.stop
         if request.service_tier is not None:
             payload["service_tier"] = request.service_tier
+        if request.prompt_cache_key is not None:
+            payload["prompt_cache_key"] = request.prompt_cache_key
+        if request.prompt_cache_retention is not None:
+            payload["prompt_cache_retention"] = request.prompt_cache_retention
         if request.tools is not None:
             payload["tools"] = request.tools
         if request.tool_choice is not None:

@@ -45,6 +45,12 @@ export interface ChatOptions {
    * 'scale'). Forwarded to OpenAI-compatible providers only.
    */
   serviceTier?: string;
+  /** OpenAI's prompt_cache_key — affinity hint routing same-keyed requests to
+   * the same prompt-cache backend. OpenAI-compatible providers only. */
+  promptCacheKey?: string;
+  /** OpenAI's prompt_cache_retention ('in-memory' default, '24h' extended).
+   * OpenAI-compatible providers only. */
+  promptCacheRetention?: string;
   /** OpenAI's `web_search_options` — hosted web-search config (context size,
    * user location). OpenAI-compatible providers only. */
   webSearchOptions?: Record<string, unknown>;

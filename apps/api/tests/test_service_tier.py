@@ -109,3 +109,59 @@ def test_compat_maps_service_tier() -> None:
         service_tier="priority",
     )
     assert to_chat_request(req).service_tier == "priority"
+
+
+# --- prompt_cache_key / prompt_cache_retention -----------------------------
+
+
+def test_prompt_cache_fields_map_through_compat() -> None:
+    req = ChatCompletionsRequest.model_validate(
+        {
+            "model": "m",
+            "messages": [{"role": "user", "content": "hi"}],
+            "prompt_cache_key": "tenant-7",
+            "prompt_cache_retention": "24h",
+        }
+    )
+    chat = to_chat_request(req)
+    assert chat.prompt_cache_key == "tenant-7"
+    assert chat.prompt_cache_retention == "24h"
+
+
+def test_prompt_cache_fields_absent_by_default() -> None:
+    req = ChatCompletionsRequest.model_validate(
+        {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
+    )
+    chat = to_chat_request(req)
+    assert chat.prompt_cache_key is None
+    assert chat.prompt_cache_retention is None
+
+
+def test_prompt_cache_fields_not_in_cache_key() -> None:
+    """Routing hints don't change the response — two requests differing only
+    in cache affinity must share RekAI's cache entry."""
+    a = _req(prompt_cache_key="tenant-a", prompt_cache_retention="24h")
+    b = _req(prompt_cache_key="tenant-b", prompt_cache_retention="in-memory")
+    assert cache_key(a, "openai") == cache_key(b, "openai")
+    assert semantic_bucket(a, "openai", "c") == semantic_bucket(b, "openai", "c")
+
+
+@pytest.mark.asyncio
+async def test_prompt_cache_fields_reach_openai(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    await OpenAIProvider().chat(
+        _req(prompt_cache_key="tenant-7", prompt_cache_retention="24h"),
+        api_key="sk-x",
+    )
+    assert _Client.captured["prompt_cache_key"] == "tenant-7"
+    assert _Client.captured["prompt_cache_retention"] == "24h"
+
+
+@pytest.mark.asyncio
+async def test_prompt_cache_fields_not_sent_to_others(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    req = _req(prompt_cache_key="tenant-7", prompt_cache_retention="24h")
+    for provider in (AnthropicProvider, GeminiProvider, OllamaProvider):
+        await provider().chat(req, api_key="sk-x")
+        assert "prompt_cache_key" not in _Client.captured
+        assert "prompt_cache_retention" not in _Client.captured

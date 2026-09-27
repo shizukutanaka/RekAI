@@ -139,6 +139,9 @@ export class RekAIClient {
     if (opts.responseFormat != null) payload.response_format = opts.responseFormat;
     if (opts.stop != null) payload.stop = opts.stop;
     if (opts.serviceTier != null) payload.service_tier = opts.serviceTier;
+    // OpenAI prompt-cache affinity hints — routing only, not response inputs.
+    if (opts.promptCacheKey != null) payload.prompt_cache_key = opts.promptCacheKey;
+    if (opts.promptCacheRetention != null) payload.prompt_cache_retention = opts.promptCacheRetention;
     // OpenAI's hosted web-search config; OpenAI-compatible providers only.
     if (opts.webSearchOptions != null) payload.web_search_options = opts.webSearchOptions;
     return payload;
