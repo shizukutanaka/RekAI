@@ -28,6 +28,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   arrive.
 
 ### Fixed
+- Provider `httpx.AsyncClient` connection pools are now closed on app shutdown
+  via `Provider.aclose()` in the lifespan teardown — previously the pooled
+  sockets were severed un-gracefully when the loop ended.
 - **`dimensions`/`encoding_format` on `POST /v1/embeddings` now reach the
   provider instead of being silently ignored.** `EmbeddingsRequest` accepted
   only the OpenAI core fields, so a caller asking text-embedding-3-small for

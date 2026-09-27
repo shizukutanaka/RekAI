@@ -648,6 +648,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             with contextlib.suppress(asyncio.CancelledError):
                 await flush_task
             await metrics_store.save(metrics.snapshot())
+            # Drain provider connection pools so in-flight connections close
+            # politely instead of being severed when the loop ends.
+            for pname in provider_names():
+                provider = get_provider(pname)
+                if provider is not None:
+                    await provider.aclose()
 
     app = FastAPI(
         title="RekAI",

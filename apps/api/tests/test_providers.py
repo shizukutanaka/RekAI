@@ -54,9 +54,9 @@ async def test_listed_chat_models_are_priced_and_routable() -> None:
     for provider_name, provider in [("openai", OpenAIProvider()), ("gemini", GeminiProvider())]:
         for model in await provider.list_models(None):
             assert price_for_model(model) is not None, f"{model} advertised but unpriced"
-            assert resolve_provider(None, model, settings) == provider_name, (
-                f"{model} advertised by {provider_name} but routes elsewhere"
-            )
+            assert (
+                resolve_provider(None, model, settings) == provider_name
+            ), f"{model} advertised by {provider_name} but routes elsewhere"
 
 
 def test_keyless_provider_is_always_ready() -> None:
@@ -114,3 +114,36 @@ async def test_client_rebuilt_when_timeout_changes() -> None:
     rebuilt = provider._client(5.0)
     assert rebuilt is not first
     assert rebuilt.timeout.read == 5.0
+
+
+async def test_aclose_closes_the_pooled_client() -> None:
+    # Shutdown teardown: the pooled client must be closed and the slot cleared
+    # so a later _client() call builds fresh rather than reusing a dead pool.
+    provider = OpenAIProvider()
+    client = provider._client(30.0)
+    await provider.aclose()
+    assert client.is_closed
+    assert provider._http_client is None
+    rebuilt = provider._client(30.0)
+    assert rebuilt is not client and not rebuilt.is_closed
+
+
+async def test_aclose_without_client_is_a_noop() -> None:
+    provider = EchoProvider()
+    await provider.aclose()  # never built a client — must not raise
+    assert provider._http_client is None
+
+
+async def test_lifespan_shutdown_closes_provider_clients() -> None:
+    # The app's lifespan teardown drains every registered provider's pool.
+    from fastapi.testclient import TestClient
+
+    from rekai.config import Settings
+    from rekai.main import create_app
+
+    provider = OpenAIProvider()
+    register_provider(provider)
+    provider._client(30.0)
+    with TestClient(create_app(Settings(environment="test", default_provider="echo"))):
+        pass
+    assert provider._http_client is None
