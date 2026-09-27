@@ -41,8 +41,9 @@ def _options(request: ChatRequest) -> dict:
     drift apart again.
     """
     options: dict = {"temperature": request.temperature}
-    if request.max_tokens is not None:
-        options["num_predict"] = request.max_tokens
+    max_tokens = request.max_tokens or request.max_completion_tokens
+    if max_tokens is not None:
+        options["num_predict"] = max_tokens
     if request.stop:
         options["stop"] = request.stop
     return options

@@ -95,8 +95,11 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         messages=[_to_chat_message(m) for m in req.messages],
         provider=provider,
         temperature=temperature,
-        # OpenAI renamed max_tokens -> max_completion_tokens; accept either.
-        max_tokens=req.max_tokens or req.max_completion_tokens,
+        # max_completion_tokens stays its own field: o-series/gpt-5-class
+        # models reject `max_tokens` outright, so collapsing it here would
+        # translate the caller's accepted name into the rejected one.
+        max_tokens=req.max_tokens,
+        max_completion_tokens=req.max_completion_tokens,
         stop=stop,
         service_tier=req.service_tier,
         cache=True,

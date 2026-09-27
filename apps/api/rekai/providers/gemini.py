@@ -82,8 +82,9 @@ class GeminiProvider(Provider):
             "contents": contents,
             "generationConfig": {"temperature": request.temperature},
         }
-        if request.max_tokens is not None:
-            payload["generationConfig"]["maxOutputTokens"] = request.max_tokens
+        max_tokens = request.max_tokens or request.max_completion_tokens
+        if max_tokens is not None:
+            payload["generationConfig"]["maxOutputTokens"] = max_tokens
         if request.stop:
             payload["generationConfig"]["stopSequences"] = request.stop
 

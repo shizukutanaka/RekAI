@@ -185,6 +185,7 @@ def _build_payload(
     response_format: dict[str, Any] | None = None,
     stop: list[str] | str | None = None,
     service_tier: str | None = None,
+    max_completion_tokens: int | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -208,6 +209,8 @@ def _build_payload(
         payload["stop"] = stop
     if service_tier is not None:
         payload["service_tier"] = service_tier
+    if max_completion_tokens is not None:
+        payload["max_completion_tokens"] = max_completion_tokens
     return payload
 
 
@@ -299,6 +302,7 @@ class RekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
+        max_completion_tokens: int | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -313,6 +317,7 @@ class RekAIClient:
             response_format,
             stop,
             service_tier,
+            max_completion_tokens,
         )
 
     @staticmethod
@@ -369,6 +374,7 @@ class RekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
+        max_completion_tokens: int | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -378,7 +384,10 @@ class RekAIClient:
         ``stop`` is one or more sequences that end generation, as OpenAI's
         ``stop`` (a bare string is fine; the server normalizes it to a list).
         ``service_tier`` ('auto' | 'flex' | 'priority' | …) reaches
-        OpenAI-compatible providers only.
+        OpenAI-compatible providers only. ``max_completion_tokens`` is
+        OpenAI's renamed cap — required by o-series/gpt-5-class models, which
+        reject ``max_tokens``; providers without the distinction treat it as
+        ``max_tokens``.
 
         ``idempotency_key`` is sent as the ``Idempotency-Key`` header so the
         server replays the first response on a retry instead of re-processing.
@@ -398,6 +407,7 @@ class RekAIClient:
             response_format,
             stop,
             service_tier,
+            max_completion_tokens,
         )
         headers = _build_headers(
             self._provider_key,
@@ -605,6 +615,7 @@ class AsyncRekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
+        max_completion_tokens: int | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -623,6 +634,7 @@ class AsyncRekAIClient:
             response_format,
             stop,
             service_tier,
+            max_completion_tokens,
         )
         headers = _build_headers(
             self._provider_key,

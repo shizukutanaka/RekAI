@@ -45,6 +45,12 @@ export interface ChatOptions {
    * 'scale'). Forwarded to OpenAI-compatible providers only.
    */
   serviceTier?: string;
+  /**
+   * OpenAI's renamed output cap — required by o-series/gpt-5-class models,
+   * which reject `max_tokens`. Providers without the distinction treat it as
+   * `max_tokens`.
+   */
+  maxCompletionTokens?: number;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
 }

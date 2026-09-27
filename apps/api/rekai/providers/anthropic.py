@@ -121,7 +121,11 @@ class AnthropicProvider(Provider):
         payload: dict = {
             "model": request.model,
             "messages": chat_messages,
-            "max_tokens": request.max_tokens or settings.anthropic_default_max_tokens,
+            "max_tokens": (
+                request.max_tokens
+                or request.max_completion_tokens
+                or settings.anthropic_default_max_tokens
+            ),
             "temperature": request.temperature,
         }
         if request.stop:

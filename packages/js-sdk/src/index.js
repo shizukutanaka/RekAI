@@ -139,6 +139,7 @@ export class RekAIClient {
     if (opts.responseFormat != null) payload.response_format = opts.responseFormat;
     if (opts.stop != null) payload.stop = opts.stop;
     if (opts.serviceTier != null) payload.service_tier = opts.serviceTier;
+    if (opts.maxCompletionTokens != null) payload.max_completion_tokens = opts.maxCompletionTokens;
     return payload;
   }
 

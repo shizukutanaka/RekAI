@@ -7,6 +7,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **`max_completion_tokens` is forwarded as itself instead of being folded
+  into `max_tokens`.** The compat layer used to collapse the two
+  (`req.max_tokens or req.max_completion_tokens`), so a caller sending the
+  renamed field produced an upstream payload with the *rejected* name —
+  o-series/gpt-5-class models refuse `max_tokens` outright, which made those
+  requests unanswerable through RekAI even though the request validated.
+  `ChatRequest` now carries both fields; OpenAI-compatible providers forward
+  each set field under its own name, and Anthropic/Gemini/Ollama treat it as
+  `max_tokens` (`max_tokens`/`maxOutputTokens`/`num_predict`). It also keys
+  the exact and semantic caches separately (the two spellings produce
+  different upstream payloads). Both SDKs expose it (`max_completion_tokens`
+  / `maxCompletionTokens`).
 - **`_verify_semantic_hit` no longer raises `TypeError` on every verified
   lookup.** The semantic-verify feature and the per-provider token metric
   landed through separate PRs whose CI each passed — but the verify helper

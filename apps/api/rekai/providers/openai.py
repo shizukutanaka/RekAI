@@ -97,6 +97,10 @@ class OpenAIProvider(Provider):
             payload["stream_options"] = {"include_usage": True}
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
+        # Not folded into max_tokens: o-series/gpt-5-class models reject the
+        # old name, so the caller's spelling must reach upstream verbatim.
+        if request.max_completion_tokens is not None:
+            payload["max_completion_tokens"] = request.max_completion_tokens
         if request.stop:
             payload["stop"] = request.stop
         if request.service_tier is not None:

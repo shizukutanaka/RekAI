@@ -39,6 +39,15 @@ class ChatRequest(BaseModel):
     )
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=None, ge=1)
+    max_completion_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        description="OpenAI's renamed cap (required by o-series/gpt-5-class "
+        "models, which reject `max_tokens` entirely). Forwarded to "
+        "OpenAI-compatible providers under its own name; providers without "
+        "the distinction treat it as `max_tokens`. When both are set the "
+        "caller sent both, and both are forwarded.",
+    )
     stop: list[str] | None = Field(
         default=None,
         description="Sequences that stop generation, as OpenAI's `stop`. A bare "
