@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from rekai import models
-from rekai.config import get_settings
+from rekai.config import current_settings
 from rekai.providers.base import (
     EmbeddingResult,
     FinishReason,
@@ -43,10 +43,10 @@ class OpenAIProvider(Provider):
 
     # --- overridable hooks (subclassed for OpenAI-compatible backends) -----
     def _base_url(self) -> str:
-        return get_settings().openai_base_url
+        return current_settings().openai_base_url
 
     def _server_key(self) -> str | None:
-        return get_settings().openai_api_key
+        return current_settings().openai_api_key
 
     def _key_env_hint(self) -> str:
         return "REKAI_OPENAI_API_KEY"
@@ -108,7 +108,7 @@ class OpenAIProvider(Provider):
         return payload
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
-        settings = get_settings()
+        settings = current_settings()
 
         payload = self._build_payload(request, stream=False)
 
@@ -153,7 +153,7 @@ class OpenAIProvider(Provider):
     async def stream_events(
         self, request: ChatRequest, api_key: str | None
     ) -> AsyncIterator[StreamEvent]:
-        settings = get_settings()
+        settings = current_settings()
 
         payload = self._build_payload(request, stream=True)
 
@@ -185,7 +185,7 @@ class OpenAIProvider(Provider):
             yield StreamEvent(tool_calls=assembled)
 
     async def embed(self, inputs: list[str], model: str, api_key: str | None) -> EmbeddingResult:
-        settings = get_settings()
+        settings = current_settings()
         url = f"{self._base_url().rstrip('/')}/embeddings"
         try:
             client = self._client(settings.request_timeout_seconds)

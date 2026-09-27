@@ -17,7 +17,12 @@ from pydantic import ValidationError
 
 from rekai import __version__, auth, guardrails, idempotency, openai_compat, tracing
 from rekai.cache import CacheBackend, build_cache
-from rekai.config import Settings, get_settings
+from rekai.config import (
+    Settings,
+    bind_current_settings,
+    get_settings,
+    reset_current_settings,
+)
 from rekai.cooldown import cooldowns
 from rekai.keystore import DynamicKeyStore
 from rekai.logging_config import configure_logging, get_logger
@@ -26,6 +31,7 @@ from rekai.metrics_store import build_metrics_store
 from rekai.pricing import price_for_model
 from rekai.providers import get_provider, provider_names
 from rekai.providers.base import ProviderError
+from rekai.providers.registry import configure_custom_provider
 from rekai.rate_limit import build_rate_limiter
 from rekai.router import resolve_provider, select_provider
 from rekai.schemas import (
@@ -523,6 +529,10 @@ async def _run_chat(
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level, settings.log_format)
+    # The provider registry reads no env at import time; the custom
+    # OpenAI-compatible backend is configured here, from the app's settings
+    # (O-1 — and re-running create_app replaces or removes a stale one).
+    configure_custom_provider(settings)
     # The metrics and semantic-cache singletons predate any Settings instance;
     # apply their per-deployment bounds before either can serve a request.
     metrics.max_tracked_clients = settings.max_tracked_clients
@@ -787,12 +797,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tracestate = tracing.parse_tracestate(request.headers.get("tracestate"))
         trace_token = tracing.set_current_trace_id(trace_id)
         tracestate_token = tracing.set_current_tracestate(tracestate)
+        # Same ambient-context idiom as the trace ids: the app's Settings are
+        # visible to provider code for this request's lifetime (O-1), so e.g.
+        # /v1/providers' readiness checks see this app's configuration.
+        settings_token = bind_current_settings(settings)
         start = time.perf_counter()
         try:
             response = await call_next(request)
         finally:
             tracing.reset_current_trace_id(trace_token)
             tracing.reset_current_tracestate(tracestate_token)
+            reset_current_settings(settings_token)
         elapsed = time.perf_counter() - start
         elapsed_ms = elapsed * 1000
         # The value was already being computed for the header and the log line;

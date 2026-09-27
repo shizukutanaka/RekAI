@@ -11,7 +11,11 @@ from dataclasses import dataclass
 from rekai import guardrails
 from rekai.cache import CacheBackend, cache_key, embedding_cache_key, semantic_bucket
 from rekai.circuit_breaker import consecutive_failures
-from rekai.config import Settings
+from rekai.config import (
+    Settings,
+    bind_current_settings,
+    reset_current_settings,
+)
 from rekai.cooldown import cooldowns
 from rekai.logging_config import get_logger
 from rekai.metrics import metrics
@@ -266,6 +270,25 @@ async def handle_chat(
     cache: CacheBackend,
     client_id: str = "anonymous",
 ) -> ChatResponse:
+    # Bind the caller's Settings for the request's duration so provider code
+    # (which takes no settings parameter) reads them via `current_settings()`
+    # rather than the process env (O-1). The request-context middleware binds
+    # the same value on the HTTP path; doing it here too makes direct
+    # handle_chat calls — e.g. tests — behave identically.
+    token = bind_current_settings(settings)
+    try:
+        return await _handle_chat(request, api_key, settings, cache, client_id)
+    finally:
+        reset_current_settings(token)
+
+
+async def _handle_chat(
+    request: ChatRequest,
+    api_key: str | None,
+    settings: Settings,
+    cache: CacheBackend,
+    client_id: str = "anonymous",
+) -> ChatResponse:
     primary_name, primary = select_provider(request, settings)
     attempts = _build_attempts(request, primary_name, primary, settings)
     use_cache = settings.cache_enabled and request.cache
@@ -507,6 +530,26 @@ async def handle_chat_stream(
     provider: Provider,
     client_id: str,
 ) -> AsyncIterator[ChatStreamEvent]:
+    # Same request-scoped Settings binding as handle_chat (O-1).
+    token = bind_current_settings(settings)
+    try:
+        async for event in _handle_chat_stream(
+            request, api_key, settings, cache, provider_name, provider, client_id
+        ):
+            yield event
+    finally:
+        reset_current_settings(token)
+
+
+async def _handle_chat_stream(
+    request: ChatRequest,
+    api_key: str | None,
+    settings: Settings,
+    cache: CacheBackend,
+    provider_name: str,
+    provider: Provider,
+    client_id: str,
+) -> AsyncIterator[ChatStreamEvent]:
     """Drive a streaming completion through one provider, yielding typed events.
 
     Emits text ``delta`` events as they arrive, then exactly one terminal event:
@@ -622,6 +665,20 @@ async def handle_chat_stream(
 
 
 async def handle_embeddings(
+    request: EmbeddingsRequest,
+    api_key: str | None,
+    settings: Settings,
+    cache: CacheBackend,
+) -> EmbeddingsResponse:
+    # Same request-scoped Settings binding as handle_chat (O-1).
+    token = bind_current_settings(settings)
+    try:
+        return await _handle_embeddings(request, api_key, settings, cache)
+    finally:
+        reset_current_settings(token)
+
+
+async def _handle_embeddings(
     request: EmbeddingsRequest,
     api_key: str | None,
     settings: Settings,
