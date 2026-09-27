@@ -18,6 +18,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `service_tier` on Messages requests (`auto` | `standard_only`) and echoes
   the billed tier in `usage.service_tier` — both directions wired. Gemini and
   Ollama have no equivalent and report null.
+||||||| 0e4ac30
+- **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
+  `cache: false` so you can compare a fresh answer against the cached one.
+  It defaults to on; the meta line already marks cache hits.
 - `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
   check (`client.messages.count_tokens`) now works against the compat surface.
   Returns a local script-aware estimate (the same heuristic the pricing path

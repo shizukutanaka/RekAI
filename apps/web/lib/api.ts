@@ -326,6 +326,7 @@ export async function sendChat(params: {
   temperature?: number;
   maxTokens?: number;
   provider?: string;
+  cache?: boolean;
   onRateLimit?: (info: RateLimitInfo) => void;
 }): Promise<ChatResponse> {
   const headers: Record<string, string> = {
@@ -343,6 +344,7 @@ export async function sendChat(params: {
       ...(params.provider ? { provider: params.provider } : {}),
       ...(params.temperature != null ? { temperature: params.temperature } : {}),
       ...(params.maxTokens ? { max_tokens: params.maxTokens } : {}),
+      ...(params.cache === false ? { cache: false } : {}),
     }),
   });
 
@@ -366,6 +368,7 @@ export async function streamChat(
     temperature?: number;
     maxTokens?: number;
     provider?: string;
+    cache?: boolean;
     onRateLimit?: (info: RateLimitInfo) => void;
   },
   onDelta: (text: string) => void,
@@ -387,6 +390,7 @@ export async function streamChat(
       ...(params.provider ? { provider: params.provider } : {}),
       ...(params.temperature != null ? { temperature: params.temperature } : {}),
       ...(params.maxTokens ? { max_tokens: params.maxTokens } : {}),
+      ...(params.cache === false ? { cache: false } : {}),
     }),
     signal,
   });
