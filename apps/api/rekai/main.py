@@ -15,7 +15,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import ValidationError
 
-from rekai import __version__, auth, guardrails, idempotency, openai_compat, tracing
+from rekai import (
+    __version__,
+    anthropic_compat,
+    auth,
+    guardrails,
+    idempotency,
+    openai_compat,
+    tracing,
+)
 from rekai.cache import CacheBackend, build_cache
 from rekai.config import Settings, get_settings
 from rekai.cooldown import cooldowns
@@ -32,6 +40,7 @@ from rekai.schemas import (
     AdminKeyList,
     AdminKeyRequest,
     AdminKeyResponse,
+    AnthropicMessagesRequest,
     ChatCompletionsRequest,
     ChatMessage,
     ChatRequest,
@@ -199,12 +208,13 @@ class ConcurrencyLimitMiddleware:
             self._in_flight -= 1
 
 
-# Paths an OpenAI SDK talks to that RekAI promises to serve *as OpenAI*. Only
-# /v1/chat/completions is that promise (README: "a drop-in POST
-# /v1/chat/completions"); /v1/chat, /v1/embeddings and /v1/usage are RekAI's own
-# API, and the three first-party clients read `detail || error` off their error
-# bodies, so their shape must not change.
+# Paths a provider SDK talks to that RekAI promises to serve *in that SDK's own
+# error envelope*. /v1/chat/completions answers as OpenAI; /v1/messages answers
+# as Anthropic. /v1/chat, /v1/embeddings and /v1/usage are RekAI's own API, and
+# the three first-party clients read `detail || error` off their error bodies,
+# so their shape must not change.
 _OPENAI_COMPAT_PATHS = frozenset({"/v1/chat/completions"})
+_ANTHROPIC_COMPAT_PATHS = frozenset({"/v1/messages"})
 
 
 def _validation_message(detail: list) -> tuple[str, str | None]:
@@ -261,6 +271,47 @@ def _openai_error_body(raw: bytes, status_code: int) -> bytes:
     return json.dumps(envelope).encode()
 
 
+def _anthropic_error_body(raw: bytes, status_code: int) -> bytes:
+    """The ``/v1/messages`` counterpart of :func:`_openai_error_body` — every
+    error on that path leaves as Anthropic's ``{type: error, error: {...}}``
+    envelope so the Anthropic SDK can read it. Same pass-through rules: only
+    JSON RekAI bodies are rewritten, so it is idempotent."""
+    try:
+        payload = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        return raw
+    if not isinstance(payload, dict):
+        return raw
+    error = payload.get("error")
+    if isinstance(error, dict) and error.get("type") in (
+        "authentication_error",
+        "permission_error",
+        "invalid_request_error",
+        "not_found_error",
+        "rate_limit_error",
+        "overloaded_error",
+        "api_error",
+    ):
+        return raw  # already an Anthropic envelope
+
+    detail = payload.get("detail")
+    if isinstance(detail, list):
+        message, _param = _validation_message(detail)
+    elif isinstance(detail, str):
+        message = detail
+    elif isinstance(error, str):
+        message = error
+    else:
+        return raw
+    return json.dumps(anthropic_compat.anthropic_error(status_code, message)).encode()
+
+
+_COMPAT_ERROR_TRANSLATORS = {
+    **{p: _openai_error_body for p in _OPENAI_COMPAT_PATHS},
+    **{p: _anthropic_error_body for p in _ANTHROPIC_COMPAT_PATHS},
+}
+
+
 class OpenAICompatErrorMiddleware:
     """Give *every* error on the OpenAI-compatible endpoint OpenAI's envelope.
 
@@ -282,13 +333,20 @@ class OpenAICompatErrorMiddleware:
     only position from which their short-circuit responses are visible. Only
     bodies of error responses are buffered; a 200 (including a streamed one) is
     forwarded chunk by chunk, untouched.
+
+    ``/v1/messages`` rides the same machinery with Anthropic's envelope — the
+    per-path translator is looked up in ``_COMPAT_ERROR_TRANSLATORS``.
     """
 
     def __init__(self, app) -> None:
         self.app = app
 
     async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http" or scope["path"] not in _OPENAI_COMPAT_PATHS:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        translate = _COMPAT_ERROR_TRANSLATORS.get(scope["path"])
+        if translate is None:
             await self.app(scope, receive, send)
             return
 
@@ -310,7 +368,7 @@ class OpenAICompatErrorMiddleware:
             chunks.append(message.get("body", b""))
             if message.get("more_body"):
                 return
-            body = _openai_error_body(b"".join(chunks), start["status"])
+            body = translate(b"".join(chunks), start["status"])
             headers = [(k, v) for k, v in start["headers"] if k.lower() != b"content-length"]
             headers.append((b"content-length", str(len(body)).encode()))
             await send({**start, "headers": headers})
@@ -687,6 +745,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # can't consume rate budget.
         if is_api_write and (settings.api_key_list or key_store is not None):
             token = auth.parse_bearer(request.headers.get("authorization"))
+            # Anthropic's SDK authenticates with `x-api-key`, not Authorization:
+            # Bearer — on /v1/messages it is the gateway credential.
+            if token is None and request.url.path == "/v1/messages":
+                token = request.headers.get("x-api-key")
             if token is None or not auth.key_allowed(token, await _allowed_keys()):
                 metrics.record_error("unauthorized")
                 return JSONResponse(
@@ -1489,6 +1551,141 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             openai_compat.chunk_usage(chunk_id, created, model, ev.summary.usage)
                         )
             yield "data: [DONE]\n\n"
+
+        stream_headers = {
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "X-RekAI-Provider": provider_name,
+        }
+        if guardrail_flag:
+            stream_headers["X-Guardrail-Flag"] = guardrail_flag
+        return StreamingResponse(
+            event_source(),
+            media_type="text/event-stream",
+            headers=stream_headers,
+        )
+
+    @app.post(
+        "/v1/messages",
+        tags=["chat"],
+        response_model=None,
+        responses={
+            200: {"content": {"application/json": {}, "text/event-stream": {}}},
+            400: {"model": ErrorResponse},
+            401: {"model": ErrorResponse},
+            403: {"model": ErrorResponse},
+            413: {"model": ErrorResponse},
+            429: {"model": ErrorResponse},
+            502: {"model": ErrorResponse},
+        },
+    )
+    async def anthropic_messages(
+        response: Response,
+        request: AnthropicMessagesRequest,
+        http_request: Request,
+        x_provider_key: str | None = Header(default=None, alias="X-Provider-Key"),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        config: Settings = Depends(get_config),
+        cache_backend: CacheBackend = Depends(get_cache),
+    ):
+        """Anthropic-compatible Messages endpoint.
+
+        Point an Anthropic SDK (``Anthropic(base_url=..., api_key=...)``) at
+        RekAI — ``.../`` (the SDK appends ``v1/messages`` itself) — and this
+        behaves like ``POST https://api.anthropic.com/v1/messages``: same
+        request/response shapes, ``stream: true`` producing Anthropic's typed
+        event sequence (message_start/content_block_*/message_delta/
+        message_stop), and errors in Anthropic's ``{type: error}`` envelope.
+        It is a thin translation over the same pipeline as ``/v1/chat`` —
+        routing, cache, retries, fallback, budgets, metrics all apply — so a
+        ``claude-*`` model still routes to Anthropic by prefix while any other
+        model goes through the normal rules. Auth: ``x-api-key`` (what the SDK
+        sends) or ``Authorization: Bearer``.
+        """
+        try:
+            chat_request = anthropic_compat.to_chat_request(request)
+        except ValidationError as exc:
+            return JSONResponse(
+                status_code=400,
+                content=ErrorResponse(error="invalid_request", detail=str(exc)).model_dump(),
+            )
+
+        if not request.stream:
+            result = await _run_chat(
+                chat_request,
+                http_request,
+                response,
+                x_provider_key,
+                idempotency_key,
+                config,
+                cache_backend,
+            )
+            if isinstance(result, JSONResponse):
+                return result
+            return anthropic_compat.to_message(result)
+
+        # Streaming — Anthropic's typed SSE event sequence.
+        blocked = _guardrail_response(chat_request.messages, config, response)
+        if blocked is not None:
+            return blocked
+        guardrail_flag = response.headers.get("X-Guardrail-Flag")
+        client_id = _client_id(http_request)
+        provider_name, provider = select_provider(chat_request, config)
+        metrics.record_request(provider_name)
+        _stash_gen_ai_prestream(http_request, provider_name, chat_request.model)
+
+        msg_id = f"msg_{uuid.uuid4().hex[:24]}"
+
+        async def event_source():
+            yield anthropic_compat.ev_message_start(msg_id, chat_request.model)
+            text_block_open = False
+            finish_reason = "stop"
+            usage = None
+            async for ev in handle_chat_stream(
+                chat_request,
+                x_provider_key,
+                config,
+                cache_backend,
+                provider_name,
+                provider,
+                client_id,
+            ):
+                if ev.delta is not None:
+                    if not text_block_open:
+                        yield anthropic_compat.ev_content_block_start(
+                            0, {"type": "text", "text": ""}
+                        )
+                        text_block_open = True
+                    yield anthropic_compat.ev_text_delta(0, ev.delta)
+                elif ev.error is not None:
+                    yield anthropic_compat.ev_error(ev.error.status_code, str(ev.error))
+                    return
+                elif ev.summary is not None:
+                    if text_block_open:
+                        yield anthropic_compat.ev_content_block_stop(0)
+                    s = ev.summary
+                    if s.finish_reason:
+                        finish_reason = s.finish_reason
+                    next_index = 1 if text_block_open else 0
+                    for i, tc in enumerate(s.tool_calls or []):
+                        finish_reason = "tool_calls"
+                        fn = tc.get("function", {})
+                        bi = next_index + i
+                        yield anthropic_compat.ev_content_block_start(
+                            bi,
+                            {
+                                "type": "tool_use",
+                                "id": tc.get("id") or f"toolu_{uuid.uuid4().hex[:24]}",
+                                "name": fn.get("name"),
+                                "input": {},
+                            },
+                        )
+                        yield anthropic_compat.ev_input_json_delta(bi, fn.get("arguments") or "{}")
+                        yield anthropic_compat.ev_content_block_stop(bi)
+                    usage = s.usage
+            stop_reason = anthropic_compat._FINISH_TO_STOP_REASON.get(finish_reason, "end_turn")
+            yield anthropic_compat.ev_message_delta(stop_reason, usage)
+            yield anthropic_compat.ev_message_stop()
 
         stream_headers = {
             "Cache-Control": "no-cache",
