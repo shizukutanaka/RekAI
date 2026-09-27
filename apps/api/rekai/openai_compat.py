@@ -87,6 +87,19 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         )
     provider, model = _resolve_provider_and_model(req)
     temperature = req.temperature if req.temperature is not None else _DEFAULT_TEMPERATURE
+    # OpenAI's pre-tools function-calling fields (deprecated but still sent by
+    # older SDKs) are normalized onto tools/tool_choice — providers only speak
+    # the modern names. Modern fields win when a caller sends both.
+    tools = req.tools
+    if tools is None and req.functions:
+        tools = [{"type": "function", "function": f} for f in req.functions]
+    tool_choice = req.tool_choice
+    if tool_choice is None and req.function_call is not None:
+        fc = req.function_call
+        if isinstance(fc, str):
+            tool_choice = fc  # "auto" / "none" pass through unchanged
+        elif isinstance(fc, dict) and fc.get("name"):
+            tool_choice = {"type": "function", "function": {"name": fc["name"]}}
     # OpenAI accepts `stop` as a bare string; ChatRequest.stop is declared
     # list[str] | None, so mypy needs this widened before construction even
     # though ChatRequest's own before-validator would normalize it at runtime
@@ -101,9 +114,13 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         max_tokens=req.max_tokens or req.max_completion_tokens,
         stop=stop,
         service_tier=req.service_tier,
+        web_search_options=req.web_search_options,
+        include_obfuscation=(
+            req.stream_options.include_obfuscation if req.stream_options else None
+        ),
         cache=True,
-        tools=req.tools,
-        tool_choice=req.tool_choice,
+        tools=tools,
+        tool_choice=tool_choice,
         response_format=req.response_format,
     )
 

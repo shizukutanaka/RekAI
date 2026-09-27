@@ -185,6 +185,7 @@ def _build_payload(
     response_format: dict[str, Any] | None = None,
     stop: list[str] | str | None = None,
     service_tier: str | None = None,
+    web_search_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -208,6 +209,8 @@ def _build_payload(
         payload["stop"] = stop
     if service_tier is not None:
         payload["service_tier"] = service_tier
+    if web_search_options is not None:
+        payload["web_search_options"] = web_search_options
     return payload
 
 
@@ -299,6 +302,7 @@ class RekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
+        web_search_options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -313,6 +317,7 @@ class RekAIClient:
             response_format,
             stop,
             service_tier,
+            web_search_options,
         )
 
     @staticmethod
@@ -369,6 +374,7 @@ class RekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
+        web_search_options: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -398,6 +404,7 @@ class RekAIClient:
             response_format,
             stop,
             service_tier,
+            web_search_options,
         )
         headers = _build_headers(
             self._provider_key,
@@ -605,6 +612,7 @@ class AsyncRekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
+        web_search_options: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -623,6 +631,7 @@ class AsyncRekAIClient:
             response_format,
             stop,
             service_tier,
+            web_search_options,
         )
         headers = _build_headers(
             self._provider_key,
