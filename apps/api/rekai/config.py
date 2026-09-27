@@ -114,6 +114,13 @@ class Settings(BaseSettings):
     rate_limit_requests: int = Field(default=60, ge=1)
     rate_limit_window_seconds: int = Field(default=60, ge=1)
 
+    # Per-key overrides for the rate limit, e.g. "sk-premium:600,sk-trial:5" —
+    # requests per window for that key. A key not listed falls back to
+    # rate_limit_requests. Only meaningful when the key also appears in
+    # api_keys (there's no per-IP override) — same convention as
+    # client_budgets_usd.
+    client_rate_limits: str = ""
+
     # Reject /v1/* request bodies larger than this many bytes (0 disables).
     max_body_bytes: int = Field(default=1_000_000, ge=0)
 
@@ -350,6 +357,28 @@ class Settings(BaseSettings):
                 overrides[key] = float(amount.strip())
             except ValueError:
                 continue
+        return overrides
+
+    @property
+    def client_rate_limit_overrides(self) -> dict[str, int]:
+        """Parse ``client_rate_limits`` into ``{raw_key: requests_per_window}``,
+        same convention as ``client_budget_overrides``. Malformed entries and
+        non-positive limits are skipped."""
+        overrides: dict[str, int] = {}
+        for raw in self.client_rate_limits.split(","):
+            raw = raw.strip()
+            if not raw or ":" not in raw:
+                continue
+            key, _, amount = raw.partition(":")
+            key = key.strip()
+            if not key:
+                continue
+            try:
+                limit = int(amount.strip())
+            except ValueError:
+                continue
+            if limit > 0:
+                overrides[key] = limit
         return overrides
 
     @property
