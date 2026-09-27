@@ -36,6 +36,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **`service_tier` request parameter** — OpenAI's processing tiers ('auto' |
+  'default' | 'flex' | 'priority' | 'scale') are a real cost/latency lever
+  (flex trades latency for a large discount); the compat layer tolerated the
+  field via `extra="allow"` and silently dropped it. Forwarded to
+  OpenAI-compatible providers only; part of the cache key and semantic bucket.
+  Exposed in both SDKs (`service_tier=` / `serviceTier`).
 - **Opt-in verify band for the semantic cache** (`REKAI_SEMANTIC_CACHE_VERIFY_*`,
   roadmap O-2). A single cosine threshold forced every candidate to be served
   or dropped on embedding distance alone; similarity is not proof two prompts
