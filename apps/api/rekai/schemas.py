@@ -126,6 +126,11 @@ class Usage(BaseModel):
     # responses and stored snapshots are unchanged.
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    # Reasoning/thinking tokens (OpenAI o- and gpt-5-series, Gemini thinking
+    # models): a *breakdown* of completion_tokens, not additional tokens. 0 for
+    # providers that don't report one (Anthropic folds thinking into
+    # output_tokens without a separate count).
+    reasoning_tokens: int = 0
 
 
 # --- OpenAI-compatible /v1/chat/completions -------------------------------
@@ -259,7 +264,11 @@ class PromptTokensDetails(BaseModel):
 
 
 class CompletionUsage(Usage):
+    # OpenAI reports the cached-token and reasoning-token breakdowns nested
+    # under prompt_tokens_details / completion_tokens_details — internal Usage
+    # keeps them flat; the compat surface re-nests for SDK parity.
     prompt_tokens_details: PromptTokensDetails | None = None
+    completion_tokens_details: dict | None = None
 
 
 class ChatCompletionChoice(BaseModel):

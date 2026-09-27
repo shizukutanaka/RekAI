@@ -56,6 +56,8 @@ export interface Usage {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+  /** Breakdown of completion_tokens spent on reasoning (o-series, Gemini thinking). */
+  reasoning_tokens?: number;
 }
 
 export interface ChatResult {
