@@ -185,6 +185,7 @@ def _build_payload(
     parallel_tool_calls: bool | None = None,
     response_format: dict[str, Any] | None = None,
     stop: list[str] | str | None = None,
+    service_tier: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -208,6 +209,8 @@ def _build_payload(
         payload["response_format"] = response_format
     if stop is not None:
         payload["stop"] = stop
+    if service_tier is not None:
+        payload["service_tier"] = service_tier
     return payload
 
 
@@ -299,6 +302,7 @@ class RekAIClient:
         parallel_tool_calls: bool | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
+        service_tier: str | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -313,6 +317,7 @@ class RekAIClient:
             parallel_tool_calls,
             response_format,
             stop,
+            service_tier,
         )
 
     @staticmethod
@@ -369,6 +374,7 @@ class RekAIClient:
         parallel_tool_calls: bool | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
+        service_tier: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -377,6 +383,8 @@ class RekAIClient:
 
         ``stop`` is one or more sequences that end generation, as OpenAI's
         ``stop`` (a bare string is fine; the server normalizes it to a list).
+        ``service_tier`` ('auto' | 'flex' | 'priority' | …) reaches
+        OpenAI-compatible providers only.
 
         ``parallel_tool_calls`` mirrors OpenAI's flag — whether the model may
         emit several tool calls in one turn — forwarded to providers that
@@ -400,6 +408,7 @@ class RekAIClient:
             parallel_tool_calls,
             response_format,
             stop,
+            service_tier,
         )
         headers = _build_headers(
             self._provider_key,
@@ -607,6 +616,7 @@ class AsyncRekAIClient:
         parallel_tool_calls: bool | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
+        service_tier: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -625,6 +635,7 @@ class AsyncRekAIClient:
             parallel_tool_calls,
             response_format,
             stop,
+            service_tier,
         )
         headers = _build_headers(
             self._provider_key,

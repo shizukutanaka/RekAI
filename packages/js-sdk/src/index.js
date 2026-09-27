@@ -139,6 +139,7 @@ export class RekAIClient {
     if (opts.parallelToolCalls != null) payload.parallel_tool_calls = opts.parallelToolCalls;
     if (opts.responseFormat != null) payload.response_format = opts.responseFormat;
     if (opts.stop != null) payload.stop = opts.stop;
+    if (opts.serviceTier != null) payload.service_tier = opts.serviceTier;
     return payload;
   }
 

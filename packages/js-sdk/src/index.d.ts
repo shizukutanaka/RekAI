@@ -42,6 +42,11 @@ export interface ChatOptions {
   stop?: string | string[];
   /** OpenAI's `parallel_tool_calls` — allow several tool calls per turn. */
   parallelToolCalls?: boolean;
+  /**
+   * OpenAI's processing tier ('auto' | 'default' | 'flex' | 'priority' |
+   * 'scale'). Forwarded to OpenAI-compatible providers only.
+   */
+  serviceTier?: string;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
 }

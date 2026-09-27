@@ -98,6 +98,7 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         # OpenAI renamed max_tokens -> max_completion_tokens; accept either.
         max_tokens=req.max_tokens or req.max_completion_tokens,
         stop=stop,
+        service_tier=req.service_tier,
         cache=True,
         tools=req.tools,
         tool_choice=req.tool_choice,
