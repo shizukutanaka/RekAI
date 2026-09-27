@@ -295,6 +295,13 @@ SDK appends `v1/messages` itself) works unmodified:
   400/422 `invalid_request_error`, 429 `rate_limit_error`, 529
   `overloaded_error`, otherwise `api_error`.
 
+`POST /v1/messages/count_tokens` answers the SDK's pre-flight token check
+(`client.messages.count_tokens`) with the same script-aware estimate the
+pricing path uses — Anthropic's own endpoint returns an exact tokenizer
+count, which a self-hosted gateway can't reproduce offline, so the value is
+deliberately an estimate (documented as such); it makes no upstream call and
+has no billing side effects.
+
 ### Why generation stopped
 
 `finish_reason` is **reported by the provider, not synthesised**. Every backend

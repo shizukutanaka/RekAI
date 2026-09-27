@@ -14,9 +14,11 @@ import json
 import uuid
 from typing import Any
 
+from rekai.pricing import estimate_tokens
 from rekai.providers.base import ProviderError
 from rekai.schemas import (
     AnthropicContentBlock,
+    AnthropicCountTokensRequest,
     AnthropicMessagesRequest,
     AnthropicTool,
     ChatMessage,
@@ -323,3 +325,42 @@ def _error_obj(status_code: int, message: str) -> dict:
 def anthropic_error(status_code: int, message: str) -> dict:
     """The Anthropic error envelope, so SDK error handling parses RekAI's."""
     return {"type": "error", "error": _error_obj(status_code, message)}
+
+
+def count_tokens(req: AnthropicCountTokensRequest) -> int:
+    """Local input-token estimate for ``POST /v1/messages/count_tokens``.
+
+    Anthropic's own endpoint returns an exact count from its tokenizer, which
+    a self-hosted gateway can't reproduce offline (no vocab downloads — the
+    same reason ``pricing.estimate_tokens`` exists). We reuse that script-aware
+    estimate over the request's text-bearing parts plus the serialized tool
+    schemas, so callers doing pre-flight budget checks get a number that is
+    honest about CJK text — not a provider-exact figure.
+    """
+    parts: list[str] = []
+    if isinstance(req.system, str):
+        parts.append(req.system)
+    elif isinstance(req.system, list):
+        parts.extend(
+            str(b.get("text", ""))
+            for b in req.system
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    for message in req.messages:
+        if isinstance(message.content, str):
+            parts.append(message.content)
+            continue
+        for block in message.content:
+            if block.text:
+                parts.append(block.text)
+            if block.type == "tool_use":
+                parts.append(block.name or "")
+                if block.input is not None:
+                    parts.append(json.dumps(block.input))
+            elif block.type == "tool_result" and block.content is not None:
+                parts.append(
+                    block.content if isinstance(block.content, str) else json.dumps(block.content)
+                )
+    if req.tools:
+        parts.append(json.dumps([t.model_dump() for t in req.tools]))
+    return sum(estimate_tokens(p) for p in parts if p) or 1
