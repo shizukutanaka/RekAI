@@ -13,6 +13,7 @@ import httpx
 import pytest
 
 from rekai.cache import cache_key, semantic_bucket
+from rekai.config import get_settings
 from rekai.openai_compat import to_chat_request
 from rekai.providers.anthropic import AnthropicProvider
 from rekai.providers.gemini import GeminiProvider
@@ -109,3 +110,69 @@ def test_compat_maps_service_tier() -> None:
         service_tier="priority",
     )
     assert to_chat_request(req).service_tier == "priority"
+
+
+# --- per-request timeout (LiteLLM `timeout` body field) ----------------------
+
+
+def test_timeout_maps_through_compat() -> None:
+    req = ChatCompletionsRequest.model_validate(
+        {
+            "model": "m",
+            "messages": [{"role": "user", "content": "hi"}],
+            "timeout": 4.5,
+        }
+    )
+    assert to_chat_request(req).timeout_seconds == 4.5
+
+
+def test_timeout_not_in_cache_key() -> None:
+    """Timeout changes latency, not the response."""
+    assert cache_key(_req(timeout_seconds=1.0), "openai") == cache_key(
+        _req(timeout_seconds=30.0), "openai"
+    )
+    assert semantic_bucket(_req(timeout_seconds=1.0), "openai", "c") == semantic_bucket(
+        _req(timeout_seconds=30.0), "openai", "c"
+    )
+
+
+@pytest.mark.asyncio
+async def test_timeout_tighten_only(monkeypatch) -> None:
+    """The request can lower the effective timeout but never exceed the
+    provider's configured cap."""
+
+    class CapClient:
+        captured_timeout: float | None = None
+
+        def __init__(self, *a, timeout=None, **k) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None, headers=None, timeout=None, **kw):
+            CapClient.captured_timeout = timeout
+            return _Resp()
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr(httpx, "AsyncClient", CapClient)
+    provider = OpenAIProvider()
+    cap = get_settings().request_timeout_seconds
+
+    # No request timeout -> the kwarg isn't passed at all (pooled client's
+    # own timeout — the global cap — applies).
+    await provider.chat(_req(), api_key="sk-x")
+    assert CapClient.captured_timeout is None
+
+    # Below the cap -> the tighter value wins.
+    await provider.chat(_req(timeout_seconds=2.0), api_key="sk-x")
+    assert CapClient.captured_timeout == 2.0
+
+    # Above the cap -> still the cap; a caller can't stretch the ceiling.
+    await provider.chat(_req(timeout_seconds=cap + 999), api_key="sk-x")
+    assert CapClient.captured_timeout == cap

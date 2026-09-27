@@ -177,7 +177,12 @@ class AnthropicProvider(Provider):
         url = f"{settings.anthropic_base_url.rstrip('/')}/messages"
         try:
             client = self._client(settings.request_timeout_seconds)
-            resp = await client.post(url, json=payload, headers=self._headers(key))
+            resp = await client.post(
+                url,
+                json=payload,
+                headers=self._headers(key),
+                **self._timeout_kwarg(request, settings),
+            )
         except httpx.HTTPError as exc:
             raise ProviderError(f"Anthropic request failed: {exc}") from exc
 
@@ -247,7 +252,13 @@ class AnthropicProvider(Provider):
         tool_blocks: dict[int, dict] = {}
         try:
             client = self._client(settings.request_timeout_seconds)
-            async with client.stream("POST", url, json=payload, headers=self._headers(key)) as resp:
+            async with client.stream(
+                "POST",
+                url,
+                json=payload,
+                headers=self._headers(key),
+                **self._timeout_kwarg(request, settings),
+            ) as resp:
                 if resp.status_code >= 400:
                     body = (await resp.aread()).decode()[:200]
                     raise ProviderError(

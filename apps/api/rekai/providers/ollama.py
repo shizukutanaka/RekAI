@@ -101,7 +101,12 @@ class OllamaProvider(Provider):
         url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
         try:
             client = self._client(settings.request_timeout_seconds)
-            resp = await client.post(url, json=payload, headers=trace_headers())
+            resp = await client.post(
+                url,
+                json=payload,
+                headers=trace_headers(),
+                **self._timeout_kwarg(request, settings),
+            )
         except httpx.HTTPError as exc:
             raise ProviderError(
                 f"Ollama request failed (is it running at {settings.ollama_base_url}?): {exc}"
@@ -179,7 +184,13 @@ class OllamaProvider(Provider):
         url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
         try:
             client = self._client(settings.request_timeout_seconds)
-            async with client.stream("POST", url, json=payload, headers=trace_headers()) as resp:
+            async with client.stream(
+                "POST",
+                url,
+                json=payload,
+                headers=trace_headers(),
+                **self._timeout_kwarg(request, settings),
+            ) as resp:
                 if resp.status_code >= 400:
                     body = (await resp.aread()).decode()[:200]
                     raise ProviderError(

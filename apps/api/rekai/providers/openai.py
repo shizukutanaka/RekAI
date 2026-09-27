@@ -125,6 +125,7 @@ class OpenAIProvider(Provider):
                 url,
                 json=payload,
                 headers=self._request_headers(api_key),
+                **self._timeout_kwarg(request, settings),
             )
         except httpx.HTTPError as exc:  # network-level failure
             raise ProviderError(f"{self.name} request failed: {exc}") from exc
@@ -173,6 +174,7 @@ class OpenAIProvider(Provider):
                 url,
                 json=payload,
                 headers=self._request_headers(api_key),
+                **self._timeout_kwarg(request, settings),
             ) as resp:
                 if resp.status_code >= 400:
                     body = (await resp.aread()).decode()[:200]

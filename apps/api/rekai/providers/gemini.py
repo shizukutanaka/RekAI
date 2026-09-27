@@ -117,7 +117,10 @@ class GeminiProvider(Provider):
         try:
             client = self._client(settings.request_timeout_seconds)
             resp = await client.post(
-                url, json=payload, headers={**trace_headers(), "x-goog-api-key": key}
+                url,
+                json=payload,
+                headers={**trace_headers(), "x-goog-api-key": key},
+                **self._timeout_kwarg(request, settings),
             )
         except httpx.HTTPError as exc:
             raise ProviderError(f"Gemini request failed: {exc}") from exc
@@ -203,7 +206,11 @@ class GeminiProvider(Provider):
         try:
             client = self._client(settings.request_timeout_seconds)
             async with client.stream(
-                "POST", url, json=payload, headers={**trace_headers(), "x-goog-api-key": key}
+                "POST",
+                url,
+                json=payload,
+                headers={**trace_headers(), "x-goog-api-key": key},
+                **self._timeout_kwarg(request, settings),
             ) as resp:
                 if resp.status_code >= 400:
                     body = (await resp.aread()).decode()[:200]

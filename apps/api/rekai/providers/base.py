@@ -11,10 +11,11 @@ import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 
+from rekai.config import Settings
 from rekai.schemas import ChatRequest, Usage
 from rekai.tracing import current_traceparent, current_tracestate
 
@@ -189,6 +190,20 @@ class Provider(ABC):
             self._http_client_loop = loop
             self._http_client_timeout = timeout
         return self._http_client
+
+    def _timeout_kwarg(self, request: ChatRequest, settings: Settings) -> dict[str, Any]:
+        """``{}`` or ``{"timeout": seconds}`` to spread into httpx calls.
+
+        ``ChatRequest.timeout_seconds`` (LiteLLM's ``timeout`` body field)
+        can only *tighten* the global ``request_timeout_seconds`` cap —
+        a caller may demand a faster answer but can never stretch the
+        gateway's own ceiling. Applied per-request so the pooled client is
+        untouched; an empty spread also keeps narrow test doubles working
+        (``timeout=None`` would mean "no timeout" to httpx, not "default").
+        """
+        if request.timeout_seconds is None:
+            return {}
+        return {"timeout": min(request.timeout_seconds, settings.request_timeout_seconds)}
 
     @abstractmethod
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:

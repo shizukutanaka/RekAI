@@ -54,6 +54,15 @@ class ChatRequest(BaseModel):
         "stay forward-compatible; an unsupported tier surfaces as the "
         "provider's own error. Forwarded to OpenAI-compatible providers only.",
     )
+    timeout_seconds: float | None = Field(
+        default=None,
+        gt=0,
+        description="Per-request provider timeout in seconds (LiteLLM's "
+        "`timeout` body field). Tighten-only: min()ed with the global "
+        "request_timeout_seconds cap, so a caller can demand a faster answer "
+        "but never stretch the gateway's ceiling. Excluded from the cache "
+        "key — it changes latency, not the response.",
+    )
     web_search_options: dict | None = Field(
         default=None,
         description="OpenAI's `web_search_options` — search context size, "
@@ -172,6 +181,7 @@ class ChatCompletionsRequest(BaseModel):
     max_completion_tokens: int | None = Field(default=None, ge=1)
     stop: str | list[str] | None = None
     service_tier: str | None = None
+    timeout: float | None = None  # LiteLLM convention: seconds, tighten-only
     web_search_options: dict[str, Any] | None = None
     stream: bool = False
     stream_options: StreamOptions | None = None
