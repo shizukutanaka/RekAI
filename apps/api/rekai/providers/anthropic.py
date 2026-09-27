@@ -199,6 +199,14 @@ class AnthropicProvider(Provider):
         finish_reason = _finish_reason(
             data.get("stop_reason"), emulating_json=self._emulating_json(request)
         )
+        # Anthropic sends refusal text as an ordinary text content block, with
+        # stop_reason="refusal" carrying the flag. OpenAI puts it in
+        # `message.refusal` with `content: null` instead — move it there so a
+        # caller checking the documented field finds the text.
+        refusal = None
+        if data.get("stop_reason") == "refusal" and content:
+            refusal, content = content, ""
+            tool_calls = None
         cache_read, cache_write = _cache_tokens(usage)
         # Anthropic reports cached prompt tokens *separately* from input_tokens;
         # fold them in so prompt_tokens stays the true prompt size and the cache
@@ -207,6 +215,7 @@ class AnthropicProvider(Provider):
         completion_tokens = usage.get("output_tokens", 0)
         return ProviderResult(
             content=content,
+            refusal=refusal,
             model=data.get("model", request.model),
             tool_calls=tool_calls,
             usage=Usage(
