@@ -95,16 +95,22 @@ class OpenAIProvider(Provider):
             payload["stream"] = True
             # Ask for a final usage chunk for accurate accounting.
             payload["stream_options"] = {"include_usage": True}
+            if request.include_obfuscation is not None:
+                payload["stream_options"]["include_obfuscation"] = request.include_obfuscation
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
         if request.stop:
             payload["stop"] = request.stop
+        if request.service_tier is not None:
+            payload["service_tier"] = request.service_tier
         if request.tools is not None:
             payload["tools"] = request.tools
         if request.tool_choice is not None:
             payload["tool_choice"] = request.tool_choice
         if request.response_format is not None:
             payload["response_format"] = request.response_format
+        if request.web_search_options is not None:
+            payload["web_search_options"] = request.web_search_options
         return payload
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
