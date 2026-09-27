@@ -44,12 +44,19 @@ class RateLimiter:
         # Soft cap on tracked clients; idle buckets are pruned past this size so
         # a flood of distinct client keys can't grow memory without bound.
         self.max_buckets = max_buckets
-        self._buckets: dict[str, tuple[float, float]] = {}  # key -> (tokens, last_refill)
+        # key -> (tokens, last_refill, capacity) — capacity rides with the
+        # bucket because per-key overrides (REKAI_CLIENT_RATE_LIMITS) make it
+        # key-specific; each key only ever sees its own, so consistency holds.
+        self._buckets: dict[str, tuple[float, float, int]] = {}
 
-    def _tokens_now(self, key: str, now: float) -> tuple[float, float]:
-        tokens, last = self._buckets.get(key, (float(self.capacity), now))
-        refill = (now - last) * (self.capacity / self.window)
-        return min(self.capacity, tokens + refill), last
+    def _cap(self, capacity: int | None) -> int:
+        return self.capacity if capacity is None else capacity
+
+    def _tokens_now(self, key: str, now: float, capacity: int | None) -> tuple[float, float]:
+        cap = self._cap(capacity)
+        tokens, last, _ = self._buckets.get(key, (float(cap), now, cap))
+        refill = (now - last) * (cap / self.window)
+        return min(cap, tokens + refill), last
 
     def _reclaim(self, now: float) -> None:
         """Bring the bucket count back under ``max_buckets``.
@@ -77,53 +84,64 @@ class RateLimiter:
         ``max_buckets * _EVICT_FRACTION`` admissions instead of being repeated
         per request.
         """
-        levels = [(self._tokens_now(k, now)[0], k) for k in self._buckets]
-        for tokens, key in levels:
-            if tokens >= self.capacity:
+        # "Full" and "closest to full" are measured per bucket's own capacity —
+        # with per-key overrides an absolute-token comparison would misjudge a
+        # cap-5 bucket at 4 tokens as healthier than a cap-60 bucket at 40.
+        levels = [
+            (self._tokens_now(k, now, cap)[0] / cap, k) for k, (_, _, cap) in self._buckets.items()
+        ]
+        for frac, key in levels:
+            if frac >= 1.0:
                 del self._buckets[key]
         if len(self._buckets) < self.max_buckets:
             return
         target = max(1, int(self.max_buckets * _EVICT_FRACTION))
-        remaining = sorted((t, k) for t, k in levels if k in self._buckets)
+        remaining = sorted((f, k) for f, k in levels if k in self._buckets)
         for _, key in remaining[-target:]:
             self._buckets.pop(key, None)
 
-    def allow(self, key: str) -> bool:
+    def allow(self, key: str, capacity: int | None = None) -> bool:
+        cap = self._cap(capacity)
         now = time.time()
         if len(self._buckets) >= self.max_buckets:
             self._reclaim(now)
-        tokens, _ = self._tokens_now(key, now)
+        tokens, _ = self._tokens_now(key, now, cap)
         if tokens < 1.0:
-            self._buckets[key] = (tokens, now)
+            self._buckets[key] = (tokens, now, cap)
             return False
-        self._buckets[key] = (tokens - 1.0, now)
+        self._buckets[key] = (tokens - 1.0, now, cap)
         return True
 
-    def remaining(self, key: str) -> int:
+    def remaining(self, key: str, capacity: int | None = None) -> int:
         """Whole tokens currently available to ``key`` — a non-consuming peek."""
-        tokens, _ = self._tokens_now(key, time.time())
+        tokens, _ = self._tokens_now(key, time.time(), capacity)
         return int(tokens)
 
-    def retry_after(self, key: str) -> int:
+    def retry_after(self, key: str, capacity: int | None = None) -> int:
         """Whole seconds until ``key`` has a token again (>= 1; 0 if available now).
 
         A peek — it does not consume a token — so it is safe to call right after
         ``allow`` returns ``False`` to populate a ``Retry-After`` header.
         """
+        cap = self._cap(capacity)
         now = time.time()
-        tokens, _ = self._tokens_now(key, now)
+        tokens, _ = self._tokens_now(key, now, cap)
         if tokens >= 1.0:
             return 0
-        seconds = (1.0 - tokens) * self.window / self.capacity
+        seconds = (1.0 - tokens) * self.window / cap
         return max(1, math.ceil(seconds))
 
 
 class AsyncRateLimiter(Protocol):
-    """What the request middleware needs from a rate limiter."""
+    """What the request middleware needs from a rate limiter.
 
-    async def allow(self, key: str) -> bool: ...
-    async def remaining(self, key: str) -> int: ...
-    async def retry_after(self, key: str) -> int: ...
+    ``capacity`` overrides the constructor capacity for that key only —
+    per-client overrides (``REKAI_CLIENT_RATE_LIMITS``) ride on it.
+    """
+
+    async def allow(self, key: str, capacity: int | None = None) -> bool: ...
+    async def remaining(self, key: str, capacity: int | None = None) -> int: ...
+    async def retry_after(self, key: str, capacity: int | None = None) -> int: ...
     @property
     def label(self) -> str: ...
 
@@ -134,14 +152,14 @@ class LocalRateLimiter:
     def __init__(self, capacity: int, window: float) -> None:
         self._limiter = RateLimiter(capacity, window)
 
-    async def allow(self, key: str) -> bool:
-        return self._limiter.allow(key)
+    async def allow(self, key: str, capacity: int | None = None) -> bool:
+        return self._limiter.allow(key, capacity)
 
-    async def remaining(self, key: str) -> int:
-        return self._limiter.remaining(key)
+    async def remaining(self, key: str, capacity: int | None = None) -> int:
+        return self._limiter.remaining(key, capacity)
 
-    async def retry_after(self, key: str) -> int:
-        return self._limiter.retry_after(key)
+    async def retry_after(self, key: str, capacity: int | None = None) -> int:
+        return self._limiter.retry_after(key, capacity)
 
     @property
     def label(self) -> str:
@@ -173,7 +191,8 @@ class RedisRateLimiter:
     def _seconds_left_in_window(self, now: float) -> int:
         return max(1, math.ceil(self.window - (now % self.window)))
 
-    async def allow(self, key: str) -> bool:
+    async def allow(self, key: str, capacity: int | None = None) -> bool:
+        cap = self.capacity if capacity is None else capacity
         now = time.time()
         try:
             count = await self._client.incr(self._window_key(key, now))
@@ -181,24 +200,25 @@ class RedisRateLimiter:
                 # Keep the counter one window past its end so a straggling
                 # remaining()/retry_after() peek still sees it.
                 await self._client.expire(self._window_key(key, now), int(self.window * 2))
-            return int(count) <= self.capacity
+            return int(count) <= cap
         except Exception as exc:
             logger.warning("rate limiter failing open (redis error: %s)", exc)
             return True
 
-    async def remaining(self, key: str) -> int:
+    async def remaining(self, key: str, capacity: int | None = None) -> int:
+        cap = self.capacity if capacity is None else capacity
         now = time.time()
         try:
             raw = await self._client.get(self._window_key(key, now))
         except Exception as exc:
             logger.warning("rate limiter failing open (redis error: %s)", exc)
-            return self.capacity
+            return cap
         used = int(raw) if raw else 0
-        return max(0, self.capacity - used)
+        return max(0, cap - used)
 
-    async def retry_after(self, key: str) -> int:
+    async def retry_after(self, key: str, capacity: int | None = None) -> int:
         # A fixed window admits new requests only when the window rolls over.
-        if await self.remaining(key) > 0:
+        if await self.remaining(key, capacity) > 0:
             return 0
         return self._seconds_left_in_window(time.time())
 
