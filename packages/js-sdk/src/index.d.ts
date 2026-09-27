@@ -40,6 +40,16 @@ export interface ChatOptions {
    * accepted too; the server normalizes it to a one-element list.
    */
   stop?: string | string[];
+  /** Nucleus sampling, as OpenAI's `top_p`. */
+  topP?: number;
+  /** Deterministic-sampling seed, as OpenAI's `seed`. */
+  seed?: number;
+  /** Token-frequency penalty (-2..2), as OpenAI's `frequency_penalty`. */
+  frequencyPenalty?: number;
+  /** Token-presence penalty (-2..2), as OpenAI's `presence_penalty`. */
+  presencePenalty?: number;
+  /** Token-id → bias map, as OpenAI's `logit_bias`. */
+  logitBias?: Record<string, number>;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
 }

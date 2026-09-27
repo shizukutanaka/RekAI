@@ -126,6 +126,10 @@ class AnthropicProvider(Provider):
         }
         if request.stop:
             payload["stop_sequences"] = request.stop
+        # Anthropic supports top_p but has no seed/frequency/presence/logit_bias
+        # equivalents — those stay RekAI-side rather than erroring upstream.
+        if request.top_p is not None:
+            payload["top_p"] = request.top_p
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
         # Structured output: Anthropic has no `response_format`, but forcing a

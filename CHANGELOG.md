@@ -36,6 +36,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **OpenAI tuning params are forwarded, not just tolerated.** `top_p`, `seed`,
+  `frequency_penalty`, `presence_penalty` and `logit_bias` are now typed on
+  `ChatRequest`/`ChatCompletionsRequest` (they were previously accepted by
+  `extra="allow"` and silently dropped — a `seed=42` request got a
+  non-deterministic 200). Forwarded per provider support: OpenAI-compatible
+  takes all five, Anthropic `top_p`, Gemini `topP`, Ollama `top_p` + `seed`.
+  All five join the cache key and semantic bucket. Both SDKs expose them
+  (`topP`, `frequencyPenalty`, … in JS; snake_case in Python).
 - **Opt-in verify band for the semantic cache** (`REKAI_SEMANTIC_CACHE_VERIFY_*`,
   roadmap O-2). A single cosine threshold forced every candidate to be served
   or dropped on embedding distance alone; similarity is not proof two prompts

@@ -184,6 +184,11 @@ def _build_payload(
     tool_choice: Any | None = None,
     response_format: dict[str, Any] | None = None,
     stop: list[str] | str | None = None,
+    top_p: float | None = None,
+    seed: int | None = None,
+    frequency_penalty: float | None = None,
+    presence_penalty: float | None = None,
+    logit_bias: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -205,6 +210,16 @@ def _build_payload(
         payload["response_format"] = response_format
     if stop is not None:
         payload["stop"] = stop
+    if top_p is not None:
+        payload["top_p"] = top_p
+    if seed is not None:
+        payload["seed"] = seed
+    if frequency_penalty is not None:
+        payload["frequency_penalty"] = frequency_penalty
+    if presence_penalty is not None:
+        payload["presence_penalty"] = presence_penalty
+    if logit_bias is not None:
+        payload["logit_bias"] = logit_bias
     return payload
 
 
@@ -295,6 +310,11 @@ class RekAIClient:
         tool_choice: Any | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
+        top_p: float | None = None,
+        seed: int | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        logit_bias: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -308,6 +328,11 @@ class RekAIClient:
             tool_choice,
             response_format,
             stop,
+            top_p,
+            seed,
+            frequency_penalty,
+            presence_penalty,
+            logit_bias,
         )
 
     @staticmethod
@@ -363,6 +388,11 @@ class RekAIClient:
         tool_choice: Any | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
+        top_p: float | None = None,
+        seed: int | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        logit_bias: dict[str, int] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -371,6 +401,10 @@ class RekAIClient:
 
         ``stop`` is one or more sequences that end generation, as OpenAI's
         ``stop`` (a bare string is fine; the server normalizes it to a list).
+
+        ``top_p``/``seed``/``frequency_penalty``/``presence_penalty``/
+        ``logit_bias`` mirror OpenAI's tuning params; providers forward the
+        ones they support and ignore the rest.
 
         ``idempotency_key`` is sent as the ``Idempotency-Key`` header so the
         server replays the first response on a retry instead of re-processing.
@@ -389,6 +423,11 @@ class RekAIClient:
             tool_choice,
             response_format,
             stop,
+            top_p,
+            seed,
+            frequency_penalty,
+            presence_penalty,
+            logit_bias,
         )
         headers = _build_headers(
             self._provider_key,
@@ -595,6 +634,11 @@ class AsyncRekAIClient:
         tool_choice: Any | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
+        top_p: float | None = None,
+        seed: int | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        logit_bias: dict[str, int] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -612,6 +656,11 @@ class AsyncRekAIClient:
             tool_choice,
             response_format,
             stop,
+            top_p,
+            seed,
+            frequency_penalty,
+            presence_penalty,
+            logit_bias,
         )
         headers = _build_headers(
             self._provider_key,

@@ -46,6 +46,37 @@ class ChatRequest(BaseModel):
         "every provider under its own name; a provider's own limit (OpenAI "
         "allows 4) surfaces as that provider's error.",
     )
+    top_p: float | None = Field(
+        default=None,
+        gt=0.0,
+        le=1.0,
+        description="Nucleus sampling, as OpenAI's `top_p`. Forwarded to providers that "
+        "support it (OpenAI/OpenAI-compatible, Anthropic, Gemini, Ollama).",
+    )
+    seed: int | None = Field(
+        default=None,
+        description="Deterministic-sampling seed, as OpenAI's `seed`. Forwarded to "
+        "providers that support it (OpenAI/OpenAI-compatible, Ollama).",
+    )
+    frequency_penalty: float | None = Field(
+        default=None,
+        ge=-2.0,
+        le=2.0,
+        description="Token-frequency penalty, as OpenAI's `frequency_penalty`. "
+        "OpenAI/OpenAI-compatible providers only.",
+    )
+    presence_penalty: float | None = Field(
+        default=None,
+        ge=-2.0,
+        le=2.0,
+        description="Token-presence penalty, as OpenAI's `presence_penalty`. "
+        "OpenAI/OpenAI-compatible providers only.",
+    )
+    logit_bias: dict[str, int] | None = Field(
+        default=None,
+        description="Token-id → bias map, as OpenAI's `logit_bias`. "
+        "OpenAI/OpenAI-compatible providers only.",
+    )
     cache: bool = Field(default=True, description="Whether this request may be served from cache.")
     fallbacks: list[FallbackTarget] | None = Field(
         default=None,
@@ -135,8 +166,8 @@ class StreamOptions(BaseModel):
 
 
 class ChatCompletionsRequest(BaseModel):
-    # Tolerate unknown OpenAI tuning params (frequency_penalty, seed, logit_bias,
-    # ...) rather than 422-ing — matches vLLM/LiteLLM leniency for drop-in use.
+    # Tolerate unknown OpenAI tuning params (top_logprobs, logprobs, ...)
+    # rather than 422-ing — matches vLLM/LiteLLM leniency for drop-in use.
     model_config = ConfigDict(extra="allow")
 
     model: str
@@ -144,6 +175,11 @@ class ChatCompletionsRequest(BaseModel):
     temperature: float | None = None
     max_tokens: int | None = Field(default=None, ge=1)
     max_completion_tokens: int | None = Field(default=None, ge=1)
+    top_p: float | None = Field(default=None, gt=0.0, le=1.0)
+    seed: int | None = None
+    frequency_penalty: float | None = Field(default=None, ge=-2.0, le=2.0)
+    presence_penalty: float | None = Field(default=None, ge=-2.0, le=2.0)
+    logit_bias: dict[str, int] | None = None
     stop: str | list[str] | None = None
     stream: bool = False
     stream_options: StreamOptions | None = None

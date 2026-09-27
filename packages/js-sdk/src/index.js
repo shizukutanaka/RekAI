@@ -138,6 +138,11 @@ export class RekAIClient {
     if (opts.toolChoice != null) payload.tool_choice = opts.toolChoice;
     if (opts.responseFormat != null) payload.response_format = opts.responseFormat;
     if (opts.stop != null) payload.stop = opts.stop;
+    if (opts.topP != null) payload.top_p = opts.topP;
+    if (opts.seed != null) payload.seed = opts.seed;
+    if (opts.frequencyPenalty != null) payload.frequency_penalty = opts.frequencyPenalty;
+    if (opts.presencePenalty != null) payload.presence_penalty = opts.presencePenalty;
+    if (opts.logitBias != null) payload.logit_bias = opts.logitBias;
     return payload;
   }
 
