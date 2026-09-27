@@ -54,6 +54,9 @@ class ChatResult:
     #: Secret patterns scrubbed from ``content`` by the output-redaction
     #: guardrail, or None if nothing was redacted.
     redacted: list[str] | None = None
+    #: The provider's logprobs object verbatim (OpenAI shape), when the
+    #: request asked for it and the provider reported it.
+    logprobs: dict[str, Any] | None = None
     #: Unix timestamp the gateway produced the response.
     created: int = 0
 
@@ -72,6 +75,7 @@ class ChatResult:
             finish_reason=data.get("finish_reason"),
             cache_similarity=data.get("cache_similarity"),
             redacted=data.get("redacted"),
+            logprobs=data.get("logprobs"),
             created=data.get("created", 0),
         )
 
@@ -185,6 +189,8 @@ def _build_payload(
     response_format: dict[str, Any] | None = None,
     stop: list[str] | str | None = None,
     service_tier: str | None = None,
+    logprobs: bool | None = None,
+    top_logprobs: int | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -208,6 +214,10 @@ def _build_payload(
         payload["stop"] = stop
     if service_tier is not None:
         payload["service_tier"] = service_tier
+    if logprobs is not None:
+        payload["logprobs"] = logprobs
+    if top_logprobs is not None:
+        payload["top_logprobs"] = top_logprobs
     return payload
 
 
@@ -299,6 +309,8 @@ class RekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
+        logprobs: bool | None = None,
+        top_logprobs: int | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -313,6 +325,8 @@ class RekAIClient:
             response_format,
             stop,
             service_tier,
+            logprobs,
+            top_logprobs,
         )
 
     @staticmethod
@@ -369,6 +383,8 @@ class RekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
+        logprobs: bool | None = None,
+        top_logprobs: int | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -378,7 +394,9 @@ class RekAIClient:
         ``stop`` is one or more sequences that end generation, as OpenAI's
         ``stop`` (a bare string is fine; the server normalizes it to a list).
         ``service_tier`` ('auto' | 'flex' | 'priority' | …) reaches
-        OpenAI-compatible providers only.
+        OpenAI-compatible providers only. So do ``logprobs``/``top_logprobs``
+        (per-token log probabilities — OpenAI-compatible providers echo the
+        ``choices[].logprobs`` object back on the result).
 
         ``idempotency_key`` is sent as the ``Idempotency-Key`` header so the
         server replays the first response on a retry instead of re-processing.
@@ -398,6 +416,8 @@ class RekAIClient:
             response_format,
             stop,
             service_tier,
+            logprobs,
+            top_logprobs,
         )
         headers = _build_headers(
             self._provider_key,
@@ -605,6 +625,8 @@ class AsyncRekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
+        logprobs: bool | None = None,
+        top_logprobs: int | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -623,6 +645,8 @@ class AsyncRekAIClient:
             response_format,
             stop,
             service_tier,
+            logprobs,
+            top_logprobs,
         )
         headers = _build_headers(
             self._provider_key,

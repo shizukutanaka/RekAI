@@ -45,6 +45,11 @@ export interface ChatOptions {
    * 'scale'). Forwarded to OpenAI-compatible providers only.
    */
   serviceTier?: string;
+  /** OpenAI's `logprobs` — request per-token log probabilities in the
+   * response (evals/confidence scoring). OpenAI-compatible providers only. */
+  logprobs?: boolean;
+  /** OpenAI's `top_logprobs` (0-20; requires logprobs: true). */
+  topLogprobs?: number;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
 }
@@ -80,6 +85,9 @@ export interface ChatResult {
   fallback_used: boolean;
   /** Secret patterns scrubbed from `content` by the output-redaction guardrail. */
   redacted: string[] | null;
+  /** The provider's logprobs object verbatim (OpenAI shape), when requested
+   * and reported. */
+  logprobs: Record<string, unknown> | null;
   /** Unix timestamp the gateway produced the response. */
   created: number;
 }

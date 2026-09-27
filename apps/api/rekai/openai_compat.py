@@ -99,6 +99,8 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         max_tokens=req.max_tokens or req.max_completion_tokens,
         stop=stop,
         service_tier=req.service_tier,
+        logprobs=req.logprobs,
+        top_logprobs=req.top_logprobs,
         cache=True,
         tools=req.tools,
         tool_choice=req.tool_choice,
@@ -126,6 +128,7 @@ def to_chat_completion(resp: ChatResponse) -> ChatCompletionResponse:
                 # nothing) — synthesising it for everything is what made a
                 # truncated answer indistinguishable from a complete one.
                 finish_reason=resp.finish_reason or ("tool_calls" if resp.tool_calls else "stop"),
+                logprobs=resp.logprobs,
             )
         ],
         usage=resp.usage,
@@ -154,9 +157,18 @@ def chunk_first(chunk_id: str, created: int, model: str) -> dict:
     return chunk
 
 
-def chunk_delta(chunk_id: str, created: int, model: str, text: str) -> dict:
+def chunk_delta(
+    chunk_id: str, created: int, model: str, text: str, logprobs: dict | None = None
+) -> dict:
     chunk = _chunk_base(chunk_id, created, model)
-    chunk["choices"] = [{"index": 0, "delta": {"content": text}, "finish_reason": None}]
+    choice: dict = {
+        "index": 0,
+        "delta": {"content": text} if text else {},
+        "finish_reason": None,
+    }
+    if logprobs is not None:
+        choice["logprobs"] = logprobs
+    chunk["choices"] = [choice]
     return chunk
 
 

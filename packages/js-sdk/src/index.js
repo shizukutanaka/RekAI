@@ -139,6 +139,9 @@ export class RekAIClient {
     if (opts.responseFormat != null) payload.response_format = opts.responseFormat;
     if (opts.stop != null) payload.stop = opts.stop;
     if (opts.serviceTier != null) payload.service_tier = opts.serviceTier;
+    // OpenAI's per-token log probabilities; OpenAI-compatible providers only.
+    if (opts.logprobs != null) payload.logprobs = opts.logprobs;
+    if (opts.topLogprobs != null) payload.top_logprobs = opts.topLogprobs;
     return payload;
   }
 

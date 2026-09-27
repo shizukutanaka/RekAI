@@ -115,6 +115,9 @@ class ProviderResult:
     usage: Usage = field(default_factory=Usage)
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    # The provider's logprobs object verbatim (OpenAI shape), when the request
+    # asked for it and the provider reported it.
+    logprobs: dict | None = None
 
 
 @dataclass
@@ -134,6 +137,8 @@ class StreamEvent:
     usage: Usage | None = None
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    # The provider's logprobs object for this chunk (OpenAI shape), verbatim.
+    logprobs: dict | None = None
 
 
 class Provider(ABC):

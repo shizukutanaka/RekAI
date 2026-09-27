@@ -70,6 +70,10 @@ class ChatStreamEvent:
     delta: str | None = None
     error: ProviderError | None = None
     summary: StreamSummary | None = None
+    # The provider's logprobs object (OpenAI shape), carried alongside the
+    # delta it belongs to. May be set alone when a chunk reported logprobs
+    # with no text (a transport then emits an empty-delta chunk).
+    logprobs: dict | None = None
 
 
 def _chat_factory(
@@ -468,6 +472,7 @@ async def handle_chat(
             cached=False,
             fallback_used=is_fallback,
             finish_reason=result.finish_reason,
+            logprobs=result.logprobs,
             created=int(time.time()),
         )
         # Redact before *any* store below sees the content (see _redact).
@@ -547,7 +552,11 @@ async def handle_chat_stream(
                 completion.append(event.delta)
                 emitted = redactor.feed(event.delta) if redactor is not None else event.delta
                 if emitted:
-                    yield ChatStreamEvent(delta=emitted)
+                    yield ChatStreamEvent(delta=emitted, logprobs=event.logprobs)
+            elif event.logprobs is not None:
+                # A logprobs-only chunk (no delta): still worth emitting so the
+                # client doesn't lose per-token data.
+                yield ChatStreamEvent(logprobs=event.logprobs)
             if event.usage is not None:
                 reported_usage = event.usage
             if event.tool_calls is not None:

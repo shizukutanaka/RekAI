@@ -75,6 +75,21 @@ class ChatRequest(BaseModel):
         "that support it (OpenAI/OpenAI-compatible natively, Gemini best-effort); "
         "ignored by others.",
     )
+    logprobs: bool | None = Field(
+        default=None,
+        description="OpenAI's `logprobs` — request per-token log probabilities "
+        "in the response (used for evals and confidence scoring). Forwarded to "
+        "OpenAI-compatible providers only; the upstream `choices[].logprobs` "
+        "object is echoed back verbatim.",
+    )
+    top_logprobs: int | None = Field(
+        default=None,
+        ge=0,
+        le=20,
+        description="OpenAI's `top_logprobs` (0-20, requires logprobs=true) — "
+        "how many candidate tokens to report per position. Forwarded to "
+        "OpenAI-compatible providers only.",
+    )
     cache_control: dict[str, Any] | None = Field(
         default=None,
         description="Provider-native prompt-cache breakpoint applied to the last "
@@ -162,6 +177,9 @@ class ChatCompletionsRequest(BaseModel):
     user: str | None = None  # accepted, ignored
     n: int | None = None  # 400 if n > 1 (RekAI returns a single choice)
     provider: str | None = None  # RekAI extension: explicit provider override
+    # OpenAI's per-token log-probability request fields.
+    logprobs: bool | None = None
+    top_logprobs: int | None = Field(default=None, ge=0, le=20)
 
 
 # --- Anthropic Messages API (`POST /v1/messages`) --------------------------
@@ -235,6 +253,8 @@ class ChatCompletionChoice(BaseModel):
     # "length" matters most: it is how an OpenAI client learns the answer was
     # truncated by max_tokens and should be retried with a larger budget.
     finish_reason: Literal["stop", "length", "tool_calls", "content_filter"] = "stop"
+    # Sibling of `message` per OpenAI's schema — not nested inside it.
+    logprobs: dict[str, Any] | None = None
 
 
 class ChatCompletionResponse(BaseModel):
@@ -280,6 +300,12 @@ class ChatResponse(BaseModel):
         "one. Null on a miss and on an exact cache hit (where the prompt matched "
         "byte-for-byte), so a non-null value is exactly the signal that an "
         "approximate match was used.",
+    )
+    logprobs: dict[str, Any] | None = Field(
+        default=None,
+        description="The provider's logprobs object verbatim (OpenAI shape: "
+        "{'content': [{token, logprob, top_logprobs: [...]}, ...]}). Present "
+        "only when the request asked for it and the provider reported it.",
     )
     fallback_used: bool = Field(
         default=False, description="True if a fallback served this response, not the primary."

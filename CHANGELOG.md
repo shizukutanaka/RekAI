@@ -36,6 +36,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **`logprobs`/`top_logprobs` end-to-end.** OpenAI's per-token log-probability
+  fields were accepted on every chat surface (native and
+  `/v1/chat/completions`) and silently dropped; they now reach
+  OpenAI-compatible providers, and the provider's `choices[].logprobs` object
+  comes back — as a `logprobs` field on the native response, as a sibling of
+  `message` on compat responses, and per-chunk on both streaming surfaces (the
+  native stream emits a `logprobs` key alongside `delta`). Both ride the cache
+  key and semantic bucket, and both SDKs expose them (`logprobs`/`top_logprobs`
+  in Python, `logprobs`/`topLogprobs` in JS).
 - **Anthropic-compatible `POST /v1/messages`.** Point an Anthropic SDK at
   RekAI — `Anthropic(base_url="http://localhost:8000")`, the SDK appends
   `/v1/messages` itself — and it works unmodified: Anthropic's request shape

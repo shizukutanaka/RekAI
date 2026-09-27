@@ -1368,8 +1368,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             async for ev in handle_chat_stream(
                 request, x_provider_key, config, cache_backend, provider_name, provider, client_id
             ):
-                if ev.delta is not None:
-                    yield f"data: {json.dumps({'delta': ev.delta})}\n\n"
+                if ev.delta is not None or ev.logprobs is not None:
+                    payload = {"delta": ev.delta or ""}
+                    if ev.logprobs is not None:
+                        payload["logprobs"] = ev.logprobs
+                    yield f"data: {json.dumps(payload)}\n\n"
                 elif ev.error is not None:
                     payload = {"error": "provider_error", "detail": str(ev.error)}
                     yield f"data: {json.dumps(payload)}\n\n"
@@ -1502,8 +1505,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 provider,
                 client_id,
             ):
-                if ev.delta is not None:
-                    yield sse(openai_compat.chunk_delta(chunk_id, created, model, ev.delta))
+                if ev.delta is not None or ev.logprobs is not None:
+                    yield sse(
+                        openai_compat.chunk_delta(
+                            chunk_id, created, model, ev.delta or "", logprobs=ev.logprobs
+                        )
+                    )
                 elif ev.error is not None:
                     yield sse(openai_compat.openai_error(ev.error.status_code, str(ev.error)))
                     yield "data: [DONE]\n\n"

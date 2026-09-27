@@ -107,6 +107,12 @@ class OpenAIProvider(Provider):
             payload["tool_choice"] = request.tool_choice
         if request.response_format is not None:
             payload["response_format"] = request.response_format
+        # OpenAI's per-token log probabilities — forwarded verbatim; the
+        # provider validates the top_logprobs-requires-logprobs rule.
+        if request.logprobs is not None:
+            payload["logprobs"] = request.logprobs
+        if request.top_logprobs is not None:
+            payload["top_logprobs"] = request.top_logprobs
         return payload
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
@@ -145,6 +151,7 @@ class OpenAIProvider(Provider):
             ),
             tool_calls=message.get("tool_calls"),
             finish_reason=_finish_reason(data["choices"][0].get("finish_reason")),
+            logprobs=data["choices"][0].get("logprobs"),
         )
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
@@ -248,10 +255,11 @@ def _parse_openai_sse_event(line: str) -> StreamEvent | None:
     if choices:
         delta = choices[0].get("delta", {}).get("content")
         reason = _finish_reason(choices[0].get("finish_reason"))
-        if delta or reason:
+        lp = choices[0].get("logprobs")
+        if delta or reason or lp:
             # The terminal chunk usually carries a finish_reason and an empty
             # delta; a provider may also send both at once.
-            return StreamEvent(delta=delta or None, finish_reason=reason)
+            return StreamEvent(delta=delta or None, finish_reason=reason, logprobs=lp)
     usage = chunk.get("usage")
     if usage:
         return StreamEvent(
