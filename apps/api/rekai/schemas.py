@@ -329,6 +329,20 @@ class EmbeddingsRequest(BaseModel):
         description="End-user identifier for per-user usage accounting "
         "(usage_by_user in /v1/usage). Not sent to the provider.",
     )
+    dimensions: int | None = Field(
+        default=None,
+        ge=1,
+        description="Output dimensionality for models that support it "
+        "(OpenAI text-embedding-3+, Gemini embedding models via "
+        "`outputDimensionality`). Forwarded verbatim; an unsupported value "
+        "surfaces as the provider's own error.",
+    )
+    encoding_format: str | None = Field(
+        default=None,
+        description="OpenAI's `encoding_format` ('float' | 'base64'). "
+        "Forwarded to OpenAI-compatible providers only; note the API's own "
+        "response stays JSON floats either way.",
+    )
 
 
 class EmbeddingsResponse(BaseModel):

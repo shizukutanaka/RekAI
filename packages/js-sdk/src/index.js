@@ -241,6 +241,9 @@ export class RekAIClient {
   async embeddings(model, input, opts = {}) {
     const payload = { model, input, cache: opts.cache ?? true };
     if (opts.provider != null) payload.provider = opts.provider;
+    // OpenAI embeddings fields; providers without them ignore them.
+    if (opts.dimensions != null) payload.dimensions = opts.dimensions;
+    if (opts.encodingFormat != null) payload.encoding_format = opts.encodingFormat;
     const res = await this._send("/v1/embeddings", {
       method: "POST",
       headers: this._headers(opts.providerKey, opts.gatewayKey),

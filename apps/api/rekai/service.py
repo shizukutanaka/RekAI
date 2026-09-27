@@ -640,7 +640,13 @@ async def handle_embeddings(
         raise ProviderError("'input' must not be empty.", status_code=422)
 
     use_cache = settings.cache_enabled and request.cache
-    key = embedding_cache_key(provider_name, request.model, inputs)
+    key = embedding_cache_key(
+        provider_name,
+        request.model,
+        inputs,
+        dimensions=request.dimensions,
+        encoding_format=request.encoding_format,
+    )
     if use_cache:
         cached_raw = await cache.get(key)
         if cached_raw is not None:
@@ -651,7 +657,13 @@ async def handle_embeddings(
     started = time.perf_counter()
     try:
         result = await call_with_retry(
-            lambda: provider.embed(inputs, request.model, api_key),
+            lambda: provider.embed(
+                inputs,
+                request.model,
+                api_key,
+                dimensions=request.dimensions,
+                encoding_format=request.encoding_format,
+            ),
             attempts=settings.retry_max_attempts,
             base_delay=settings.retry_base_delay_seconds,
             max_delay=settings.retry_max_delay_seconds,
