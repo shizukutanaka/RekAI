@@ -189,6 +189,7 @@ def _build_payload(
     frequency_penalty: float | None = None,
     presence_penalty: float | None = None,
     logit_bias: dict[str, int] | None = None,
+    service_tier: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -220,6 +221,8 @@ def _build_payload(
         payload["presence_penalty"] = presence_penalty
     if logit_bias is not None:
         payload["logit_bias"] = logit_bias
+    if service_tier is not None:
+        payload["service_tier"] = service_tier
     return payload
 
 
@@ -315,6 +318,7 @@ class RekAIClient:
         frequency_penalty: float | None = None,
         presence_penalty: float | None = None,
         logit_bias: dict[str, int] | None = None,
+        service_tier: str | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -333,6 +337,7 @@ class RekAIClient:
             frequency_penalty,
             presence_penalty,
             logit_bias,
+            service_tier,
         )
 
     @staticmethod
@@ -393,6 +398,7 @@ class RekAIClient:
         frequency_penalty: float | None = None,
         presence_penalty: float | None = None,
         logit_bias: dict[str, int] | None = None,
+        service_tier: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -401,6 +407,8 @@ class RekAIClient:
 
         ``stop`` is one or more sequences that end generation, as OpenAI's
         ``stop`` (a bare string is fine; the server normalizes it to a list).
+        ``service_tier`` ('auto' | 'flex' | 'priority' | …) reaches
+        OpenAI-compatible providers only.
 
         ``top_p``/``seed``/``frequency_penalty``/``presence_penalty``/
         ``logit_bias`` mirror OpenAI's tuning params; providers forward the
@@ -428,6 +436,7 @@ class RekAIClient:
             frequency_penalty,
             presence_penalty,
             logit_bias,
+            service_tier,
         )
         headers = _build_headers(
             self._provider_key,
@@ -639,6 +648,7 @@ class AsyncRekAIClient:
         frequency_penalty: float | None = None,
         presence_penalty: float | None = None,
         logit_bias: dict[str, int] | None = None,
+        service_tier: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -661,6 +671,7 @@ class AsyncRekAIClient:
             frequency_penalty,
             presence_penalty,
             logit_bias,
+            service_tier,
         )
         headers = _build_headers(
             self._provider_key,

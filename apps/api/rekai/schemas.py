@@ -77,6 +77,14 @@ class ChatRequest(BaseModel):
         description="Token-id → bias map, as OpenAI's `logit_bias`. "
         "OpenAI/OpenAI-compatible providers only.",
     )
+    service_tier: str | None = Field(
+        default=None,
+        description="OpenAI's processing tier ('auto' | 'default' | 'flex' | "
+        "'priority' | 'scale'): flex trades latency for a large discount, "
+        "priority pays for lower latency. Not enum-validated so newer tiers "
+        "stay forward-compatible; an unsupported tier surfaces as the "
+        "provider's own error. Forwarded to OpenAI-compatible providers only.",
+    )
     cache: bool = Field(default=True, description="Whether this request may be served from cache.")
     fallbacks: list[FallbackTarget] | None = Field(
         default=None,
@@ -181,6 +189,7 @@ class ChatCompletionsRequest(BaseModel):
     presence_penalty: float | None = Field(default=None, ge=-2.0, le=2.0)
     logit_bias: dict[str, int] | None = None
     stop: str | list[str] | None = None
+    service_tier: str | None = None
     stream: bool = False
     stream_options: StreamOptions | None = None
     tools: list[dict[str, Any]] | None = None

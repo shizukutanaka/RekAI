@@ -143,6 +143,7 @@ export class RekAIClient {
     if (opts.frequencyPenalty != null) payload.frequency_penalty = opts.frequencyPenalty;
     if (opts.presencePenalty != null) payload.presence_penalty = opts.presencePenalty;
     if (opts.logitBias != null) payload.logit_bias = opts.logitBias;
+    if (opts.serviceTier != null) payload.service_tier = opts.serviceTier;
     return payload;
   }
 

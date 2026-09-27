@@ -103,6 +103,7 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         frequency_penalty=req.frequency_penalty,
         presence_penalty=req.presence_penalty,
         logit_bias=req.logit_bias,
+        service_tier=req.service_tier,
         cache=True,
         tools=req.tools,
         tool_choice=req.tool_choice,

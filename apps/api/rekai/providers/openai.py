@@ -109,6 +109,8 @@ class OpenAIProvider(Provider):
             payload["logit_bias"] = request.logit_bias
         if request.stop:
             payload["stop"] = request.stop
+        if request.service_tier is not None:
+            payload["service_tier"] = request.service_tier
         if request.tools is not None:
             payload["tools"] = request.tools
         if request.tool_choice is not None:

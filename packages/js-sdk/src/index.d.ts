@@ -50,6 +50,11 @@ export interface ChatOptions {
   presencePenalty?: number;
   /** Token-id → bias map, as OpenAI's `logit_bias`. */
   logitBias?: Record<string, number>;
+  /**
+   * OpenAI's processing tier ('auto' | 'default' | 'flex' | 'priority' |
+   * 'scale'). Forwarded to OpenAI-compatible providers only.
+   */
+  serviceTier?: string;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
 }
