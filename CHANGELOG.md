@@ -17,7 +17,6 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Anthropic-compat surface passes them as a response extra (Anthropic's own
   citations schema needs `cited_text` upstreams don't send). Both SDKs expose
   them (`ChatResult.annotations`, `on_annotations`/`onAnnotations` hooks).
-||||||| 0e4ac30
 - **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
   `cache: false` so you can compare a fresh answer against the cached one.
   It defaults to on; the meta line already marks cache hits.
