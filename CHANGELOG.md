@@ -47,6 +47,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   four call surfaces (`/v1/chat`, `/v1/chat/stream`, `/v1/chat/completions`
   both modes, `/v1/embeddings`). `GET /v1/models` is also filtered to what
   the caller's key may use. Denied requests return 403 `model_not_allowed`.
+- **Per-key rate-limit overrides** (`REKAI_CLIENT_RATE_LIMITS`, e.g.
+  `"sk-premium:600,sk-trial:5"`): the global `REKAI_RATE_LIMIT_REQUESTS`
+  applied the same ceiling to every tenant — there was no way to sell a
+  higher tier or throttle one noisy key. Entries are keyed by the raw API
+  key (same convention as `REKAI_CLIENT_BUDGETS_USD`); keys not listed use
+  the global default. The limiter's bucket now carries its own capacity,
+  and eviction's "closest to full" ordering compares fill fractions so a
+  cap-5 bucket at 4 tokens is correctly judged tighter than a cap-600
+  bucket at 4. `X-RateLimit-Limit`/`Retry-After` reflect the effective cap.
+- **`service_tier` request parameter** — OpenAI's processing tiers ('auto' |
+  'default' | 'flex' | 'priority' | 'scale') are a real cost/latency lever
+  (flex trades latency for a large discount); the compat layer tolerated the
+  field via `extra="allow"` and silently dropped it. Forwarded to
+  OpenAI-compatible providers only; part of the cache key and semantic bucket.
+  Exposed in both SDKs (`service_tier=` / `serviceTier`).
 - **Opt-in verify band for the semantic cache** (`REKAI_SEMANTIC_CACHE_VERIFY_*`,
   roadmap O-2). A single cosine threshold forced every candidate to be served
   or dropped on embedding distance alone; similarity is not proof two prompts
