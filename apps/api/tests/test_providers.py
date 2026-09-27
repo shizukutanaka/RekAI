@@ -54,9 +54,9 @@ async def test_listed_chat_models_are_priced_and_routable() -> None:
     for provider_name, provider in [("openai", OpenAIProvider()), ("gemini", GeminiProvider())]:
         for model in await provider.list_models(None):
             assert price_for_model(model) is not None, f"{model} advertised but unpriced"
-            assert (
-                resolve_provider(None, model, settings) == provider_name
-            ), f"{model} advertised by {provider_name} but routes elsewhere"
+            assert resolve_provider(None, model, settings) == provider_name, (
+                f"{model} advertised by {provider_name} but routes elsewhere"
+            )
 
 
 def test_keyless_provider_is_always_ready() -> None:
