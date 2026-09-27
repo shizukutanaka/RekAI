@@ -225,8 +225,20 @@ class Provider(ABC):
         """
         return not self.requires_key
 
-    async def embed(self, inputs: list[str], model: str, api_key: str | None) -> EmbeddingResult:
-        """Embed one or more texts. Providers that support embeddings override this."""
+    async def embed(
+        self,
+        inputs: list[str],
+        model: str,
+        api_key: str | None,
+        *,
+        dimensions: int | None = None,
+        encoding_format: str | None = None,
+    ) -> EmbeddingResult:
+        """Embed one or more texts. Providers that support embeddings override this.
+
+        ``dimensions``/``encoding_format`` are OpenAI's request fields —
+        providers without them ignore them (and a provider that understands a
+        different name maps it, e.g. Gemini's ``outputDimensionality``)."""
         raise ProviderError(f"{self.name} does not support embeddings.", status_code=400)
 
     async def list_models(self, api_key: str | None) -> list[str]:
