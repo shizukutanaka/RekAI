@@ -28,6 +28,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   arrive.
 
 ### Fixed
+- `GET /v1/models` is now parseable by the OpenAI SDK (`object`/`created`/
+  `owned_by` added to each entry — `created` is 0 = unknown, since providers
+  don't expose creation dates) and answers Anthropic's list shape when the
+  caller sends `anthropic-version` (the SDK always does), so
+  `client.models.list()` works on both SDKs.
 - **`dimensions`/`encoding_format` on `POST /v1/embeddings` now reach the
   provider instead of being silently ignored.** `EmbeddingsRequest` accepted
   only the OpenAI core fields, so a caller asking text-embedding-3-small for

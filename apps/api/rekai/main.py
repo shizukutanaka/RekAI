@@ -1211,10 +1211,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/v1/models", response_model=ModelsResponse, tags=["chat"])
     async def list_models(
+        http_request: Request,
         type: Literal["chat", "embedding"] | None = Query(
             None, description="Filter by model type: 'chat' or 'embedding'."
         ),
-    ) -> ModelsResponse:
+    ):
         def _info(model: str, name: str, kind: Literal["chat", "embedding"]) -> ModelInfo:
             price = price_for_model(model, settings.pricing_override_dict)
             pricing = (
@@ -1222,7 +1223,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if price is not None
                 else None
             )
-            return ModelInfo(id=model, provider=name, type=kind, pricing=pricing)
+            return ModelInfo(id=model, provider=name, type=kind, pricing=pricing, owned_by=name)
 
         data: list[ModelInfo] = []
         for name in provider_names():
@@ -1235,6 +1236,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if type != "chat":
                 for model in await provider.list_embedding_models(None):
                     data.append(_info(model, name, "embedding"))
+        # The Anthropic SDK sends `anthropic-version` on every call and expects
+        # its own list shape ({data: [{id, type: "model", ...}], has_more, ...}).
+        # Content-negotiate on it so `client.models.list()` works there too;
+        # Anthropic has no embedding models, so only chat entries are listed.
+        if http_request.headers.get("anthropic-version") is not None:
+            chat = [m for m in data if m.type == "chat"]
+            return JSONResponse(
+                content={
+                    "data": [
+                        {
+                            "id": m.id,
+                            "type": "model",
+                            "display_name": m.id,
+                            # Providers don't expose creation dates — epoch 0 is
+                            # "unknown", not a fabricated timestamp.
+                            "created_at": "1970-01-01T00:00:00Z",
+                        }
+                        for m in chat
+                    ],
+                    "has_more": False,
+                    "first_id": chat[0].id if chat else None,
+                    "last_id": chat[-1].id if chat else None,
+                }
+            )
         return ModelsResponse(data=data)
 
     @app.post(

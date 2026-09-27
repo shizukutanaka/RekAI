@@ -86,6 +86,29 @@ def test_models_listing(client: TestClient) -> None:
     assert "gpt-4o-mini" in ids
 
 
+def test_models_are_parseable_by_openai_sdk(client: TestClient) -> None:
+    # OpenAI's SDK requires id/object/created/owned_by on each data item —
+    # RekAI's own fields (provider/type/pricing) are extra keys it ignores.
+    for m in client.get("/v1/models").json()["data"]:
+        assert m["object"] == "model"
+        assert isinstance(m["created"], int)
+        assert m["owned_by"] == m["provider"]
+
+
+def test_models_list_anthropic_shape(client: TestClient) -> None:
+    # The Anthropic SDK sends anthropic-version and expects its own shape.
+    resp = client.get("/v1/models", headers={"anthropic-version": "2023-06-01"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["has_more"] is False
+    ids = [m["id"] for m in body["data"]]
+    assert body["first_id"] == ids[0] and body["last_id"] == ids[-1]
+    for m in body["data"]:
+        assert m["type"] == "model" and m["display_name"] == m["id"]
+        assert "created_at" in m
+    assert "echo" in ids
+
+
 def test_models_include_pricing(client: TestClient) -> None:
     by_id = {m["id"]: m for m in client.get("/v1/models").json()["data"]}
     # A priced model exposes its per-1M rates from the pricing table.

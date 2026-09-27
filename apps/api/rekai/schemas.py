@@ -361,10 +361,18 @@ class ModelPricing(BaseModel):
 
 
 class ModelInfo(BaseModel):
+    """One advertised model. The extra ``object``/``created``/``owned_by``
+    fields are OpenAI's Model shape — an OpenAI SDK's ``models.list()`` parses
+    this response only when all three are present. ``created`` is 0 because
+    providers don't expose creation dates (unknown, not a fake date)."""
+
     id: str
     provider: str
     type: Literal["chat", "embedding"] = "chat"
     pricing: ModelPricing | None = None
+    object: Literal["model"] = "model"
+    created: int = 0
+    owned_by: str | None = None
 
 
 class ModelsResponse(BaseModel):
