@@ -18,6 +18,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `service_tier` on Messages requests (`auto` | `standard_only`) and echoes
   the billed tier in `usage.service_tier` — both directions wired. Gemini and
   Ollama have no equivalent and report null.
+- `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
+  check (`client.messages.count_tokens`) now works against the compat surface.
+  Returns a local script-aware estimate (the same heuristic the pricing path
+  uses); it makes no upstream call and has no billing side effects.
 - **Reasoning-token accounting in `usage`.** Reasoning models (OpenAI o-series
   and gpt-5, Gemini thinking models) bill a separate slice of completion tokens
   for chain-of-thought; the provider-reported count now surfaces as
@@ -39,6 +43,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   arrive.
 
 ### Fixed
+- Provider `httpx.AsyncClient` connection pools are now closed on app shutdown
+  via `Provider.aclose()` in the lifespan teardown — previously the pooled
+  sockets were severed un-gracefully when the loop ended.
 - **`dimensions`/`encoding_format` on `POST /v1/embeddings` now reach the
   provider instead of being silently ignored.** `EmbeddingsRequest` accepted
   only the OpenAI core fields, so a caller asking text-embedding-3-small for

@@ -8,6 +8,7 @@ implementing this small interface and registering it.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
@@ -198,6 +199,25 @@ class Provider(ABC):
             self._http_client_loop = loop
             self._http_client_timeout = timeout
         return self._http_client
+
+    async def aclose(self) -> None:
+        """Close the persistent client, if one was built.
+
+        Providers are process-lifetime singletons, but their connection pools
+        should drain politely on app shutdown rather than be severed when the
+        loop ends. Tolerant by construction: a client whose loop already ended
+        (or a test double without ``aclose``) is dropped without failing the
+        shutdown path.
+        """
+        # Subclasses that skip ``super().__init__()`` (test doubles, minimal
+        # stubs) may not have the attribute at all — teardown must not trip on it.
+        client = getattr(self, "_http_client", None)
+        self._http_client = None
+        self._http_client_loop = None
+        self._http_client_timeout = None
+        if client is not None:
+            with contextlib.suppress(Exception):
+                await client.aclose()
 
     @abstractmethod
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:

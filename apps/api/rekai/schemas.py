@@ -229,15 +229,14 @@ class AnthropicToolChoice(BaseModel):
     # flag (parallel_tool_calls) lives on the request, not on tool_choice.
 
 
-class AnthropicMessagesRequest(BaseModel):
-    """`POST /v1/messages` body. max_tokens is required by Anthropic (unlike
-    OpenAI) and stays required here — an SDK caller always sends it."""
+class _AnthropicMessagesBase(BaseModel):
+    """Fields shared by `/v1/messages` and `/v1/messages/count_tokens` —
+    everything except `max_tokens`, which the counter doesn't require."""
 
     model_config = ConfigDict(extra="allow")
 
     model: str
     messages: list[AnthropicMessage] = Field(..., min_length=1)
-    max_tokens: int = Field(..., ge=1)
     system: str | list[dict[str, Any]] | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=1.0)
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -247,6 +246,26 @@ class AnthropicMessagesRequest(BaseModel):
     tool_choice: AnthropicToolChoice | None = None
     service_tier: str | None = None  # 'auto' | 'standard_only'
     provider: str | None = None  # RekAI extension: explicit provider override
+
+
+class AnthropicMessagesRequest(_AnthropicMessagesBase):
+    """`POST /v1/messages` body. max_tokens is required by Anthropic (unlike
+    OpenAI) and stays required here — an SDK caller always sends it."""
+
+    max_tokens: int = Field(..., ge=1)
+
+
+class AnthropicCountTokensRequest(_AnthropicMessagesBase):
+    """`POST /v1/messages/count_tokens` body — the Messages shape except
+    ``max_tokens`` is optional (Anthropic's counter doesn't need it)."""
+
+    max_tokens: int | None = Field(default=None, ge=1)
+
+
+class AnthropicTokenCount(BaseModel):
+    """`POST /v1/messages/count_tokens` response — Anthropic's shape."""
+
+    input_tokens: int
 
 
 class ChatCompletionMessage(BaseModel):
