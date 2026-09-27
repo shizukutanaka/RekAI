@@ -95,6 +95,8 @@ class OpenAIProvider(Provider):
             payload["stream"] = True
             # Ask for a final usage chunk for accurate accounting.
             payload["stream_options"] = {"include_usage": True}
+            if request.include_obfuscation is not None:
+                payload["stream_options"]["include_obfuscation"] = request.include_obfuscation
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
         if request.stop:
@@ -107,6 +109,8 @@ class OpenAIProvider(Provider):
             payload["tool_choice"] = request.tool_choice
         if request.response_format is not None:
             payload["response_format"] = request.response_format
+        if request.web_search_options is not None:
+            payload["web_search_options"] = request.web_search_options
         return payload
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
@@ -186,14 +190,27 @@ class OpenAIProvider(Provider):
             assembled = [tool_calls_acc[i] for i in sorted(tool_calls_acc)]
             yield StreamEvent(tool_calls=assembled)
 
-    async def embed(self, inputs: list[str], model: str, api_key: str | None) -> EmbeddingResult:
+    async def embed(
+        self,
+        inputs: list[str],
+        model: str,
+        api_key: str | None,
+        *,
+        dimensions: int | None = None,
+        encoding_format: str | None = None,
+    ) -> EmbeddingResult:
         settings = get_settings()
         url = f"{self._base_url().rstrip('/')}/embeddings"
+        body: dict = {"model": model, "input": inputs}
+        if dimensions is not None:
+            body["dimensions"] = dimensions
+        if encoding_format is not None:
+            body["encoding_format"] = encoding_format
         try:
             client = self._client(settings.request_timeout_seconds)
             resp = await client.post(
                 url,
-                json={"model": model, "input": inputs},
+                json=body,
                 headers=self._request_headers(api_key),
             )
         except httpx.HTTPError as exc:

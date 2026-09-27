@@ -54,6 +54,18 @@ class ChatRequest(BaseModel):
         "stay forward-compatible; an unsupported tier surfaces as the "
         "provider's own error. Forwarded to OpenAI-compatible providers only.",
     )
+    web_search_options: dict | None = Field(
+        default=None,
+        description="OpenAI's `web_search_options` — search context size, "
+        "user location, etc. for models with hosted web search. Forwarded "
+        "verbatim to OpenAI-compatible providers only.",
+    )
+    include_obfuscation: bool | None = Field(
+        default=None,
+        description="OpenAI's `stream_options.include_obfuscation`: asks the "
+        "provider to obfuscate streamed tokens. Forwarded into the upstream "
+        "`stream_options` on OpenAI-compatible providers only.",
+    )
     cache: bool = Field(default=True, description="Whether this request may be served from cache.")
     fallbacks: list[FallbackTarget] | None = Field(
         default=None,
@@ -140,6 +152,7 @@ class OpenAIChatMessage(BaseModel):
 
 class StreamOptions(BaseModel):
     include_usage: bool = False
+    include_obfuscation: bool | None = None
 
 
 class ChatCompletionsRequest(BaseModel):
@@ -154,6 +167,7 @@ class ChatCompletionsRequest(BaseModel):
     max_completion_tokens: int | None = Field(default=None, ge=1)
     stop: str | list[str] | None = None
     service_tier: str | None = None
+    web_search_options: dict[str, Any] | None = None
     stream: bool = False
     stream_options: StreamOptions | None = None
     tools: list[dict[str, Any]] | None = None
@@ -304,6 +318,20 @@ class EmbeddingsRequest(BaseModel):
     input: str | list[str] = Field(..., description="A string or list of strings to embed.")
     provider: str | None = Field(default=None, description="Force a provider (else routed).")
     cache: bool = Field(default=True)
+    dimensions: int | None = Field(
+        default=None,
+        ge=1,
+        description="Output dimensionality for models that support it "
+        "(OpenAI text-embedding-3+, Gemini embedding models via "
+        "`outputDimensionality`). Forwarded verbatim; an unsupported value "
+        "surfaces as the provider's own error.",
+    )
+    encoding_format: str | None = Field(
+        default=None,
+        description="OpenAI's `encoding_format` ('float' | 'base64'). "
+        "Forwarded to OpenAI-compatible providers only; note the API's own "
+        "response stays JSON floats either way.",
+    )
 
 
 class EmbeddingsResponse(BaseModel):
