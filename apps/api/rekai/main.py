@@ -49,7 +49,12 @@ from rekai.schemas import (
 )
 from rekai.security import KeyCipher, mask_key
 from rekai.semantic_cache import semantic_cache
-from rekai.service import handle_chat, handle_chat_stream, handle_embeddings
+from rekai.service import (
+    handle_chat,
+    handle_chat_stream,
+    handle_embeddings,
+    with_heartbeat,
+)
 
 access_logger = get_logger("rekai.access")
 admin_logger = get_logger("rekai.admin")
@@ -1296,9 +1301,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _stash_gen_ai_prestream(http_request, provider_name, request.model)
 
         async def event_source():
-            async for ev in handle_chat_stream(
-                request, x_provider_key, config, cache_backend, provider_name, provider, client_id
-            ):
+            stream = with_heartbeat(
+                handle_chat_stream(
+                    request,
+                    x_provider_key,
+                    config,
+                    cache_backend,
+                    provider_name,
+                    provider,
+                    client_id,
+                ),
+                config.stream_heartbeat_seconds,
+            )
+            async for ev in stream:
+                if ev is None:
+                    yield ": ka\n\n"
+                    continue
                 if ev.delta is not None:
                     yield f"data: {json.dumps({'delta': ev.delta})}\n\n"
                 elif ev.error is not None:
@@ -1424,15 +1442,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
             yield sse(openai_compat.chunk_first(chunk_id, created, model))
             finish_reason = "stop"
-            async for ev in handle_chat_stream(
-                chat_request,
-                x_provider_key,
-                config,
-                cache_backend,
-                provider_name,
-                provider,
-                client_id,
-            ):
+            stream = with_heartbeat(
+                handle_chat_stream(
+                    chat_request,
+                    x_provider_key,
+                    config,
+                    cache_backend,
+                    provider_name,
+                    provider,
+                    client_id,
+                ),
+                config.stream_heartbeat_seconds,
+            )
+            async for ev in stream:
+                if ev is None:
+                    yield ": ka\n\n"
+                    continue
                 if ev.delta is not None:
                     yield sse(openai_compat.chunk_delta(chunk_id, created, model, ev.delta))
                 elif ev.error is not None:

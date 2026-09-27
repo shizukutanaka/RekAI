@@ -36,6 +36,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **SSE keepalive on the streaming endpoints** (`REKAI_STREAM_HEARTBEAT_SECONDS`,
+  default 15, `0` disables). A reasoning model can sit silent past a proxy's
+  idle timeout, cutting the connection mid-thought; when the upstream stream
+  goes quiet for the interval RekAI emits a `: ka` comment — which every
+  spec-compliant SSE parser ignores — on both `/v1/chat/stream` and the
+  `/v1/chat/completions` stream.
 - **Opt-in verify band for the semantic cache** (`REKAI_SEMANTIC_CACHE_VERIFY_*`,
   roadmap O-2). A single cosine threshold forced every candidate to be served
   or dropped on embedding distance alone; similarity is not proof two prompts

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
@@ -619,6 +620,41 @@ async def handle_chat_stream(
                 redacted=(redactor.hits or None) if redactor is not None else None,
             )
         )
+
+
+async def with_heartbeat(
+    stream: AsyncIterator[ChatStreamEvent], interval: float
+) -> AsyncIterator[ChatStreamEvent | None]:
+    """Yield ``stream``'s events; yield ``None`` when it goes quiet.
+
+    Long reasoning calls can sit silent past a proxy's idle timeout (and past
+    a client's), which cuts the SSE connection with nothing to show for the
+    wait. Callers translate the ``None`` sentinel into an SSE comment
+    (``: ka``) — a line every spec-compliant event-source parser ignores — so
+    intermediaries see activity while the model thinks. ``interval <= 0``
+    disables the watchdog entirely.
+    """
+    if interval <= 0:
+        async for ev in stream:
+            yield ev
+        return
+    it = stream.__aiter__()
+    pending = asyncio.ensure_future(it.__anext__())
+    try:
+        while True:
+            try:
+                ev = await asyncio.wait_for(asyncio.shield(pending), interval)
+            except TimeoutError:
+                yield None
+                continue
+            except StopAsyncIteration:
+                return
+            # Schedule the next read before yielding: the upstream call keeps
+            # progressing while the caller flushes this event downstream.
+            pending = asyncio.ensure_future(it.__anext__())
+            yield ev
+    finally:
+        pending.cancel()
 
 
 async def handle_embeddings(

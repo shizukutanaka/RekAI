@@ -128,6 +128,11 @@ class Settings(BaseSettings):
     # effective cap is N × this.
     max_concurrent_requests: int = Field(default=0, ge=0)
 
+    # SSE keepalive: when an upstream stream stays silent this long, emit a
+    # `: ka` comment so proxies and clients don't cut the connection — a
+    # reasoning model can sit silent past typical idle timeouts. 0 disables.
+    stream_heartbeat_seconds: float = Field(default=15.0, ge=0.0)
+
     # Per-client spend cap (opt-in). Once a client's cumulative cost_usd_total
     # (tracked in usage_by_client) reaches this, further /v1/* requests from that
     # client get 402 until an operator resets metrics. Unset = no cap.
