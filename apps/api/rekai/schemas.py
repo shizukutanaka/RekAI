@@ -216,6 +216,13 @@ class AnthropicMessage(BaseModel):
 
 
 class AnthropicTool(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    # Absent or "custom" -> a client tool (translated to an OpenAI function).
+    # Anything else is an Anthropic server tool (web_search_20250305,
+    # code_execution, computer_use, mcp_tool_use, ...) whose extra fields
+    # (max_uses, allowed_domains, ...) must pass through verbatim.
+    type: str | None = None
     name: str
     description: str | None = None
     input_schema: dict[str, Any] = Field(default_factory=dict)

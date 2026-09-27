@@ -355,9 +355,17 @@ def _parse_anthropic_sse_line(line: str) -> str | None:
 
 def _translate_tools(openai_tools: list[dict]) -> list[dict]:
     """OpenAI ``{"type":"function","function":{name,description,parameters}}``
-    -> Anthropic ``{name, description, input_schema}``."""
+    -> Anthropic ``{name, description, input_schema}``.
+
+    Entries whose ``type`` isn't ``function`` are Anthropic server tools
+    (``web_search_20250305`` etc.) that arrived via the compat layer
+    un-translated — they go back out verbatim.
+    """
     out = []
     for tool in openai_tools:
+        if tool.get("type") not in (None, "function", "custom"):
+            out.append(tool)
+            continue
         fn = tool.get("function", tool)
         out.append(
             {

@@ -7,6 +7,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+
+- **`POST /v1/messages` accepts Anthropic server tools verbatim** —
+  `web_search_20250305`, `code_execution_*`, `computer_use_*`,
+  `mcp_tool_use`, etc. (any tool whose `type` isn't `custom`) are no longer
+  re-shaped into OpenAI client functions, which had silently rewired them into
+  ordinary tools upstream so the hosted capability never ran. Server tools
+  keep every field (`max_uses`, `allowed_domains`, ...) through to the
+  Anthropic payload; a non-Anthropic upstream surfaces a readable provider
+  error instead of a silent miswire.
 - `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
   check (`client.messages.count_tokens`) now works against the compat surface.
   Returns a local script-aware estimate (the same heuristic the pricing path
