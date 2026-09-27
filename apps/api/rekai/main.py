@@ -1378,6 +1378,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ):
                 if ev.delta is not None:
                     yield f"data: {json.dumps({'delta': ev.delta})}\n\n"
+                elif ev.refusal_delta is not None:
+                    yield f"data: {json.dumps({'refusal': ev.refusal_delta})}\n\n"
                 elif ev.error is not None:
                     payload = {"error": "provider_error", "detail": str(ev.error)}
                     yield f"data: {json.dumps(payload)}\n\n"
@@ -1394,6 +1396,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         summary["tool_calls"] = s.tool_calls
                     if s.finish_reason:
                         summary["finish_reason"] = s.finish_reason
+                    if s.refusal:
+                        summary["refusal"] = s.refusal
                     if s.redacted:
                         summary["redacted"] = s.redacted
                     yield f"data: {json.dumps(summary)}\n\n"
@@ -1512,6 +1516,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ):
                 if ev.delta is not None:
                     yield sse(openai_compat.chunk_delta(chunk_id, created, model, ev.delta))
+                elif ev.refusal_delta is not None:
+                    yield sse(
+                        openai_compat.chunk_refusal(chunk_id, created, model, ev.refusal_delta)
+                    )
                 elif ev.error is not None:
                     yield sse(openai_compat.openai_error(ev.error.status_code, str(ev.error)))
                     yield "data: [DONE]\n\n"
@@ -1633,13 +1641,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 provider,
                 client_id,
             ):
-                if ev.delta is not None:
+                if ev.delta is not None or ev.refusal_delta is not None:
+                    # Anthropic has no refusal channel — the refusal text is the
+                    # message content (stop_reason already maps to "refusal").
+                    text = ev.delta if ev.delta is not None else ev.refusal_delta
                     if not text_block_open:
                         yield anthropic_compat.ev_content_block_start(
                             0, {"type": "text", "text": ""}
                         )
                         text_block_open = True
-                    yield anthropic_compat.ev_text_delta(0, ev.delta)
+                    yield anthropic_compat.ev_text_delta(0, text)
                 elif ev.error is not None:
                     yield anthropic_compat.ev_error(ev.error.status_code, str(ev.error))
                     return

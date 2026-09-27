@@ -7,6 +7,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Model refusal text is surfaced end-to-end instead of dropped.** OpenAI
+  returns a refusal as `message.refusal` / `delta.refusal` chunks with
+  `content` null; RekAI flattened that to an empty answer. `ProviderResult`,
+  `StreamEvent`, `ChatResponse` and the stream summary now carry `refusal`;
+  the native SSE stream emits `{"refusal": ...}` events, the OpenAI-compat
+  surface reproduces `message.refusal`/`delta.refusal` chunks, and the
+  Anthropic-compat surface folds the text into a content block with
+  `stop_reason: "refusal"` (Anthropic's own encoding). Both SDKs expose it
+  (`ChatResult.refusal`, `on_refusal`/`onRefusal` stream hooks).
 - `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
   check (`client.messages.count_tokens`) now works against the compat surface.
   Returns a local script-aware estimate (the same heuristic the pricing path

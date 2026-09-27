@@ -137,6 +137,7 @@ def to_chat_completion(resp: ChatResponse) -> ChatCompletionResponse:
                     role="assistant",
                     content=resp.content or None,
                     tool_calls=resp.tool_calls,
+                    refusal=resp.refusal,
                 ),
                 # The provider's own reason when it gave one. The fallback
                 # is the old behavior, kept only for responses that predate
@@ -184,6 +185,13 @@ def chunk_first(chunk_id: str, created: int, model: str) -> dict:
 def chunk_delta(chunk_id: str, created: int, model: str, text: str) -> dict:
     chunk = _chunk_base(chunk_id, created, model)
     chunk["choices"] = [{"index": 0, "delta": {"content": text}, "finish_reason": None}]
+    return chunk
+
+
+def chunk_refusal(chunk_id: str, created: int, model: str, text: str) -> dict:
+    # OpenAI streams refusal text in `delta.refusal`, parallel to content deltas.
+    chunk = _chunk_base(chunk_id, created, model)
+    chunk["choices"] = [{"index": 0, "delta": {"refusal": text}, "finish_reason": None}]
     return chunk
 
 

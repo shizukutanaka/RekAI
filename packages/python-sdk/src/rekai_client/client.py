@@ -54,6 +54,9 @@ class ChatResult:
     #: Secret patterns scrubbed from ``content`` by the output-redaction
     #: guardrail, or None if nothing was redacted.
     redacted: list[str] | None = None
+    #: The model's refusal text when it declined (``content`` stays empty in
+    #: that case); None on a normal answer.
+    refusal: str | None = None
     #: Unix timestamp the gateway produced the response.
     created: int = 0
 
@@ -72,6 +75,7 @@ class ChatResult:
             finish_reason=data.get("finish_reason"),
             cache_similarity=data.get("cache_similarity"),
             redacted=data.get("redacted"),
+            refusal=data.get("refusal"),
             created=data.get("created", 0),
         )
 
@@ -225,6 +229,8 @@ def _classify_stream_event(event: dict[str, Any]) -> tuple[str, Any]:
     """Map one decoded SSE event to ``(kind, value)`` for the stream loops."""
     if "delta" in event:
         return ("delta", event["delta"])
+    if "refusal" in event:
+        return ("refusal", event["refusal"])
     if "usage" in event:
         return ("usage", event)
     if "error" in event:
@@ -430,6 +436,7 @@ class RekAIClient:
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], None] | None = None,
         on_tool_calls: Callable[[list[dict[str, Any]]], None] | None = None,
+        on_refusal: Callable[[str], None] | None = None,
     ) -> Iterator[str]:
         """Yield response text chunks from the streaming endpoint.
 
@@ -468,6 +475,9 @@ class RekAIClient:
                 kind, value = _classify_stream_event(decoded)
                 if kind == "delta":
                     yield value
+                elif kind == "refusal":
+                    if on_refusal is not None:
+                        on_refusal(value)
                 elif kind == "usage":
                     if on_usage is not None:
                         on_usage(value)
@@ -666,6 +676,7 @@ class AsyncRekAIClient:
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
         on_tool_calls: Callable[[list[dict[str, Any]]], Awaitable[None] | None] | None = None,
+        on_refusal: Callable[[str], Awaitable[None] | None] | None = None,
     ) -> AsyncIterator[str]:
         """Yield response text chunks from the streaming endpoint.
 
@@ -706,6 +717,11 @@ class AsyncRekAIClient:
                 kind, value = _classify_stream_event(decoded)
                 if kind == "delta":
                     yield value
+                elif kind == "refusal":
+                    if on_refusal is not None:
+                        maybe_r = on_refusal(value)
+                        if maybe_r is not None:
+                            await maybe_r
                 elif kind == "usage":
                     if on_usage is not None:
                         maybe = on_usage(value)

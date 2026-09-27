@@ -51,6 +51,9 @@ class StreamSummary:
     estimated: bool
     tool_calls: list[dict] | None = None
     finish_reason: str | None = None
+    # Model refusal text (OpenAI `message.refusal`), streamed in refusal_delta
+    # events and reproduced here in full for consumers that only read the summary.
+    refusal: str | None = None
     # Secret patterns scrubbed from the streamed text. Reported here rather
     # than as a header because response headers are long gone by the time the
     # first delta is redacted.
@@ -68,6 +71,7 @@ class ChatStreamEvent:
     """
 
     delta: str | None = None
+    refusal_delta: str | None = None
     error: ProviderError | None = None
     summary: StreamSummary | None = None
 
@@ -463,6 +467,7 @@ async def handle_chat(
             model=result.model,
             content=result.content,
             tool_calls=result.tool_calls,
+            refusal=result.refusal,
             usage=usage,
             cost_usd=cost_usd,
             cached=False,
@@ -526,6 +531,7 @@ async def handle_chat_stream(
     reported_usage: Usage | None = None
     reported_tool_calls: list[dict] | None = None
     reported_finish_reason: str | None = None
+    reported_refusal: list[str] = []
     errored = False
     started = time.perf_counter()
     first_token_at: float | None = None
@@ -548,6 +554,11 @@ async def handle_chat_stream(
                 emitted = redactor.feed(event.delta) if redactor is not None else event.delta
                 if emitted:
                     yield ChatStreamEvent(delta=emitted)
+            if event.refusal_delta:
+                # Refusal text is model output but not the answer; it skips the
+                # content redactor to keep that streamer's state machine honest.
+                reported_refusal.append(event.refusal_delta)
+                yield ChatStreamEvent(refusal_delta=event.refusal_delta)
             if event.usage is not None:
                 reported_usage = event.usage
             if event.tool_calls is not None:
@@ -616,6 +627,7 @@ async def handle_chat_stream(
                 estimated=estimated,
                 tool_calls=reported_tool_calls or None,
                 finish_reason=reported_finish_reason,
+                refusal="".join(reported_refusal) or None,
                 redacted=(redactor.hits or None) if redactor is not None else None,
             )
         )
