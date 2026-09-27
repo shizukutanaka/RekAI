@@ -15,6 +15,8 @@ export interface StreamSummary {
   cost_usd: number | null;
   estimated: boolean;
   tool_calls?: Record<string, unknown>[];
+  system_fingerprint?: string | null;
+  service_tier?: string | null;
 }
 
 export interface ChatOptions {
@@ -87,6 +89,10 @@ export interface ChatResult {
   redacted: string[] | null;
   /** Unix timestamp the gateway produced the response. */
   created: number;
+  /** OpenAI backend fingerprint — which config served the call (with `seed`, a determinism aid). */
+  system_fingerprint?: string | null;
+  /** The service tier that actually handled the call when `service_tier` was "auto". */
+  service_tier?: string | null;
 }
 
 export interface ModelPricing {

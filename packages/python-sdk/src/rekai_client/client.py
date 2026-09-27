@@ -56,6 +56,12 @@ class ChatResult:
     redacted: list[str] | None = None
     #: Unix timestamp the gateway produced the response.
     created: int = 0
+    #: OpenAI backend fingerprint — which config served the call (with
+    #: ``seed``, a determinism aid). None for other providers.
+    system_fingerprint: str | None = None
+    #: The service tier that actually handled the call when ``service_tier``
+    #: was "auto". None for other providers.
+    service_tier: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ChatResult:
@@ -73,6 +79,8 @@ class ChatResult:
             cache_similarity=data.get("cache_similarity"),
             redacted=data.get("redacted"),
             created=data.get("created", 0),
+            system_fingerprint=data.get("system_fingerprint"),
+            service_tier=data.get("service_tier"),
         )
 
 

@@ -51,6 +51,9 @@ class StreamSummary:
     estimated: bool
     tool_calls: list[dict] | None = None
     finish_reason: str | None = None
+    # OpenAI's response-side identifiers (see ProviderResult).
+    system_fingerprint: str | None = None
+    service_tier: str | None = None
     # Secret patterns scrubbed from the streamed text. Reported here rather
     # than as a header because response headers are long gone by the time the
     # first delta is redacted.
@@ -70,6 +73,11 @@ class ChatStreamEvent:
     delta: str | None = None
     error: ProviderError | None = None
     summary: StreamSummary | None = None
+    # Provider metadata seen on the stream so far (OpenAI's
+    # system_fingerprint/service_tier): set on whichever event carried it —
+    # may arrive alone on the role-announcement chunk.
+    system_fingerprint: str | None = None
+    service_tier: str | None = None
 
 
 def _chat_factory(
@@ -468,6 +476,8 @@ async def handle_chat(
             cached=False,
             fallback_used=is_fallback,
             finish_reason=result.finish_reason,
+            system_fingerprint=result.system_fingerprint,
+            service_tier=result.service_tier,
             created=int(time.time()),
         )
         # Redact before *any* store below sees the content (see _redact).
@@ -534,7 +544,13 @@ async def handle_chat_stream(
     # when actually enabled.
     redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
     try:
+        seen_fingerprint: str | None = None
+        seen_tier: str | None = None
         async for event in provider.stream_events(request, api_key):
+            if event.system_fingerprint is not None:
+                seen_fingerprint = event.system_fingerprint
+            if event.service_tier is not None:
+                seen_tier = event.service_tier
             if event.delta:
                 if first_token_at is None:
                     # Time to first token: on a stream this is what the user
@@ -547,7 +563,18 @@ async def handle_chat_stream(
                 completion.append(event.delta)
                 emitted = redactor.feed(event.delta) if redactor is not None else event.delta
                 if emitted:
-                    yield ChatStreamEvent(delta=emitted)
+                    yield ChatStreamEvent(
+                        delta=emitted,
+                        system_fingerprint=event.system_fingerprint,
+                        service_tier=event.service_tier,
+                    )
+            elif event.system_fingerprint is not None or event.service_tier is not None:
+                # Metadata-only provider event (e.g. the role-announcement
+                # chunk) — forward so transports can stamp it on their frames.
+                yield ChatStreamEvent(
+                    system_fingerprint=event.system_fingerprint,
+                    service_tier=event.service_tier,
+                )
             if event.usage is not None:
                 reported_usage = event.usage
             if event.tool_calls is not None:
@@ -616,6 +643,8 @@ async def handle_chat_stream(
                 estimated=estimated,
                 tool_calls=reported_tool_calls or None,
                 finish_reason=reported_finish_reason,
+                system_fingerprint=seen_fingerprint,
+                service_tier=seen_tier,
                 redacted=(redactor.hits or None) if redactor is not None else None,
             )
         )

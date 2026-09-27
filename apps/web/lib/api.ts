@@ -31,6 +31,10 @@ export interface ChatResponse {
   /** True when a fallback target answered because the primary failed. */
   fallback_used?: boolean;
   tool_calls?: Record<string, unknown>[] | null;
+  /** OpenAI backend fingerprint — which config served the call. */
+  system_fingerprint?: string | null;
+  /** The service tier that actually handled the call when `service_tier` was "auto". */
+  service_tier?: string | null;
 }
 
 /**
@@ -427,6 +431,8 @@ export interface StreamSummary {
   cost_usd: number | null;
   estimated: boolean;
   tool_calls?: Record<string, unknown>[];
+  system_fingerprint?: string | null;
+  service_tier?: string | null;
   finish_reason?: FinishReason;
   redacted?: string[] | null;
 }

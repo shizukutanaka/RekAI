@@ -7,6 +7,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`system_fingerprint` and response `service_tier` now round-trip.** OpenAI
+  stamps both on every response — the fingerprint identifies the backend
+  configuration that served the call (the debugging companion to `seed`), and
+  the response-side `service_tier` reports which tier actually handled it when
+  the request said "auto". They were dropped on the floor before; now they ride
+  through `ProviderResult`/`StreamEvent` into the native `ChatResponse`, the
+  native SSE summary, the compat response, and every compat stream chunk after
+  the first provider frame. Anthropic/Gemini/Ollama have no equivalent and
+  report null.
 - **Reasoning-token accounting in `usage`.** Reasoning models (OpenAI o-series
   and gpt-5, Gemini thinking models) bill a separate slice of completion tokens
   for chain-of-thought; the provider-reported count now surfaces as

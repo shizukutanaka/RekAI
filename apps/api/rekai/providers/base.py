@@ -115,6 +115,11 @@ class ProviderResult:
     usage: Usage = field(default_factory=Usage)
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    # OpenAI's response-side identifiers: which backend config served the call
+    # (used with `seed` for determinism debugging) and which service tier
+    # actually handled it when the request said "auto". None elsewhere.
+    system_fingerprint: str | None = None
+    service_tier: str | None = None
 
 
 @dataclass
@@ -134,6 +139,10 @@ class StreamEvent:
     usage: Usage | None = None
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    # OpenAI puts these on every chunk (including the role announcement, which
+    # carries no delta) — see ProviderResult for what they mean.
+    system_fingerprint: str | None = None
+    service_tier: str | None = None
 
 
 class Provider(ABC):

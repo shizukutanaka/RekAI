@@ -157,6 +157,8 @@ def to_chat_completion(resp: ChatResponse) -> ChatCompletionResponse:
             ),
         ),
         provider=resp.provider,
+        system_fingerprint=resp.system_fingerprint,
+        service_tier=resp.service_tier,
         cost_usd=resp.cost_usd,
         cached=resp.cached,
         fallback_used=resp.fallback_used,
@@ -166,13 +168,27 @@ def to_chat_completion(resp: ChatResponse) -> ChatCompletionResponse:
 # --- streaming chunk builders (chat.completion.chunk) ----------------------
 
 
-def _chunk_base(chunk_id: str, created: int, model: str) -> dict:
-    return {
+def _chunk_base(
+    chunk_id: str,
+    created: int,
+    model: str,
+    system_fingerprint: str | None = None,
+    service_tier: str | None = None,
+) -> dict:
+    chunk = {
         "id": chunk_id,
         "object": "chat.completion.chunk",
         "created": created,
         "model": model,
     }
+    # OpenAI stamps both on every chunk once known (the role announcement
+    # carries them already); ours arrive with the first provider event, so
+    # they appear on chunks from that point on.
+    if system_fingerprint is not None:
+        chunk["system_fingerprint"] = system_fingerprint
+    if service_tier is not None:
+        chunk["service_tier"] = service_tier
+    return chunk
 
 
 def chunk_first(chunk_id: str, created: int, model: str) -> dict:
@@ -181,32 +197,60 @@ def chunk_first(chunk_id: str, created: int, model: str) -> dict:
     return chunk
 
 
-def chunk_delta(chunk_id: str, created: int, model: str, text: str) -> dict:
-    chunk = _chunk_base(chunk_id, created, model)
+def chunk_delta(
+    chunk_id: str,
+    created: int,
+    model: str,
+    text: str,
+    system_fingerprint: str | None = None,
+    service_tier: str | None = None,
+) -> dict:
+    chunk = _chunk_base(chunk_id, created, model, system_fingerprint, service_tier)
     chunk["choices"] = [{"index": 0, "delta": {"content": text}, "finish_reason": None}]
     return chunk
 
 
-def chunk_tool_calls(chunk_id: str, created: int, model: str, tool_calls: list[dict]) -> dict:
+def chunk_tool_calls(
+    chunk_id: str,
+    created: int,
+    model: str,
+    tool_calls: list[dict],
+    system_fingerprint: str | None = None,
+    service_tier: str | None = None,
+) -> dict:
     # The internal pipeline yields fully-assembled tool calls in one shot; OpenAI
     # streaming requires an index per call, so attach one. A single chunk with
     # complete arguments is valid — SDKs reassemble by index either way.
     indexed = [{**tc, "index": i} for i, tc in enumerate(tool_calls)]
-    chunk = _chunk_base(chunk_id, created, model)
+    chunk = _chunk_base(chunk_id, created, model, system_fingerprint, service_tier)
     chunk["choices"] = [{"index": 0, "delta": {"tool_calls": indexed}, "finish_reason": None}]
     return chunk
 
 
-def chunk_finish(chunk_id: str, created: int, model: str, reason: str) -> dict:
-    chunk = _chunk_base(chunk_id, created, model)
+def chunk_finish(
+    chunk_id: str,
+    created: int,
+    model: str,
+    reason: str,
+    system_fingerprint: str | None = None,
+    service_tier: str | None = None,
+) -> dict:
+    chunk = _chunk_base(chunk_id, created, model, system_fingerprint, service_tier)
     chunk["choices"] = [{"index": 0, "delta": {}, "finish_reason": reason}]
     return chunk
 
 
-def chunk_usage(chunk_id: str, created: int, model: str, usage: Usage) -> dict:
+def chunk_usage(
+    chunk_id: str,
+    created: int,
+    model: str,
+    usage: Usage,
+    system_fingerprint: str | None = None,
+    service_tier: str | None = None,
+) -> dict:
     # Per OpenAI's stream_options.include_usage: a final chunk with an empty
     # choices array and the usage totals.
-    chunk = _chunk_base(chunk_id, created, model)
+    chunk = _chunk_base(chunk_id, created, model, system_fingerprint, service_tier)
     chunk["choices"] = []
     chunk["usage"] = usage.model_dump()
     if usage.reasoning_tokens:
