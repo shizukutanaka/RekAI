@@ -177,6 +177,68 @@ def test_tool_calls_finish_reason(client: TestClient) -> None:
     assert body["choices"][0]["message"]["tool_calls"][0]["id"] == "c1"
 
 
+class _CaptureProvider(Provider):
+    """Records the ChatRequest it was given so tests can inspect what the
+    compat layer normalized the request into."""
+
+    name = "cap"
+    requires_key = False
+    last_request = None
+
+    async def chat(self, request, api_key):  # type: ignore[no-untyped-def]
+        type(self).last_request = request
+        return ProviderResult(
+            content="ok",
+            model=request.model,
+            usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        )
+
+
+def _post_legacy(client: TestClient, **extra: object):
+    register_provider(_CaptureProvider())
+    resp = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "m",
+            "provider": "cap",
+            "messages": [{"role": "user", "content": "hi"}],
+            **extra,
+        },
+    )
+    assert resp.status_code == 200
+
+
+def test_legacy_functions_normalized_to_tools(client: TestClient) -> None:
+    fn = {"name": "f", "description": "d", "parameters": {"type": "object"}}
+    _post_legacy(client, functions=[fn], function_call={"name": "f"})
+    req = _CaptureProvider.last_request
+    assert req.tools == [{"type": "function", "function": fn}]
+    assert req.tool_choice == {"type": "function", "function": {"name": "f"}}
+
+
+def test_legacy_function_call_strings(client: TestClient) -> None:
+    _post_legacy(client, function_call="auto")
+    assert _CaptureProvider.last_request.tool_choice == "auto"
+    _post_legacy(client, function_call="none")
+    assert _CaptureProvider.last_request.tool_choice == "none"
+
+
+def test_modern_tools_win_over_legacy_functions(client: TestClient) -> None:
+    """A caller sending both is mid-migration; tools is the field providers
+    honor, so it must not be clobbered by the legacy twin."""
+    tools = [{"type": "function", "function": {"name": "new"}}]
+    _post_legacy(
+        client,
+        tools=tools,
+        tool_choice="required",
+        functions=[{"name": "old"}],
+        function_call={"name": "old"},
+    )
+    req = _CaptureProvider.last_request
+    assert req.tools == tools
+    assert req.tool_choice == "required"
+
+
 # --- middleware coverage ----------------------------------------------------
 
 
