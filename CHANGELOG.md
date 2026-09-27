@@ -14,7 +14,6 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rides on `ChatMessage.is_error` and the Anthropic provider re-emits
   `is_error: true` upstream; surfaces without the concept (OpenAI tool
   messages) drop the flag and keep the error text in `content`.
-||||||| 0e4ac30
 - **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
   `cache: false` so you can compare a fresh answer against the cached one.
   It defaults to on; the meta line already marks cache hits.
