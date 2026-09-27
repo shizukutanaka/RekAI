@@ -14,8 +14,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the request said "auto". They were dropped on the floor before; now they ride
   through `ProviderResult`/`StreamEvent` into the native `ChatResponse`, the
   native SSE summary, the compat response, and every compat stream chunk after
-  the first provider frame. Anthropic/Gemini/Ollama have no equivalent and
-  report null.
+  the first provider frame. Anthropic participates too: it accepts
+  `service_tier` on Messages requests (`auto` | `standard_only`) and echoes
+  the billed tier in `usage.service_tier` — both directions wired. Gemini and
+  Ollama have no equivalent and report null.
 - **Reasoning-token accounting in `usage`.** Reasoning models (OpenAI o-series
   and gpt-5, Gemini thinking models) bill a separate slice of completion tokens
   for chain-of-thought; the provider-reported count now surfaces as

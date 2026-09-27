@@ -69,10 +69,17 @@ async def test_service_tier_reaches_openai(monkeypatch) -> None:
     assert _Client.captured["service_tier"] == "flex"
 
 
+async def test_service_tier_reaches_anthropic(monkeypatch) -> None:
+    """Anthropic accepts service_tier on Messages requests ('auto' |
+    'standard_only') — forward it verbatim and let Anthropic validate."""
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    await AnthropicProvider().chat(_req(service_tier="standard_only"), api_key="sk-x")
+    assert _Client.captured["service_tier"] == "standard_only"
+
+
 @pytest.mark.parametrize(
     ("provider", "api_key", "container"),
     [
-        (AnthropicProvider, "sk-x", lambda p: p),
         (GeminiProvider, "sk-x", lambda p: p["generationConfig"]),
         (OllamaProvider, None, lambda p: p["options"]),
     ],

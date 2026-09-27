@@ -5,8 +5,9 @@ backend configuration that served the call (the debugging companion to `seed`),
 and `service_tier` reports which tier actually handled it when the request said
 "auto". They were dropped before; now they ride ProviderResult/StreamEvent into
 the native ChatResponse, the native SSE summary, the compat response, and the
-compat stream chunks. Anthropic/Gemini/Ollama have no equivalent and report
-None.
+compat stream chunks. Anthropic also reports `service_tier` in its usage
+object ("auto"/"standard_only" — a billing-tier echo, accepted on requests
+too); Gemini/Ollama have no equivalent and report None.
 """
 
 from __future__ import annotations
@@ -148,3 +149,55 @@ def test_stream_chunks_omit_when_unknown() -> None:
     chunk = chunk_delta("c", 0, "m", "hi")
     assert "system_fingerprint" not in chunk
     assert "service_tier" not in chunk
+
+
+# --- Anthropic service_tier (usage.service_tier, billing-tier echo) ---------
+
+
+async def test_anthropic_service_tier_round_trip(monkeypatch) -> None:
+    from rekai.providers.anthropic import AnthropicProvider
+
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+        headers: dict = {}
+
+        def json(self) -> dict:
+            return {
+                "model": "claude-x",
+                "content": [{"type": "text", "text": "ok"}],
+                "usage": {
+                    "input_tokens": 3,
+                    "output_tokens": 2,
+                    "service_tier": "standard",
+                },
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None, headers=None, **kw):
+            captured.update(json or {})
+            return FakeResponse()
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    req = ChatRequest(
+        model="claude-x",
+        messages=[ChatMessage(role="user", content="hi")],
+        service_tier="standard_only",
+    )
+    result = await AnthropicProvider().chat(req, api_key="sk-x")
+    # Request side forwarded verbatim; response side echoes what billed.
+    assert captured["service_tier"] == "standard_only"
+    assert result.service_tier == "standard"

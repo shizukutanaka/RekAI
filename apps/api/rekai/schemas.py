@@ -52,7 +52,8 @@ class ChatRequest(BaseModel):
         "'priority' | 'scale'): flex trades latency for a large discount, "
         "priority pays for lower latency. Not enum-validated so newer tiers "
         "stay forward-compatible; an unsupported tier surfaces as the "
-        "provider's own error. Forwarded to OpenAI-compatible providers only.",
+        "provider's own error. Forwarded to providers that accept it: "
+        "OpenAI-compatible APIs and Anthropic ('auto' | 'standard_only').",
     )
     web_search_options: dict | None = Field(
         default=None,
@@ -244,6 +245,7 @@ class AnthropicMessagesRequest(BaseModel):
     stream: bool = False
     tools: list[AnthropicTool] | None = None
     tool_choice: AnthropicToolChoice | None = None
+    service_tier: str | None = None  # 'auto' | 'standard_only'
     provider: str | None = None  # RekAI extension: explicit provider override
 
 
