@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`anthropic-beta` header forwarding on `POST /v1/messages`.** Anthropic
+  gates features behind beta headers (interleaved thinking, prompt-caching
+  scope, ...); a compat caller's header was dropped, silently disabling the
+  gated feature. It's now forwarded verbatim to Anthropic upstream and keyed
+  into the response cache (beta flags can change the response shape).
 - `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
   check (`client.messages.count_tokens`) now works against the compat surface.
   Returns a local script-aware estimate (the same heuristic the pricing path

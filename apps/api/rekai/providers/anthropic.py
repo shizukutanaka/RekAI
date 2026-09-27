@@ -161,11 +161,15 @@ class AnthropicProvider(Provider):
             payload["stream"] = True
         return payload
 
-    def _headers(self, key: str) -> dict[str, str]:
+    def _headers(self, key: str, beta: str | None = None) -> dict[str, str]:
         return {
             **trace_headers(),
             "x-api-key": key,
             "anthropic-version": get_settings().anthropic_version,
+            # Beta-gated features (interleaved thinking, prompt caching scope,
+            # ...) need the caller's `anthropic-beta` flag set to survive the
+            # compat hop — forward it verbatim when present.
+            **({"anthropic-beta": beta} if beta else {}),
             "content-type": "application/json",
         }
 
@@ -177,7 +181,9 @@ class AnthropicProvider(Provider):
         url = f"{settings.anthropic_base_url.rstrip('/')}/messages"
         try:
             client = self._client(settings.request_timeout_seconds)
-            resp = await client.post(url, json=payload, headers=self._headers(key))
+            resp = await client.post(
+                url, json=payload, headers=self._headers(key, request.anthropic_beta)
+            )
         except httpx.HTTPError as exc:
             raise ProviderError(f"Anthropic request failed: {exc}") from exc
 
@@ -247,7 +253,9 @@ class AnthropicProvider(Provider):
         tool_blocks: dict[int, dict] = {}
         try:
             client = self._client(settings.request_timeout_seconds)
-            async with client.stream("POST", url, json=payload, headers=self._headers(key)) as resp:
+            async with client.stream(
+                "POST", url, json=payload, headers=self._headers(key, request.anthropic_beta)
+            ) as resp:
                 if resp.status_code >= 400:
                     body = (await resp.aread()).decode()[:200]
                     raise ProviderError(

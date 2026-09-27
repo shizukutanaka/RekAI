@@ -1567,6 +1567,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: AnthropicMessagesRequest,
         http_request: Request,
         x_provider_key: str | None = Header(default=None, alias="X-Provider-Key"),
+        anthropic_beta: str | None = Header(default=None, alias="anthropic-beta"),
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         config: Settings = Depends(get_config),
         cache_backend: CacheBackend = Depends(get_cache),
@@ -1587,6 +1588,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """
         try:
             chat_request = anthropic_compat.to_chat_request(request)
+            chat_request.anthropic_beta = anthropic_beta
         except ValidationError as exc:
             return JSONResponse(
                 status_code=400,
