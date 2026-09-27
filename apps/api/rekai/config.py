@@ -76,6 +76,14 @@ class Settings(BaseSettings):
     # guardrails.StreamRedactor — see docs/architecture.md.
     output_redaction_enabled: bool = False
 
+    # Input-side secret detection: scans caller-supplied request text (chat
+    # messages of every role, embeddings inputs) for the same secret/API-key
+    # patterns output redaction scrubs, so a pasted credential doesn't flow to
+    # an upstream provider. Same action knob as the injection guardrail —
+    # "flag" sets X-Input-Secrets-Flag, "block" refuses with 403. A secret in
+    # a prompt is usually an accident, not an attack, so the default stays off.
+    input_secrets_enabled: bool = False
+
     log_format: Literal["text", "json"] = "text"
 
     # Routing

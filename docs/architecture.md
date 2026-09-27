@@ -788,6 +788,18 @@ carries the longest run its pattern can plausibly span, so a stray `sk-` in
 prose costs a few hundred characters of delay while a PEM block gets the
 kilobytes it needs.
 
+### Input-side secret detection
+
+`REKAI_INPUT_SECRETS_ENABLED=true` runs the same pattern set the other way —
+against the **request**, not the response. A user pasting `sk-…` into a chat
+prompt otherwise ships that key to the upstream provider. It scans every
+message role on `/v1/chat`, `/v1/chat/stream` and `/v1/chat/completions` plus
+embeddings inputs on `/v1/embeddings`, shares `REKAI_GUARDRAILS_ACTION`
+(`flag` → `X-Input-Secrets-Flag` header, `block` → 403 `input_secret_detected`
+before any provider call), and never rewrites the request — a secret in a
+prompt is usually an accident, so it is refused or signalled, not silently
+mutated. Off by default.
+
 The buffered region is deliberately kept **raw**. Scrubbing it on every delta
 looks tempting and is wrong: the patterns end in `{20,}`, so a half-arrived key
 matches at its minimum length, gets replaced, and the *rest of the key* then

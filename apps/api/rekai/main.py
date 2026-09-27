@@ -341,6 +341,38 @@ def _guardrail_response(
     return None
 
 
+def _message_texts(messages: list[ChatMessage]) -> list[str]:
+    """Caller-supplied message text — every role, since any of it is forwarded
+    verbatim to the upstream provider."""
+    return [m.content for m in messages if m.content]
+
+
+def _input_secrets_response(
+    texts: list[str], settings: Settings, response: Response
+) -> JSONResponse | None:
+    """Flag or refuse a request carrying a credential in its caller text.
+
+    Runs the same detection set as output redaction against the request side:
+    a user pasting ``sk-…`` into a chat prompt otherwise ships that key to the
+    provider. Honors ``guardrails_action`` — flag sets ``X-Input-Secrets-Flag``,
+    block returns 403 before any provider call."""
+    hits = guardrails.scan_texts_for_secrets(texts, settings.input_secrets_enabled)
+    if not hits:
+        return None
+    if settings.guardrails_action == "block":
+        metrics.record_error("input_secret_detected")
+        return JSONResponse(
+            status_code=403,
+            content=ErrorResponse(
+                error="input_secret_detected",
+                detail="Request appears to contain a credential "
+                f"({', '.join(hits)}). Remove it and retry.",
+            ).model_dump(),
+        )
+    response.headers["X-Input-Secrets-Flag"] = ",".join(hits)
+    return None
+
+
 def _idempotency_error(status_code: int, detail: str) -> JSONResponse:
     """A 409/422 for an Idempotency-Key that conflicts with an existing record."""
     metrics.record_error("idempotency_error")
@@ -474,6 +506,9 @@ async def _run_chat(
     blocked = _guardrail_response(request.messages, settings, response)
     if blocked is not None:
         return blocked
+    leaked = _input_secrets_response(_message_texts(request.messages), settings, response)
+    if leaked is not None:
+        return leaked
     fingerprint: str | None = None
     claimed = False
     client_id = _client_id(http_request)
@@ -1225,6 +1260,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         config: Settings = Depends(get_config),
         cache_backend: CacheBackend = Depends(get_cache),
     ) -> EmbeddingsResponse | JSONResponse:
+        input_texts = [request.input] if isinstance(request.input, str) else request.input
+        leaked = _input_secrets_response(input_texts, config, response)
+        if leaked is not None:
+            return leaked
         fingerprint: str | None = None
         claimed = False
         client_id = _client_id(http_request)
@@ -1300,6 +1339,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         blocked = _guardrail_response(request.messages, config, response)
         if blocked is not None:
             return blocked
+        leaked = _input_secrets_response(_message_texts(request.messages), config, response)
+        if leaked is not None:
+            return leaked
         guardrail_flag = response.headers.get("X-Guardrail-Flag")
         client_id = _client_id(http_request)
         provider_name, provider = select_provider(request, config)
@@ -1418,6 +1460,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         blocked = _guardrail_response(chat_request.messages, config, response)
         if blocked is not None:
             return blocked
+        leaked = _input_secrets_response(_message_texts(chat_request.messages), config, response)
+        if leaked is not None:
+            return leaked
         guardrail_flag = response.headers.get("X-Guardrail-Flag")
         client_id = _client_id(http_request)
         provider_name, provider = select_provider(chat_request, config)

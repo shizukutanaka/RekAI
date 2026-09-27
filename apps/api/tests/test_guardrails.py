@@ -346,9 +346,9 @@ def test_every_secret_pattern_has_a_stream_sentinel() -> None:
     from rekai.guardrails import _SECRET_PATTERNS, _STREAM_SENTINELS
 
     sentinels = [s for s, _ in _STREAM_SENTINELS]
-    assert {name for name, _ in _SECRET_PATTERNS} == set(_STREAM_SECRETS), (
-        "a secret pattern has no streaming example — add one to _STREAM_SECRETS"
-    )
+    assert {name for name, _ in _SECRET_PATTERNS} == set(
+        _STREAM_SECRETS
+    ), "a secret pattern has no streaming example — add one to _STREAM_SECRETS"
     for name, secret in _STREAM_SECRETS.items():
         assert any(secret.startswith(s) for s in sentinels), f"{name} starts with no sentinel"
 
@@ -422,3 +422,61 @@ async def test_stream_endpoint_redacts_and_reports(monkeypatch) -> None:
         if line.startswith("data: ") and line != "data: [DONE]"
     ]
     assert any(ev.get("redacted") == ["openai_api_key"] for ev in summary)
+
+
+# --- input-side secret detection ---------------------------------------------
+
+SECRET = "sk-proj-" + "A" * 40
+
+
+def test_input_secrets_flag_mode_marks_response() -> None:
+    client = _client(input_secrets_enabled=True)
+    resp = _chat(client, f"debug this config: api_key={SECRET}")
+    assert resp.status_code == 200
+    assert resp.headers["X-Input-Secrets-Flag"] == "openai_api_key"
+
+
+def test_input_secrets_block_mode_rejects() -> None:
+    client = _client(input_secrets_enabled=True, guardrails_action="block")
+    bad = _chat(client, f"here is my key {SECRET}")
+    assert bad.status_code == 403
+    assert bad.json()["error"] == "input_secret_detected"
+    assert SECRET not in bad.text  # never echo the secret back
+    assert _chat(client, "hello").status_code == 200
+
+
+def test_input_secrets_disabled_by_default() -> None:
+    client = _client()
+    resp = _chat(client, f"key {SECRET}")
+    assert resp.status_code == 200
+    assert "X-Input-Secrets-Flag" not in resp.headers
+
+
+def test_input_secrets_scan_embeddings_input() -> None:
+    client = _client(input_secrets_enabled=True, guardrails_action="block")
+    resp = client.post("/v1/embeddings", json={"model": "echo", "input": SECRET})
+    assert resp.status_code == 403
+    assert resp.json()["error"] == "input_secret_detected"
+
+
+def test_input_secrets_scan_stream_and_completions() -> None:
+    client = _client(input_secrets_enabled=True, guardrails_action="block")
+    body = {"model": "echo", "messages": [{"role": "user", "content": SECRET}]}
+    assert client.post("/v1/chat/stream", json=body).status_code == 403
+    assert client.post("/v1/chat/completions", json=body).status_code == 403
+    assert client.post("/v1/chat/completions", json={**body, "stream": True}).status_code == 403
+
+
+def test_input_secrets_scans_all_roles() -> None:
+    client = _client(input_secrets_enabled=True, guardrails_action="block")
+    resp = client.post(
+        "/v1/chat",
+        json={
+            "model": "echo",
+            "messages": [
+                {"role": "system", "content": f"call upstream with {SECRET}"},
+                {"role": "user", "content": "hi"},
+            ],
+        },
+    )
+    assert resp.status_code == 403

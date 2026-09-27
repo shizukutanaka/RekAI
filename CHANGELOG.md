@@ -36,6 +36,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **Input-side secret detection** (`REKAI_INPUT_SECRETS_ENABLED`, opt-in).
+  Output redaction already scrubbed secrets the *model* emitted; this runs the
+  same pattern set against caller-supplied request text — every message role
+  on all three chat surfaces plus embeddings inputs — so a pasted `sk-…` or
+  PEM block doesn't flow to the upstream provider at all. Shares
+  `REKAI_GUARDRAILS_ACTION`: `flag` sets `X-Input-Secrets-Flag`, `block`
+  refuses with 403 `input_secret_detected` before any provider call. The
+  request is never silently mutated. Verified live: flag mode returns the
+  header and lets the request through; block mode returns 403 for chat,
+  stream, completions and embeddings.
 - **Per-end-user usage accounting via the OpenAI `user` field.** The gateway
   has always accepted `user` on chat/embeddings requests (OpenAI
   compatibility); it now drives `usage_by_user` in `/v1/usage` and
