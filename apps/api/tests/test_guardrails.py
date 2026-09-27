@@ -346,9 +346,10 @@ def test_every_secret_pattern_has_a_stream_sentinel() -> None:
     from rekai.guardrails import _SECRET_PATTERNS, _STREAM_SENTINELS
 
     sentinels = [s for s, _ in _STREAM_SENTINELS]
-    assert {name for name, _ in _SECRET_PATTERNS} == set(
-        _STREAM_SECRETS
-    ), "a secret pattern has no streaming example — add one to _STREAM_SECRETS"
+    actual = {name for name, _ in _SECRET_PATTERNS}
+    assert actual == set(_STREAM_SECRETS), (
+        "a secret pattern has no streaming example — add one to _STREAM_SECRETS"
+    )
     for name, secret in _STREAM_SECRETS.items():
         assert any(secret.startswith(s) for s in sentinels), f"{name} starts with no sentinel"
 
