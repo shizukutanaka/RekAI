@@ -79,8 +79,8 @@ def test_rate_limiter_reclaims_idle_buckets_before_active_ones() -> None:
     # holding a real client's consumed budget and is kept.
     limiter = RateLimiter(capacity=5, window=60, max_buckets=10)
     now = time.time()
-    limiter._buckets["idle"] = (5.0, now)  # tokens == capacity -> idle
-    limiter._buckets["busy"] = (0.5, now)  # partially spent -> active
+    limiter._buckets["idle"] = (5.0, now, 5)  # tokens == capacity -> idle
+    limiter._buckets["busy"] = (0.5, now, 5)  # partially spent -> active
     limiter._reclaim(now)
     assert "idle" not in limiter._buckets
     assert "busy" in limiter._buckets
