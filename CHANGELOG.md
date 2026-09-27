@@ -36,6 +36,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   complete.
 
 ### Added
+- **`GET /v1/models/{id}`** — the OpenAI-compat "retrieve a model" endpoint
+  (`client.models.retrieve("…")` in the OpenAI SDK). Returns the same
+  `ModelInfo` the list endpoint reports; unknown ids get a 404 in the OpenAI
+  envelope (`type: invalid_request_error`, `code: model_not_found`), matching
+  api.openai.com. `openai_compat.openai_error` gained optional `code` /
+  `error_type` overrides for this.
 - **Opt-in verify band for the semantic cache** (`REKAI_SEMANTIC_CACHE_VERIFY_*`,
   roadmap O-2). A single cosine threshold forced every candidate to be served
   or dropped on embedding distance alone; similarity is not proof two prompts

@@ -1140,12 +1140,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             return AdminKeyResponse(status="revoked", key=masked)
 
-    @app.get("/v1/models", response_model=ModelsResponse, tags=["chat"])
-    async def list_models(
-        type: Literal["chat", "embedding"] | None = Query(
-            None, description="Filter by model type: 'chat' or 'embedding'."
-        ),
-    ) -> ModelsResponse:
+    async def _collect_model_infos(
+        kind_filter: Literal["chat", "embedding"] | None,
+    ) -> list[ModelInfo]:
         def _info(model: str, name: str, kind: Literal["chat", "embedding"]) -> ModelInfo:
             price = price_for_model(model, settings.pricing_override_dict)
             pricing = (
@@ -1160,13 +1157,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             provider = get_provider(name)
             if provider is None:
                 continue
-            if type != "embedding":
+            if kind_filter != "embedding":
                 for model in await provider.list_models(None):
                     data.append(_info(model, name, "chat"))
-            if type != "chat":
+            if kind_filter != "chat":
                 for model in await provider.list_embedding_models(None):
                     data.append(_info(model, name, "embedding"))
-        return ModelsResponse(data=data)
+        return data
+
+    @app.get("/v1/models", response_model=ModelsResponse, tags=["chat"])
+    async def list_models(
+        type: Literal["chat", "embedding"] | None = Query(
+            None, description="Filter by model type: 'chat' or 'embedding'."
+        ),
+    ) -> ModelsResponse:
+        return ModelsResponse(data=await _collect_model_infos(type))
+
+    # OpenAI-compat "retrieve a model" — `client.models.retrieve("…")` in the
+    # OpenAI SDK calls GET /models/{id}; a drop-in base URL needs it.
+    @app.get("/v1/models/{model_id}", response_model=ModelInfo, tags=["chat"])
+    async def retrieve_model(model_id: str):
+        for info in await _collect_model_infos(None):
+            if info.id == model_id:
+                return info
+        # The route answers in the OpenAI envelope so SDK callers
+        # (client.models.retrieve) get a typed NotFoundError with a readable
+        # message, same as on api.openai.com.
+        return JSONResponse(
+            status_code=404,
+            content=openai_compat.openai_error(
+                404,
+                f"The model '{model_id}' does not exist",
+                code="model_not_found",
+                error_type="invalid_request_error",
+            ),
+        )
 
     @app.post(
         "/v1/chat",

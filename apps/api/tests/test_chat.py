@@ -25,7 +25,7 @@ def test_usage_summary_accumulates(client: TestClient) -> None:
     after = client.get("/v1/usage").json()
     assert after["requests_total"] == before + 1
     assert "echo" in after["requests_by_provider"]
-    assert isinstance(after["cost_usd_total"], (int, float))
+    assert isinstance(after["cost_usd_total"], int | float)
 
 
 def test_chat_is_cached_on_second_call(client: TestClient) -> None:
@@ -92,6 +92,25 @@ def test_models_include_pricing(client: TestClient) -> None:
     assert by_id["gpt-4o-mini"]["pricing"] == {"input_per_1m": 0.15, "output_per_1m": 0.60}
     # An unpriced/free model reports null pricing.
     assert by_id["echo"]["pricing"] is None
+
+
+def test_retrieve_model(client: TestClient) -> None:
+    resp = client.get("/v1/models/gpt-4o-mini")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == "gpt-4o-mini"
+    assert body["provider"] == "openai"
+    assert body["type"] == "chat"
+    assert body["pricing"] == {"input_per_1m": 0.15, "output_per_1m": 0.60}
+
+
+def test_retrieve_model_404_is_openai_shaped(client: TestClient) -> None:
+    resp = client.get("/v1/models/no-such-model")
+    assert resp.status_code == 404
+    err = resp.json()["error"]
+    # The OpenAI envelope, so client.models.retrieve() surfaces a typed error.
+    assert isinstance(err, dict) and "no-such-model" in err["message"]
+    assert err["type"] == "invalid_request_error"
 
 
 def test_pricing_overrides_flow_through_to_v1_models() -> None:

@@ -197,18 +197,30 @@ def _error_type_for_status(status_code: int) -> str:
     return "api_error"
 
 
-def openai_error(status_code: int, message: str, param: str | None = None) -> dict:
+def openai_error(
+    status_code: int,
+    message: str,
+    param: str | None = None,
+    code: str | None = None,
+    error_type: str | None = None,
+) -> dict:
     """The OpenAI error envelope, so SDK error handling parses RekAI's errors.
 
     ``param`` names the offending request field when exactly one is at fault —
     OpenAI populates it for a bad or missing parameter, and the SDK exposes it
     as ``exc.param``. It stays None otherwise, as OpenAI leaves it.
+
+    ``code`` carries OpenAI's machine-readable codes (``model_not_found``,
+    ``context_length_exceeded``…) when the caller knows the specific one, and
+    ``error_type`` overrides the status-derived type when OpenAI's real
+    response disagrees with it (e.g. an unknown model is a 404 whose type is
+    ``invalid_request_error``, not ``api_error``).
     """
     return {
         "error": {
             "message": message,
-            "type": _error_type_for_status(status_code),
+            "type": error_type or _error_type_for_status(status_code),
             "param": param,
-            "code": None,
+            "code": code,
         }
     }
