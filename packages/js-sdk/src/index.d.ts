@@ -40,6 +40,11 @@ export interface ChatOptions {
    * accepted too; the server normalizes it to a one-element list.
    */
   stop?: string | string[];
+  /**
+   * OpenAI's processing tier ('auto' | 'default' | 'flex' | 'priority' |
+   * 'scale'). Forwarded to OpenAI-compatible providers only.
+   */
+  serviceTier?: string;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
 }
