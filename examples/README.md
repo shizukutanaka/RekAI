@@ -21,6 +21,8 @@ upstream provider, this one authenticates you to RekAI.
 | `curl.sh`                | bash + curl    | `./curl.sh`                          |
 | `python/chat.py`         | Python 3 (stdlib) | `python python/chat.py`           |
 | `python/stream.py`       | Python 3 (stdlib) | `python python/stream.py`         |
+| `python/openai_compat.py` | Python 3 (stdlib) | `python python/openai_compat.py` — OpenAI-shaped `/v1/chat/completions` |
+| `python/anthropic_compat.py` | Python 3 (stdlib) | `python python/anthropic_compat.py` — Anthropic-shaped `/v1/messages` |
 | `python/tools.py`        | Python 3 (stdlib) | `python python/tools.py` (needs a tool-capable model + key) |
 | `python/embeddings.py`   | Python 3 (stdlib) | `python python/embeddings.py`     |
 | `python/semantic_search.py` | Python 3 (stdlib) | `python python/semantic_search.py "your query"` |
