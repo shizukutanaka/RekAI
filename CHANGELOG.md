@@ -15,7 +15,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   surface reproduces `message.refusal`/`delta.refusal` chunks, and the
   Anthropic-compat surface folds the text into a content block with
   `stop_reason: "refusal"` (Anthropic's own encoding). Both SDKs expose it
-  (`ChatResult.refusal`, `on_refusal`/`onRefusal` stream hooks).
+  (`ChatResult.refusal`, `on_refusal`/`onRefusal` stream hooks), and the web
+  chat displays the refusal text in the reply bubble (streamed `{"refusal"}`
+  events ride the normal delta path; the `content_filter` meta note marks it
+  as a decline) instead of a bare empty bubble.
 - `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
   check (`client.messages.count_tokens`) now works against the compat surface.
   Returns a local script-aware estimate (the same heuristic the pricing path

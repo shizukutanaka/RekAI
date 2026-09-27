@@ -453,6 +453,9 @@ export function parseSSEFrame(frame: string): SSEEvent {
   try {
     const event = JSON.parse(payload);
     if (event.delta) return { kind: "delta", text: event.delta };
+    // A refusal is reply text, not an error — surface it like a delta; the
+    // finish_reason in the summary marks it as a refusal.
+    if (event.refusal) return { kind: "delta", text: event.refusal };
     if (event.error) return { kind: "error", message: event.detail || event.error };
     if (event.usage) return { kind: "summary", summary: event as StreamSummary };
     return { kind: "ignore" };

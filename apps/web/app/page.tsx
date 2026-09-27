@@ -247,7 +247,9 @@ export default function ChatPage() {
           {
             id: nextMsgId(),
             role: "assistant",
-            content: res.content,
+            // A refusal's text lives on `refusal` with `content` empty — show
+            // it as the reply body; the finishReason meta marks it declined.
+            content: res.refusal || res.content,
             provider: res.provider,
             cached: res.cached,
             tokens: res.usage.total_tokens,
