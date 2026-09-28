@@ -13,7 +13,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   tool message, so the model couldn't tell failure from success. The flag now
   rides on `ChatMessage.is_error` and the Anthropic provider re-emits
   `is_error: true` upstream; surfaces without the concept (OpenAI tool
-  messages) drop the flag and keep the error text in `content`.
+  messages) drop the flag and keep the error text in `content`. Non-text
+  blocks nested inside a `tool_result`'s content (images, documents) now
+  fail as a readable 400 like top-level blocks instead of silently
+  dropping.
 - `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
   check (`client.messages.count_tokens`) now works against the compat surface.
   Returns a local script-aware estimate (the same heuristic the pricing path

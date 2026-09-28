@@ -94,6 +94,16 @@ def _flatten_content(
         elif block.type == "tool_result":
             body = block.content
             if isinstance(body, list):
+                # Same rule as the outer layer: a non-text block inside a
+                # tool_result (image, document, …) is a readable 400, not a
+                # silent drop.
+                for b in body:
+                    if isinstance(b, dict) and b.get("type") != "text":
+                        raise ProviderError(
+                            f"Unsupported content block type '{b.get('type')}' "
+                            "inside tool_result; RekAI accepts text blocks.",
+                            status_code=400,
+                        )
                 body = "\n".join(
                     b.get("text", "")
                     for b in body

@@ -421,3 +421,37 @@ async def test_anthropic_provider_emits_is_error(monkeypatch) -> None:
         "content": "boom",
         "is_error": True,
     }
+
+
+def test_tool_result_nested_non_text_block_is_a_400(client: TestClient) -> None:
+    """An image block nested inside a tool_result used to drop silently —
+    the outer layer's readable-400 rule didn't reach it."""
+    resp = client.post(
+        "/v1/messages",
+        json=_payload(
+            messages=[
+                {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "t1", "name": "f", "input": {}}],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t1",
+                            "content": [
+                                {"type": "text", "text": "see attached"},
+                                {
+                                    "type": "image",
+                                    "source": {"type": "base64", "data": "…"},
+                                },
+                            ],
+                        }
+                    ],
+                },
+            ]
+        ),
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["type"] == "invalid_request_error"
