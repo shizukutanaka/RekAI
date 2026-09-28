@@ -31,6 +31,8 @@ export interface ChatResponse {
   /** True when a fallback target answered because the primary failed. */
   fallback_used?: boolean;
   tool_calls?: Record<string, unknown>[] | null;
+  /** Anthropic thinking blocks produced before the answer (extended thinking). */
+  thinking_blocks?: Record<string, unknown>[] | null;
 }
 
 /**
