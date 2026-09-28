@@ -206,3 +206,19 @@ def test_openai_compatible_endpoint_forwards_tuning_params(monkeypatch) -> None:
     assert _Client.captured["top_p"] == 0.9
     assert _Client.captured["seed"] == 42
     assert _Client.captured["frequency_penalty"] == 0.5
+
+
+def test_anthropic_compat_maps_top_p() -> None:
+    """`top_p` was declared (and range-validated) on the Anthropic-compat
+    request but never mapped into ChatRequest — a silent drop on Anthropic's
+    own surface."""
+    from rekai.anthropic_compat import to_chat_request
+    from rekai.schemas import AnthropicMessagesRequest
+
+    req = AnthropicMessagesRequest(
+        model="claude-x",
+        max_tokens=16,
+        messages=[{"role": "user", "content": "hi"}],
+        top_p=0.9,
+    )
+    assert to_chat_request(req).top_p == 0.9
