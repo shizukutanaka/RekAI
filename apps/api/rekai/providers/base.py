@@ -119,6 +119,9 @@ class ProviderResult:
     # Web-search citations etc. (OpenAI `message.annotations`) — raw dicts,
     # passed through verbatim so the caller sees what the model cited.
     annotations: list[dict] | None = None
+    # Anthropic extended-thinking blocks (thinking/redacted_thinking), verbatim
+    # — text and signature the caller must echo back on the next turn.
+    thinking_blocks: list[dict] | None = None
 
 
 @dataclass
@@ -140,6 +143,11 @@ class StreamEvent:
     finish_reason: FinishReason | None = None
     # OpenAI streams annotations complete inside one delta chunk.
     annotations: list[dict] | None = None
+    # Anthropic extended-thinking stream pieces: a thinking_delta text chunk,
+    # the block's closing signature, or a whole redacted_thinking block.
+    thinking_delta: str | None = None
+    thinking_signature: str | None = None
+    thinking_block: dict | None = None
 
 
 class Provider(ABC):
