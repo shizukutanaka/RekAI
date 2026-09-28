@@ -44,6 +44,8 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         # (include_obfuscation is excluded: it changes the streamed encoding,
         # not the content — and a cached body is never streamed.)
         "web_search_options": request.web_search_options,
+        # Extended thinking changes both the content and its cost.
+        "thinking": request.thinking,
         "mcp_servers": request.mcp_servers,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -79,6 +81,7 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
         "response_format": request.response_format,
         "cache_control": request.cache_control,
         "web_search_options": request.web_search_options,
+        "thinking": request.thinking,
         "mcp_servers": request.mcp_servers,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
