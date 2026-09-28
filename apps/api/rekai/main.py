@@ -1380,6 +1380,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     yield f"data: {json.dumps({'delta': ev.delta})}\n\n"
                 elif ev.refusal_delta is not None:
                     yield f"data: {json.dumps({'refusal': ev.refusal_delta})}\n\n"
+                elif ev.thinking_delta is not None:
+                    yield f"data: {json.dumps({'thinking_delta': ev.thinking_delta})}\n\n"
+                elif ev.thinking_signature is not None:
+                    yield f"data: {json.dumps({'thinking_signature': ev.thinking_signature})}\n\n"
+                elif ev.thinking_block is not None:
+                    yield f"data: {json.dumps({'thinking_block': ev.thinking_block})}\n\n"
                 elif ev.error is not None:
                     payload = {"error": "provider_error", "detail": str(ev.error)}
                     yield f"data: {json.dumps(payload)}\n\n"
@@ -1629,7 +1635,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         async def event_source():
             yield anthropic_compat.ev_message_start(msg_id, chat_request.model)
-            text_block_open = False
+            # Content blocks are indexed in order: thinking blocks (0..n, each
+            # closed by its signature_delta), then the text block, then tool_use.
+            open_block: str | None = None  # "thinking" | "text"
+            block_index = 0
             finish_reason = "stop"
             usage = None
             async for ev in handle_chat_stream(
@@ -1641,30 +1650,64 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 provider,
                 client_id,
             ):
-                if ev.delta is not None or ev.refusal_delta is not None:
+                if ev.thinking_delta is not None:
+                    if open_block != "thinking":
+                        if open_block is not None:
+                            yield anthropic_compat.ev_content_block_stop(block_index)
+                            block_index += 1
+                        yield anthropic_compat.ev_content_block_start(
+                            block_index, {"type": "thinking", "thinking": ""}
+                        )
+                        open_block = "thinking"
+                    yield anthropic_compat.ev_thinking_delta(block_index, ev.thinking_delta)
+                elif ev.thinking_signature is not None:
+                    # The signature_delta closes the thinking block upstream.
+                    if open_block == "thinking":
+                        yield anthropic_compat.ev_signature_delta(
+                            block_index, ev.thinking_signature
+                        )
+                        yield anthropic_compat.ev_content_block_stop(block_index)
+                        block_index += 1
+                        open_block = None
+                elif ev.thinking_block is not None:
+                    # redacted_thinking arrives whole — open and close it in one
+                    # step so its index advances like a normal block's.
+                    if open_block is not None:
+                        yield anthropic_compat.ev_content_block_stop(block_index)
+                        block_index += 1
+                    yield anthropic_compat.ev_content_block_start(block_index, ev.thinking_block)
+                    yield anthropic_compat.ev_content_block_stop(block_index)
+                    block_index += 1
+                    open_block = None
+                elif ev.delta is not None or ev.refusal_delta is not None:
                     # Anthropic has no refusal channel — the refusal text is the
                     # message content (stop_reason already maps to "refusal").
                     text = ev.delta if ev.delta is not None else ev.refusal_delta
-                    if not text_block_open:
+                    if open_block != "text":
+                        if open_block is not None:
+                            yield anthropic_compat.ev_content_block_stop(block_index)
+                            block_index += 1
                         yield anthropic_compat.ev_content_block_start(
-                            0, {"type": "text", "text": ""}
+                            block_index, {"type": "text", "text": ""}
                         )
-                        text_block_open = True
-                    yield anthropic_compat.ev_text_delta(0, text)
+                        open_block = "text"
+                    yield anthropic_compat.ev_text_delta(block_index, text)
                 elif ev.error is not None:
                     yield anthropic_compat.ev_error(ev.error.status_code, str(ev.error))
                     return
                 elif ev.summary is not None:
-                    if text_block_open:
-                        yield anthropic_compat.ev_content_block_stop(0)
+                    if open_block is not None:
+                        yield anthropic_compat.ev_content_block_stop(block_index)
+                        block_index += 1
+                        open_block = None
                     s = ev.summary
                     if s.finish_reason:
                         finish_reason = s.finish_reason
-                    next_index = 1 if text_block_open else 0
-                    for i, tc in enumerate(s.tool_calls or []):
+                    for tc in s.tool_calls or []:
                         finish_reason = "tool_calls"
                         fn = tc.get("function", {})
-                        bi = next_index + i
+                        bi = block_index
+                        block_index += 1
                         yield anthropic_compat.ev_content_block_start(
                             bi,
                             {

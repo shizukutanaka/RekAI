@@ -119,6 +119,9 @@ class ProviderResult:
     # The model's refusal text (OpenAI `message.refusal`) — kept out of
     # ``content``, which stays "" on a refusal so "no answer" stays honest.
     refusal: str | None = None
+    # Anthropic extended-thinking blocks (thinking/redacted_thinking), verbatim
+    # — text and signature the caller must echo back on the next turn.
+    thinking_blocks: list[dict] | None = None
 
 
 @dataclass
@@ -141,6 +144,11 @@ class StreamEvent:
     # OpenAI streams refusal text as `delta.refusal` chunks, separate from
     # `delta.content` — kept apart for the same reason as ProviderResult.
     refusal_delta: str | None = None
+    # Anthropic extended-thinking stream pieces: a thinking_delta text chunk,
+    # the block's closing signature, or a whole redacted_thinking block.
+    thinking_delta: str | None = None
+    thinking_signature: str | None = None
+    thinking_block: dict | None = None
 
 
 class Provider(ABC):
