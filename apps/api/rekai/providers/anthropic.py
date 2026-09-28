@@ -157,6 +157,8 @@ class AnthropicProvider(Provider):
         # order) so everything before it is cached.
         if request.cache_control and payload["messages"]:
             _apply_cache_control(payload["messages"][-1], request.cache_control)
+        if request.mcp_servers:
+            payload["mcp_servers"] = request.mcp_servers
         if stream:
             payload["stream"] = True
         return payload

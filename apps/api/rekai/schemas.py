@@ -95,6 +95,11 @@ class ChatRequest(BaseModel):
         "automatically and ignores it. Per-message placement is also supported "
         "via a message's own cache_control.",
     )
+    mcp_servers: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Anthropic MCP connector servers (forwarded verbatim to "
+        "Anthropic; ignored by other providers).",
+    )
 
     @field_validator("stop", mode="before")
     @classmethod
@@ -250,6 +255,10 @@ class _AnthropicMessagesBase(BaseModel):
     stream: bool = False
     tools: list[AnthropicTool] | None = None
     tool_choice: AnthropicToolChoice | None = None
+    # Anthropic's MCP connector — remote MCP servers the provider calls
+    # itself ({name, url, type:"url", authorization_token?, tool_configuration?}).
+    # Forwarded verbatim to Anthropic; requires the mcp-client beta header.
+    mcp_servers: list[dict[str, Any]] | None = None
     provider: str | None = None  # RekAI extension: explicit provider override
 
 

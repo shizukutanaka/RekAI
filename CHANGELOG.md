@@ -15,7 +15,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ordinary tools upstream so the hosted capability never ran. Server tools
   keep every field (`max_uses`, `allowed_domains`, ...) through to the
   Anthropic payload; a non-Anthropic upstream surfaces a readable provider
-  error instead of a silent miswire.
+  error instead of a silent miswire. The top-level `mcp_servers` field
+  (Anthropic's MCP connector) likewise forwards verbatim instead of being
+  dropped.
 - **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
   `cache: false` so you can compare a fresh answer against the cached one.
   It defaults to on; the meta line already marks cache hits.

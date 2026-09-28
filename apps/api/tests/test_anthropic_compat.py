@@ -416,3 +416,70 @@ async def test_anthropic_provider_reemits_server_tool_verbatim(monkeypatch) -> N
         "key",
     )
     assert server_tool in captured["json"]["tools"]
+
+
+async def test_mcp_servers_forward_verbatim_to_anthropic(monkeypatch) -> None:
+    import httpx
+
+    from rekai.providers.anthropic import AnthropicProvider
+    from rekai.schemas import ChatMessage, ChatRequest
+
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {
+                "model": "claude-sonnet-4-6",
+                "content": [{"type": "text", "text": "hi"}],
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def aclose(self) -> None:
+            return None
+
+        async def post(self, url, json=None, headers=None):
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    servers = [
+        {
+            "type": "url",
+            "name": "docs",
+            "url": "https://mcp.example.com/sse",
+            "authorization_token": "tok",
+            "tool_configuration": {"enabled": True},
+        }
+    ]
+    await AnthropicProvider().chat(
+        ChatRequest(
+            model="claude-sonnet-4-6",
+            messages=[ChatMessage(role="user", content="hi")],
+            mcp_servers=servers,
+        ),
+        "key",
+    )
+    assert captured["json"]["mcp_servers"] == servers
+
+
+def test_mcp_servers_field_reaches_chat_request(client: TestClient, monkeypatch) -> None:
+    from rekai.providers.echo import EchoProvider
+
+    captured: dict = {}
+    original = EchoProvider.chat
+
+    async def spy(self, request, api_key):
+        captured["mcp_servers"] = request.mcp_servers
+        return await original(self, request, api_key)
+
+    monkeypatch.setattr(EchoProvider, "chat", spy)
+    servers = [{"type": "url", "name": "docs", "url": "https://mcp.example.com/sse"}]
+    resp = client.post("/v1/messages", json=_payload(mcp_servers=servers))
+    assert resp.status_code == 200
+    assert captured["mcp_servers"] == servers
