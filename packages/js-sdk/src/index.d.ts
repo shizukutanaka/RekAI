@@ -87,6 +87,8 @@ export interface ChatResult {
   fallback_used: boolean;
   /** Secret patterns scrubbed from `content` by the output-redaction guardrail. */
   redacted: string[] | null;
+  /** Anthropic thinking/redacted_thinking blocks produced before the answer. */
+  thinking_blocks: Record<string, unknown>[] | null;
   /** Unix timestamp the gateway produced the response. */
   created: number;
   /** OpenAI backend fingerprint — which config served the call (with `seed`, a determinism aid). */

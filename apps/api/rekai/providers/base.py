@@ -121,6 +121,9 @@ class ProviderResult:
     # actually handled it when the request said "auto". None elsewhere.
     system_fingerprint: str | None = None
     service_tier: str | None = None
+    # Anthropic extended-thinking blocks (thinking/redacted_thinking), verbatim
+    # — text and signature the caller must echo back on the next turn.
+    thinking_blocks: list[dict] | None = None
 
 
 @dataclass
@@ -144,6 +147,11 @@ class StreamEvent:
     # carries no delta) — see ProviderResult for what they mean.
     system_fingerprint: str | None = None
     service_tier: str | None = None
+    # Anthropic extended-thinking stream pieces: a thinking_delta text chunk,
+    # the block's closing signature, or a whole redacted_thinking block.
+    thinking_delta: str | None = None
+    thinking_signature: str | None = None
+    thinking_block: dict | None = None
 
 
 class Provider(ABC):

@@ -78,6 +78,11 @@ class ChatStreamEvent:
     # may arrive alone on the role-announcement chunk.
     system_fingerprint: str | None = None
     service_tier: str | None = None
+    # Anthropic extended-thinking pieces — a thinking_delta chunk, the block's
+    # closing signature, or a whole redacted_thinking block.
+    thinking_delta: str | None = None
+    thinking_signature: str | None = None
+    thinking_block: dict | None = None
 
 
 def _chat_factory(
@@ -478,6 +483,7 @@ async def handle_chat(
             finish_reason=result.finish_reason,
             system_fingerprint=result.system_fingerprint,
             service_tier=result.service_tier,
+            thinking_blocks=result.thinking_blocks,
             created=int(time.time()),
         )
         # Redact before *any* store below sees the content (see _redact).
@@ -543,6 +549,7 @@ async def handle_chat_stream(
     # It holds back a few characters of every delta, so it is only constructed
     # when actually enabled.
     redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
+    thinking_redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
     try:
         seen_fingerprint: str | None = None
         seen_tier: str | None = None
@@ -575,6 +582,21 @@ async def handle_chat_stream(
                     system_fingerprint=event.system_fingerprint,
                     service_tier=event.service_tier,
                 )
+            if event.thinking_delta is not None:
+                # Thinking text gets the same secret redaction as the answer —
+                # a second redactor keeps its holdback independent so the two
+                # streams don't interleave.
+                emitted_t = (
+                    thinking_redactor.feed(event.thinking_delta)
+                    if thinking_redactor is not None
+                    else event.thinking_delta
+                )
+                if emitted_t:
+                    yield ChatStreamEvent(thinking_delta=emitted_t)
+            if event.thinking_signature is not None:
+                yield ChatStreamEvent(thinking_signature=event.thinking_signature)
+            if event.thinking_block is not None:
+                yield ChatStreamEvent(thinking_block=event.thinking_block)
             if event.usage is not None:
                 reported_usage = event.usage
             if event.tool_calls is not None:
@@ -585,6 +607,10 @@ async def handle_chat_stream(
             tail = redactor.flush()
             if tail:
                 yield ChatStreamEvent(delta=tail)
+        if thinking_redactor is not None:
+            tail = thinking_redactor.flush()
+            if tail:
+                yield ChatStreamEvent(thinking_delta=tail)
     except ProviderError as exc:
         errored = True
         metrics.record_error("provider_error")

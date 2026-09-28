@@ -35,6 +35,8 @@ export interface ChatResponse {
   system_fingerprint?: string | null;
   /** The service tier that actually handled the call when `service_tier` was "auto". */
   service_tier?: string | null;
+  /** Anthropic thinking blocks produced before the answer (extended thinking). */
+  thinking_blocks?: Record<string, unknown>[] | null;
 }
 
 /**
