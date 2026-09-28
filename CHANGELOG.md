@@ -8,6 +8,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Anthropic extended thinking end-to-end** — `POST /v1/messages` accepts
+  `thinking` (e.g. `{"type": "enabled", "budget_tokens": 4096}`), forwards it
+  verbatim upstream, and returns `thinking`/`redacted_thinking` content blocks
+  (text + signature) in the response and the typed SSE stream. Assistant
+  history carrying thinking blocks — which Anthropic requires echoed back in
+  multi-turn thinking conversations — round-trips verbatim instead of erroring.
+  An unset caller temperature defaults to 1.0 under thinking (Anthropic's
+  requirement), while an explicit temperature rides as sent. Non-Anthropic
+  providers ignore the config and surfaces without the concept (OpenAI chunks)
+  drop the blocks. Both SDKs and the web client expose `thinking_blocks`.
 - **Guardrail scans tool results.** The prompt-injection guardrail now covers
   `role="tool"` messages on every chat surface (native, OpenAI-, and
   Anthropic-compat) — tool output is external content and the canonical
