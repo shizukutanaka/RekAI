@@ -120,6 +120,9 @@ class ProviderResult:
     # alongside `stop_reason: "stop_sequence"`). None for providers that don't
     # say — OpenAI's API has no equivalent field.
     stop_sequence: str | None = None
+    # Anthropic extended-thinking blocks (thinking/redacted_thinking), verbatim
+    # — text and signature the caller must echo back on the next turn.
+    thinking_blocks: list[dict] | None = None
 
 
 @dataclass
@@ -140,6 +143,11 @@ class StreamEvent:
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
     stop_sequence: str | None = None
+    # Anthropic extended-thinking stream pieces: a thinking_delta text chunk,
+    # the block's closing signature, or a whole redacted_thinking block.
+    thinking_delta: str | None = None
+    thinking_signature: str | None = None
+    thinking_block: dict | None = None
 
 
 class Provider(ABC):
