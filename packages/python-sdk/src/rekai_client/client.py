@@ -186,6 +186,7 @@ def _build_payload(
     stop: list[str] | str | None = None,
     service_tier: str | None = None,
     web_search_options: dict[str, Any] | None = None,
+    user: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -211,6 +212,8 @@ def _build_payload(
         payload["service_tier"] = service_tier
     if web_search_options is not None:
         payload["web_search_options"] = web_search_options
+    if user is not None:
+        payload["user"] = user
     return payload
 
 
@@ -303,6 +306,7 @@ class RekAIClient:
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
         web_search_options: dict[str, Any] | None = None,
+        user: str | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -318,6 +322,7 @@ class RekAIClient:
             stop,
             service_tier,
             web_search_options,
+            user,
         )
 
     @staticmethod
@@ -375,6 +380,7 @@ class RekAIClient:
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
         web_search_options: dict[str, Any] | None = None,
+        user: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -384,7 +390,9 @@ class RekAIClient:
         ``stop`` is one or more sequences that end generation, as OpenAI's
         ``stop`` (a bare string is fine; the server normalizes it to a list).
         ``service_tier`` ('auto' | 'flex' | 'priority' | …) reaches
-        OpenAI-compatible providers only.
+        OpenAI-compatible providers only. ``user`` is the providers' end-user id
+        for abuse detection (OpenAI's ``user``, Anthropic's
+        ``metadata.user_id``) — a routing hint, never a cache key.
 
         ``idempotency_key`` is sent as the ``Idempotency-Key`` header so the
         server replays the first response on a retry instead of re-processing.
@@ -405,6 +413,7 @@ class RekAIClient:
             stop,
             service_tier,
             web_search_options,
+            user,
         )
         headers = _build_headers(
             self._provider_key,
@@ -622,6 +631,7 @@ class AsyncRekAIClient:
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
         web_search_options: dict[str, Any] | None = None,
+        user: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -641,6 +651,7 @@ class AsyncRekAIClient:
             stop,
             service_tier,
             web_search_options,
+            user,
         )
         headers = _build_headers(
             self._provider_key,

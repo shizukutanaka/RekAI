@@ -141,6 +141,9 @@ export class RekAIClient {
     if (opts.serviceTier != null) payload.service_tier = opts.serviceTier;
     // OpenAI's hosted web-search config; OpenAI-compatible providers only.
     if (opts.webSearchOptions != null) payload.web_search_options = opts.webSearchOptions;
+    // The providers' end-user id for abuse detection (OpenAI `user`,
+    // Anthropic `metadata.user_id`) — a routing hint, never a cache key.
+    if (opts.user != null) payload.user = opts.user;
     return payload;
   }
 

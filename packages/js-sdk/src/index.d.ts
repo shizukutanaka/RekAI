@@ -48,6 +48,9 @@ export interface ChatOptions {
   /** OpenAI's `web_search_options` — hosted web-search config (context size,
    * user location). OpenAI-compatible providers only. */
   webSearchOptions?: Record<string, unknown>;
+  /** The providers' end-user id for abuse detection (OpenAI's `user`,
+   * Anthropic's `metadata.user_id`). A routing hint — never a cache key. */
+  user?: string;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
 }
