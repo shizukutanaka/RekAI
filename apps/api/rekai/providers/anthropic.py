@@ -161,6 +161,10 @@ class AnthropicProvider(Provider):
         # order) so everything before it is cached.
         if request.cache_control and payload["messages"]:
             _apply_cache_control(payload["messages"][-1], request.cache_control)
+        # Extended thinking rides verbatim — its shape is Anthropic's own and
+        # new knobs (interleaved, budget caps) should not need a schema bump.
+        if request.thinking is not None:
+            payload["thinking"] = request.thinking
         if stream:
             payload["stream"] = True
         return payload
@@ -192,6 +196,7 @@ class AnthropicProvider(Provider):
         blocks = data.get("content", [])
         # content is a list of blocks; concatenate the text blocks.
         content = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+        thinking_blocks = [b for b in blocks if b.get("type") in ("thinking", "redacted_thinking")]
         tool_calls = _extract_tool_calls(blocks)
         if self._emulating_json(request):
             # The caller asked for JSON, not a tool call: unwrap the forced
@@ -221,6 +226,7 @@ class AnthropicProvider(Provider):
                 cache_write_tokens=cache_write,
             ),
             finish_reason=finish_reason,
+            thinking_blocks=thinking_blocks or None,
         )
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
@@ -271,7 +277,11 @@ class AnthropicProvider(Provider):
                     etype = event.get("type")
                     if etype == "content_block_start":
                         block = event.get("content_block", {})
-                        if block.get("type") == "tool_use":
+                        # redacted_thinking arrives whole (no deltas) — emit it
+                        # as-is so the caller can echo it back verbatim.
+                        if block.get("type") == "redacted_thinking":
+                            yield StreamEvent(thinking_block=block)
+                        elif block.get("type") == "tool_use":
                             tool_blocks[event.get("index", 0)] = {
                                 "id": block.get("id", ""),
                                 "type": "function",
@@ -283,7 +293,11 @@ class AnthropicProvider(Provider):
                     elif etype == "content_block_delta":
                         delta = event.get("delta", {})
                         text = delta.get("text")
-                        if text:
+                        if delta.get("type") == "thinking_delta":
+                            yield StreamEvent(thinking_delta=delta.get("thinking", ""))
+                        elif delta.get("type") == "signature_delta":
+                            yield StreamEvent(thinking_signature=delta.get("signature", ""))
+                        elif text:
                             yield StreamEvent(delta=text)
                         elif delta.get("type") == "input_json_delta":
                             fragment = delta.get("partial_json", "")
@@ -447,11 +461,15 @@ def _translate_messages(messages: list) -> list[dict]:
                     ],
                 }
             )
-        elif m.role == "assistant" and m.tool_calls:
+        elif m.role == "assistant" and (m.tool_calls or m.thinking_blocks):
             blocks: list[dict] = []
+            # Thinking blocks must precede every other block in an assistant
+            # turn (Anthropic's contract) — they are echoed back verbatim.
+            if m.thinking_blocks:
+                blocks.extend(m.thinking_blocks)
             if m.content:
                 blocks.append({"type": "text", "text": m.content})
-            for tc in m.tool_calls:
+            for tc in m.tool_calls or []:
                 fn = tc.get("function", {})
                 try:
                     args = json.loads(fn.get("arguments") or "{}")

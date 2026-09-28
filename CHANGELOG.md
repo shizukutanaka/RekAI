@@ -8,6 +8,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Anthropic extended thinking end-to-end** — `POST /v1/messages` accepts
+  `thinking` (e.g. `{"type": "enabled", "budget_tokens": 4096}`), forwards it
+  verbatim upstream, and returns `thinking`/`redacted_thinking` content blocks
+  (text + signature) in the response and the typed SSE stream. Assistant
+  history carrying thinking blocks — which Anthropic requires echoed back in
+  multi-turn thinking conversations — round-trips verbatim instead of erroring.
+  An unset caller temperature defaults to 1.0 under thinking (Anthropic's
+  requirement), while an explicit temperature rides as sent. Non-Anthropic
+  providers ignore the config and surfaces without the concept (OpenAI chunks)
+  drop the blocks. Both SDKs and the web client expose `thinking_blocks`.
 - **`service_tier` reaches Anthropic too.** Anthropic's Messages API takes the
   same field name with its own vocabulary (`auto` | `standard_only`); the
   compat layer accepted it via `extra="allow"` and dropped it, and the provider
