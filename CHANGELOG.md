@@ -7,6 +7,34 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+
+- **Anthropic extended thinking end-to-end** — `POST /v1/messages` accepts
+  `thinking` (e.g. `{"type": "enabled", "budget_tokens": 4096}`), forwards it
+  verbatim upstream, and returns `thinking`/`redacted_thinking` content blocks
+  (text + signature) in the response and the typed SSE stream. Assistant
+  history carrying thinking blocks — which Anthropic requires echoed back in
+  multi-turn thinking conversations — round-trips verbatim instead of erroring.
+  An unset caller temperature defaults to 1.0 under thinking (Anthropic's
+  requirement), while an explicit temperature rides as sent. Non-Anthropic
+  providers ignore the config and surfaces without the concept (OpenAI chunks)
+  drop the blocks. Both SDKs and the web client expose `thinking_blocks`.
+- **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
+  `cache: false` so you can compare a fresh answer against the cached one.
+  It defaults to on; the meta line already marks cache hits.
+- `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
+  check (`client.messages.count_tokens`) now works against the compat surface.
+  Returns a local script-aware estimate (the same heuristic the pricing path
+  uses); it makes no upstream call and has no billing side effects.
+- **Reasoning-token accounting in `usage`.** Reasoning models (OpenAI o-series
+  and gpt-5, Gemini thinking models) bill a separate slice of completion tokens
+  for chain-of-thought; the provider-reported count now surfaces as
+  `usage.reasoning_tokens` (a breakdown of `completion_tokens`, not additive).
+  OpenAI's `completion_tokens_details.reasoning_tokens` and Gemini's
+  `thoughtsTokenCount` are parsed on both the unary and streaming paths; the
+  OpenAI-compat surface re-nests the count under `completion_tokens_details`
+  so SDKs read it at the standard location (including the
+  `stream_options.include_usage` chunk). Anthropic and Ollama report no
+  separate count — thinking folds into output tokens there.
 - **Legacy `functions`/`function_call` on `POST /v1/chat/completions` are
   normalized onto `tools`/`tool_choice`.** OpenAI's pre-tools calling fields
   (deprecated since the 0613 models but still emitted by older SDKs and
@@ -18,6 +46,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   arrive.
 
 ### Fixed
+- Provider `httpx.AsyncClient` connection pools are now closed on app shutdown
+  via `Provider.aclose()` in the lifespan teardown — previously the pooled
+  sockets were severed un-gracefully when the loop ended.
 - **`dimensions`/`encoding_format` on `POST /v1/embeddings` now reach the
   provider instead of being silently ignored.** `EmbeddingsRequest` accepted
   only the OpenAI core fields, so a caller asking text-embedding-3-small for

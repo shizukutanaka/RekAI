@@ -21,6 +21,9 @@ class ChatMessage(BaseModel):
     # Anthropic's {"type": "ephemeral"}). Providers that cache automatically
     # (OpenAI) ignore it.
     cache_control: dict[str, Any] | None = None
+    # Anthropic thinking/redacted_thinking blocks echoed back in assistant
+    # history (verbatim dicts). Providers without the concept drop them.
+    thinking_blocks: list[dict[str, Any]] | None = None
 
 
 class FallbackTarget(BaseModel):
@@ -59,6 +62,14 @@ class ChatRequest(BaseModel):
         description="OpenAI's `web_search_options` — search context size, "
         "user location, etc. for models with hosted web search. Forwarded "
         "verbatim to OpenAI-compatible providers only.",
+    )
+    thinking: dict[str, Any] | None = Field(
+        default=None,
+        description="Anthropic's `thinking` config — e.g. {'type': 'enabled', "
+        "'budget_tokens': 4096} enables extended thinking. Forwarded verbatim "
+        "to Anthropic only; other providers ignore it. Anthropic requires "
+        "temperature=1 under thinking, so the compat layer defaults to that "
+        "when the caller left temperature unset.",
     )
     include_obfuscation: bool | None = Field(
         default=None,
@@ -132,6 +143,11 @@ class Usage(BaseModel):
     # responses and stored snapshots are unchanged.
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    # Reasoning/thinking tokens (OpenAI o- and gpt-5-series, Gemini thinking
+    # models): a *breakdown* of completion_tokens, not additional tokens. 0 for
+    # providers that don't report one (Anthropic folds thinking into
+    # output_tokens without a separate count).
+    reasoning_tokens: int = 0
 
 
 # --- OpenAI-compatible /v1/chat/completions -------------------------------
@@ -232,15 +248,14 @@ class AnthropicToolChoice(BaseModel):
     disable_parallel_tool_use: bool | None = None
 
 
-class AnthropicMessagesRequest(BaseModel):
-    """`POST /v1/messages` body. max_tokens is required by Anthropic (unlike
-    OpenAI) and stays required here — an SDK caller always sends it."""
+class _AnthropicMessagesBase(BaseModel):
+    """Fields shared by `/v1/messages` and `/v1/messages/count_tokens` —
+    everything except `max_tokens`, which the counter doesn't require."""
 
     model_config = ConfigDict(extra="allow")
 
     model: str
     messages: list[AnthropicMessage] = Field(..., min_length=1)
-    max_tokens: int = Field(..., ge=1)
     system: str | list[dict[str, Any]] | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=1.0)
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -248,7 +263,30 @@ class AnthropicMessagesRequest(BaseModel):
     stream: bool = False
     tools: list[AnthropicTool] | None = None
     tool_choice: AnthropicToolChoice | None = None
+    # Anthropic's extended-thinking config, verbatim ({'type': 'enabled',
+    # 'budget_tokens': N}). Declared so it isn't swallowed by extra=allow.
+    thinking: dict[str, Any] | None = None
     provider: str | None = None  # RekAI extension: explicit provider override
+
+
+class AnthropicMessagesRequest(_AnthropicMessagesBase):
+    """`POST /v1/messages` body. max_tokens is required by Anthropic (unlike
+    OpenAI) and stays required here — an SDK caller always sends it."""
+
+    max_tokens: int = Field(..., ge=1)
+
+
+class AnthropicCountTokensRequest(_AnthropicMessagesBase):
+    """`POST /v1/messages/count_tokens` body — the Messages shape except
+    ``max_tokens`` is optional (Anthropic's counter doesn't need it)."""
+
+    max_tokens: int | None = Field(default=None, ge=1)
+
+
+class AnthropicTokenCount(BaseModel):
+    """`POST /v1/messages/count_tokens` response — Anthropic's shape."""
+
+    input_tokens: int
 
 
 class ChatCompletionMessage(BaseModel):
@@ -265,13 +303,20 @@ class ChatCompletionChoice(BaseModel):
     finish_reason: Literal["stop", "length", "tool_calls", "content_filter"] = "stop"
 
 
+class CompletionUsage(Usage):
+    # OpenAI reports the reasoning-token breakdown nested under
+    # `completion_tokens_details` — internal Usage keeps it flat, the compat
+    # surface re-nests it for SDK parity.
+    completion_tokens_details: dict | None = None
+
+
 class ChatCompletionResponse(BaseModel):
     id: str
     object: Literal["chat.completion"] = "chat.completion"
     created: int
     model: str
     choices: list[ChatCompletionChoice]
-    usage: Usage  # field names already match OpenAI's
+    usage: CompletionUsage  # field names already match OpenAI's
     system_fingerprint: str | None = None
     # RekAI extensions — OpenAI SDKs ignore unknown response fields.
     provider: str | None = None
@@ -308,6 +353,13 @@ class ChatResponse(BaseModel):
         "one. Null on a miss and on an exact cache hit (where the prompt matched "
         "byte-for-byte), so a non-null value is exactly the signal that an "
         "approximate match was used.",
+    )
+    thinking_blocks: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Anthropic thinking/redacted_thinking blocks the model "
+        "produced before its answer, verbatim (text + signature). Present only "
+        "when thinking was enabled; the /v1/messages surface re-emits them as "
+        "content blocks so the caller can echo them back verbatim.",
     )
     fallback_used: bool = Field(
         default=False, description="True if a fallback served this response, not the primary."

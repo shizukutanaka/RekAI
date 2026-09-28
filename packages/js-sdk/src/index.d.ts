@@ -58,6 +58,8 @@ export interface Usage {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+  /** Breakdown of completion_tokens spent on reasoning (o-series, Gemini thinking). */
+  reasoning_tokens?: number;
 }
 
 export interface ChatResult {
@@ -85,6 +87,8 @@ export interface ChatResult {
   fallback_used: boolean;
   /** Secret patterns scrubbed from `content` by the output-redaction guardrail. */
   redacted: string[] | null;
+  /** Anthropic thinking/redacted_thinking blocks produced before the answer. */
+  thinking_blocks: Record<string, unknown>[] | null;
   /** Unix timestamp the gateway produced the response. */
   created: number;
 }

@@ -14,9 +14,11 @@ import json
 import uuid
 from typing import Any
 
+from rekai.pricing import estimate_tokens
 from rekai.providers.base import ProviderError
 from rekai.schemas import (
     AnthropicContentBlock,
+    AnthropicCountTokensRequest,
     AnthropicMessagesRequest,
     AnthropicTool,
     ChatMessage,
@@ -51,8 +53,9 @@ def _flatten_system(system: str | list[dict[str, Any]] | None) -> str | None:
 
 def _flatten_content(
     content: str | list[AnthropicContentBlock], role: str
-) -> tuple[str | None, list[dict], list[ChatMessage]]:
-    """Reduce a Messages-API content array to (text, tool_calls, tool_messages).
+) -> tuple[str | None, list[dict], list[ChatMessage], list[dict]]:
+    """Reduce a Messages-API content array to (text, tool_calls, tool_messages,
+    thinking_blocks).
 
     - ``text`` blocks join into the message's plain text.
     - ``tool_use`` blocks on an assistant turn become OpenAI-shaped tool_calls
@@ -60,19 +63,29 @@ def _flatten_content(
     - ``tool_result`` blocks become trailing ``role="tool"`` messages, matching
       the OpenAI convention the pipeline already speaks. A tool_result's own
       content (string or block list) is flattened to text the same way.
-    - anything else (image/document/thinking blocks) is a readable 400 rather
-      than a silent drop — same rule the OpenAI layer applies to non-text
-      parts.
+    - ``thinking``/``redacted_thinking`` blocks on an assistant turn are kept
+      verbatim — Anthropic requires them echoed back in multi-turn thinking
+      conversations (the signature proves the text wasn't tampered with).
+    - anything else (image/document blocks) is a readable 400 rather than a
+      silent drop — same rule the OpenAI layer applies to non-text parts.
     """
     if isinstance(content, str):
-        return content, [], []
+        return content, [], [], []
     texts: list[str] = []
     tool_calls: list[dict] = []
     tool_messages: list[ChatMessage] = []
+    thinking_blocks: list[dict] = []
     for block in content:
         if block.type == "text":
             if block.text is not None:
                 texts.append(block.text)
+        elif block.type in ("thinking", "redacted_thinking"):
+            if role != "assistant":
+                raise ProviderError(
+                    "'thinking' blocks belong on assistant messages.",
+                    status_code=400,
+                )
+            thinking_blocks.append(block.model_dump(exclude_none=True))
         elif block.type == "tool_use":
             if role != "assistant":
                 raise ProviderError(
@@ -107,10 +120,11 @@ def _flatten_content(
         else:
             raise ProviderError(
                 f"Unsupported content block type '{block.type}'; "
-                "RekAI accepts text, tool_use, and tool_result blocks.",
+                "RekAI accepts text, tool_use, tool_result, and (on assistant "
+                "turns) thinking blocks.",
                 status_code=400,
             )
-    return "\n".join(texts) if texts else None, tool_calls, tool_messages
+    return "\n".join(texts) if texts else None, tool_calls, tool_messages, thinking_blocks
 
 
 def _to_openai_tool(tool: AnthropicTool) -> dict:
@@ -143,14 +157,30 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
     if system is not None:
         messages.append(ChatMessage(role="system", content=system))
     for m in req.messages:
-        text, tool_calls, tool_msgs = _flatten_content(m.content, m.role)
-        messages.append(ChatMessage(role=m.role, content=text, tool_calls=tool_calls or None))
+        text, tool_calls, tool_msgs, thinking = _flatten_content(m.content, m.role)
+        messages.append(
+            ChatMessage(
+                role=m.role,
+                content=text,
+                tool_calls=tool_calls or None,
+                thinking_blocks=thinking or None,
+            )
+        )
         messages.extend(tool_msgs)
+    # Anthropic requires temperature=1 when extended thinking is enabled; a
+    # caller who left it unset expects Anthropic's own default, not ours.
+    thinking_enabled = isinstance(req.thinking, dict) and req.thinking.get("type") == "enabled"
+    if req.temperature is not None:
+        temperature = req.temperature
+    elif thinking_enabled:
+        temperature = 1.0
+    else:
+        temperature = 0.7
     return ChatRequest(
         model=req.model,
         messages=messages,
         provider=req.provider,
-        temperature=req.temperature if req.temperature is not None else 0.7,
+        temperature=temperature,
         max_tokens=req.max_tokens,
         stop=req.stop_sequences,
         cache=True,
@@ -162,11 +192,15 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
         parallel_tool_calls=(
             False if req.tool_choice and req.tool_choice.disable_parallel_tool_use else None
         ),
+        thinking=req.thinking,
     )
 
 
 def _content_blocks(resp: ChatResponse) -> list[dict]:
     blocks: list[dict] = []
+    # Thinking blocks lead the content, matching Anthropic's response order.
+    if resp.thinking_blocks:
+        blocks.extend(resp.thinking_blocks)
     if resp.content:
         blocks.append({"type": "text", "text": resp.content})
     for tc in resp.tool_calls or []:
@@ -256,6 +290,28 @@ def ev_text_delta(index: int, text: str) -> str:
     )
 
 
+def ev_thinking_delta(index: int, thinking: str) -> str:
+    return sse(
+        "content_block_delta",
+        {
+            "type": "content_block_delta",
+            "index": index,
+            "delta": {"type": "thinking_delta", "thinking": thinking},
+        },
+    )
+
+
+def ev_signature_delta(index: int, signature: str) -> str:
+    return sse(
+        "content_block_delta",
+        {
+            "type": "content_block_delta",
+            "index": index,
+            "delta": {"type": "signature_delta", "signature": signature},
+        },
+    )
+
+
 def ev_input_json_delta(index: int, partial_json: str) -> str:
     return sse(
         "content_block_delta",
@@ -323,3 +379,46 @@ def _error_obj(status_code: int, message: str) -> dict:
 def anthropic_error(status_code: int, message: str) -> dict:
     """The Anthropic error envelope, so SDK error handling parses RekAI's."""
     return {"type": "error", "error": _error_obj(status_code, message)}
+
+
+def count_tokens(req: AnthropicCountTokensRequest) -> int:
+    """Local input-token estimate for ``POST /v1/messages/count_tokens``.
+
+    Anthropic's own endpoint returns an exact count from its tokenizer, which
+    a self-hosted gateway can't reproduce offline (no vocab downloads — the
+    same reason ``pricing.estimate_tokens`` exists). We reuse that script-aware
+    estimate over the request's text-bearing parts plus the serialized tool
+    schemas, so callers doing pre-flight budget checks get a number that is
+    honest about CJK text — not a provider-exact figure.
+    """
+    parts: list[str] = []
+    if isinstance(req.system, str):
+        parts.append(req.system)
+    elif isinstance(req.system, list):
+        parts.extend(
+            str(b.get("text", ""))
+            for b in req.system
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    for message in req.messages:
+        if isinstance(message.content, str):
+            parts.append(message.content)
+            continue
+        for block in message.content:
+            if block.text:
+                parts.append(block.text)
+            if block.type == "tool_use":
+                parts.append(block.name or "")
+                if block.input is not None:
+                    parts.append(json.dumps(block.input))
+            elif block.type == "tool_result" and block.content is not None:
+                parts.append(
+                    block.content if isinstance(block.content, str) else json.dumps(block.content)
+                )
+            elif block.type == "thinking":
+                thinking_text = block.model_dump().get("thinking")
+                if thinking_text:
+                    parts.append(thinking_text)
+    if req.tools:
+        parts.append(json.dumps([t.model_dump() for t in req.tools]))
+    return sum(estimate_tokens(p) for p in parts if p) or 1

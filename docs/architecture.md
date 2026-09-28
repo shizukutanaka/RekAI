@@ -274,9 +274,11 @@ SDK appends `v1/messages` itself) works unmodified:
   (string or text-block list) becomes the system message, `tool_use` blocks on
   an assistant turn become OpenAI-shaped `tool_calls`, `tool_result` blocks
   become `role="tool"` messages, and `tool_choice` `{type: auto|none|any|tool}`
-  maps to `auto`/`none`/`required`/named function. Non-text blocks RekAI
-  cannot carry (images, documents, thinking) are a readable 400, never a
-  silent drop. `max_tokens` stays required, as upstream. A RekAI `provider`
+  maps to `auto`/`none`/`required`/named function. `thinking` config and
+  assistant `thinking`/`redacted_thinking` blocks ride verbatim to Anthropic
+  (which requires them echoed back in multi-turn thinking); non-text blocks
+  RekAI cannot carry (images, documents) are a readable 400, never a silent
+  drop. `max_tokens` stays required, as upstream. A RekAI `provider`
   extension field is accepted alongside model-prefix routing.
 - **Responses** translate back to Anthropic's `type: "message"` shape with
   `stop_reason` mapped (`stop`→`end_turn`, `length`→`max_tokens`,
@@ -294,6 +296,13 @@ SDK appends `v1/messages` itself) works unmodified:
   the SDK. Type map: 401 `authentication_error`, 403 `permission_error`,
   400/422 `invalid_request_error`, 429 `rate_limit_error`, 529
   `overloaded_error`, otherwise `api_error`.
+
+`POST /v1/messages/count_tokens` answers the SDK's pre-flight token check
+(`client.messages.count_tokens`) with the same script-aware estimate the
+pricing path uses — Anthropic's own endpoint returns an exact tokenizer
+count, which a self-hosted gateway can't reproduce offline, so the value is
+deliberately an estimate (documented as such); it makes no upstream call and
+has no billing side effects.
 
 ### Why generation stopped
 

@@ -20,6 +20,7 @@ from rekai.schemas import (
     ChatMessage,
     ChatRequest,
     ChatResponse,
+    CompletionUsage,
     ContentPart,
     OpenAIChatMessage,
     Usage,
@@ -146,7 +147,16 @@ def to_chat_completion(resp: ChatResponse) -> ChatCompletionResponse:
                 finish_reason=resp.finish_reason or ("tool_calls" if resp.tool_calls else "stop"),
             )
         ],
-        usage=resp.usage,
+        # Emit OpenAI's nested completion_tokens_details.reasoning_tokens in
+        # addition to the flat field — SDKs read the nested shape.
+        usage=CompletionUsage(
+            **resp.usage.model_dump(),
+            completion_tokens_details=(
+                {"reasoning_tokens": resp.usage.reasoning_tokens}
+                if resp.usage.reasoning_tokens
+                else None
+            ),
+        ),
         provider=resp.provider,
         cost_usd=resp.cost_usd,
         cached=resp.cached,
@@ -200,6 +210,8 @@ def chunk_usage(chunk_id: str, created: int, model: str, usage: Usage) -> dict:
     chunk = _chunk_base(chunk_id, created, model)
     chunk["choices"] = []
     chunk["usage"] = usage.model_dump()
+    if usage.reasoning_tokens:
+        chunk["usage"]["completion_tokens_details"] = {"reasoning_tokens": usage.reasoning_tokens}
     return chunk
 
 
