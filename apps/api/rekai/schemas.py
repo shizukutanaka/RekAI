@@ -25,6 +25,9 @@ class ChatMessage(BaseModel):
     # (Anthropic `tool_result.is_error`). Surfaces that can't express it
     # (OpenAI tool messages) drop it — the error text rides in `content`.
     is_error: bool = False
+    # Anthropic thinking/redacted_thinking blocks echoed back in assistant
+    # history (verbatim dicts). Providers without the concept drop them.
+    thinking_blocks: list[dict[str, Any]] | None = None
 
 
 class FallbackTarget(BaseModel):
@@ -63,6 +66,14 @@ class ChatRequest(BaseModel):
         description="OpenAI's `web_search_options` — search context size, "
         "user location, etc. for models with hosted web search. Forwarded "
         "verbatim to OpenAI-compatible providers only.",
+    )
+    thinking: dict[str, Any] | None = Field(
+        default=None,
+        description="Anthropic's `thinking` config — e.g. {'type': 'enabled', "
+        "'budget_tokens': 4096} enables extended thinking. Forwarded verbatim "
+        "to Anthropic only; other providers ignore it. Anthropic requires "
+        "temperature=1 under thinking, so the compat layer defaults to that "
+        "when the caller left temperature unset.",
     )
     include_obfuscation: bool | None = Field(
         default=None,
@@ -252,6 +263,9 @@ class _AnthropicMessagesBase(BaseModel):
     stream: bool = False
     tools: list[AnthropicTool] | None = None
     tool_choice: AnthropicToolChoice | None = None
+    # Anthropic's extended-thinking config, verbatim ({'type': 'enabled',
+    # 'budget_tokens': N}). Declared so it isn't swallowed by extra=allow.
+    thinking: dict[str, Any] | None = None
     provider: str | None = None  # RekAI extension: explicit provider override
 
 
@@ -339,6 +353,13 @@ class ChatResponse(BaseModel):
         "one. Null on a miss and on an exact cache hit (where the prompt matched "
         "byte-for-byte), so a non-null value is exactly the signal that an "
         "approximate match was used.",
+    )
+    thinking_blocks: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Anthropic thinking/redacted_thinking blocks the model "
+        "produced before its answer, verbatim (text + signature). Present only "
+        "when thinking was enabled; the /v1/messages surface re-emits them as "
+        "content blocks so the caller can echo them back verbatim.",
     )
     fallback_used: bool = Field(
         default=False, description="True if a fallback served this response, not the primary."
