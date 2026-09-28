@@ -13,9 +13,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   OpenAI-compatible upstreams, `metadata.user_id` to Anthropic — so
   provider-side abuse detection sees the caller's end-user id. On the
   Anthropic-compat surface, `metadata.user_id` maps to it (and now parses
-  instead of being dropped by `extra="allow"`). It's a routing/billing hint,
-  not a response-shaping field, so it does not join the cache key. Gemini and
-  Ollama have no such field and don't receive it.
+  instead of being dropped by `extra="allow"`). `POST /v1/embeddings` accepts
+  and forwards it the same way (OpenAI's embeddings API takes `user` too).
+  It's a routing/billing hint, not a response-shaping field, so it does not
+  join the cache key. Gemini and Ollama have no such field and don't receive
+  it. Both SDKs expose it (`user=` on `chat()` / `user` in `ChatOptions`).
 - **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
   `cache: false` so you can compare a fresh answer against the cached one.
   It defaults to on; the meta line already marks cache hits.

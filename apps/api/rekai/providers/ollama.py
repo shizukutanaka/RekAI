@@ -134,6 +134,7 @@ class OllamaProvider(Provider):
         *,
         dimensions: int | None = None,
         encoding_format: str | None = None,
+        user: str | None = None,
     ) -> EmbeddingResult:
         settings = get_settings()
         url = f"{settings.ollama_base_url.rstrip('/')}/api/embed"

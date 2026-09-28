@@ -497,11 +497,13 @@ class RekAIClient:
         gateway_key: str | None = None,
         dimensions: int | None = None,
         encoding_format: str | None = None,
+        user: str | None = None,
     ) -> EmbeddingsResult:
         """Create embeddings for a string or list of strings.
 
         ``dimensions``/``encoding_format`` map to OpenAI's embeddings fields
-        (supported providers only)."""
+        (supported providers only). ``user`` is the same end-user id as on
+        ``chat()`` — a routing hint, never a cache key."""
         payload: dict[str, Any] = {"model": model, "input": input, "cache": cache}
         if provider is not None:
             payload["provider"] = provider
@@ -509,6 +511,8 @@ class RekAIClient:
             payload["dimensions"] = dimensions
         if encoding_format is not None:
             payload["encoding_format"] = encoding_format
+        if user is not None:
+            payload["user"] = user
         resp = self._send(
             "POST", "/v1/embeddings", json=payload, headers=self._headers(provider_key, gateway_key)
         )
@@ -741,11 +745,13 @@ class AsyncRekAIClient:
         gateway_key: str | None = None,
         dimensions: int | None = None,
         encoding_format: str | None = None,
+        user: str | None = None,
     ) -> EmbeddingsResult:
         """Create embeddings for a string or list of strings.
 
         ``dimensions``/``encoding_format`` map to OpenAI's embeddings fields
-        (supported providers only)."""
+        (supported providers only). ``user`` is the same end-user id as on
+        ``chat()`` — a routing hint, never a cache key."""
         payload: dict[str, Any] = {"model": model, "input": input, "cache": cache}
         if provider is not None:
             payload["provider"] = provider
@@ -753,6 +759,8 @@ class AsyncRekAIClient:
             payload["dimensions"] = dimensions
         if encoding_format is not None:
             payload["encoding_format"] = encoding_format
+        if user is not None:
+            payload["user"] = user
         resp = await self._send(
             "POST", "/v1/embeddings", json=payload, headers=self._headers(provider_key, gateway_key)
         )

@@ -77,6 +77,7 @@ class EchoProvider(Provider):
         *,
         dimensions: int | None = None,
         encoding_format: str | None = None,
+        user: str | None = None,
     ) -> EmbeddingResult:
         tokens = sum(_count_tokens(t) for t in inputs)
         return EmbeddingResult(

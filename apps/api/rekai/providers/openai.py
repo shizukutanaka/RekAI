@@ -202,6 +202,7 @@ class OpenAIProvider(Provider):
         *,
         dimensions: int | None = None,
         encoding_format: str | None = None,
+        user: str | None = None,
     ) -> EmbeddingResult:
         settings = get_settings()
         url = f"{self._base_url().rstrip('/')}/embeddings"
@@ -210,6 +211,8 @@ class OpenAIProvider(Provider):
             body["dimensions"] = dimensions
         if encoding_format is not None:
             body["encoding_format"] = encoding_format
+        if user is not None:
+            body["user"] = user
         try:
             client = self._client(settings.request_timeout_seconds)
             resp = await client.post(

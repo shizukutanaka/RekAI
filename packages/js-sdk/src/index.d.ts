@@ -115,6 +115,9 @@ export interface EmbeddingsOptions {
   /** OpenAI's encoding_format ("float" | "base64"); OpenAI-compatible
    * providers only. */
   encodingFormat?: string;
+  /** OpenAI's end-user id for abuse detection — a routing hint,
+   * never a cache key. */
+  user?: string;
 }
 
 export interface EmbeddingsResult {

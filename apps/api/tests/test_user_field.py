@@ -125,3 +125,27 @@ def test_anthropic_compat_maps_metadata_user_id() -> None:
         metadata={"user_id": "u-9"},
     )
     assert anthropic_to_chat_request(req).user == "u-9"
+
+
+# --- embeddings --------------------------------------------------------------
+# OpenAI's embeddings API takes the same `user` end-user id; the request model
+# used to 422 on it (no extra="allow" there), and even a tolerated field would
+# have stopped at the provider boundary.
+
+
+async def test_user_reaches_openai_embeddings(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    await OpenAIProvider().embed(["hi"], "m", "sk-x", user="u-123")
+    assert _Client.captured["user"] == "u-123"
+
+
+async def test_no_user_sends_no_embeddings_key(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    await OpenAIProvider().embed(["hi"], "m", "sk-x")
+    assert "user" not in _Client.captured
+
+
+def test_embeddings_request_accepts_user() -> None:
+    from rekai.schemas import EmbeddingsRequest
+
+    assert EmbeddingsRequest(model="m", input="hi", user="u-1").user == "u-1"

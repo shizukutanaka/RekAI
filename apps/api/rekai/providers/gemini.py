@@ -155,6 +155,7 @@ class GeminiProvider(Provider):
         *,
         dimensions: int | None = None,
         encoding_format: str | None = None,
+        user: str | None = None,
     ) -> EmbeddingResult:
         settings = get_settings()
         key = self._resolve_key(api_key)

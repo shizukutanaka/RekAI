@@ -377,6 +377,12 @@ class EmbeddingsRequest(BaseModel):
         "Forwarded to OpenAI-compatible providers only; note the API's own "
         "response stays JSON floats either way.",
     )
+    user: str | None = Field(
+        default=None,
+        description="OpenAI's end-user id for abuse detection. Forwarded to "
+        "OpenAI-compatible providers only; a routing hint, so it does not join "
+        "the cache key.",
+    )
 
 
 class EmbeddingsResponse(BaseModel):
