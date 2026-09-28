@@ -323,6 +323,12 @@ class ChatResponse(BaseModel):
         "'tool_calls', or 'content_filter'. Null when the provider didn't report "
         "one, which is also how responses cached before this field existed read.",
     )
+    stop_sequence: str | None = Field(
+        default=None,
+        description="The stop sequence that ended generation, when the provider "
+        "reports one (Anthropic does, alongside stop_reason 'stop_sequence'). "
+        "Null for providers that don't say — OpenAI's API has no equivalent field.",
+    )
     cache_similarity: float | None = Field(
         default=None,
         description="Cosine similarity to the stored prompt when the semantic cache "

@@ -217,6 +217,7 @@ class AnthropicProvider(Provider):
                 cache_write_tokens=cache_write,
             ),
             finish_reason=finish_reason,
+            stop_sequence=data.get("stop_sequence"),
         )
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
@@ -242,6 +243,7 @@ class AnthropicProvider(Provider):
         cache_read = 0
         cache_write = 0
         saw_usage = False
+        stop_sequence: str | None = None
         # tool_use blocks: id/name from content_block_start, args from
         # input_json_delta fragments, keyed by block index.
         tool_blocks: dict[int, dict] = {}
@@ -307,6 +309,10 @@ class AnthropicProvider(Provider):
                         )
                         if stop_reason is not None:
                             finish_reason = stop_reason
+                        # Anthropic also says *which* stop sequence fired.
+                        seq = event.get("delta", {}).get("stop_sequence")
+                        if isinstance(seq, str):
+                            stop_sequence = seq
         except httpx.HTTPError as exc:
             raise ProviderError(f"Anthropic streaming request failed: {exc}") from exc
         if tool_blocks and not emulating_json:
@@ -328,6 +334,7 @@ class AnthropicProvider(Provider):
                     else None
                 ),
                 finish_reason=finish_reason,
+                stop_sequence=stop_sequence,
             )
 
     async def list_models(self, api_key: str | None) -> list[str]:

@@ -1394,6 +1394,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         summary["tool_calls"] = s.tool_calls
                     if s.finish_reason:
                         summary["finish_reason"] = s.finish_reason
+                    if s.stop_sequence:
+                        summary["stop_sequence"] = s.stop_sequence
                     if s.redacted:
                         summary["redacted"] = s.redacted
                     yield f"data: {json.dumps(summary)}\n\n"
@@ -1623,6 +1625,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             yield anthropic_compat.ev_message_start(msg_id, chat_request.model)
             text_block_open = False
             finish_reason = "stop"
+            stop_sequence = None
             usage = None
             async for ev in handle_chat_stream(
                 chat_request,
@@ -1649,6 +1652,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     s = ev.summary
                     if s.finish_reason:
                         finish_reason = s.finish_reason
+                    if s.stop_sequence:
+                        stop_sequence = s.stop_sequence
                     next_index = 1 if text_block_open else 0
                     for i, tc in enumerate(s.tool_calls or []):
                         finish_reason = "tool_calls"
@@ -1667,7 +1672,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         yield anthropic_compat.ev_content_block_stop(bi)
                     usage = s.usage
             stop_reason = anthropic_compat._FINISH_TO_STOP_REASON.get(finish_reason, "end_turn")
-            yield anthropic_compat.ev_message_delta(stop_reason, usage)
+            yield anthropic_compat.ev_message_delta(stop_reason, usage, stop_sequence)
             yield anthropic_compat.ev_message_stop()
 
         stream_headers = {

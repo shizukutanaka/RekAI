@@ -192,7 +192,11 @@ def to_message(resp: ChatResponse) -> dict:
         "content": _content_blocks(resp),
         "model": resp.model,
         "stop_reason": _FINISH_TO_STOP_REASON.get(finish, "end_turn"),
-        "stop_sequence": None,
+        # Anthropic reports *which* stop sequence fired; it survives the
+        # internal round-trip so a client that sent several can tell which
+        # one matched. Null for providers that don't report it (OpenAI's API
+        # has no equivalent field).
+        "stop_sequence": resp.stop_sequence,
         "usage": {
             "input_tokens": resp.usage.prompt_tokens,
             "output_tokens": resp.usage.completion_tokens,
@@ -267,10 +271,12 @@ def ev_content_block_stop(index: int) -> str:
     return sse("content_block_stop", {"type": "content_block_stop", "index": index})
 
 
-def ev_message_delta(stop_reason: str, usage: Usage | None) -> str:
+def ev_message_delta(
+    stop_reason: str, usage: Usage | None, stop_sequence: str | None = None
+) -> str:
     data: dict[str, Any] = {
         "type": "message_delta",
-        "delta": {"stop_reason": stop_reason, "stop_sequence": None},
+        "delta": {"stop_reason": stop_reason, "stop_sequence": stop_sequence},
     }
     if usage is not None:
         # Anthropic only defines output_tokens here, but we also report

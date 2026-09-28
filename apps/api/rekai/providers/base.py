@@ -116,6 +116,10 @@ class ProviderResult:
     usage: Usage = field(default_factory=Usage)
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    # Anthropic reports *which* stop sequence ended the turn (`stop_sequence`
+    # alongside `stop_reason: "stop_sequence"`). None for providers that don't
+    # say — OpenAI's API has no equivalent field.
+    stop_sequence: str | None = None
 
 
 @dataclass
@@ -135,6 +139,7 @@ class StreamEvent:
     usage: Usage | None = None
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    stop_sequence: str | None = None
 
 
 class Provider(ABC):

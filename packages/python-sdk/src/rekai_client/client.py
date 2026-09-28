@@ -46,6 +46,10 @@ class ChatResult:
     #: budget), "tool_calls", or "content_filter". None when the provider didn't
     #: report one.
     finish_reason: str | None = None
+    #: Which stop sequence ended the turn, when the provider reports one
+    #: (Anthropic's `stop_sequence` alongside `stop_reason: "stop_sequence"`).
+    #: None for providers that don't say — OpenAI's API has no equivalent field.
+    stop_sequence: str | None = None
     #: Cosine similarity to the stored prompt when the semantic cache served
     #: this response — the answer is to a *similar* prompt, not this one. None
     #: on a miss and on an exact cache hit, so a value here is exactly the
@@ -70,6 +74,7 @@ class ChatResult:
             fallback_used=data.get("fallback_used", False),
             tool_calls=data.get("tool_calls"),
             finish_reason=data.get("finish_reason"),
+            stop_sequence=data.get("stop_sequence"),
             cache_similarity=data.get("cache_similarity"),
             redacted=data.get("redacted"),
             created=data.get("created", 0),

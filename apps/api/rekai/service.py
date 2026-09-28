@@ -51,6 +51,9 @@ class StreamSummary:
     estimated: bool
     tool_calls: list[dict] | None = None
     finish_reason: str | None = None
+    # Which stop sequence ended the turn, when the provider reports one
+    # (Anthropic's `stop_sequence` alongside `stop_reason: "stop_sequence"`).
+    stop_sequence: str | None = None
     # Secret patterns scrubbed from the streamed text. Reported here rather
     # than as a header because response headers are long gone by the time the
     # first delta is redacted.
@@ -468,6 +471,7 @@ async def handle_chat(
             cached=False,
             fallback_used=is_fallback,
             finish_reason=result.finish_reason,
+            stop_sequence=result.stop_sequence,
             created=int(time.time()),
         )
         # Redact before *any* store below sees the content (see _redact).
@@ -526,6 +530,7 @@ async def handle_chat_stream(
     reported_usage: Usage | None = None
     reported_tool_calls: list[dict] | None = None
     reported_finish_reason: str | None = None
+    reported_stop_sequence: str | None = None
     errored = False
     started = time.perf_counter()
     first_token_at: float | None = None
@@ -554,6 +559,8 @@ async def handle_chat_stream(
                 reported_tool_calls = event.tool_calls
             if event.finish_reason is not None:
                 reported_finish_reason = event.finish_reason
+            if event.stop_sequence is not None:
+                reported_stop_sequence = event.stop_sequence
         if redactor is not None:
             tail = redactor.flush()
             if tail:
@@ -616,6 +623,7 @@ async def handle_chat_stream(
                 estimated=estimated,
                 tool_calls=reported_tool_calls or None,
                 finish_reason=reported_finish_reason,
+                stop_sequence=reported_stop_sequence,
                 redacted=(redactor.hits or None) if redactor is not None else None,
             )
         )
