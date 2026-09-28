@@ -126,6 +126,10 @@ class AnthropicProvider(Provider):
         }
         if request.stop:
             payload["stop_sequences"] = request.stop
+        # Anthropic's own processing tier ('auto' | 'standard_only') — same
+        # field name as OpenAI's, different vocabulary. Forwarded verbatim.
+        if request.service_tier is not None:
+            payload["service_tier"] = request.service_tier
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
         # Structured output: Anthropic has no `response_format`, but forcing a

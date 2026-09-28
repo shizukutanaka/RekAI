@@ -8,6 +8,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`service_tier` reaches Anthropic too.** Anthropic's Messages API takes the
+  same field name with its own vocabulary (`auto` | `standard_only`); the
+  compat layer accepted it via `extra="allow"` and dropped it, and the provider
+  never sent it. Now `POST /v1/messages` (and `count_tokens`) maps it onto the
+  internal request and the Anthropic provider forwards it verbatim — same as
+  the OpenAI-compatible path, whose tiers it already reaches.
+
 - **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
   `cache: false` so you can compare a fresh answer against the cached one.
   It defaults to on; the meta line already marks cache hits.
