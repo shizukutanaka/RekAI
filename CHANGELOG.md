@@ -63,7 +63,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and silently dropped — a caller could not stop a model from emitting
   several tool calls in one turn. Now typed, forwarded to OpenAI-compatible
   providers, part of the cache key and semantic bucket, and exposed on both
-  SDKs (`parallelToolCalls` in JS).
+  SDKs (`parallelToolCalls` in JS). Anthropic carries the same switch on
+  `tool_choice.disable_parallel_tool_use` — it used to 422 (undeclared field);
+  it now maps onto `parallel_tool_calls` inbound and back outbound, so an
+  Anthropic-SDK caller's flag round-trips to the Anthropic provider.
 - **`web_search_options` and `stream_options.include_obfuscation` forwarding.**
   Two more OpenAI request fields the compat layer accepted and dropped now
   reach OpenAI-compatible providers: `web_search_options` (hosted web-search

@@ -226,8 +226,10 @@ class AnthropicTool(BaseModel):
 class AnthropicToolChoice(BaseModel):
     type: Literal["auto", "none", "any", "tool"]
     name: str | None = None
-    # disable_parallel_tool_use is Anthropic-specific; the OpenAI-equivalent
-    # flag (parallel_tool_calls) lives on the request, not on tool_choice.
+    # Anthropic carries the parallel-call switch *on* tool_choice; the
+    # OpenAI-equivalent flag (parallel_tool_calls) lives on the request.
+    # Mapped onto ChatRequest.parallel_tool_calls so it round-trips.
+    disable_parallel_tool_use: bool | None = None
 
 
 class AnthropicMessagesRequest(BaseModel):

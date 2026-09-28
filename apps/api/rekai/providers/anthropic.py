@@ -151,6 +151,10 @@ class AnthropicProvider(Provider):
             payload["tools"] = _translate_tools(request.tools)
             choice = _translate_tool_choice(request.tool_choice)
             if choice is not None:
+                # OpenAI's request-level parallel_tool_calls=False is
+                # Anthropic's tool_choice.disable_parallel_tool_use.
+                if request.parallel_tool_calls is False:
+                    choice["disable_parallel_tool_use"] = True
                 payload["tool_choice"] = choice
         # A top-level cache_control marks the end of the cacheable prefix. Place
         # it on the last message block (after tools/system in Anthropic's render
