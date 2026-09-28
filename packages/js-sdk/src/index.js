@@ -144,6 +144,8 @@ export class RekAIClient {
     // The providers' end-user id for abuse detection (OpenAI `user`,
     // Anthropic `metadata.user_id`) — a routing hint, never a cache key.
     if (opts.user != null) payload.user = opts.user;
+    // OpenAI's newer hashed abuse-detection identifier (successor to `user`).
+    if (opts.safetyIdentifier != null) payload.safety_identifier = opts.safetyIdentifier;
     return payload;
   }
 

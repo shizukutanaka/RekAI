@@ -18,6 +18,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   It's a routing/billing hint, not a response-shaping field, so it does not
   join the cache key. Gemini and Ollama have no such field and don't receive
   it. Both SDKs expose it (`user=` on `chat()` / `user` in `ChatOptions`).
+  OpenAI's newer `safety_identifier` (the hashed abuse-detection handle that
+  supersedes `user`) forwards to OpenAI-compatible providers the same way and
+  is exposed on both SDKs (`safety_identifier=` / `safetyIdentifier`).
 - **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
   `cache: false` so you can compare a fresh answer against the cached one.
   It defaults to on; the meta line already marks cache hits.

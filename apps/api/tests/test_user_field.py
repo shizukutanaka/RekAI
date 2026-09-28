@@ -149,3 +149,30 @@ def test_embeddings_request_accepts_user() -> None:
     from rekai.schemas import EmbeddingsRequest
 
     assert EmbeddingsRequest(model="m", input="hi", user="u-1").user == "u-1"
+
+
+# --- safety_identifier -------------------------------------------------------
+# OpenAI's newer abuse-detection field (a hashed end-user handle meant to
+# supersede `user`). OpenAI-compatible providers take it; Anthropic/Gemini/
+# Ollama have no equivalent and must not receive it.
+
+
+async def test_safety_identifier_reaches_openai(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    await OpenAIProvider().chat(_req(safety_identifier="hash-7"), api_key="sk-x")
+    assert _Client.captured["safety_identifier"] == "hash-7"
+
+
+async def test_safety_identifier_not_sent_to_anthropic(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    await AnthropicProvider().chat(_req(safety_identifier="hash-7"), api_key="sk-x")
+    assert "safety_identifier" not in _Client.captured
+
+
+def test_openai_compat_maps_safety_identifier() -> None:
+    req = ChatCompletionsRequest(
+        model="m",
+        messages=[{"role": "user", "content": "hi"}],
+        safety_identifier="hash-9",
+    )
+    assert to_chat_request(req).safety_identifier == "hash-9"

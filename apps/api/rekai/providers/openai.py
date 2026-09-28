@@ -114,6 +114,8 @@ class OpenAIProvider(Provider):
         if request.user is not None:
             # OpenAI's abuse-detection end-user id.
             payload["user"] = request.user
+        if request.safety_identifier is not None:
+            payload["safety_identifier"] = request.safety_identifier
         return payload
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:

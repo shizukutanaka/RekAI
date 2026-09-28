@@ -51,6 +51,9 @@ export interface ChatOptions {
   /** The providers' end-user id for abuse detection (OpenAI's `user`,
    * Anthropic's `metadata.user_id`). A routing hint — never a cache key. */
   user?: string;
+  /** OpenAI's newer hashed abuse-detection identifier (successor to `user`).
+   * OpenAI-compatible providers only. */
+  safetyIdentifier?: string;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
 }

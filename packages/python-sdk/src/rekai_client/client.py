@@ -187,6 +187,7 @@ def _build_payload(
     service_tier: str | None = None,
     web_search_options: dict[str, Any] | None = None,
     user: str | None = None,
+    safety_identifier: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -214,6 +215,8 @@ def _build_payload(
         payload["web_search_options"] = web_search_options
     if user is not None:
         payload["user"] = user
+    if safety_identifier is not None:
+        payload["safety_identifier"] = safety_identifier
     return payload
 
 
@@ -307,6 +310,7 @@ class RekAIClient:
         service_tier: str | None = None,
         web_search_options: dict[str, Any] | None = None,
         user: str | None = None,
+        safety_identifier: str | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -323,6 +327,7 @@ class RekAIClient:
             service_tier,
             web_search_options,
             user,
+            safety_identifier,
         )
 
     @staticmethod
@@ -381,6 +386,7 @@ class RekAIClient:
         service_tier: str | None = None,
         web_search_options: dict[str, Any] | None = None,
         user: str | None = None,
+        safety_identifier: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -414,6 +420,7 @@ class RekAIClient:
             service_tier,
             web_search_options,
             user,
+            safety_identifier,
         )
         headers = _build_headers(
             self._provider_key,
@@ -636,6 +643,7 @@ class AsyncRekAIClient:
         service_tier: str | None = None,
         web_search_options: dict[str, Any] | None = None,
         user: str | None = None,
+        safety_identifier: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -656,6 +664,7 @@ class AsyncRekAIClient:
             service_tier,
             web_search_options,
             user,
+            safety_identifier,
         )
         headers = _build_headers(
             self._provider_key,
