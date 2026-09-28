@@ -372,3 +372,11 @@ test("a long Retry-After returns the response instead of sleeping", async () => 
   assert.ok(Date.now() - started < 5000, "must not have waited on Retry-After");
   flake = { remaining: 0, status: 503, retryAfter: undefined, keys: [] };
 });
+
+test("chat forwards thinking", async () => {
+  const client = new RekAIClient(baseUrl);
+  await client.chat("claude-sonnet-4-6", [{ role: "user", content: "hi" }], {
+    thinking: { type: "enabled", budget_tokens: 256 },
+  });
+  assert.deepEqual(lastRequest.body.thinking, { type: "enabled", budget_tokens: 256 });
+});

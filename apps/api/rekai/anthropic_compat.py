@@ -409,10 +409,6 @@ def count_tokens(req: AnthropicCountTokensRequest) -> int:
                 parts.append(
                     block.content if isinstance(block.content, str) else json.dumps(block.content)
                 )
-            elif block.type == "thinking":
-                thinking_text = block.model_dump().get("thinking")
-                if thinking_text:
-                    parts.append(thinking_text)
     if req.tools:
         parts.append(json.dumps([t.model_dump() for t in req.tools]))
     return sum(estimate_tokens(p) for p in parts if p) or 1
