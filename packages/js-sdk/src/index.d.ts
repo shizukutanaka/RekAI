@@ -1,6 +1,10 @@
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
+  /** Anthropic server-side tool blocks echoed back verbatim on assistant turns. */
+  extra_blocks?: Record<string, unknown>[];
+  /** Ordered verbatim content array for an assistant turn — replays the exact upstream sequence. */
+  content_blocks?: Record<string, unknown>[];
 }
 
 export interface FallbackTarget {
@@ -48,6 +52,10 @@ export interface ChatOptions {
   /** OpenAI's `web_search_options` — hosted web-search config (context size,
    * user location). OpenAI-compatible providers only. */
   webSearchOptions?: Record<string, unknown>;
+  /** Anthropic extended thinking config, e.g.
+   * `{type: "enabled", budget_tokens: 1024}` — forwarded verbatim to Anthropic
+   * upstreams. Thinking blocks come back on `ChatResult.thinking_blocks`. */
+  thinking?: Record<string, unknown>;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
 }
@@ -87,6 +95,12 @@ export interface ChatResult {
   redacted: string[] | null;
   /** Anthropic thinking/redacted_thinking blocks produced before the answer. */
   thinking_blocks: Record<string, unknown>[] | null;
+  /** Anthropic server-side tool blocks (server_tool_use, tool-result blocks, mcp_*). */
+  extra_blocks: Record<string, unknown>[] | null;
+  /** Message-level fields the provider doesn't map (container, context_management, ...). */
+  extra_fields: Record<string, unknown> | null;
+  /** The upstream content array verbatim, in emitted order. Echo it back on the next turn. */
+  content_blocks: Record<string, unknown>[] | null;
   /** Unix timestamp the gateway produced the response. */
   created: number;
 }
