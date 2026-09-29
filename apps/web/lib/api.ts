@@ -3,6 +3,9 @@ export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
+  /** Anthropic thinking/redacted_thinking blocks echoed back in assistant
+   * history (extended thinking multi-turn requires them verbatim). */
+  thinking_blocks?: Record<string, unknown>[] | null;
 }
 
 /**
@@ -33,6 +36,21 @@ export interface ChatResponse {
   tool_calls?: Record<string, unknown>[] | null;
   /** Anthropic thinking blocks produced before the answer (extended thinking). */
   thinking_blocks?: Record<string, unknown>[] | null;
+}
+
+/**
+ * Flatten Anthropic thinking blocks into display text. `thinking` blocks carry
+ * visible reasoning; `redacted_thinking` blocks are opaque ciphertext, shown as
+ * a placeholder so a redacted stretch doesn't read as missing output.
+ */
+export function thinkingText(blocks?: Record<string, unknown>[] | null): string {
+  return (blocks ?? [])
+    .map((b) =>
+      b && b.type === "thinking" && typeof b.thinking === "string"
+        ? b.thinking
+        : "[redacted thinking]",
+    )
+    .join("\n\n");
 }
 
 /**
@@ -325,6 +343,7 @@ export async function sendChat(params: {
   maxTokens?: number;
   provider?: string;
   cache?: boolean;
+  thinking?: Record<string, unknown>;
   onRateLimit?: (info: RateLimitInfo) => void;
 }): Promise<ChatResponse> {
   const headers: Record<string, string> = {
@@ -343,6 +362,7 @@ export async function sendChat(params: {
       ...(params.temperature != null ? { temperature: params.temperature } : {}),
       ...(params.maxTokens ? { max_tokens: params.maxTokens } : {}),
       ...(params.cache === false ? { cache: false } : {}),
+      ...(params.thinking ? { thinking: params.thinking } : {}),
     }),
   });
 
@@ -367,11 +387,13 @@ export async function streamChat(
     maxTokens?: number;
     provider?: string;
     cache?: boolean;
+    thinking?: Record<string, unknown>;
     onRateLimit?: (info: RateLimitInfo) => void;
   },
   onDelta: (text: string) => void,
   signal?: AbortSignal,
   onSummary?: (summary: StreamSummary) => void,
+  onThinkingEvent?: (ev: SSEEvent) => void,
 ): Promise<void> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -389,6 +411,7 @@ export async function streamChat(
       ...(params.temperature != null ? { temperature: params.temperature } : {}),
       ...(params.maxTokens ? { max_tokens: params.maxTokens } : {}),
       ...(params.cache === false ? { cache: false } : {}),
+      ...(params.thinking ? { thinking: params.thinking } : {}),
     }),
     signal,
   });
@@ -417,6 +440,7 @@ export async function streamChat(
       if (ev.kind === "delta") onDelta(ev.text);
       else if (ev.kind === "summary") onSummary?.(ev.summary);
       else if (ev.kind === "error") throw new Error(ev.message);
+      else onThinkingEvent?.(ev);
     }
   }
 }
@@ -440,6 +464,9 @@ export interface StreamSummary {
 export type SSEEvent =
   | { kind: "delta"; text: string }
   | { kind: "summary"; summary: StreamSummary }
+  | { kind: "thinking"; text: string }
+  | { kind: "thinking_signature"; signature: string }
+  | { kind: "thinking_block"; block: Record<string, unknown> }
   | { kind: "done" }
   | { kind: "error"; message: string }
   | { kind: "ignore" };
@@ -456,6 +483,12 @@ export function parseSSEFrame(frame: string): SSEEvent {
   try {
     const event = JSON.parse(payload);
     if (event.delta) return { kind: "delta", text: event.delta };
+    if (event.thinking_delta)
+      return { kind: "thinking", text: event.thinking_delta };
+    if (event.thinking_signature)
+      return { kind: "thinking_signature", signature: event.thinking_signature };
+    if (event.thinking_block)
+      return { kind: "thinking_block", block: event.thinking_block };
     if (event.error) return { kind: "error", message: event.detail || event.error };
     if (event.usage) return { kind: "summary", summary: event as StreamSummary };
     return { kind: "ignore" };

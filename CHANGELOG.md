@@ -8,6 +8,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Chat playground: extended thinking** — an Options toggle sends Anthropic's
+  `thinking` config (with a budget-tokens field) on the native chat surface,
+  and the reply's reasoning shows in a collapsible "Thinking" section —
+  streamed live from `thinking_delta` events or flattened from the response's
+  thinking blocks (`redacted_thinking` shows as a marked placeholder). Kept
+  blocks echo back on later turns so multi-turn thinking conversations keep
+  working; the playground sends `temperature: 1` while enabled since that's
+  the only value Anthropic accepts under thinking.
 - **Anthropic extended thinking end-to-end** — `POST /v1/messages` accepts
   `thinking` (e.g. `{"type": "enabled", "budget_tokens": 4096}`), forwards it
   verbatim upstream, and returns `thinking`/`redacted_thinking` content blocks
