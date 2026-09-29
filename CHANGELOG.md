@@ -19,6 +19,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   SSE surfaces, and assistant `extra_blocks` echo back through the compat
   layer for multi-turn continuity. Both SDKs and the playground ("used
   web_search" badge) expose them; the OpenAI surface omits them honestly.
+- **Verbatim order + redaction coverage for the pass-through** — the response
+  also carries `content_blocks`, the whole upstream content array verbatim,
+  so interleaved text/tool-trace replays in emitted order on `/v1/messages`
+  and echoes verbatim in history (instead of the flattened
+  thinking→extra→text reconstruction). Server-tool block text (search
+  results, tool inputs, code-exec output) gets the same secret scrub as the
+  answer — streaming frames included — while `signature` blobs stay intact;
+  requests carrying tool-trace history skip the semantic cache (plain-text
+  embeddings can't see that context), and a text delta buffered by the
+  redactor flushes before any non-text block starts so answer order can't
+  invert.
 - **Message-level Anthropic response fields pass through verbatim** —
   `container` (code execution, needed to reference it on the next turn),
   `context_management` edit reports, and anything new ride

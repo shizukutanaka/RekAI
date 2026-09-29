@@ -53,9 +53,9 @@ def _flatten_system(system: str | list[dict[str, Any]] | None) -> str | None:
 
 def _flatten_content(
     content: str | list[AnthropicContentBlock], role: str
-) -> tuple[str | None, list[dict], list[ChatMessage], list[dict], list[dict]]:
+) -> tuple[str | None, list[dict], list[ChatMessage], list[dict], list[dict], list[dict]]:
     """Reduce a Messages-API content array to (text, tool_calls, tool_messages,
-    thinking_blocks, extra_blocks).
+    thinking_blocks, extra_blocks, content_blocks).
 
     - ``text`` blocks join into the message's plain text.
     - ``tool_use`` blocks on an assistant turn become OpenAI-shaped tool_calls
@@ -70,12 +70,16 @@ def _flatten_content(
       web_search_tool_result, mcp_*, code_execution, ...) is kept verbatim in
       ``extra_blocks`` — Anthropic requires the server-tool trace echoed back
       in multi-turn context, and unknown types stay forward-compatible.
+    - ``content_blocks`` — the whole ordered array verbatim (assistant turns
+      only): the sequence the caller sent, preserved so an echoed turn
+      replays interleaved text/tool-trace in its original order rather than
+      the flattened reconstruction.
     - on a user turn anything else (image/document blocks) is a readable 400
       rather than a silent drop — same rule the OpenAI layer applies to
       non-text parts.
     """
     if isinstance(content, str):
-        return content, [], [], [], []
+        return content, [], [], [], [], []
     texts: list[str] = []
     tool_calls: list[dict] = []
     tool_messages: list[ChatMessage] = []
@@ -132,12 +136,16 @@ def _flatten_content(
                 "turns) thinking and server-tool blocks.",
                 status_code=400,
             )
+    ordered = (
+        [block.model_dump(exclude_none=True) for block in content] if role == "assistant" else []
+    )
     return (
         "\n".join(texts) if texts else None,
         tool_calls,
         tool_messages,
         thinking_blocks,
         extra_blocks,
+        ordered,
     )
 
 
@@ -171,7 +179,7 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
     if system is not None:
         messages.append(ChatMessage(role="system", content=system))
     for m in req.messages:
-        text, tool_calls, tool_msgs, thinking, extra = _flatten_content(m.content, m.role)
+        text, tool_calls, tool_msgs, thinking, extra, ordered = _flatten_content(m.content, m.role)
         messages.append(
             ChatMessage(
                 role=m.role,
@@ -179,6 +187,7 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
                 tool_calls=tool_calls or None,
                 thinking_blocks=thinking or None,
                 extra_blocks=extra or None,
+                content_blocks=ordered or None,
             )
         )
         messages.extend(tool_msgs)
@@ -236,11 +245,15 @@ def _content_blocks(resp: ChatResponse) -> list[dict]:
 def to_message(resp: ChatResponse) -> dict:
     """Translate RekAI's ChatResponse into an Anthropic Message object."""
     finish = resp.finish_reason or ("tool_calls" if resp.tool_calls else "stop")
+    # Prefer the verbatim upstream content array — interleaved text/tool-trace
+    # keeps its emitted order; the composed copy is the fallback for providers
+    # that never reported ordered blocks.
+    content = resp.content_blocks if resp.content_blocks else _content_blocks(resp)
     message = {
         "id": f"msg_{resp.id}" if not resp.id.startswith("msg_") else resp.id,
         "type": "message",
         "role": "assistant",
-        "content": _content_blocks(resp),
+        "content": content,
         "model": resp.model,
         "stop_reason": _FINISH_TO_STOP_REASON.get(finish, "end_turn"),
         "stop_sequence": None,

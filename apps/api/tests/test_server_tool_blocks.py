@@ -523,3 +523,162 @@ def test_native_stream_emits_extra_fields_frame(client: TestClient, monkeypatch)
         if line.startswith("data:") and "[DONE]" not in line
     ]
     assert any(f.get("extra_fields", {}).get("container") == _CONTAINER for f in frames)
+
+
+# --- review follow-ups --------------------------------------------------------
+
+
+async def test_stream_extra_block_text_delta_stays_block_scoped(monkeypatch) -> None:
+    """A text_delta inside a tracked extra block is not swallowed as answer text."""
+    lines = [
+        _sse(
+            "content_block_start",
+            {"index": 0, "content_block": {"type": "unmapped_future", "data": {}}},
+        ),
+        _sse(
+            "content_block_delta",
+            {"index": 0, "delta": {"type": "text_delta", "text": "tool output"}},
+        ),
+        _sse("content_block_stop", {"index": 0}),
+        _sse(
+            "content_block_start",
+            {"index": 1, "content_block": {"type": "text", "text": ""}},
+        ),
+        _sse(
+            "content_block_delta",
+            {"index": 1, "delta": {"type": "text_delta", "text": "real answer"}},
+        ),
+        _sse("content_block_stop", {"index": 1}),
+        _sse(
+            "message_delta",
+            {"delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 2}},
+        ),
+        _sse("message_stop", {}),
+    ]
+    events = await _collect(lines)
+    deltas = [e.delta for e in events if e.delta is not None]
+    assert deltas == ["real answer"]  # "tool output" never leaks into the answer
+    assert any(e.extra_block_delta == {"type": "text_delta", "text": "tool output"} for e in events)
+
+
+def test_to_message_uses_verbatim_ordered_content() -> None:
+    """Interleaved text/server-tool order survives to_message verbatim."""
+    from rekai.schemas import ChatResponse
+
+    ordered = [
+        {"type": "text", "text": "Searching now"},
+        _SERVER_USE,
+        _SEARCH_RESULT,
+        {"type": "text", "text": "Found it"},
+    ]
+    resp = ChatResponse(
+        id="x",
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        content="Searching nowFound it",
+        usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        created=0,
+        content_blocks=ordered,
+        extra_blocks=[_SERVER_USE, _SEARCH_RESULT],
+    )
+    msg = to_message(resp)
+    assert msg["content"] == ordered
+
+
+def test_history_echo_replays_verbatim_order() -> None:
+    """An assistant turn echoes its exact upstream sequence, not the flattened order."""
+    ordered = [
+        {"type": "text", "text": "Searching now"},
+        _SERVER_USE,
+        _SEARCH_RESULT,
+        {"type": "text", "text": "Found it"},
+    ]
+    req = AnthropicMessagesRequest(
+        model="claude-sonnet-4-6",
+        max_tokens=10,
+        messages=[
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": ordered},
+            {"role": "user", "content": "and?"},
+        ],
+    )
+    chat = anthropic_compat.to_chat_request(req)
+    assistant = chat.messages[1]
+    assert assistant.content_blocks == ordered
+    provider = AnthropicProvider()
+    payload = provider._build_payload(chat, stream=False)
+    assert payload["messages"][1]["content"] == ordered
+
+
+async def test_redaction_scrubs_extra_block_strings() -> None:
+    """Server-tool result text gets the same secret scrub as the answer."""
+    secret_block = {
+        "type": "web_search_tool_result",
+        "tool_use_id": "srvtoolu_1",
+        "content": [
+            {"type": "web_search_result", "url": "https://x", "title": "key: ghp_" + "A" * 36}
+        ],
+    }
+
+    class _SecretProvider(Provider):
+        name = "svc-secret"
+
+        async def chat(self, request, api_key):
+            return ProviderResult(
+                content="ok",
+                model="x",
+                usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+                extra_blocks=[secret_block],
+                content_blocks=[secret_block, {"type": "text", "text": "ok"}],
+            )
+
+        async def stream_events(self, request, api_key):
+            yield StreamEvent(extra_block=secret_block)
+            yield StreamEvent(delta="ok")
+            yield StreamEvent(finish_reason="stop")
+
+        async def embed(self, texts, model, api_key):
+            raise ProviderError("unused")
+
+    provider = _SecretProvider()
+    register_provider(provider)
+    settings = Settings(environment="test", default_provider="echo", output_redaction_enabled=True)
+    result = await handle_chat(
+        _req().model_copy(update={"model": "x", "provider": "svc-secret"}),
+        None,
+        settings,
+        NullCache(),
+    )
+    title = result.extra_blocks[0]["content"][0]["title"]
+    assert "ghp_" + "A" * 36 not in title
+    assert "ghp_" + "A" * 36 not in result.content_blocks[0]["content"][0]["title"]
+
+
+async def test_semantic_cache_skips_extra_blocks_history() -> None:
+    """Histories carrying server-tool results can't collide on plain-text embeddings."""
+    from rekai.semantic_cache import semantic_cache
+
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        cache_enabled=False,
+        semantic_cache_enabled=True,
+        semantic_cache_model="echo",
+    )
+    semantic_cache.clear()
+    request = ChatRequest(
+        model="echo",
+        messages=[
+            ChatMessage(
+                role="assistant",
+                content="Done",
+                extra_blocks=[_SERVER_USE],
+            ),
+            ChatMessage(role="user", content="Continue"),
+        ],
+    )
+    first = await handle_chat(request, None, settings, NullCache())
+    second = await handle_chat(request, None, settings, NullCache())
+    assert first.cached is False
+    assert second.cached is False
+    semantic_cache.clear()

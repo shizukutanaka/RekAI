@@ -34,6 +34,7 @@ interface DisplayMessage extends ChatMessage {
   cacheSimilarity?: number | null;
   redacted?: string[] | null;
   extraBlocks?: Record<string, unknown>[];
+  contentBlocks?: Record<string, unknown>[];
 }
 
 // Server-side tools the provider ran for an answer (web search, code
@@ -158,11 +159,13 @@ export default function ChatPage() {
     setLoading(true);
 
     // Anthropic requires the server-tool trace echoed back in multi-turn
-    // context, so extraBlocks ride the wire verbatim on assistant turns.
-    const convo = history.map(({ role, content, extraBlocks }) => ({
+    // context — the ordered verbatim array replays the exact emitted
+    // sequence, extraBlocks the flattened trace for older replies.
+    const convo = history.map(({ role, content, extraBlocks, contentBlocks }) => ({
       role,
       content,
       ...(extraBlocks?.length ? { extra_blocks: extraBlocks } : {}),
+      ...(contentBlocks?.length ? { content_blocks: contentBlocks } : {}),
     }));
     // Prepend an optional system prompt (not shown as a chat bubble).
     const wire = system.trim()
@@ -297,6 +300,7 @@ export default function ChatPage() {
             cacheSimilarity: res.cache_similarity,
             redacted: res.redacted,
             extraBlocks: res.extra_blocks ?? undefined,
+            contentBlocks: res.content_blocks ?? undefined,
           },
         ]);
       }

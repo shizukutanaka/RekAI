@@ -5,6 +5,8 @@ export interface ChatMessage {
   content: string;
   /** Anthropic server-tool blocks echoed back verbatim on assistant turns. */
   extra_blocks?: Record<string, unknown>[];
+  /** Ordered verbatim content array for an assistant turn — replays the exact upstream sequence. */
+  content_blocks?: Record<string, unknown>[];
 }
 
 /**
@@ -39,6 +41,8 @@ export interface ChatResponse {
   extra_blocks?: Record<string, unknown>[] | null;
   /** Message-level fields the provider doesn't map (container, context_management, ...). */
   extra_fields?: Record<string, unknown> | null;
+  /** The upstream content array verbatim, in emitted order. */
+  content_blocks?: Record<string, unknown>[] | null;
 }
 
 /**

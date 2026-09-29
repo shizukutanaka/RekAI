@@ -125,6 +125,11 @@ class ProviderResult:
     # types verbatim is forward-compatible: new Anthropic blocks pass through
     # untouched instead of vanishing.
     extra_blocks: list[dict] | None = None
+    # The upstream content array verbatim — the ordered sequence the provider
+    # actually emitted (text, thinking, tool_use, and extra blocks interleaved
+    # in upstream order). Flattening loses that order, so the verbatim copy
+    # backs the /v1/messages surface and history echo.
+    content_blocks: list[dict] | None = None
     # Message-level fields the provider doesn't map (container for code
     # execution, context_management edit reports, ...) — verbatim, so new
     # upstream fields surface instead of vanishing.

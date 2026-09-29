@@ -29,6 +29,9 @@ class ChatMessage(BaseModel):
     # requires the tool-trace preserved in multi-turn context; providers
     # without the concept drop them.
     extra_blocks: list[dict[str, Any]] | None = None
+    # Ordered verbatim Anthropic content array for an assistant turn —
+    # preserved so a later request echoes the exact upstream sequence.
+    content_blocks: list[dict[str, Any]] | None = None
 
 
 class FallbackTarget(BaseModel):
@@ -371,6 +374,14 @@ class ChatResponse(BaseModel):
         "container for code execution, context_management edit reports, and "
         "anything new) — verbatim. The OpenAI surface has no equivalent and "
         "omits them.",
+    )
+    content_blocks: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="The upstream content array verbatim, in emitted order "
+        "(text, thinking, tool_use and server-tool blocks interleaved). "
+        "Present only when the provider reports ordered blocks — /v1/messages "
+        "re-emits it verbatim and callers echo it for multi-turn continuity. "
+        "The OpenAI surface has no equivalent and omits it.",
     )
     fallback_used: bool = Field(
         default=False, description="True if a fallback served this response, not the primary."

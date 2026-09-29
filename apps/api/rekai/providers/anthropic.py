@@ -232,6 +232,7 @@ class AnthropicProvider(Provider):
             finish_reason=finish_reason,
             thinking_blocks=thinking_blocks or None,
             extra_blocks=extra_blocks or None,
+            content_blocks=blocks or None,
             extra_fields=_response_extras(data),
         )
 
@@ -310,7 +311,16 @@ class AnthropicProvider(Provider):
                     elif etype == "content_block_delta":
                         delta = event.get("delta", {})
                         text = delta.get("text")
-                        if delta.get("type") == "thinking_delta":
+                        if (
+                            event.get("index", 0) in extra_json
+                            and delta.get("type") != "input_json_delta"
+                        ):
+                            # Deltas belonging to a tracked extra block (any
+                            # type — including text_delta inside a tool-result
+                            # block) ride through verbatim, never as answer
+                            # text.
+                            yield StreamEvent(extra_block_delta=delta)
+                        elif delta.get("type") == "thinking_delta":
                             yield StreamEvent(thinking_delta=delta.get("thinking", ""))
                         elif delta.get("type") == "signature_delta":
                             yield StreamEvent(thinking_signature=delta.get("signature", ""))
@@ -500,7 +510,16 @@ def _translate_messages(messages: list) -> list[dict]:
                     ],
                 }
             )
-        elif m.role == "assistant" and (m.tool_calls or m.thinking_blocks or m.extra_blocks):
+        elif m.role == "assistant" and (
+            m.tool_calls or m.thinking_blocks or m.extra_blocks or m.content_blocks
+        ):
+            # The verbatim ordered array wins when present — it replays the
+            # exact sequence upstream emitted (interleaved text/tool-trace),
+            # which the flattened thinking→extra→text→tool_use reconstruction
+            # can't reproduce.
+            if m.content_blocks:
+                out.append({"role": "assistant", "content": m.content_blocks})
+                continue
             blocks: list[dict] = []
             # Thinking blocks must precede every other block in an assistant
             # turn (Anthropic's contract) — they are echoed back verbatim.
