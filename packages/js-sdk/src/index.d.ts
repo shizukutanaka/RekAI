@@ -54,6 +54,10 @@ export interface ChatOptions {
   /** OpenAI's newer hashed abuse-detection identifier (successor to `user`).
    * OpenAI-compatible providers only. */
   safetyIdentifier?: string;
+  /** Anthropic extended thinking config, e.g.
+   * `{type: "enabled", budget_tokens: 1024}` — forwarded verbatim to Anthropic
+   * upstreams. Thinking blocks come back on `ChatResult.thinking_blocks`. */
+  thinking?: Record<string, unknown>;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
 }

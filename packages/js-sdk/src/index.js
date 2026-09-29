@@ -146,6 +146,9 @@ export class RekAIClient {
     if (opts.user != null) payload.user = opts.user;
     // OpenAI's newer hashed abuse-detection identifier (successor to `user`).
     if (opts.safetyIdentifier != null) payload.safety_identifier = opts.safetyIdentifier;
+    // Anthropic extended thinking ({type:"enabled",budget_tokens}) — Anthropic
+    // upstreams only; thinking blocks come back on ChatResult.thinking_blocks.
+    if (opts.thinking != null) payload.thinking = opts.thinking;
     return payload;
   }
 
