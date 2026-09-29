@@ -53,9 +53,9 @@ def _flatten_system(system: str | list[dict[str, Any]] | None) -> str | None:
 
 def _flatten_content(
     content: str | list[AnthropicContentBlock], role: str
-) -> tuple[str | None, list[dict], list[ChatMessage], list[dict]]:
+) -> tuple[str | None, list[dict], list[ChatMessage], list[dict], list[dict], list[dict]]:
     """Reduce a Messages-API content array to (text, tool_calls, tool_messages,
-    thinking_blocks).
+    thinking_blocks, extra_blocks, content_blocks).
 
     - ``text`` blocks join into the message's plain text.
     - ``tool_use`` blocks on an assistant turn become OpenAI-shaped tool_calls
@@ -66,15 +66,25 @@ def _flatten_content(
     - ``thinking``/``redacted_thinking`` blocks on an assistant turn are kept
       verbatim — Anthropic requires them echoed back in multi-turn thinking
       conversations (the signature proves the text wasn't tampered with).
-    - anything else (image/document blocks) is a readable 400 rather than a
-      silent drop — same rule the OpenAI layer applies to non-text parts.
+    - every other block type on an assistant turn (server_tool_use,
+      web_search_tool_result, mcp_*, code_execution, ...) is kept verbatim in
+      ``extra_blocks`` — Anthropic requires the server-tool trace echoed back
+      in multi-turn context, and unknown types stay forward-compatible.
+    - ``content_blocks`` — the whole ordered array verbatim (assistant turns
+      only): the sequence the caller sent, preserved so an echoed turn
+      replays interleaved text/tool-trace in its original order rather than
+      the flattened reconstruction.
+    - on a user turn anything else (image/document blocks) is a readable 400
+      rather than a silent drop — same rule the OpenAI layer applies to
+      non-text parts.
     """
     if isinstance(content, str):
-        return content, [], [], []
+        return content, [], [], [], [], []
     texts: list[str] = []
     tool_calls: list[dict] = []
     tool_messages: list[ChatMessage] = []
     thinking_blocks: list[dict] = []
+    extra_blocks: list[dict] = []
     for block in content:
         if block.type == "text":
             if block.text is not None:
@@ -117,14 +127,26 @@ def _flatten_content(
                     tool_call_id=block.tool_use_id,
                 )
             )
+        elif role == "assistant":
+            extra_blocks.append(block.model_dump(exclude_none=True))
         else:
             raise ProviderError(
                 f"Unsupported content block type '{block.type}'; "
                 "RekAI accepts text, tool_use, tool_result, and (on assistant "
-                "turns) thinking blocks.",
+                "turns) thinking and server-tool blocks.",
                 status_code=400,
             )
-    return "\n".join(texts) if texts else None, tool_calls, tool_messages, thinking_blocks
+    ordered = (
+        [block.model_dump(exclude_none=True) for block in content] if role == "assistant" else []
+    )
+    return (
+        "\n".join(texts) if texts else None,
+        tool_calls,
+        tool_messages,
+        thinking_blocks,
+        extra_blocks,
+        ordered,
+    )
 
 
 def _to_openai_tool(tool: AnthropicTool) -> dict:
@@ -157,13 +179,15 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
     if system is not None:
         messages.append(ChatMessage(role="system", content=system))
     for m in req.messages:
-        text, tool_calls, tool_msgs, thinking = _flatten_content(m.content, m.role)
+        text, tool_calls, tool_msgs, thinking, extra, ordered = _flatten_content(m.content, m.role)
         messages.append(
             ChatMessage(
                 role=m.role,
                 content=text,
                 tool_calls=tool_calls or None,
                 thinking_blocks=thinking or None,
+                extra_blocks=extra or None,
+                content_blocks=ordered or None,
             )
         )
         messages.extend(tool_msgs)
@@ -201,6 +225,10 @@ def _content_blocks(resp: ChatResponse) -> list[dict]:
     # Thinking blocks lead the content, matching Anthropic's response order.
     if resp.thinking_blocks:
         blocks.extend(resp.thinking_blocks)
+    # The server-tool trace (server_tool_use, *_tool_result, mcp_*) sits
+    # between thinking and the answer text, matching upstream order.
+    if resp.extra_blocks:
+        blocks.extend(resp.extra_blocks)
     if resp.content:
         blocks.append({"type": "text", "text": resp.content})
     for tc in resp.tool_calls or []:
@@ -223,11 +251,15 @@ def _content_blocks(resp: ChatResponse) -> list[dict]:
 def to_message(resp: ChatResponse) -> dict:
     """Translate RekAI's ChatResponse into an Anthropic Message object."""
     finish = resp.finish_reason or ("tool_calls" if resp.tool_calls else "stop")
-    return {
+    # Prefer the verbatim upstream content array — interleaved text/tool-trace
+    # keeps its emitted order; the composed copy is the fallback for providers
+    # that never reported ordered blocks.
+    content = resp.content_blocks if resp.content_blocks else _content_blocks(resp)
+    message = {
         "id": f"msg_{resp.id}" if not resp.id.startswith("msg_") else resp.id,
         "type": "message",
         "role": "assistant",
-        "content": _content_blocks(resp),
+        "content": content,
         "model": resp.model,
         "stop_reason": _FINISH_TO_STOP_REASON.get(finish, "end_turn"),
         "stop_sequence": None,
@@ -240,6 +272,12 @@ def to_message(resp: ChatResponse) -> dict:
         "cost_usd": resp.cost_usd,
         "cached": resp.cached,
     }
+    # Message-level fields RekAI doesn't map (container, context_management,
+    # ...) reattach verbatim — setdefault so they can never clobber the
+    # fields the gateway computes (id, model, usage, ...).
+    for key, value in (resp.extra_fields or {}).items():
+        message.setdefault(key, value)
+    return message
 
 
 # --- streaming event builders (the Messages SSE protocol) ------------------
@@ -253,23 +291,22 @@ def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-def ev_message_start(msg_id: str, model: str) -> str:
-    return sse(
-        "message_start",
-        {
-            "type": "message_start",
-            "message": {
-                "id": msg_id,
-                "type": "message",
-                "role": "assistant",
-                "content": [],
-                "model": model,
-                "stop_reason": None,
-                "stop_sequence": None,
-                "usage": {"input_tokens": 0, "output_tokens": 0},
-            },
-        },
-    )
+def ev_message_start(msg_id: str, model: str, extra: dict | None = None) -> str:
+    message: dict = {
+        "id": msg_id,
+        "type": "message",
+        "role": "assistant",
+        "content": [],
+        "model": model,
+        "stop_reason": None,
+        "stop_sequence": None,
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+    }
+    # Message-level extras (container, ...) ride the skeleton verbatim, the
+    # same slots they arrive in upstream's own message_start.
+    for key, value in (extra or {}).items():
+        message.setdefault(key, value)
+    return sse("message_start", {"type": "message_start", "message": message})
 
 
 def ev_content_block_start(index: int, block: dict) -> str:
@@ -309,6 +346,15 @@ def ev_signature_delta(index: int, signature: str) -> str:
             "index": index,
             "delta": {"type": "signature_delta", "signature": signature},
         },
+    )
+
+
+def ev_block_delta(index: int, delta: dict) -> str:
+    """A verbatim content_block_delta for a block RekAI doesn't interpret —
+    server-tool blocks stream their own delta vocabulary through untouched."""
+    return sse(
+        "content_block_delta",
+        {"type": "content_block_delta", "index": index, "delta": delta},
     )
 
 

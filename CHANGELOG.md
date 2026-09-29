@@ -16,6 +16,34 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   layer, sent verbatim upstream, and part of the exact/semantic cache keys.
   Anthropic's `fallbacks` is deliberately not forwarded: RekAI's extension uses
   the same name with different semantics.
+- **Anthropic server-side tool blocks pass through verbatim** — blocks RekAI
+  doesn't map (`server_tool_use`, `web_search_tool_result`, `mcp_tool_use`/
+  `mcp_tool_result`, `code_execution_tool_result`, and any future block type)
+  were silently dropped: a `web_search` answer came back without its
+  tool-trace, and echoing that history on the next turn was a 400. Response
+  blocks now ride `ChatResponse.extra_blocks` (re-emitted on `/v1/messages`
+  between thinking and the answer text, matching upstream order), stream as
+  their own `content_block_start`/verbatim deltas/`content_block_stop` on both
+  SSE surfaces, and assistant `extra_blocks` echo back through the compat
+  layer for multi-turn continuity. Both SDKs and the playground ("used
+  web_search" badge) expose them; the OpenAI surface omits them honestly.
+- **Verbatim order + redaction coverage for the pass-through** — the response
+  also carries `content_blocks`, the whole upstream content array verbatim,
+  so interleaved text/tool-trace replays in emitted order on `/v1/messages`
+  and echoes verbatim in history (instead of the flattened
+  thinking→extra→text reconstruction). Server-tool block text (search
+  results, tool inputs, code-exec output) gets the same secret scrub as the
+  answer — streaming frames included — while `signature` blobs stay intact;
+  requests carrying tool-trace history skip the semantic cache (plain-text
+  embeddings can't see that context), and a text delta buffered by the
+  redactor flushes before any non-text block starts so answer order can't
+  invert.
+- **Message-level Anthropic response fields pass through verbatim** —
+  `container` (code execution, needed to reference it on the next turn),
+  `context_management` edit reports, and anything new ride
+  `ChatResponse.extra_fields`, reattach on `/v1/messages` without clobbering
+  gateway-computed fields, and merge into the streamed `message_start`
+  skeleton. Forward-compatible the same way `extra_blocks` is.
 - **Anthropic extended thinking end-to-end** — `POST /v1/messages` accepts
   `thinking` (e.g. `{"type": "enabled", "budget_tokens": 4096}`), forwards it
   verbatim upstream, and returns `thinking`/`redacted_thinking` content blocks
