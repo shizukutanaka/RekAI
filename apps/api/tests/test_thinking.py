@@ -13,8 +13,14 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from rekai.cache import NullCache
+from rekai.config import Settings
+from rekai.providers import register_provider
 from rekai.providers.anthropic import AnthropicProvider
-from rekai.schemas import ChatMessage, ChatRequest
+from rekai.providers.base import Provider, ProviderResult, StreamEvent
+from rekai.schemas import ChatMessage, ChatRequest, Usage
+from rekai.semantic_cache import semantic_cache
+from rekai.service import handle_chat, handle_chat_stream
 
 
 def _payload(**over) -> dict:
@@ -387,3 +393,156 @@ def test_thinking_is_part_of_the_cache_key() -> None:
     base = ChatRequest(model="echo", messages=[ChatMessage(role="user", content="hi")])
     thinking = base.model_copy(update={"thinking": {"type": "enabled", "budget_tokens": 512}})
     assert cache_key(base, "echo") != cache_key(thinking, "echo")
+
+
+# --- post-merge review follow-ups -------------------------------------------
+# (a) held-back thinking must reach the client before its signature — the SSE
+# builder drops signatures with no open block, and Anthropic needs the pair to
+# replay the history; (b) thinking text is model output: secrets in it get the
+# same scrubbing as the answer; (c) the semantic index keys on plain text, so
+# thinking history would collide — skip it; (d) Anthropic strips prior
+# thinking from billed context, so count_tokens must not estimate it.
+
+
+class _PonderingProvider(Provider):
+    """Streams a thinking block short enough to sit inside the redactor's
+    holdback — the case that used to strand its signature."""
+
+    name = "svc-pondering"
+    requires_key = False
+
+    async def chat(self, request, api_key):  # pragma: no cover - unused here
+        raise NotImplementedError
+
+    async def stream_events(self, request, api_key):
+        yield StreamEvent(thinking_delta="ponder")
+        yield StreamEvent(thinking_signature="sig-1")
+        yield StreamEvent(delta="answer")
+        yield StreamEvent(usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2))
+
+
+async def test_signature_waits_for_held_back_thinking() -> None:
+    provider = _PonderingProvider()
+    register_provider(provider)
+    events = [
+        e
+        async for e in handle_chat_stream(
+            ChatRequest(
+                model="x",
+                provider="svc-pondering",
+                messages=[ChatMessage(role="user", content="hi")],
+            ),
+            None,
+            Settings(environment="test", default_provider="echo", output_redaction_enabled=True),
+            NullCache(),
+            "svc-pondering",
+            provider,
+            "client-a",
+        )
+    ]
+    kinds = [
+        ("thinking_delta" if e.thinking_delta else None)
+        or ("signature" if e.thinking_signature else None)
+        or ("delta" if e.delta else None)
+        or ("summary" if e.summary else None)
+        for e in events
+    ]
+    assert kinds[:3] == ["thinking_delta", "signature", "delta"]
+    assert events[0].thinking_delta == "ponder"
+    assert events[1].thinking_signature == "sig-1"
+
+
+async def test_thinking_text_is_secret_scrubbed(monkeypatch) -> None:
+    from rekai.providers.echo import EchoProvider
+
+    secret = "sk-" + "e" * 30
+
+    async def fake_chat(self, request, api_key):
+        return ProviderResult(
+            model="echo",
+            content="safe answer",
+            usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            thinking_blocks=[
+                {"type": "thinking", "thinking": f"ponder {secret}", "signature": "s"},
+                {"type": "redacted_thinking", "data": "opaque-blob"},
+            ],
+        )
+
+    monkeypatch.setattr(EchoProvider, "chat", fake_chat)
+    settings = Settings(environment="test", default_provider="echo", output_redaction_enabled=True)
+    result = await handle_chat(
+        ChatRequest(model="echo", messages=[ChatMessage(role="user", content="hi")]),
+        None,
+        settings,
+        NullCache(),
+    )
+    assert secret not in result.thinking_blocks[0]["thinking"]
+    assert "[REDACTED:openai_api_key]" in result.thinking_blocks[0]["thinking"]
+    assert "openai_api_key" in result.redacted
+    assert result.thinking_blocks[1]["data"] == "opaque-blob"
+
+
+async def test_thinking_history_skips_the_semantic_cache() -> None:
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        cache_enabled=False,
+        semantic_cache_enabled=True,
+        semantic_cache_model="echo",
+    )
+    semantic_cache.clear()
+    request = ChatRequest(
+        model="echo",
+        messages=[
+            ChatMessage(
+                role="assistant",
+                content="Done",
+                thinking_blocks=[{"type": "thinking", "thinking": "Plan A", "signature": "s"}],
+            ),
+            ChatMessage(role="user", content="Continue"),
+        ],
+    )
+    first = await handle_chat(request, None, settings, NullCache())
+    second = await handle_chat(request, None, settings, NullCache())
+    assert first.cached is False
+    assert second.cached is False
+    semantic_cache.clear()
+
+
+def test_count_tokens_ignores_prior_thinking_blocks() -> None:
+    from rekai.anthropic_compat import count_tokens
+    from rekai.schemas import AnthropicCountTokensRequest
+
+    base = {
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 64,
+        "messages": [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": [{"type": "text", "text": "Done"}]},
+            {"role": "user", "content": "continue"},
+        ],
+    }
+    without = count_tokens(AnthropicCountTokensRequest.model_validate(base))
+    with_thinking = count_tokens(
+        AnthropicCountTokensRequest.model_validate(
+            {
+                **base,
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "thinking",
+                                "thinking": "long reasoning " * 500,
+                                "signature": "s",
+                            },
+                            {"type": "text", "text": "Done"},
+                        ],
+                    },
+                    {"role": "user", "content": "continue"},
+                ],
+            }
+        )
+    )
+    assert with_thinking == without

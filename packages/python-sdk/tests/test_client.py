@@ -866,3 +866,31 @@ def test_a_long_retry_after_returns_the_response_instead_of_sleeping():
     assert resp.status_code == 429
     assert resp.headers["Retry-After"] == "3600"
     assert time.monotonic() - started < 5.0
+
+
+def test_chat_forwards_thinking() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-6",
+                "content": "ok",
+                "usage": {},
+                "cost_usd": None,
+                "cached": False,
+                "fallback_used": False,
+            },
+        )
+
+    client = make_client(handler)
+    client.chat(
+        "claude-sonnet-4-6",
+        [{"role": "user", "content": "hi"}],
+        thinking={"type": "enabled", "budget_tokens": 256},
+    )
+    assert captured["body"]["thinking"] == {"type": "enabled", "budget_tokens": 256}
