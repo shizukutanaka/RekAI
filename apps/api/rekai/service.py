@@ -76,6 +76,8 @@ class ChatStreamEvent:
     thinking_delta: str | None = None
     thinking_signature: str | None = None
     thinking_block: dict | None = None
+    # A web-search citation arriving inside a text block.
+    citation: dict | None = None
 
 
 def _chat_factory(
@@ -268,6 +270,22 @@ def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
             new_blocks.append(block)
         if changed:
             updates["thinking_blocks"] = new_blocks
+    if response.citations:
+        # cited_text echoes model-generated text — a secret scrubbed from the
+        # answer must not re-leak through its citation.
+        new_citations: list[dict[str, Any]] = []
+        changed = False
+        for citation in response.citations:
+            text = citation.get("cited_text")
+            if isinstance(text, str):
+                scrubbed, found = guardrails.redact_secrets(text)
+                if found:
+                    citation = {**citation, "cited_text": scrubbed}
+                    hits += found
+                    changed = True
+            new_citations.append(citation)
+        if changed:
+            updates["citations"] = new_citations
     if not hits:
         return response
     updates["redacted"] = hits
@@ -505,6 +523,7 @@ async def handle_chat(
             fallback_used=is_fallback,
             finish_reason=result.finish_reason,
             thinking_blocks=result.thinking_blocks,
+            citations=result.citations,
             created=int(time.time()),
         )
         # Redact before *any* store below sees the content (see _redact).
@@ -571,6 +590,7 @@ async def handle_chat_stream(
     # when actually enabled.
     redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
     thinking_redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
+    citation_redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
     try:
         async for event in provider.stream_events(request, api_key):
             if event.delta:
@@ -615,6 +635,18 @@ async def handle_chat_stream(
                     if tail:
                         yield ChatStreamEvent(thinking_delta=tail)
                 yield ChatStreamEvent(thinking_block=event.thinking_block)
+            if event.citation is not None:
+                # A citation arrives whole — feed and flush in one step keeps
+                # its cited_text on the same secret-scrubbing contract as the
+                # streamed text it quotes.
+                citation = event.citation
+                if citation_redactor is not None and isinstance(citation.get("cited_text"), str):
+                    citation_redactor.feed(citation["cited_text"])
+                    citation = {
+                        **citation,
+                        "cited_text": citation_redactor.flush(),
+                    }
+                yield ChatStreamEvent(citation=citation)
             if event.usage is not None:
                 reported_usage = event.usage
             if event.tool_calls is not None:
@@ -690,6 +722,7 @@ async def handle_chat_stream(
                 redacted=(
                     (redactor.hits if redactor is not None else [])
                     + (thinking_redactor.hits if thinking_redactor is not None else [])
+                    + (citation_redactor.hits if citation_redactor is not None else [])
                 )
                 or None,
             )

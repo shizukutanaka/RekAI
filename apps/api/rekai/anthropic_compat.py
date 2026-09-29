@@ -196,7 +196,13 @@ def _content_blocks(resp: ChatResponse) -> list[dict]:
     if resp.thinking_blocks:
         blocks.extend(resp.thinking_blocks)
     if resp.content:
-        blocks.append({"type": "text", "text": resp.content})
+        text_block: dict[str, Any] = {"type": "text", "text": resp.content}
+        # Anthropic hangs citations on the text block they cite, and each one
+        # self-locates via cited_text — so attaching the flat list preserves
+        # the upstream shape.
+        if resp.citations:
+            text_block["citations"] = resp.citations
+        blocks.append(text_block)
     for tc in resp.tool_calls or []:
         fn = tc.get("function", {})
         try:
@@ -291,6 +297,17 @@ def ev_thinking_delta(index: int, thinking: str) -> str:
             "type": "content_block_delta",
             "index": index,
             "delta": {"type": "thinking_delta", "thinking": thinking},
+        },
+    )
+
+
+def ev_citations_delta(index: int, citation: dict) -> str:
+    return sse(
+        "content_block_delta",
+        {
+            "type": "content_block_delta",
+            "index": index,
+            "delta": {"type": "citations_delta", "citation": citation},
         },
     )
 

@@ -91,6 +91,8 @@ export interface ChatResult {
   redacted: string[] | null;
   /** Anthropic thinking/redacted_thinking blocks produced before the answer. */
   thinking_blocks: Record<string, unknown>[] | null;
+  /** Anthropic citations on the answer's text (web-search sources), verbatim. */
+  citations: Record<string, unknown>[] | null;
   /** Unix timestamp the gateway produced the response. */
   created: number;
 }

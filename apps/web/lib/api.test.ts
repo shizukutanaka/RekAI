@@ -147,6 +147,13 @@ describe("parseSSEFrame", () => {
     });
   });
 
+  it("parses a citation event", () => {
+    const citation = { url: "https://example.com", cited_text: "claim" };
+    expect(
+      parseSSEFrame(`data: {"citation": ${JSON.stringify(citation)}}`),
+    ).toEqual({ kind: "citation", citation });
+  });
+
   it("recognizes the terminator", () => {
     expect(parseSSEFrame("data: [DONE]")).toEqual({ kind: "done" });
   });

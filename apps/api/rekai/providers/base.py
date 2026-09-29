@@ -119,6 +119,10 @@ class ProviderResult:
     # Anthropic extended-thinking blocks (thinking/redacted_thinking), verbatim
     # — text and signature the caller must echo back on the next turn.
     thinking_blocks: list[dict] | None = None
+    # Anthropic citations on the answer's text (web-search sources), verbatim.
+    # Each carries its own cited_text, so a flat list stays faithful even over
+    # the provider's flat-text model.
+    citations: list[dict] | None = None
 
 
 @dataclass
@@ -143,6 +147,8 @@ class StreamEvent:
     thinking_delta: str | None = None
     thinking_signature: str | None = None
     thinking_block: dict | None = None
+    # A web-search citation arriving inside a text block (citations_delta).
+    citation: dict | None = None
 
 
 class Provider(ABC):

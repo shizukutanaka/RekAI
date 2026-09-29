@@ -8,6 +8,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Anthropic web-search citations end-to-end** — `citations` on upstream text
+  blocks ride the response (`ChatResponse.citations`, verbatim), stream
+  `citations_delta` events reach both the `/v1/messages` typed SSE and the
+  RekAI-native stream, and the compat response reattaches them to the text
+  block they cite. `cited_text` gets the same secret redaction as answer text
+  (both paths), since it echoes model-generated content. Both SDKs and the
+  web playground (Sources pills under replies) expose them. Surfaces without
+  the concept omit them honestly.
 - **Anthropic extended thinking end-to-end** — `POST /v1/messages` accepts
   `thinking` (e.g. `{"type": "enabled", "budget_tokens": 4096}`), forwards it
   verbatim upstream, and returns `thinking`/`redacted_thinking` content blocks

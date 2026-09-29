@@ -33,6 +33,8 @@ export interface ChatResponse {
   tool_calls?: Record<string, unknown>[] | null;
   /** Anthropic thinking blocks produced before the answer (extended thinking). */
   thinking_blocks?: Record<string, unknown>[] | null;
+  /** Anthropic citations on the answer's text (web-search sources). */
+  citations?: Record<string, unknown>[] | null;
 }
 
 /**
@@ -372,6 +374,7 @@ export async function streamChat(
   onDelta: (text: string) => void,
   signal?: AbortSignal,
   onSummary?: (summary: StreamSummary) => void,
+  onCitation?: (citation: Record<string, unknown>) => void,
 ): Promise<void> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -415,6 +418,7 @@ export async function streamChat(
       const ev = parseSSEFrame(frame);
       if (ev.kind === "done") return;
       if (ev.kind === "delta") onDelta(ev.text);
+      else if (ev.kind === "citation") onCitation?.(ev.citation);
       else if (ev.kind === "summary") onSummary?.(ev.summary);
       else if (ev.kind === "error") throw new Error(ev.message);
     }
@@ -439,6 +443,7 @@ export interface StreamSummary {
 
 export type SSEEvent =
   | { kind: "delta"; text: string }
+  | { kind: "citation"; citation: Record<string, unknown> }
   | { kind: "summary"; summary: StreamSummary }
   | { kind: "done" }
   | { kind: "error"; message: string }
@@ -456,6 +461,7 @@ export function parseSSEFrame(frame: string): SSEEvent {
   try {
     const event = JSON.parse(payload);
     if (event.delta) return { kind: "delta", text: event.delta };
+    if (event.citation) return { kind: "citation", citation: event.citation };
     if (event.error) return { kind: "error", message: event.detail || event.error };
     if (event.usage) return { kind: "summary", summary: event as StreamSummary };
     return { kind: "ignore" };

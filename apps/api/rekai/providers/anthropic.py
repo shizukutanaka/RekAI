@@ -193,6 +193,12 @@ class AnthropicProvider(Provider):
         # content is a list of blocks; concatenate the text blocks.
         content = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
         thinking_blocks = [b for b in blocks if b.get("type") in ("thinking", "redacted_thinking")]
+        # Web-search citations ride on the text blocks; collect them verbatim.
+        # Each citation self-locates via its cited_text, so flattening the
+        # per-block lists keeps the mapping intact.
+        citations = [
+            c for b in blocks if b.get("type") == "text" for c in (b.get("citations") or [])
+        ]
         tool_calls = _extract_tool_calls(blocks)
         if self._emulating_json(request):
             # The caller asked for JSON, not a tool call: unwrap the forced
@@ -223,6 +229,7 @@ class AnthropicProvider(Provider):
             ),
             finish_reason=finish_reason,
             thinking_blocks=thinking_blocks or None,
+            citations=citations or None,
         )
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
@@ -293,6 +300,10 @@ class AnthropicProvider(Provider):
                             yield StreamEvent(thinking_delta=delta.get("thinking", ""))
                         elif delta.get("type") == "signature_delta":
                             yield StreamEvent(thinking_signature=delta.get("signature", ""))
+                        elif delta.get("type") == "citations_delta":
+                            citation = delta.get("citation")
+                            if citation:
+                                yield StreamEvent(citation=citation)
                         elif text:
                             yield StreamEvent(delta=text)
                         elif delta.get("type") == "input_json_delta":

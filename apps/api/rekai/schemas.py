@@ -352,6 +352,13 @@ class ChatResponse(BaseModel):
         "when thinking was enabled; the /v1/messages surface re-emits them as "
         "content blocks so the caller can echo them back verbatim.",
     )
+    citations: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Anthropic citations on the answer's text (web-search "
+        "sources), verbatim — each carries its own cited_text. Present only "
+        "when the model cited sources; the /v1/messages surface attaches them "
+        "to the text block they belong to.",
+    )
     fallback_used: bool = Field(
         default=False, description="True if a fallback served this response, not the primary."
     )
