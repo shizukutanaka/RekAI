@@ -154,6 +154,14 @@ describe("parseSSEFrame", () => {
     ).toEqual({ kind: "citation", citation });
   });
 
+  it("parses an extra_block event", () => {
+    const block = { type: "server_tool_use", name: "web_search" };
+    expect(
+      parseSSEFrame(`data: {"extra_block": ${JSON.stringify(block)}}`),
+    ).toEqual({ kind: "extra_block", block });
+  });
+
+
   it("recognizes the terminator", () => {
     expect(parseSSEFrame("data: [DONE]")).toEqual({ kind: "done" });
   });

@@ -1,6 +1,10 @@
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
+  /** Anthropic server-side tool blocks echoed back verbatim on assistant turns. */
+  extra_blocks?: Record<string, unknown>[];
+  /** Ordered verbatim content array for an assistant turn — replays the exact upstream sequence. */
+  content_blocks?: Record<string, unknown>[];
 }
 
 export interface FallbackTarget {
@@ -93,6 +97,12 @@ export interface ChatResult {
   thinking_blocks: Record<string, unknown>[] | null;
   /** Anthropic citations on the answer's text (web-search sources), verbatim. */
   citations: Record<string, unknown>[] | null;
+  /** Anthropic server-side tool blocks (server_tool_use, tool-result blocks, mcp_*). */
+  extra_blocks: Record<string, unknown>[] | null;
+  /** Message-level fields the provider doesn't map (container, context_management, ...). */
+  extra_fields: Record<string, unknown> | null;
+  /** The upstream content array verbatim, in emitted order. Echo it back on the next turn. */
+  content_blocks: Record<string, unknown>[] | null;
   /** Unix timestamp the gateway produced the response. */
   created: number;
 }
