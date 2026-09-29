@@ -46,6 +46,8 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         "web_search_options": request.web_search_options,
         # Extended thinking changes both the content and its cost.
         "thinking": request.thinking,
+        # Output config (effort/format) changes what comes back.
+        "output_config": request.output_config,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "rekai:chat:" + hashlib.sha256(raw.encode()).hexdigest()
@@ -81,6 +83,7 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
         "cache_control": request.cache_control,
         "web_search_options": request.web_search_options,
         "thinking": request.thinking,
+        "output_config": request.output_config,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode()).hexdigest()

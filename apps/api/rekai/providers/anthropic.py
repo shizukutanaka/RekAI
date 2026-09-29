@@ -161,6 +161,9 @@ class AnthropicProvider(Provider):
         # new knobs (interleaved, budget caps) should not need a schema bump.
         if request.thinking is not None:
             payload["thinking"] = request.thinking
+        # Output config (effort/format) too — Anthropic's own vocabulary.
+        if request.output_config is not None:
+            payload["output_config"] = request.output_config
         if stream:
             payload["stream"] = True
         return payload

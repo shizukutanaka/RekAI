@@ -8,6 +8,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Anthropic `output_config` forwarded verbatim** — `POST /v1/messages`
+  accepts `output_config` (e.g. `{"effort": "medium"}` or `{"format": ...}`),
+  Anthropic's lever for response effort and structured output. It previously
+  rode in under `extra="allow"` and was silently dropped; now it reaches the
+  upstream payload and the exact/semantic cache keys. Other providers never
+  receive it.
 - **Anthropic extended thinking end-to-end** — `POST /v1/messages` accepts
   `thinking` (e.g. `{"type": "enabled", "budget_tokens": 4096}`), forwards it
   verbatim upstream, and returns `thinking`/`redacted_thinking` content blocks
