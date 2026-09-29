@@ -19,6 +19,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   SSE surfaces, and assistant `extra_blocks` echo back through the compat
   layer for multi-turn continuity. Both SDKs and the playground ("used
   web_search" badge) expose them; the OpenAI surface omits them honestly.
+- **Message-level Anthropic response fields pass through verbatim** —
+  `container` (code execution, needed to reference it on the next turn),
+  `context_management` edit reports, and anything new ride
+  `ChatResponse.extra_fields`, reattach on `/v1/messages` without clobbering
+  gateway-computed fields, and merge into the streamed `message_start`
+  skeleton. Forward-compatible the same way `extra_blocks` is.
 - **Anthropic extended thinking end-to-end** — `POST /v1/messages` accepts
   `thinking` (e.g. `{"type": "enabled", "budget_tokens": 4096}`), forwards it
   verbatim upstream, and returns `thinking`/`redacted_thinking` content blocks

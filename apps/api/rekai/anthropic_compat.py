@@ -236,7 +236,7 @@ def _content_blocks(resp: ChatResponse) -> list[dict]:
 def to_message(resp: ChatResponse) -> dict:
     """Translate RekAI's ChatResponse into an Anthropic Message object."""
     finish = resp.finish_reason or ("tool_calls" if resp.tool_calls else "stop")
-    return {
+    message = {
         "id": f"msg_{resp.id}" if not resp.id.startswith("msg_") else resp.id,
         "type": "message",
         "role": "assistant",
@@ -253,6 +253,12 @@ def to_message(resp: ChatResponse) -> dict:
         "cost_usd": resp.cost_usd,
         "cached": resp.cached,
     }
+    # Message-level fields RekAI doesn't map (container, context_management,
+    # ...) reattach verbatim — setdefault so they can never clobber the
+    # fields the gateway computes (id, model, usage, ...).
+    for key, value in (resp.extra_fields or {}).items():
+        message.setdefault(key, value)
+    return message
 
 
 # --- streaming event builders (the Messages SSE protocol) ------------------
@@ -266,23 +272,22 @@ def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-def ev_message_start(msg_id: str, model: str) -> str:
-    return sse(
-        "message_start",
-        {
-            "type": "message_start",
-            "message": {
-                "id": msg_id,
-                "type": "message",
-                "role": "assistant",
-                "content": [],
-                "model": model,
-                "stop_reason": None,
-                "stop_sequence": None,
-                "usage": {"input_tokens": 0, "output_tokens": 0},
-            },
-        },
-    )
+def ev_message_start(msg_id: str, model: str, extra: dict | None = None) -> str:
+    message: dict = {
+        "id": msg_id,
+        "type": "message",
+        "role": "assistant",
+        "content": [],
+        "model": model,
+        "stop_reason": None,
+        "stop_sequence": None,
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+    }
+    # Message-level extras (container, ...) ride the skeleton verbatim, the
+    # same slots they arrive in upstream's own message_start.
+    for key, value in (extra or {}).items():
+        message.setdefault(key, value)
+    return sse("message_start", {"type": "message_start", "message": message})
 
 
 def ev_content_block_start(index: int, block: dict) -> str:

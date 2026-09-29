@@ -392,3 +392,134 @@ def test_native_stream_emits_extra_block_frame(client: TestClient, monkeypatch) 
         if line.startswith("data:") and "[DONE]" not in line
     ]
     assert any("extra_block" in f and f["extra_block"]["name"] == "web_search" for f in frames)
+
+
+# --- message-level extras (container, context_management, ...) ----------------
+
+
+_CONTAINER = {"id": "container_abc", "expires_at": "2026-01-01T00:00:00Z"}
+
+
+def _resp_with_extras() -> dict:
+    data = _resp([{"type": "text", "text": "answer"}])
+    data["container"] = dict(_CONTAINER)
+    data["context_management"] = {"applied_edits": [{"type": "clear_thinking_20251013"}]}
+    return data
+
+
+def test_provider_keeps_message_level_extras_verbatim(monkeypatch) -> None:
+    """container/context_management ride extra_fields, forward-compatible."""
+    _FakeClient.data = _resp_with_extras()
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeClient)
+    result = asyncio.run(AnthropicProvider().chat(_req(), "k"))
+    assert result.extra_fields == {
+        "container": dict(_CONTAINER),
+        "context_management": {"applied_edits": [{"type": "clear_thinking_20251013"}]},
+    }
+
+
+def test_provider_no_extras_returns_none(monkeypatch) -> None:
+    _FakeClient.data = _resp([{"type": "text", "text": "answer"}])
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeClient)
+    result = asyncio.run(AnthropicProvider().chat(_req(), "k"))
+    assert result.extra_fields is None
+
+
+def test_to_message_reattaches_extras_without_clobbering() -> None:
+    from rekai.schemas import ChatResponse
+
+    resp = ChatResponse(
+        id="x",
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        content="answer",
+        usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        created=0,
+        extra_fields={"container": dict(_CONTAINER), "model": "spoofed"},
+    )
+    msg = to_message(resp)
+    assert msg["container"] == _CONTAINER
+    # setdefault: extras can never clobber gateway-computed fields
+    assert msg["model"] == "claude-sonnet-4-6"
+
+
+async def test_stream_message_start_extras(monkeypatch) -> None:
+    lines = [
+        _sse(
+            "message_start",
+            {
+                "message": {
+                    "id": "msg_1",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "claude-sonnet-4-6",
+                    "content": [],
+                    "container": dict(_CONTAINER),
+                    "usage": {"input_tokens": 5},
+                }
+            },
+        ),
+        _sse(
+            "content_block_start",
+            {"index": 0, "content_block": {"type": "text", "text": ""}},
+        ),
+        _sse("content_block_delta", {"index": 0, "delta": {"type": "text_delta", "text": "hi"}}),
+        _sse("content_block_stop", {"index": 0}),
+        _sse(
+            "message_delta",
+            {"delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 1}},
+        ),
+        _sse("message_stop", {}),
+    ]
+    events = await _collect(lines)
+    extras = next(e for e in events if e.extra_fields is not None)
+    assert extras.extra_fields == {"container": dict(_CONTAINER)}
+
+
+def test_messages_stream_merges_extras_into_message_start(client: TestClient, monkeypatch) -> None:
+    async def fake_stream_events(self, request, api_key):
+        yield StreamEvent(extra_fields={"container": dict(_CONTAINER)})
+        yield StreamEvent(delta="answer")
+        yield StreamEvent(finish_reason="stop")
+
+    from rekai.providers.echo import EchoProvider
+
+    monkeypatch.setattr(EchoProvider, "stream_events", fake_stream_events)
+    resp = client.post(
+        "/v1/messages",
+        json={
+            "model": "echo",
+            "max_tokens": 10,
+            "stream": True,
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+    assert resp.status_code == 200
+    events = []
+    for line in resp.text.splitlines():
+        if line.startswith("data:") and "[DONE]" not in line:
+            events.append(json.loads(line.split(":", 1)[1]))
+    start = next(e for e in events if e["type"] == "message_start")
+    assert start["message"]["container"] == _CONTAINER
+
+
+def test_native_stream_emits_extra_fields_frame(client: TestClient, monkeypatch) -> None:
+    async def fake_stream_events(self, request, api_key):
+        yield StreamEvent(extra_fields={"container": dict(_CONTAINER)})
+        yield StreamEvent(delta="answer")
+        yield StreamEvent(finish_reason="stop")
+
+    from rekai.providers.echo import EchoProvider
+
+    monkeypatch.setattr(EchoProvider, "stream_events", fake_stream_events)
+    resp = client.post(
+        "/v1/chat/stream",
+        json={"model": "echo", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status_code == 200
+    frames = [
+        json.loads(line.split(":", 1)[1])
+        for line in resp.text.splitlines()
+        if line.startswith("data:") and "[DONE]" not in line
+    ]
+    assert any(f.get("extra_fields", {}).get("container") == _CONTAINER for f in frames)

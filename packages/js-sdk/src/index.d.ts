@@ -95,6 +95,8 @@ export interface ChatResult {
   thinking_blocks: Record<string, unknown>[] | null;
   /** Anthropic server-side tool blocks (server_tool_use, tool-result blocks, mcp_*). */
   extra_blocks: Record<string, unknown>[] | null;
+  /** Message-level fields the provider doesn't map (container, context_management, ...). */
+  extra_fields: Record<string, unknown> | null;
   /** Unix timestamp the gateway produced the response. */
   created: number;
 }

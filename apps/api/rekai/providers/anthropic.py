@@ -232,6 +232,7 @@ class AnthropicProvider(Provider):
             finish_reason=finish_reason,
             thinking_blocks=thinking_blocks or None,
             extra_blocks=extra_blocks or None,
+            extra_fields=_response_extras(data),
         )
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
@@ -343,7 +344,11 @@ class AnthropicProvider(Provider):
                                     block["input"] = raw_input
                             yield StreamEvent(extra_block=block)
                     elif etype == "message_start":
-                        usage = event.get("message", {}).get("usage", {})
+                        msg = event.get("message", {})
+                        extras = _response_extras(msg)
+                        if extras:
+                            yield StreamEvent(extra_fields=extras)
+                        usage = msg.get("usage", {})
                         input_tokens = usage.get("input_tokens", input_tokens)
                         output_tokens = usage.get("output_tokens", output_tokens)
                         cache_read, cache_write = _cache_tokens(usage)
@@ -539,6 +544,19 @@ def _unwrap_structured_output(blocks: list[dict]) -> str | None:
         if block.get("type") == "tool_use" and block.get("name") == _JSON_TOOL_NAME:
             return json.dumps(block.get("input", {}))
     return None
+
+
+# Message-level keys RekAI maps; anything else rides ``extra_fields`` verbatim.
+_KNOWN_RESPONSE_KEYS = frozenset(
+    {"id", "type", "role", "content", "model", "stop_reason", "stop_sequence", "usage"}
+)
+
+
+def _response_extras(data: dict) -> dict | None:
+    """Message-level fields RekAI doesn't map (container, context_management,
+    and anything new) — verbatim, so they surface instead of vanishing."""
+    extras = {k: v for k, v in data.items() if k not in _KNOWN_RESPONSE_KEYS}
+    return extras or None
 
 
 def _extract_tool_calls(blocks: list[dict]) -> list[dict] | None:

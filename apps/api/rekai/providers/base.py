@@ -125,6 +125,10 @@ class ProviderResult:
     # types verbatim is forward-compatible: new Anthropic blocks pass through
     # untouched instead of vanishing.
     extra_blocks: list[dict] | None = None
+    # Message-level fields the provider doesn't map (container for code
+    # execution, context_management edit reports, ...) — verbatim, so new
+    # upstream fields surface instead of vanishing.
+    extra_fields: dict | None = None
 
 
 @dataclass
@@ -155,6 +159,9 @@ class StreamEvent:
     extra_block_start: dict | None = None
     extra_block_delta: dict | None = None
     extra_block: dict | None = None
+    # Message-level fields arriving on message_start that the provider
+    # doesn't map (container, context_management, ...), verbatim.
+    extra_fields: dict | None = None
 
 
 class Provider(ABC):

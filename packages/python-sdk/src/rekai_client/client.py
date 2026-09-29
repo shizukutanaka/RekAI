@@ -60,6 +60,9 @@ class ChatResult:
     #: Anthropic server-side tool blocks (server_tool_use, tool-result blocks,
     #: mcp_*), verbatim. Echo them back verbatim on the next turn.
     extra_blocks: list[dict[str, Any]] | None = None
+    #: Message-level fields the provider doesn't map (container,
+    #: context_management, ...), verbatim.
+    extra_fields: dict[str, Any] | None = None
     #: Unix timestamp the gateway produced the response.
     created: int = 0
 
@@ -80,6 +83,7 @@ class ChatResult:
             redacted=data.get("redacted"),
             thinking_blocks=data.get("thinking_blocks"),
             extra_blocks=data.get("extra_blocks"),
+            extra_fields=data.get("extra_fields"),
             created=data.get("created", 0),
         )
 

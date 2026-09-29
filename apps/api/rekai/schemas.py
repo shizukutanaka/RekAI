@@ -365,6 +365,13 @@ class ChatResponse(BaseModel):
         "between thinking and the answer text, and callers echo them back on "
         "the next turn to preserve the tool-trace.",
     )
+    extra_fields: dict[str, Any] | None = Field(
+        default=None,
+        description="Message-level fields the provider doesn't map (Anthropic's "
+        "container for code execution, context_management edit reports, and "
+        "anything new) — verbatim. The OpenAI surface has no equivalent and "
+        "omits them.",
+    )
     fallback_used: bool = Field(
         default=False, description="True if a fallback served this response, not the primary."
     )

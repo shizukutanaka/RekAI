@@ -81,6 +81,9 @@ class ChatStreamEvent:
     extra_block_start: dict | None = None
     extra_block_delta: dict | None = None
     extra_block: dict | None = None
+    # Message-level fields arriving on message_start that the provider
+    # doesn't map (container, context_management, ...), verbatim.
+    extra_fields: dict | None = None
 
 
 def _chat_factory(
@@ -511,6 +514,7 @@ async def handle_chat(
             finish_reason=result.finish_reason,
             thinking_blocks=result.thinking_blocks,
             extra_blocks=result.extra_blocks,
+            extra_fields=result.extra_fields,
             created=int(time.time()),
         )
         # Redact before *any* store below sees the content (see _redact).
@@ -629,6 +633,8 @@ async def handle_chat_stream(
                 yield ChatStreamEvent(extra_block_delta=event.extra_block_delta)
             if event.extra_block is not None:
                 yield ChatStreamEvent(extra_block=event.extra_block)
+            if event.extra_fields is not None:
+                yield ChatStreamEvent(extra_fields=event.extra_fields)
             if event.usage is not None:
                 reported_usage = event.usage
             if event.tool_calls is not None:

@@ -1390,6 +1390,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     yield f"data: {json.dumps({'extra_block_delta': ev.extra_block_delta})}\n\n"
                 elif ev.extra_block is not None:
                     yield f"data: {json.dumps({'extra_block': ev.extra_block})}\n\n"
+                elif ev.extra_fields is not None:
+                    yield f"data: {json.dumps({'extra_fields': ev.extra_fields})}\n\n"
                 elif ev.error is not None:
                     payload = {"error": "provider_error", "detail": str(ev.error)}
                     yield f"data: {json.dumps(payload)}\n\n"
@@ -1632,10 +1634,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         msg_id = f"msg_{uuid.uuid4().hex[:24]}"
 
         async def event_source():
-            yield anthropic_compat.ev_message_start(msg_id, chat_request.model)
+            # message_start emits lazily so extras arriving on upstream's own
+            # message_start (container, ...) merge into the same skeleton.
+            started = False
             # Content blocks are indexed in order: thinking blocks (0..n, each
             # closed by its signature_delta), then the text block, then tool_use.
-            open_block: str | None = None  # "thinking" | "text"
+            open_block: str | None = None  # "thinking" | "text" | "extra"
             block_index = 0
             finish_reason = "stop"
             usage = None
@@ -1648,6 +1652,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 provider,
                 client_id,
             ):
+                if not started:
+                    yield anthropic_compat.ev_message_start(
+                        msg_id, chat_request.model, ev.extra_fields
+                    )
+                    started = True
+                    if ev.extra_fields is not None:
+                        continue
                 if ev.thinking_delta is not None:
                     if open_block != "thinking":
                         if open_block is not None:
