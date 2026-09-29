@@ -49,6 +49,10 @@ export interface ChatOptions {
   /** OpenAI's `web_search_options` — hosted web-search config (context size,
    * user location). OpenAI-compatible providers only. */
   webSearchOptions?: Record<string, unknown>;
+  /** Anthropic extended thinking config, e.g.
+   * `{type: "enabled", budget_tokens: 1024}` — forwarded verbatim to Anthropic
+   * upstreams. Thinking blocks come back on `ChatResult.thinking_blocks`. */
+  thinking?: Record<string, unknown>;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
   /** Called with each refusal-text chunk when the model declines. */

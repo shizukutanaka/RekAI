@@ -194,6 +194,7 @@ def _build_payload(
     stop: list[str] | str | None = None,
     service_tier: str | None = None,
     web_search_options: dict[str, Any] | None = None,
+    thinking: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -219,6 +220,8 @@ def _build_payload(
         payload["service_tier"] = service_tier
     if web_search_options is not None:
         payload["web_search_options"] = web_search_options
+    if thinking is not None:
+        payload["thinking"] = thinking
     return payload
 
 
@@ -313,6 +316,7 @@ class RekAIClient:
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
         web_search_options: dict[str, Any] | None = None,
+        thinking: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -328,6 +332,7 @@ class RekAIClient:
             stop,
             service_tier,
             web_search_options,
+            thinking,
         )
 
     @staticmethod
@@ -385,6 +390,7 @@ class RekAIClient:
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
         web_search_options: dict[str, Any] | None = None,
+        thinking: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -415,6 +421,7 @@ class RekAIClient:
             stop,
             service_tier,
             web_search_options,
+            thinking,
         )
         headers = _build_headers(
             self._provider_key,
@@ -436,6 +443,7 @@ class RekAIClient:
         temperature: float = 0.7,
         max_tokens: int | None = None,
         response_format: dict[str, Any] | None = None,
+        thinking: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], None] | None = None,
@@ -461,6 +469,7 @@ class RekAIClient:
             True,
             None,
             response_format=response_format,
+            thinking=thinking,
         )
         with self._client.stream(
             "POST",
@@ -636,6 +645,7 @@ class AsyncRekAIClient:
         stop: list[str] | str | None = None,
         service_tier: str | None = None,
         web_search_options: dict[str, Any] | None = None,
+        thinking: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -655,6 +665,7 @@ class AsyncRekAIClient:
             stop,
             service_tier,
             web_search_options,
+            thinking,
         )
         headers = _build_headers(
             self._provider_key,
@@ -676,6 +687,7 @@ class AsyncRekAIClient:
         temperature: float = 0.7,
         max_tokens: int | None = None,
         response_format: dict[str, Any] | None = None,
+        thinking: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
@@ -699,6 +711,7 @@ class AsyncRekAIClient:
             True,
             None,
             response_format=response_format,
+            thinking=thinking,
         )
         async with self._client.stream(
             "POST",

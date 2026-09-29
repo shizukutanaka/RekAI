@@ -7,6 +7,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
+from typing import Any
 
 from rekai import guardrails
 from rekai.cache import CacheBackend, cache_key, embedding_cache_key, semantic_bucket
@@ -246,12 +247,35 @@ def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
     ``docs/architecture.md`` promises. The pattern names ride along on the
     response so a cache hit can still report ``X-Redacted``.
     """
-    if not settings.output_redaction_enabled or not response.content:
+    if not settings.output_redaction_enabled:
         return response
-    scrubbed, hits = guardrails.redact_secrets(response.content)
+    hits: list[str] = []
+    updates: dict[str, Any] = {}
+    if response.content:
+        scrubbed, found = guardrails.redact_secrets(response.content)
+        if found:
+            updates["content"] = scrubbed
+            hits += found
+    if response.thinking_blocks:
+        # Thinking text is model-generated content too — a secret surfaced in
+        # reasoning is the same leak as one in the answer.
+        new_blocks: list[dict[str, Any]] = []
+        changed = False
+        for block in response.thinking_blocks:
+            text = block.get("thinking") if block.get("type") == "thinking" else None
+            if isinstance(text, str):
+                scrubbed, found = guardrails.redact_secrets(text)
+                if found:
+                    block = {**block, "thinking": scrubbed}
+                    hits += found
+                    changed = True
+            new_blocks.append(block)
+        if changed:
+            updates["thinking_blocks"] = new_blocks
     if not hits:
         return response
-    return response.model_copy(update={"content": scrubbed, "redacted": hits})
+    updates["redacted"] = hits
+    return response.model_copy(update=updates)
 
 
 def _request_deadline(settings: Settings) -> float | None:
@@ -283,7 +307,14 @@ async def handle_chat(
     # Semantic cache (its own in-memory store): reuse a response for a paraphrase
     # of an earlier prompt. Respects the per-request opt-out, independent of the
     # content-cache backend.
-    sem_enabled = settings.semantic_cache_enabled and request.cache
+    # Assistant thinking blocks carry signed prior reasoning; the semantic
+    # index keys on plain message text, so two requests differing only in
+    # thinking history would collide. Skip semantic caching for them.
+    sem_enabled = (
+        settings.semantic_cache_enabled
+        and request.cache
+        and not any(m.thinking_blocks for m in request.messages)
+    )
     sem_bucket = ""
     sem_embedding: list[float] | None = None
     if sem_enabled:
@@ -549,6 +580,10 @@ async def handle_chat_stream(
     try:
         async for event in provider.stream_events(request, api_key):
             if event.delta:
+                if thinking_redactor is not None:
+                    tail = thinking_redactor.flush()
+                    if tail:
+                        yield ChatStreamEvent(thinking_delta=tail)
                 if first_token_at is None:
                     # Time to first token: on a stream this is what the user
                     # perceives as latency. Total duration is dominated by how
@@ -578,8 +613,18 @@ async def handle_chat_stream(
                 if emitted_t:
                     yield ChatStreamEvent(thinking_delta=emitted_t)
             if event.thinking_signature is not None:
+                # The signature closes the block — release the redactor's
+                # held-back tail first so the block opens before it lands.
+                if thinking_redactor is not None:
+                    tail = thinking_redactor.flush()
+                    if tail:
+                        yield ChatStreamEvent(thinking_delta=tail)
                 yield ChatStreamEvent(thinking_signature=event.thinking_signature)
             if event.thinking_block is not None:
+                if thinking_redactor is not None:
+                    tail = thinking_redactor.flush()
+                    if tail:
+                        yield ChatStreamEvent(thinking_delta=tail)
                 yield ChatStreamEvent(thinking_block=event.thinking_block)
             if event.usage is not None:
                 reported_usage = event.usage
@@ -654,7 +699,11 @@ async def handle_chat_stream(
                 tool_calls=reported_tool_calls or None,
                 finish_reason=reported_finish_reason,
                 refusal="".join(reported_refusal) or None,
-                redacted=(redactor.hits or None) if redactor is not None else None,
+                redacted=(
+                    (redactor.hits if redactor is not None else [])
+                    + (thinking_redactor.hits if thinking_redactor is not None else [])
+                )
+                or None,
             )
         )
 
