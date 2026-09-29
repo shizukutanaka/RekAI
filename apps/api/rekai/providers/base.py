@@ -119,6 +119,21 @@ class ProviderResult:
     # Anthropic extended-thinking blocks (thinking/redacted_thinking), verbatim
     # — text and signature the caller must echo back on the next turn.
     thinking_blocks: list[dict] | None = None
+    # Anthropic server-side tool blocks (server_tool_use, web_search_tool_result,
+    # mcp_tool_use/result, code_execution_tool_result, ...) and any block type
+    # the provider doesn't map — verbatim, in upstream order. Keeping unknown
+    # types verbatim is forward-compatible: new Anthropic blocks pass through
+    # untouched instead of vanishing.
+    extra_blocks: list[dict] | None = None
+    # The upstream content array verbatim — the ordered sequence the provider
+    # actually emitted (text, thinking, tool_use, and extra blocks interleaved
+    # in upstream order). Flattening loses that order, so the verbatim copy
+    # backs the /v1/messages surface and history echo.
+    content_blocks: list[dict] | None = None
+    # Message-level fields the provider doesn't map (container for code
+    # execution, context_management edit reports, ...) — verbatim, so new
+    # upstream fields surface instead of vanishing.
+    extra_fields: dict | None = None
 
 
 @dataclass
@@ -143,6 +158,15 @@ class StreamEvent:
     thinking_delta: str | None = None
     thinking_signature: str | None = None
     thinking_block: dict | None = None
+    # A non-standard content block streaming through verbatim: the upstream
+    # content_block_start payload, one verbatim delta, or the completed block
+    # at content_block_stop.
+    extra_block_start: dict | None = None
+    extra_block_delta: dict | None = None
+    extra_block: dict | None = None
+    # Message-level fields arriving on message_start that the provider
+    # doesn't map (container, context_management, ...), verbatim.
+    extra_fields: dict | None = None
 
 
 class Provider(ABC):
