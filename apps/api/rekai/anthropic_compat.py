@@ -187,6 +187,12 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
         tools=[_to_openai_tool(t) for t in req.tools] if req.tools else None,
         tool_choice=_to_openai_tool_choice(req.tool_choice) if req.tool_choice else None,
         thinking=req.thinking,
+        context_management=req.context_management,
+        container=req.container,
+        inference_geo=req.inference_geo,
+        speed=req.speed,
+        diagnostics=req.diagnostics,
+        user_profile_id=req.user_profile_id,
     )
 
 

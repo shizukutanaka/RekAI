@@ -8,6 +8,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Remaining Anthropic request fields forwarded verbatim** — `context_management`
+  (context editing), `container` (code-execution reuse), `inference_geo` (data
+  residency), `speed` (fast/standard), `diagnostics` (prompt-cache divergence),
+  and `user_profile_id` all rode in under `extra="allow"` and were silently
+  dropped. Each is now declared on `/v1/messages`, mapped through the compat
+  layer, sent verbatim upstream, and part of the exact/semantic cache keys.
+  Anthropic's `fallbacks` is deliberately not forwarded: RekAI's extension uses
+  the same name with different semantics.
 - **Anthropic extended thinking end-to-end** — `POST /v1/messages` accepts
   `thinking` (e.g. `{"type": "enabled", "budget_tokens": 4096}`), forwards it
   verbatim upstream, and returns `thinking`/`redacted_thinking` content blocks

@@ -161,6 +161,20 @@ class AnthropicProvider(Provider):
         # new knobs (interleaved, budget caps) should not need a schema bump.
         if request.thinking is not None:
             payload["thinking"] = request.thinking
+        # Same for the remaining real Anthropic request fields — all
+        # Anthropic's own vocabulary, forwarded verbatim when set.
+        if request.context_management is not None:
+            payload["context_management"] = request.context_management
+        if request.container is not None:
+            payload["container"] = request.container
+        if request.inference_geo is not None:
+            payload["inference_geo"] = request.inference_geo
+        if request.speed is not None:
+            payload["speed"] = request.speed
+        if request.diagnostics is not None:
+            payload["diagnostics"] = request.diagnostics
+        if request.user_profile_id is not None:
+            payload["user_profile_id"] = request.user_profile_id
         if stream:
             payload["stream"] = True
         return payload
