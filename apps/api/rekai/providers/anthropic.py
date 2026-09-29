@@ -194,6 +194,14 @@ class AnthropicProvider(Provider):
         content = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
         thinking_blocks = [b for b in blocks if b.get("type") in ("thinking", "redacted_thinking")]
         tool_calls = _extract_tool_calls(blocks)
+        # Everything else — server-side tool blocks (server_tool_use,
+        # web_search_tool_result, mcp_*, code_execution) and any type RekAI
+        # doesn't map — passes through verbatim so the tool-trace survives.
+        extra_blocks = [
+            b
+            for b in blocks
+            if b.get("type") not in ("text", "thinking", "redacted_thinking", "tool_use")
+        ]
         if self._emulating_json(request):
             # The caller asked for JSON, not a tool call: unwrap the forced
             # tool_use block's input back into `content` and drop the call, so
@@ -223,6 +231,7 @@ class AnthropicProvider(Provider):
             ),
             finish_reason=finish_reason,
             thinking_blocks=thinking_blocks or None,
+            extra_blocks=extra_blocks or None,
         )
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
@@ -251,6 +260,10 @@ class AnthropicProvider(Provider):
         # tool_use blocks: id/name from content_block_start, args from
         # input_json_delta fragments, keyed by block index.
         tool_blocks: dict[int, dict] = {}
+        # Non-standard blocks (server-side tools etc.) ride through verbatim:
+        # start block + accumulated input_json, keyed by block index.
+        extra_blocks: dict[int, dict] = {}
+        extra_json: dict[int, str] = {}
         try:
             client = self._client(settings.request_timeout_seconds)
             async with client.stream("POST", url, json=payload, headers=self._headers(key)) as resp:
@@ -286,6 +299,13 @@ class AnthropicProvider(Provider):
                                     "arguments": "",
                                 },
                             }
+                        elif block.get("type") not in ("text", "thinking"):
+                            # server_tool_use, web_search_tool_result, mcp_*,
+                            # code_execution, and anything new: pass through.
+                            idx = event.get("index", 0)
+                            extra_blocks[idx] = dict(block)
+                            extra_json[idx] = ""
+                            yield StreamEvent(extra_block_start=block)
                     elif etype == "content_block_delta":
                         delta = event.get("delta", {})
                         text = delta.get("text")
@@ -304,6 +324,24 @@ class AnthropicProvider(Provider):
                             slot = tool_blocks.get(event.get("index", 0))
                             if slot is not None:
                                 slot["function"]["arguments"] += fragment
+                            elif event.get("index", 0) in extra_json:
+                                extra_json[event.get("index", 0)] += fragment
+                                yield StreamEvent(extra_block_delta=delta)
+                        elif event.get("index", 0) in extra_json:
+                            # Any other delta type on a tracked extra block
+                            # rides through verbatim as well.
+                            yield StreamEvent(extra_block_delta=delta)
+                    elif etype == "content_block_stop":
+                        idx = event.get("index", 0)
+                        if idx in extra_blocks:
+                            block = extra_blocks.pop(idx)
+                            raw_input = extra_json.pop(idx)
+                            if raw_input:
+                                try:
+                                    block["input"] = json.loads(raw_input)
+                                except json.JSONDecodeError:
+                                    block["input"] = raw_input
+                            yield StreamEvent(extra_block=block)
                     elif etype == "message_start":
                         usage = event.get("message", {}).get("usage", {})
                         input_tokens = usage.get("input_tokens", input_tokens)
@@ -457,12 +495,16 @@ def _translate_messages(messages: list) -> list[dict]:
                     ],
                 }
             )
-        elif m.role == "assistant" and (m.tool_calls or m.thinking_blocks):
+        elif m.role == "assistant" and (m.tool_calls or m.thinking_blocks or m.extra_blocks):
             blocks: list[dict] = []
             # Thinking blocks must precede every other block in an assistant
             # turn (Anthropic's contract) — they are echoed back verbatim.
             if m.thinking_blocks:
                 blocks.extend(m.thinking_blocks)
+            # Server-tool trace (server_tool_use, tool-result blocks) sits
+            # between thinking and the answer text, matching upstream order.
+            if m.extra_blocks:
+                blocks.extend(m.extra_blocks)
             if m.content:
                 blocks.append({"type": "text", "text": m.content})
             for tc in m.tool_calls or []:

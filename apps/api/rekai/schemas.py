@@ -24,6 +24,11 @@ class ChatMessage(BaseModel):
     # Anthropic thinking/redacted_thinking blocks echoed back in assistant
     # history (verbatim dicts). Providers without the concept drop them.
     thinking_blocks: list[dict[str, Any]] | None = None
+    # Anthropic server-side tool blocks (server_tool_use, tool-result blocks,
+    # mcp_*, ...) echoed back in assistant history, verbatim. Anthropic
+    # requires the tool-trace preserved in multi-turn context; providers
+    # without the concept drop them.
+    extra_blocks: list[dict[str, Any]] | None = None
 
 
 class FallbackTarget(BaseModel):
@@ -351,6 +356,14 @@ class ChatResponse(BaseModel):
         "produced before its answer, verbatim (text + signature). Present only "
         "when thinking was enabled; the /v1/messages surface re-emits them as "
         "content blocks so the caller can echo them back verbatim.",
+    )
+    extra_blocks: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Anthropic server-side tool blocks (server_tool_use, "
+        "web_search_tool_result, mcp_*, code_execution, ...) in upstream order, "
+        "verbatim. Present when server tools ran; /v1/messages re-emits them "
+        "between thinking and the answer text, and callers echo them back on "
+        "the next turn to preserve the tool-trace.",
     )
     fallback_used: bool = Field(
         default=False, description="True if a fallback served this response, not the primary."

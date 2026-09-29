@@ -1,0 +1,394 @@
+"""Anthropic server-side tool blocks — response blocks ride through verbatim.
+
+`web_search`, MCP connectors and code execution make Anthropic emit blocks
+RekAI doesn't map (``server_tool_use``, ``web_search_tool_result``,
+``mcp_tool_use``/``mcp_tool_result``, ``code_execution_tool_result``, ...).
+They used to be dropped silently: the answer came back without its tool-trace,
+and echoing that history next turn 400'd. Both directions now pass verbatim.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+
+from rekai import anthropic_compat
+from rekai.anthropic_compat import to_message
+from rekai.cache import NullCache
+from rekai.config import Settings
+from rekai.providers import register_provider
+from rekai.providers.anthropic import AnthropicProvider
+from rekai.providers.base import Provider, ProviderError, ProviderResult, StreamEvent
+from rekai.schemas import AnthropicMessagesRequest, ChatMessage, ChatRequest, Usage
+from rekai.service import handle_chat, handle_chat_stream
+
+_SERVER_USE = {
+    "type": "server_tool_use",
+    "id": "srvtoolu_1",
+    "name": "web_search",
+    "input": {"query": "latest news"},
+}
+_SEARCH_RESULT = {
+    "type": "web_search_tool_result",
+    "tool_use_id": "srvtoolu_1",
+    "content": [
+        {
+            "type": "web_search_result",
+            "url": "https://example.com/a",
+            "title": "Article",
+            "encrypted_content": "enc…",
+        }
+    ],
+}
+
+
+def _req() -> ChatRequest:
+    return ChatRequest(model="claude-sonnet-4-6", messages=[ChatMessage(role="user", content="hi")])
+
+
+def _resp(blocks: list[dict]) -> dict:
+    return {
+        "model": "claude-sonnet-4-6",
+        "content": blocks,
+        "usage": {"input_tokens": 5, "output_tokens": 9},
+    }
+
+
+class _FakeResp:
+    status_code = 200
+
+    def __init__(self, data: dict) -> None:
+        self._data = data
+
+    def json(self) -> dict:
+        return self._data
+
+
+class _FakeClient:
+    """Captures the outgoing payload and replays a canned non-stream reply."""
+
+    captured: dict = {}
+    data: dict = {}
+
+    def __init__(self, *a, **k) -> None:
+        pass
+
+    async def aclose(self) -> None:
+        return None
+
+    async def post(self, url, json=None, headers=None):
+        _FakeClient.captured = json
+        return _FakeResp(_FakeClient.data)
+
+
+class _StreamResp:
+    status_code = 200
+
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = lines
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+
+
+class _StreamCtx:
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = lines
+
+    async def __aenter__(self):
+        return _StreamResp(self._lines)
+
+    async def __aexit__(self, *exc):
+        return None
+
+
+def _stream_client(lines: list[str]):
+    class _C:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        def stream(self, *a, **k):
+            return _StreamCtx(lines)
+
+    return _C
+
+
+def _sse(event_type: str, data: dict) -> str:
+    return f"data: {json.dumps({'type': event_type, **data})}"
+
+
+# --- non-stream --------------------------------------------------------------
+
+
+def test_provider_keeps_server_tool_blocks_verbatim(monkeypatch) -> None:
+    _FakeClient.data = _resp([_SERVER_USE, _SEARCH_RESULT, {"type": "text", "text": "answer"}])
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeClient)
+    provider = AnthropicProvider()
+    result = asyncio.run(provider.chat(_req(), "k"))
+    assert result.content == "answer"
+    assert result.extra_blocks == [_SERVER_USE, _SEARCH_RESULT]
+
+
+def test_provider_no_extra_blocks_returns_none(monkeypatch) -> None:
+    _FakeClient.data = _resp([{"type": "text", "text": "answer"}])
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeClient)
+    result = asyncio.run(AnthropicProvider().chat(_req(), "k"))
+    assert result.extra_blocks is None
+
+
+# --- provider stream ---------------------------------------------------------
+
+
+async def _collect(lines: list[str]) -> list[StreamEvent]:
+    monkey_client = _stream_client(lines)
+    import unittest.mock as mock
+
+    with mock.patch.object(httpx, "AsyncClient", monkey_client):
+        provider = AnthropicProvider()
+        return [e async for e in provider.stream_events(_req(), "k")]
+
+
+async def test_stream_server_tool_use_round_trip(monkeypatch) -> None:
+    lines = [
+        _sse("content_block_start", {"index": 0, "content_block": dict(_SERVER_USE, input={})}),
+        _sse(
+            "content_block_delta",
+            {"index": 0, "delta": {"type": "input_json_delta", "partial_json": '{"query": "la'}},
+        ),
+        _sse(
+            "content_block_delta",
+            {"index": 0, "delta": {"type": "input_json_delta", "partial_json": 'test news"}'}},
+        ),
+        _sse("content_block_stop", {"index": 0}),
+        _sse(
+            "content_block_start",
+            {"index": 1, "content_block": {"type": "text", "text": ""}},
+        ),
+        _sse(
+            "content_block_delta",
+            {"index": 1, "delta": {"type": "text_delta", "text": "answer"}},
+        ),
+        _sse("content_block_stop", {"index": 1}),
+        _sse("message_delta", {"delta": {"stop_reason": "end_turn"}}),
+    ]
+    events = await _collect(lines)
+    starts = [e.extra_block_start for e in events if e.extra_block_start]
+    deltas = [e.extra_block_delta for e in events if e.extra_block_delta]
+    done = [e.extra_block for e in events if e.extra_block]
+    assert starts == [dict(_SERVER_USE, input={})]
+    assert len(deltas) == 2
+    assert done[0]["type"] == "server_tool_use"
+    assert done[0]["input"] == {"query": "latest news"}
+
+
+async def test_stream_tool_result_block_arrives_whole(monkeypatch) -> None:
+    lines = [
+        _sse("content_block_start", {"index": 0, "content_block": _SEARCH_RESULT}),
+        _sse("content_block_stop", {"index": 0}),
+        _sse("message_delta", {"delta": {"stop_reason": "end_turn"}}),
+    ]
+    events = await _collect(lines)
+    done = [e.extra_block for e in events if e.extra_block]
+    assert done == [_SEARCH_RESULT]
+
+
+# --- compat ------------------------------------------------------------------
+
+
+def test_to_message_inserts_extra_blocks_before_text() -> None:
+    from rekai.schemas import ChatResponse
+
+    resp = ChatResponse(
+        id="r1",
+        provider="anthropic",
+        model="m",
+        content="answer",
+        usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        thinking_blocks=[{"type": "thinking", "thinking": "t", "signature": "s"}],
+        extra_blocks=[_SERVER_USE, _SEARCH_RESULT],
+        created=0,
+    )
+    types = [b["type"] for b in to_message(resp)["content"]]
+    assert types == ["thinking", "server_tool_use", "web_search_tool_result", "text"]
+
+
+def test_history_echo_preserves_server_blocks() -> None:
+    """Multi-turn: an assistant turn carrying the tool-trace echoes verbatim —
+    Anthropic requires it for context."""
+    req = AnthropicMessagesRequest.model_validate(
+        {
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 2000,
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "thinking", "thinking": "t", "signature": "s"},
+                        _SERVER_USE,
+                        _SEARCH_RESULT,
+                        {"type": "text", "text": "the answer"},
+                    ],
+                },
+                {"role": "user", "content": "and then?"},
+            ],
+        }
+    )
+    chat = anthropic_compat.to_chat_request(req)
+    assistant = chat.messages[1]
+    assert assistant.extra_blocks == [_SERVER_USE, _SEARCH_RESULT]
+
+    payload = AnthropicProvider()._build_payload(chat, stream=False)
+    types = [b["type"] for b in payload["messages"][1]["content"]]
+    assert types == ["thinking", "server_tool_use", "web_search_tool_result", "text"]
+    assert payload["messages"][1]["content"][1] == _SERVER_USE
+
+
+def test_user_turn_server_block_is_400() -> None:
+    req = AnthropicMessagesRequest.model_validate(
+        {
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 2000,
+            "messages": [{"role": "user", "content": [_SERVER_USE]}],
+        }
+    )
+    with pytest.raises(ProviderError):
+        anthropic_compat.to_chat_request(req)
+
+
+# --- service pass-through ----------------------------------------------------
+
+
+class _ServerToolProvider(Provider):
+    name = "svc-servertool"
+    requires_key = False
+
+    async def chat(self, request, api_key):
+        return ProviderResult(
+            model="x",
+            content="answer",
+            usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            extra_blocks=[_SERVER_USE, _SEARCH_RESULT],
+        )
+
+    async def stream_events(self, request, api_key):
+        yield StreamEvent(extra_block_start=dict(_SERVER_USE, input={}))
+        yield StreamEvent(extra_block_delta={"type": "input_json_delta", "partial_json": "{}"})
+        yield StreamEvent(extra_block=_SERVER_USE)
+        yield StreamEvent(delta="answer")
+        yield StreamEvent(
+            usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            finish_reason="stop",
+        )
+
+
+async def test_service_carries_extra_blocks() -> None:
+    provider = _ServerToolProvider()
+    register_provider(provider)
+    result = await handle_chat(
+        _req().model_copy(update={"model": "x", "provider": "svc-servertool"}),
+        None,
+        Settings(environment="test", default_provider="echo"),
+        NullCache(),
+    )
+    assert result.extra_blocks == [_SERVER_USE, _SEARCH_RESULT]
+
+
+async def test_service_streams_extra_events() -> None:
+    provider = _ServerToolProvider()
+    register_provider(provider)
+    events = [
+        e
+        async for e in handle_chat_stream(
+            ChatRequest(
+                model="x",
+                provider="svc-servertool",
+                messages=[ChatMessage(role="user", content="hi")],
+            ),
+            None,
+            Settings(environment="test", default_provider="echo"),
+            NullCache(),
+            "svc-servertool",
+            provider,
+            "client-a",
+        )
+    ]
+    assert any(e.extra_block_start for e in events)
+    assert any(e.extra_block_delta for e in events)
+    assert any(e.extra_block == _SERVER_USE for e in events)
+
+
+# --- /v1/messages stream ------------------------------------------------------
+
+
+def test_messages_stream_emits_verbatim_block_frames(client: TestClient, monkeypatch) -> None:
+    """Server-tool blocks stream as their own content blocks, start→delta→stop."""
+
+    async def fake_stream_events(self, request, api_key):
+        yield StreamEvent(extra_block_start=dict(_SERVER_USE, input={}))
+        yield StreamEvent(
+            extra_block_delta={"type": "input_json_delta", "partial_json": '{"query":"x"}'}
+        )
+        yield StreamEvent(extra_block=dict(_SERVER_USE, input={"query": "x"}))
+        yield StreamEvent(delta="answer")
+        yield StreamEvent(finish_reason="stop")
+
+    monkeypatch.setattr(AnthropicProvider, "stream_events", fake_stream_events)
+    resp = client.post(
+        "/v1/messages",
+        json={
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 2000,
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+        headers={"X-Provider-Key": "k"},
+    )
+    assert resp.status_code == 200
+    events = []
+    current = None
+    for line in resp.text.splitlines():
+        if line.startswith("event:"):
+            current = line.split(":", 1)[1].strip()
+        elif line.startswith("data:") and current:
+            events.append((current, json.loads(line.split(":", 1)[1])))
+            current = None
+    starts = [d for n, d in events if n == "content_block_start"]
+    assert starts[0]["content_block"]["type"] == "server_tool_use"
+    assert starts[0]["content_block"]["name"] == "web_search"
+    block_delta = next(
+        d
+        for n, d in events
+        if n == "content_block_delta" and d["delta"]["type"] == "input_json_delta"
+    )
+    assert block_delta["delta"]["partial_json"] == '{"query":"x"}'
+    # text block follows the server block at the next index
+    text_start = next(d for n, d in events if n == "content_block_start" and d["index"] == 1)
+    assert text_start["content_block"]["type"] == "text"
+
+
+def test_native_stream_emits_extra_block_frame(client: TestClient, monkeypatch) -> None:
+    async def fake_stream_events(self, request, api_key):
+        yield StreamEvent(extra_block=_SERVER_USE)
+        yield StreamEvent(delta="answer")
+        yield StreamEvent(finish_reason="stop")
+
+    from rekai.providers.echo import EchoProvider
+
+    monkeypatch.setattr(EchoProvider, "stream_events", fake_stream_events)
+    resp = client.post(
+        "/v1/chat/stream",
+        json={"model": "echo", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status_code == 200
+    frames = [
+        json.loads(line.split(":", 1)[1])
+        for line in resp.text.splitlines()
+        if line.startswith("data:") and "[DONE]" not in line
+    ]
+    assert any("extra_block" in f and f["extra_block"]["name"] == "web_search" for f in frames)

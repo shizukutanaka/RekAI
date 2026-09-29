@@ -119,6 +119,12 @@ class ProviderResult:
     # Anthropic extended-thinking blocks (thinking/redacted_thinking), verbatim
     # — text and signature the caller must echo back on the next turn.
     thinking_blocks: list[dict] | None = None
+    # Anthropic server-side tool blocks (server_tool_use, web_search_tool_result,
+    # mcp_tool_use/result, code_execution_tool_result, ...) and any block type
+    # the provider doesn't map — verbatim, in upstream order. Keeping unknown
+    # types verbatim is forward-compatible: new Anthropic blocks pass through
+    # untouched instead of vanishing.
+    extra_blocks: list[dict] | None = None
 
 
 @dataclass
@@ -143,6 +149,12 @@ class StreamEvent:
     thinking_delta: str | None = None
     thinking_signature: str | None = None
     thinking_block: dict | None = None
+    # A non-standard content block streaming through verbatim: the upstream
+    # content_block_start payload, one verbatim delta, or the completed block
+    # at content_block_stop.
+    extra_block_start: dict | None = None
+    extra_block_delta: dict | None = None
+    extra_block: dict | None = None
 
 
 class Provider(ABC):

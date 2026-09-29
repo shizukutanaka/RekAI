@@ -76,6 +76,11 @@ class ChatStreamEvent:
     thinking_delta: str | None = None
     thinking_signature: str | None = None
     thinking_block: dict | None = None
+    # A non-standard content block streaming through verbatim: the upstream
+    # content_block_start payload, one verbatim delta, or the completed block.
+    extra_block_start: dict | None = None
+    extra_block_delta: dict | None = None
+    extra_block: dict | None = None
 
 
 def _chat_factory(
@@ -505,6 +510,7 @@ async def handle_chat(
             fallback_used=is_fallback,
             finish_reason=result.finish_reason,
             thinking_blocks=result.thinking_blocks,
+            extra_blocks=result.extra_blocks,
             created=int(time.time()),
         )
         # Redact before *any* store below sees the content (see _redact).
@@ -615,6 +621,14 @@ async def handle_chat_stream(
                     if tail:
                         yield ChatStreamEvent(thinking_delta=tail)
                 yield ChatStreamEvent(thinking_block=event.thinking_block)
+            if event.extra_block_start is not None:
+                # Server-side tool blocks (and anything unmapped) pass through
+                # verbatim — structured upstream data, not free model text.
+                yield ChatStreamEvent(extra_block_start=event.extra_block_start)
+            if event.extra_block_delta is not None:
+                yield ChatStreamEvent(extra_block_delta=event.extra_block_delta)
+            if event.extra_block is not None:
+                yield ChatStreamEvent(extra_block=event.extra_block)
             if event.usage is not None:
                 reported_usage = event.usage
             if event.tool_calls is not None:

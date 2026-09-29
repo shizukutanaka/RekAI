@@ -1384,6 +1384,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     yield f"data: {json.dumps({'thinking_signature': ev.thinking_signature})}\n\n"
                 elif ev.thinking_block is not None:
                     yield f"data: {json.dumps({'thinking_block': ev.thinking_block})}\n\n"
+                elif ev.extra_block_start is not None:
+                    yield f"data: {json.dumps({'extra_block_start': ev.extra_block_start})}\n\n"
+                elif ev.extra_block_delta is not None:
+                    yield f"data: {json.dumps({'extra_block_delta': ev.extra_block_delta})}\n\n"
+                elif ev.extra_block is not None:
+                    yield f"data: {json.dumps({'extra_block': ev.extra_block})}\n\n"
                 elif ev.error is not None:
                     payload = {"error": "provider_error", "detail": str(ev.error)}
                     yield f"data: {json.dumps(payload)}\n\n"
@@ -1671,6 +1677,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     yield anthropic_compat.ev_content_block_stop(block_index)
                     block_index += 1
                     open_block = None
+                elif ev.extra_block_start is not None:
+                    # A server-side tool block (or anything unmapped): open it
+                    # verbatim — the block dict came straight from upstream.
+                    if open_block is not None:
+                        yield anthropic_compat.ev_content_block_stop(block_index)
+                        block_index += 1
+                    yield anthropic_compat.ev_content_block_start(block_index, ev.extra_block_start)
+                    open_block = "extra"
+                elif ev.extra_block_delta is not None:
+                    yield anthropic_compat.ev_block_delta(block_index, ev.extra_block_delta)
+                elif ev.extra_block is not None:
+                    # content_block_stop upstream — close the verbatim block.
+                    if open_block == "extra":
+                        yield anthropic_compat.ev_content_block_stop(block_index)
+                        block_index += 1
+                        open_block = None
                 elif ev.delta is not None:
                     if open_block != "text":
                         if open_block is not None:

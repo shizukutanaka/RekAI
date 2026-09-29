@@ -8,6 +8,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Anthropic server-side tool blocks pass through verbatim** — blocks RekAI
+  doesn't map (`server_tool_use`, `web_search_tool_result`, `mcp_tool_use`/
+  `mcp_tool_result`, `code_execution_tool_result`, and any future block type)
+  were silently dropped: a `web_search` answer came back without its
+  tool-trace, and echoing that history on the next turn was a 400. Response
+  blocks now ride `ChatResponse.extra_blocks` (re-emitted on `/v1/messages`
+  between thinking and the answer text, matching upstream order), stream as
+  their own `content_block_start`/verbatim deltas/`content_block_stop` on both
+  SSE surfaces, and assistant `extra_blocks` echo back through the compat
+  layer for multi-turn continuity. Both SDKs and the playground ("used
+  web_search" badge) expose them; the OpenAI surface omits them honestly.
 - **Anthropic extended thinking end-to-end** — `POST /v1/messages` accepts
   `thinking` (e.g. `{"type": "enabled", "budget_tokens": 4096}`), forwards it
   verbatim upstream, and returns `thinking`/`redacted_thinking` content blocks

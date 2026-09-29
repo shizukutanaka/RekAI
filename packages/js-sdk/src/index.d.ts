@@ -1,6 +1,8 @@
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
+  /** Anthropic server-side tool blocks echoed back verbatim on assistant turns. */
+  extra_blocks?: Record<string, unknown>[];
 }
 
 export interface FallbackTarget {
@@ -91,6 +93,8 @@ export interface ChatResult {
   redacted: string[] | null;
   /** Anthropic thinking/redacted_thinking blocks produced before the answer. */
   thinking_blocks: Record<string, unknown>[] | null;
+  /** Anthropic server-side tool blocks (server_tool_use, tool-result blocks, mcp_*). */
+  extra_blocks: Record<string, unknown>[] | null;
   /** Unix timestamp the gateway produced the response. */
   created: number;
 }
