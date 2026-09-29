@@ -141,6 +141,9 @@ export class RekAIClient {
     if (opts.serviceTier != null) payload.service_tier = opts.serviceTier;
     // OpenAI's hosted web-search config; OpenAI-compatible providers only.
     if (opts.webSearchOptions != null) payload.web_search_options = opts.webSearchOptions;
+    // Anthropic extended thinking ({type:"enabled",budget_tokens}) — Anthropic
+    // upstreams only; thinking blocks come back on ChatResult.thinking_blocks.
+    if (opts.thinking != null) payload.thinking = opts.thinking;
     return payload;
   }
 

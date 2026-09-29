@@ -56,6 +56,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   arrive.
 
 ### Fixed
+- **Thinking follow-ups.** Output redaction now scrubs thinking text like the
+  answer (a secret pondered aloud was shipped verbatim); streamed thinking
+  held back by that scrubber is now flushed before its signature event, so the
+  SSE builder no longer drops the signature a thinking block needs to be
+  replayed in history; requests carrying prior thinking blocks skip the
+  semantic cache, which would otherwise collide thinking-variant answers on
+  identical plain text; `POST /v1/messages/count_tokens` no longer estimates
+  prior thinking blocks, which Anthropic strips from billed context; and both
+  SDKs expose the `thinking` request option (`thinking=` in Python,
+  `thinking` in JS) so the config is reachable without hand-building a body.
 - Provider `httpx.AsyncClient` connection pools are now closed on app shutdown
   via `Provider.aclose()` in the lifespan teardown — previously the pooled
   sockets were severed un-gracefully when the loop ended.
