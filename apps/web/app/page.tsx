@@ -39,6 +39,23 @@ interface DisplayMessage extends ChatMessage {
   /** Raw blocks kept for echoing back on the next turn — Anthropic requires
    * prior thinking (incl. signatures) in multi-turn thinking conversations. */
   thinkingBlocks?: Record<string, unknown>[] | null;
+  extraBlocks?: Record<string, unknown>[];
+  contentBlocks?: Record<string, unknown>[];
+}
+
+// Server-side tools the provider ran for an answer (web search, code
+// execution, MCP). Surfaced so "the model just knew" reads honestly — an
+// unattributed web search looks exactly like the model remembering.
+function serverToolNote(blocks?: Record<string, unknown>[]): string {
+  const names = [
+    ...new Set(
+      (blocks ?? [])
+        .filter((b) => b.type === "server_tool_use")
+        .map((b) => String(b.name ?? "tool")),
+    ),
+  ];
+  if (names.length) return ` · used ${names.join(", ")}`;
+  return blocks?.length ? " · used server tools" : "";
 }
 
 // Monotonic id for React keys. Index keys shift when regenerate()/clear drop or
@@ -151,11 +168,17 @@ export default function ChatPage() {
     setError("");
     setLoading(true);
 
-    // Prior thinking blocks ride along on assistant turns: Anthropic rejects a
-    // multi-turn thinking conversation that drops them (signature included).
-    const convo = history.map(({ role, content, thinkingBlocks }) =>
-      thinkingBlocks?.length ? { role, content, thinking_blocks: thinkingBlocks } : { role, content },
-    );
+    // Anthropic requires prior thinking blocks AND the server-tool trace
+    // echoed back in multi-turn context: thinking blocks (signature
+    // included), the ordered verbatim content array for the exact emitted
+    // sequence, and extraBlocks for replies that predate it.
+    const convo = history.map(({ role, content, thinkingBlocks, extraBlocks, contentBlocks }) => ({
+      role,
+      content,
+      ...(thinkingBlocks?.length ? { thinking_blocks: thinkingBlocks } : {}),
+      ...(extraBlocks?.length ? { extra_blocks: extraBlocks } : {}),
+      ...(contentBlocks?.length ? { content_blocks: contentBlocks } : {}),
+    }));
     // Prepend an optional system prompt (not shown as a chat bubble).
     const wire = system.trim()
       ? [{ role: "system" as const, content: system.trim() }, ...convo]
@@ -241,6 +264,19 @@ export default function ChatPage() {
                 thinkBlocks.push(ev.block);
               }
             },
+            (block) => {
+              setMessages((prev) => {
+                const next = [...prev];
+                const last = next[next.length - 1];
+                if (last?.role === "assistant") {
+                  next[next.length - 1] = {
+                    ...last,
+                    extraBlocks: [...(last.extraBlocks ?? []), block],
+                  };
+                }
+                return next;
+              });
+            },
           );
         } catch (e) {
           if (e instanceof DOMException && e.name === "AbortError") {
@@ -324,6 +360,8 @@ export default function ChatPage() {
             redacted: res.redacted,
             thinking: thinkingText(res.thinking_blocks) || undefined,
             thinkingBlocks: res.thinking_blocks ?? null,
+            extraBlocks: res.extra_blocks ?? undefined,
+            contentBlocks: res.content_blocks ?? undefined,
           },
         ]);
       }
@@ -517,6 +555,7 @@ export default function ChatPage() {
                 {m.fallbackUsed ? " · via fallback" : ""}
                 {finishNote(m.finishReason) ? ` · ${finishNote(m.finishReason)}` : ""}
                 {redactionNote(m.redacted) ? ` · ${redactionNote(m.redacted)}` : ""}
+                {serverToolNote(m.extraBlocks)}
               </span>
             )}
           </div>
