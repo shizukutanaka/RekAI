@@ -8,6 +8,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Five pass-through fidelity fixes** — streamed extra-block deltas now merge
+  into the completed `extra_block` (a `text_delta` inside a tool-result block
+  reached frames but not the stored block clients echo back); extra-block
+  deltas scrub incrementally through a per-block `StreamRedactor` so a secret
+  split across frames can't leak (the held-back tail re-emits in the last
+  delta's shape before the completed block); `content_blocks` history gets
+  `cache_control` breakpoints on a copy — the caller's verbatim array stays
+  untouched; JSON-mode's synthetic `json_response` tool leaves the verbatim
+  array (it's instrumentation, not the answer); and the playground reassembles
+  streamed replies in upstream order so the next turn echoes the real
+  text/tool sequence instead of tools-then-text.
 - **Anthropic server-side tool blocks pass through verbatim** — blocks RekAI
   doesn't map (`server_tool_use`, `web_search_tool_result`, `mcp_tool_use`/
   `mcp_tool_result`, `code_execution_tool_result`, and any future block type)
