@@ -23,6 +23,7 @@ from rekai.schemas import (
     CompletionUsage,
     ContentPart,
     OpenAIChatMessage,
+    PromptTokensDetails,
     Usage,
 )
 
@@ -125,6 +126,7 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         cache=True,
         tools=tools,
         tool_choice=tool_choice,
+        parallel_tool_calls=req.parallel_tool_calls,
         response_format=req.response_format,
         user=req.user,
         safety_identifier=req.safety_identifier,
@@ -155,10 +157,16 @@ def to_chat_completion(resp: ChatResponse) -> ChatCompletionResponse:
                 finish_reason=resp.finish_reason or ("tool_calls" if resp.tool_calls else "stop"),
             )
         ],
-        # Emit OpenAI's nested completion_tokens_details.reasoning_tokens in
-        # addition to the flat field — SDKs read the nested shape.
+        # OpenAI nests both breakdowns — the cached-token count under
+        # prompt_tokens_details, reasoning under completion_tokens_details;
+        # emit each only when the provider reported one, like OpenAI does.
         usage=CompletionUsage(
             **resp.usage.model_dump(),
+            prompt_tokens_details=(
+                PromptTokensDetails(cached_tokens=resp.usage.cache_read_tokens)
+                if resp.usage.cache_read_tokens
+                else None
+            ),
             completion_tokens_details=(
                 {"reasoning_tokens": resp.usage.reasoning_tokens}
                 if resp.usage.reasoning_tokens
@@ -166,6 +174,8 @@ def to_chat_completion(resp: ChatResponse) -> ChatCompletionResponse:
             ),
         ),
         provider=resp.provider,
+        system_fingerprint=resp.system_fingerprint,
+        service_tier=resp.service_tier,
         cost_usd=resp.cost_usd,
         cached=resp.cached,
         fallback_used=resp.fallback_used,
@@ -175,13 +185,27 @@ def to_chat_completion(resp: ChatResponse) -> ChatCompletionResponse:
 # --- streaming chunk builders (chat.completion.chunk) ----------------------
 
 
-def _chunk_base(chunk_id: str, created: int, model: str) -> dict:
-    return {
+def _chunk_base(
+    chunk_id: str,
+    created: int,
+    model: str,
+    system_fingerprint: str | None = None,
+    service_tier: str | None = None,
+) -> dict:
+    chunk = {
         "id": chunk_id,
         "object": "chat.completion.chunk",
         "created": created,
         "model": model,
     }
+    # OpenAI stamps both on every chunk once known (the role announcement
+    # carries them already); ours arrive with the first provider event, so
+    # they appear on chunks from that point on.
+    if system_fingerprint is not None:
+        chunk["system_fingerprint"] = system_fingerprint
+    if service_tier is not None:
+        chunk["service_tier"] = service_tier
+    return chunk
 
 
 def chunk_first(chunk_id: str, created: int, model: str) -> dict:
@@ -190,8 +214,15 @@ def chunk_first(chunk_id: str, created: int, model: str) -> dict:
     return chunk
 
 
-def chunk_delta(chunk_id: str, created: int, model: str, text: str) -> dict:
-    chunk = _chunk_base(chunk_id, created, model)
+def chunk_delta(
+    chunk_id: str,
+    created: int,
+    model: str,
+    text: str,
+    system_fingerprint: str | None = None,
+    service_tier: str | None = None,
+) -> dict:
+    chunk = _chunk_base(chunk_id, created, model, system_fingerprint, service_tier)
     chunk["choices"] = [{"index": 0, "delta": {"content": text}, "finish_reason": None}]
     return chunk
 
@@ -211,30 +242,54 @@ def chunk_annotations(chunk_id: str, created: int, model: str, annotations: list
     return chunk
 
 
-def chunk_tool_calls(chunk_id: str, created: int, model: str, tool_calls: list[dict]) -> dict:
+def chunk_tool_calls(
+    chunk_id: str,
+    created: int,
+    model: str,
+    tool_calls: list[dict],
+    system_fingerprint: str | None = None,
+    service_tier: str | None = None,
+) -> dict:
     # The internal pipeline yields fully-assembled tool calls in one shot; OpenAI
     # streaming requires an index per call, so attach one. A single chunk with
     # complete arguments is valid — SDKs reassemble by index either way.
     indexed = [{**tc, "index": i} for i, tc in enumerate(tool_calls)]
-    chunk = _chunk_base(chunk_id, created, model)
+    chunk = _chunk_base(chunk_id, created, model, system_fingerprint, service_tier)
     chunk["choices"] = [{"index": 0, "delta": {"tool_calls": indexed}, "finish_reason": None}]
     return chunk
 
 
-def chunk_finish(chunk_id: str, created: int, model: str, reason: str) -> dict:
-    chunk = _chunk_base(chunk_id, created, model)
+def chunk_finish(
+    chunk_id: str,
+    created: int,
+    model: str,
+    reason: str,
+    system_fingerprint: str | None = None,
+    service_tier: str | None = None,
+) -> dict:
+    chunk = _chunk_base(chunk_id, created, model, system_fingerprint, service_tier)
     chunk["choices"] = [{"index": 0, "delta": {}, "finish_reason": reason}]
     return chunk
 
 
-def chunk_usage(chunk_id: str, created: int, model: str, usage: Usage) -> dict:
+def chunk_usage(
+    chunk_id: str,
+    created: int,
+    model: str,
+    usage: Usage,
+    system_fingerprint: str | None = None,
+    service_tier: str | None = None,
+) -> dict:
     # Per OpenAI's stream_options.include_usage: a final chunk with an empty
     # choices array and the usage totals.
-    chunk = _chunk_base(chunk_id, created, model)
+    chunk = _chunk_base(chunk_id, created, model, system_fingerprint, service_tier)
     chunk["choices"] = []
-    chunk["usage"] = usage.model_dump()
+    body = usage.model_dump()
+    if usage.cache_read_tokens:
+        body["prompt_tokens_details"] = {"cached_tokens": usage.cache_read_tokens}
     if usage.reasoning_tokens:
-        chunk["usage"]["completion_tokens_details"] = {"reasoning_tokens": usage.reasoning_tokens}
+        body["completion_tokens_details"] = {"reasoning_tokens": usage.reasoning_tokens}
+    chunk["usage"] = body
     return chunk
 
 
@@ -251,18 +306,30 @@ def _error_type_for_status(status_code: int) -> str:
     return "api_error"
 
 
-def openai_error(status_code: int, message: str, param: str | None = None) -> dict:
+def openai_error(
+    status_code: int,
+    message: str,
+    param: str | None = None,
+    code: str | None = None,
+    error_type: str | None = None,
+) -> dict:
     """The OpenAI error envelope, so SDK error handling parses RekAI's errors.
 
     ``param`` names the offending request field when exactly one is at fault —
     OpenAI populates it for a bad or missing parameter, and the SDK exposes it
     as ``exc.param``. It stays None otherwise, as OpenAI leaves it.
+
+    ``code`` carries OpenAI's machine-readable codes (``model_not_found``,
+    ``context_length_exceeded``…) when the caller knows the specific one, and
+    ``error_type`` overrides the status-derived type when OpenAI's real
+    response disagrees with it (e.g. an unknown model is a 404 whose type is
+    ``invalid_request_error``, not ``api_error``).
     """
     return {
         "error": {
             "message": message,
-            "type": _error_type_for_status(status_code),
+            "type": error_type or _error_type_for_status(status_code),
             "param": param,
-            "code": None,
+            "code": code,
         }
     }

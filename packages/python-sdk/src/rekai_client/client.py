@@ -46,6 +46,10 @@ class ChatResult:
     #: budget), "tool_calls", or "content_filter". None when the provider didn't
     #: report one.
     finish_reason: str | None = None
+    #: Which stop sequence ended the turn, when the provider reports one
+    #: (Anthropic's `stop_sequence` alongside `stop_reason: "stop_sequence"`).
+    #: None for providers that don't say — OpenAI's API has no equivalent field.
+    stop_sequence: str | None = None
     #: Cosine similarity to the stored prompt when the semantic cache served
     #: this response — the answer is to a *similar* prompt, not this one. None
     #: on a miss and on an exact cache hit, so a value here is exactly the
@@ -76,6 +80,12 @@ class ChatResult:
     content_blocks: list[dict[str, Any]] | None = None
     #: Unix timestamp the gateway produced the response.
     created: int = 0
+    #: OpenAI backend fingerprint — which config served the call (with
+    #: ``seed``, a determinism aid). None for other providers.
+    system_fingerprint: str | None = None
+    #: The service tier that actually handled the call when ``service_tier``
+    #: was "auto". None for other providers.
+    service_tier: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ChatResult:
@@ -90,6 +100,7 @@ class ChatResult:
             fallback_used=data.get("fallback_used", False),
             tool_calls=data.get("tool_calls"),
             finish_reason=data.get("finish_reason"),
+            stop_sequence=data.get("stop_sequence"),
             cache_similarity=data.get("cache_similarity"),
             redacted=data.get("redacted"),
             refusal=data.get("refusal"),
@@ -100,6 +111,8 @@ class ChatResult:
             extra_fields=data.get("extra_fields"),
             content_blocks=data.get("content_blocks"),
             created=data.get("created", 0),
+            system_fingerprint=data.get("system_fingerprint"),
+            service_tier=data.get("service_tier"),
         )
 
 
@@ -209,6 +222,7 @@ def _build_payload(
     fallbacks: list[dict[str, Any]] | None,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: Any | None = None,
+    parallel_tool_calls: bool | None = None,
     response_format: dict[str, Any] | None = None,
     stop: list[str] | str | None = None,
     top_p: float | None = None,
@@ -238,6 +252,8 @@ def _build_payload(
         payload["tools"] = tools
     if tool_choice is not None:
         payload["tool_choice"] = tool_choice
+    if parallel_tool_calls is not None:
+        payload["parallel_tool_calls"] = parallel_tool_calls
     if response_format is not None:
         payload["response_format"] = response_format
     if stop is not None:
@@ -354,6 +370,7 @@ class RekAIClient:
         fallbacks: list[dict[str, Any]] | None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any | None = None,
+        parallel_tool_calls: bool | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         top_p: float | None = None,
@@ -377,6 +394,7 @@ class RekAIClient:
             fallbacks,
             tools,
             tool_choice,
+            parallel_tool_calls,
             response_format,
             stop,
             top_p,
@@ -442,6 +460,7 @@ class RekAIClient:
         fallbacks: list[dict[str, Any]] | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any | None = None,
+        parallel_tool_calls: bool | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         top_p: float | None = None,
@@ -467,6 +486,10 @@ class RekAIClient:
         for abuse detection (OpenAI's ``user``, Anthropic's
         ``metadata.user_id``) — a routing hint, never a cache key.
 
+        ``parallel_tool_calls`` mirrors OpenAI's flag — whether the model may
+        emit several tool calls in one turn — forwarded to providers that
+        support it.
+
         ``top_p``/``seed``/``frequency_penalty``/``presence_penalty``/
         ``logit_bias`` mirror OpenAI's tuning params; providers forward the
         ones they support and ignore the rest.
@@ -486,6 +509,7 @@ class RekAIClient:
             fallbacks,
             tools,
             tool_choice,
+            parallel_tool_calls,
             response_format,
             stop,
             top_p,
@@ -725,6 +749,7 @@ class AsyncRekAIClient:
         fallbacks: list[dict[str, Any]] | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any | None = None,
+        parallel_tool_calls: bool | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         top_p: float | None = None,
@@ -752,6 +777,7 @@ class AsyncRekAIClient:
             fallbacks,
             tools,
             tool_choice,
+            parallel_tool_calls,
             response_format,
             stop,
             top_p,

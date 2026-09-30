@@ -13,6 +13,7 @@ import {
   parseRateLimit,
   parseSSEFrame,
   redactionNote,
+  thinkingText,
 } from "./api";
 
 describe("formatCost", () => {
@@ -141,6 +142,23 @@ describe("errorFromResponse", () => {
 
 describe("parseSSEFrame", () => {
   it("parses a delta event", () => {
+    // Refusal chunks carry reply text (content is empty on a refusal), so
+    // they surface through the same delta path.
+    expect(parseSSEFrame('data: {"refusal": "I cannot help"}')).toEqual({
+      kind: "delta",
+      text: "I cannot help",
+    });
+    const refusalSummary = {
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      cost_usd: null,
+      estimated: false,
+      finish_reason: "content_filter",
+      refusal: "I cannot help",
+    };
+    expect(parseSSEFrame(`data: ${JSON.stringify(refusalSummary)}`)).toEqual({
+      kind: "summary",
+      summary: refusalSummary,
+    });
     expect(parseSSEFrame('data: {"delta": "Hello"}')).toEqual({
       kind: "delta",
       text: "Hello",
@@ -203,6 +221,23 @@ describe("parseSSEFrame", () => {
     expect(parseSSEFrame('event: message\ndata: {"delta": "x"}')).toEqual({
       kind: "delta",
       text: "x",
+    });
+  });
+
+  it("parses thinking events", () => {
+    expect(parseSSEFrame('data: {"thinking_delta": "hmm"}')).toEqual({
+      kind: "thinking",
+      text: "hmm",
+    });
+    expect(parseSSEFrame('data: {"thinking_signature": "sig123"}')).toEqual({
+      kind: "thinking_signature",
+      signature: "sig123",
+    });
+    expect(
+      parseSSEFrame('data: {"thinking_block": {"type": "redacted_thinking", "data": "enc"}}'),
+    ).toEqual({
+      kind: "thinking_block",
+      block: { type: "redacted_thinking", data: "enc" },
     });
   });
 });
@@ -356,5 +391,45 @@ describe("cache toggle", () => {
     expect(body.cache).toBe(false);
     expect(deltas).toEqual(["ok"]);
     vi.unstubAllGlobals();
+  });
+
+  it("forwards the thinking config on both chat paths", async () => {
+    const { sendChat, streamChat } = await import("./api");
+    const thinking = { type: "enabled", budget_tokens: 1024 };
+    let body: Record<string, unknown> = {};
+    vi.stubGlobal("fetch", stubFetch((b) => (body = b)));
+    await sendChat({ model: "echo", messages: msgs, thinking });
+    expect(body.thinking).toEqual(thinking);
+    await sendChat({ model: "echo", messages: msgs });
+    expect("thinking" in body).toBe(false);
+    vi.unstubAllGlobals();
+
+    vi.stubGlobal(
+      "fetch",
+      async (_url: string | URL | Request, init?: RequestInit) => {
+        body = JSON.parse((init?.body as string) ?? "{}");
+        return new Response('data: {"delta": "ok"}\n\ndata: [DONE]\n\n', {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      },
+    );
+    await streamChat({ model: "echo", messages: msgs, thinking }, () => {});
+    expect(body.thinking).toEqual(thinking);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("thinkingText", () => {
+  it("joins visible thinking and marks redacted blocks", () => {
+    expect(
+      thinkingText([
+        { type: "thinking", thinking: "first", signature: "s" },
+        { type: "redacted_thinking", data: "enc" },
+        { type: "thinking", thinking: "second" },
+      ]),
+    ).toBe("first\n\n[redacted thinking]\n\nsecond");
+    expect(thinkingText(null)).toBe("");
+    expect(thinkingText(undefined)).toBe("");
   });
 });

@@ -96,9 +96,10 @@ class ChatRequest(BaseModel):
         default=None,
         description="OpenAI's processing tier ('auto' | 'default' | 'flex' | "
         "'priority' | 'scale'): flex trades latency for a large discount, "
-        "priority pays for lower latency. Not enum-validated so newer tiers "
-        "stay forward-compatible; an unsupported tier surfaces as the "
-        "provider's own error. Forwarded to OpenAI-compatible providers only.",
+        "priority pays for lower latency. Anthropic takes the same field name "
+        "with its own vocabulary ('auto' | 'standard_only'). Not enum-validated "
+        "so newer tiers stay forward-compatible; an unsupported tier surfaces "
+        "as the provider's own error.",
     )
     web_search_options: dict | None = Field(
         default=None,
@@ -180,6 +181,12 @@ class ChatRequest(BaseModel):
     tool_choice: Any | None = Field(
         default=None,
         description="Tool choice ('auto' | 'none' | 'required' | {...}), passed through.",
+    )
+    parallel_tool_calls: bool | None = Field(
+        default=None,
+        description="OpenAI's parallel_tool_calls — whether the model may emit "
+        "several tool calls in one turn. Forwarded to providers that support it "
+        "(OpenAI/OpenAI-compatible); ignored by others.",
     )
     response_format: dict[str, Any] | None = Field(
         default=None,
@@ -304,6 +311,7 @@ class ChatCompletionsRequest(BaseModel):
     stream_options: StreamOptions | None = None
     tools: list[dict[str, Any]] | None = None
     tool_choice: Any | None = None
+    parallel_tool_calls: bool | None = None
     response_format: dict[str, Any] | None = None
     user: str | None = None  # forwarded to the provider as its end-user id
     safety_identifier: str | None = None  # OpenAI's newer abuse-detection id
@@ -367,8 +375,10 @@ class AnthropicTool(BaseModel):
 class AnthropicToolChoice(BaseModel):
     type: Literal["auto", "none", "any", "tool"]
     name: str | None = None
-    # disable_parallel_tool_use is Anthropic-specific; the OpenAI-equivalent
-    # flag (parallel_tool_calls) lives on the request, not on tool_choice.
+    # Anthropic carries the parallel-call switch *on* tool_choice; the
+    # OpenAI-equivalent flag (parallel_tool_calls) lives on the request.
+    # Mapped onto ChatRequest.parallel_tool_calls so it round-trips.
+    disable_parallel_tool_use: bool | None = None
 
 
 class AnthropicMetadata(BaseModel):
@@ -393,6 +403,9 @@ class _AnthropicMessagesBase(BaseModel):
     stream: bool = False
     tools: list[AnthropicTool] | None = None
     tool_choice: AnthropicToolChoice | None = None
+    # Anthropic's processing tier — 'auto' | 'standard_only'. Same field name
+    # as OpenAI's, different vocabulary; forwarded verbatim either way.
+    service_tier: str | None = None
     # Anthropic's MCP connector — remote MCP servers the provider calls
     # itself ({name, url, type:"url", authorization_token?, tool_configuration?}).
     # Forwarded verbatim to Anthropic; requires the mcp-client beta header.
@@ -444,6 +457,24 @@ class ChatCompletionMessage(BaseModel):
     annotations: list[dict[str, Any]] | None = None
 
 
+class PromptTokensDetails(BaseModel):
+    """OpenAI's `usage.prompt_tokens_details` — where its SDKs look for
+    prompt-cache hits. RekAI reports the same numbers flat as
+    ``cache_read_tokens`` / ``cache_write_tokens``; the nested copy exists so
+    ``usage.prompt_tokens_details.cached_tokens`` resolves on the compat
+    surface exactly as it does against api.openai.com."""
+
+    cached_tokens: int = 0
+
+
+class CompletionUsage(Usage):
+    # OpenAI reports the cached-token and reasoning-token breakdowns nested
+    # under prompt_tokens_details / completion_tokens_details — internal Usage
+    # keeps them flat; the compat surface re-nests for SDK parity.
+    prompt_tokens_details: PromptTokensDetails | None = None
+    completion_tokens_details: dict | None = None
+
+
 class ChatCompletionChoice(BaseModel):
     index: int = 0
     message: ChatCompletionMessage
@@ -452,21 +483,15 @@ class ChatCompletionChoice(BaseModel):
     finish_reason: Literal["stop", "length", "tool_calls", "content_filter"] = "stop"
 
 
-class CompletionUsage(Usage):
-    # OpenAI reports the reasoning-token breakdown nested under
-    # `completion_tokens_details` — internal Usage keeps it flat, the compat
-    # surface re-nests it for SDK parity.
-    completion_tokens_details: dict | None = None
-
-
 class ChatCompletionResponse(BaseModel):
     id: str
     object: Literal["chat.completion"] = "chat.completion"
     created: int
     model: str
     choices: list[ChatCompletionChoice]
-    usage: CompletionUsage  # field names already match OpenAI's
+    usage: CompletionUsage  # flat fields already match; *Details is OpenAI's nesting
     system_fingerprint: str | None = None
+    service_tier: str | None = None  # the tier that actually served
     # RekAI extensions — OpenAI SDKs ignore unknown response fields.
     provider: str | None = None
     cost_usd: float | None = None
@@ -505,6 +530,12 @@ class ChatResponse(BaseModel):
         "(finished), 'length' (cut off by max_tokens — the answer is INCOMPLETE), "
         "'tool_calls', or 'content_filter'. Null when the provider didn't report "
         "one, which is also how responses cached before this field existed read.",
+    )
+    stop_sequence: str | None = Field(
+        default=None,
+        description="The stop sequence that ended generation, when the provider "
+        "reports one (Anthropic does, alongside stop_reason 'stop_sequence'). "
+        "Null for providers that don't say — OpenAI's API has no equivalent field.",
     )
     cache_similarity: float | None = Field(
         default=None,
@@ -554,6 +585,11 @@ class ChatResponse(BaseModel):
     fallback_used: bool = Field(
         default=False, description="True if a fallback served this response, not the primary."
     )
+    # OpenAI's response-side identifiers: the backend config fingerprint (used
+    # with `seed` for determinism debugging) and the service tier that actually
+    # handled the call when the request said "auto". Null elsewhere.
+    system_fingerprint: str | None = None
+    service_tier: str | None = None
     redacted: list[str] | None = Field(
         default=None,
         description="Names of the secret patterns scrubbed from 'content' by the output "
@@ -641,6 +677,12 @@ class UsageSummary(BaseModel):
         description="Subset of cache_hits_total served by approximate (embedding) "
         "match rather than an exact prompt match.",
     )
+    cache_fills_coalesced_total: int = Field(
+        default=0,
+        description="Subset of cache_hits_total that were coalesced onto an "
+        "in-flight identical request (singleflight) instead of calling the "
+        "provider again.",
+    )
     errors_total: int
     fallbacks_total: int
     retries_total: int = 0
@@ -656,6 +698,13 @@ class UsageSummary(BaseModel):
         default_factory=dict,
         description="Per-tenant usage keyed by a masked client id ('key:<hash>' "
         "when gateway auth is on, else the client IP).",
+    )
+    usage_by_user: dict[str, dict[str, ClientUsage]] = Field(
+        default_factory=dict,
+        description="Per-end-user usage nested under the owning client "
+        "{client_id: {user: usage}} — populated only for requests that carry "
+        "the OpenAI `user` field. Under gateway auth /v1/usage returns only "
+        "the caller's inner map.",
     )
 
 

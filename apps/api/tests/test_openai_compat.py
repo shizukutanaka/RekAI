@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from rekai.config import Settings
 from rekai.main import create_app
 from rekai.providers import register_provider
-from rekai.providers.base import Provider, ProviderResult
+from rekai.providers.base import Provider, ProviderResult, StreamEvent
 from rekai.schemas import Usage
 
 
@@ -356,3 +356,200 @@ def test_guardrail_block_returns_openai_error() -> None:
     assert resp.status_code == 403
     assert "error" in resp.json()
     assert resp.json()["error"]["message"]
+
+
+# --- prompt_tokens_details ---------------------------------------------------
+
+
+class _CachedProvider(Provider):
+    name = "cachedy"
+    requires_key = False
+
+    async def chat(self, request, api_key):  # type: ignore[no-untyped-def]
+        return ProviderResult(
+            content="cached answer",
+            model=request.model,
+            usage=Usage(
+                prompt_tokens=1000,
+                completion_tokens=5,
+                total_tokens=1005,
+                cache_read_tokens=900,
+            ),
+        )
+
+    async def stream_events(self, request, api_key):  # type: ignore[no-untyped-def]
+        result = await self.chat(request, api_key)
+        yield StreamEvent(delta=result.content)
+        yield StreamEvent(usage=result.usage, finish_reason="stop")
+
+
+def test_prompt_cache_tokens_appear_in_openais_nested_field(client: TestClient) -> None:
+    """OpenAI SDKs read `usage.prompt_tokens_details.cached_tokens`; a flat
+    `cache_read_tokens` extension alone leaves them blind to provider cache
+    hits, which is exactly the number the caller tracks cost savings by."""
+    register_provider(_CachedProvider())
+    resp = client.post(
+        "/v1/chat/completions",
+        json={"model": "cachedy/m", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status_code == 200
+    usage = resp.json()["usage"]
+    assert usage["cache_read_tokens"] == 900
+    assert usage["prompt_tokens_details"] == {"cached_tokens": 900}
+
+
+def test_no_provider_cache_means_no_prompt_tokens_details(client: TestClient) -> None:
+    resp = client.post(
+        "/v1/chat/completions",
+        json={"model": "echo", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.json()["usage"].get("prompt_tokens_details") is None
+
+
+def test_stream_usage_chunk_carries_prompt_tokens_details(client: TestClient) -> None:
+    register_provider(_CachedProvider())
+    resp = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "cachedy/m",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        },
+    )
+    chunks = [json.loads(p) for p in _parse_sse(resp.text) if p != "[DONE]"]
+    usage_chunk = next(c for c in chunks if c.get("usage"))
+    assert usage_chunk["usage"]["prompt_tokens_details"] == {"cached_tokens": 900}
+
+
+# --- Authorization: Bearer doubles as the BYOK key ---------------------------
+
+
+class _KeyedProvider(Provider):
+    name = "keyy"
+    requires_key = True
+    seen: str | None = None
+
+    async def chat(self, request, api_key):  # type: ignore[no-untyped-def]
+        type(self).seen = api_key
+        return ProviderResult(
+            content="hi",
+            model=request.model,
+            usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        )
+
+
+def _app(**kw):
+    kw.setdefault("environment", "test")
+    kw.setdefault("default_provider", "keyy")
+    return create_app(Settings(**kw))
+
+
+def test_bearer_is_the_provider_key_when_gateway_auth_is_off() -> None:
+    """OpenRouter convention: with no gateway keys configured, the SDK's own
+    `Authorization: Bearer` reaches the provider — so
+    `OpenAI(base_url=rekai, api_key="sk-…")` is a true drop-in BYOK."""
+    register_provider(_KeyedProvider())
+    c = TestClient(_app())
+    resp = c.post(
+        "/v1/chat/completions",
+        json={"model": "m", "messages": [{"role": "user", "content": "hi"}]},
+        headers={"Authorization": "Bearer sk-upstream"},
+    )
+    assert resp.status_code == 200
+    assert _KeyedProvider.seen == "sk-upstream"
+
+
+def test_x_provider_key_wins_over_bearer() -> None:
+    register_provider(_KeyedProvider())
+    c = TestClient(_app())
+    resp = c.post(
+        "/v1/chat/completions",
+        json={"model": "m", "messages": [{"role": "user", "content": "hi"}]},
+        headers={
+            "Authorization": "Bearer sk-upstream",
+            "X-Provider-Key": "sk-explicit",
+        },
+    )
+    assert resp.status_code == 200
+    assert _KeyedProvider.seen == "sk-explicit"
+
+
+def test_bearer_stays_gateway_auth_when_keys_are_configured() -> None:
+    """With gateway auth on, Bearer belongs to RekAI — forwarding it upstream
+    too would leak the tenant's gateway key to the provider."""
+    register_provider(_KeyedProvider())
+    _KeyedProvider.seen = None
+    c = TestClient(_app(api_keys="gw-secret"))
+    resp = c.post(
+        "/v1/chat/completions",
+        json={"model": "m", "messages": [{"role": "user", "content": "hi"}]},
+        headers={"Authorization": "Bearer gw-secret"},
+    )
+    assert resp.status_code == 200
+    assert _KeyedProvider.seen is None
+
+
+class _CaptureClient:
+    captured: dict = {}
+
+    def __init__(self, *a: object, **k: object) -> None:
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a: object):
+        return False
+
+    async def aclose(self) -> None:
+        return None
+
+    async def post(self, url, json=None, headers=None, **kw):
+        _CaptureClient.captured = json or {}
+        return _CaptureResp()
+
+
+class _CaptureResp:
+    status_code = 200
+    headers: dict = {}
+    text = ""
+
+    def json(self) -> dict:
+        return {
+            "model": "m",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "hi"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+
+async def test_parallel_tool_calls_forwarded_to_provider(monkeypatch) -> None:
+    """parallel_tool_calls was tolerated-and-dropped like the tuning params —
+    a caller could not stop a model from emitting several tool calls at once.
+    It now reaches OpenAI-compatible providers and keys the cache."""
+    import httpx
+
+    from rekai.providers.openai import OpenAIProvider
+    from rekai.schemas import ChatMessage, ChatRequest
+
+    monkeypatch.setattr(httpx, "AsyncClient", _CaptureClient)
+    req = ChatRequest(
+        model="m",
+        messages=[ChatMessage(role="user", content="hi")],
+        parallel_tool_calls=False,
+    )
+    await OpenAIProvider().chat(req, api_key="sk-x")
+    assert _CaptureClient.captured["parallel_tool_calls"] is False
+
+
+def test_parallel_tool_calls_keys_the_cache() -> None:
+    from rekai.cache import cache_key
+    from rekai.schemas import ChatMessage, ChatRequest
+
+    plain = ChatRequest(model="m", messages=[ChatMessage(role="user", content="hi")])
+    parallel_off = ChatRequest(
+        model="m",
+        messages=[ChatMessage(role="user", content="hi")],
+        parallel_tool_calls=False,
+    )
+    assert cache_key(plain, "openai") != cache_key(parallel_off, "openai")

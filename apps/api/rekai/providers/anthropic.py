@@ -126,10 +126,18 @@ class AnthropicProvider(Provider):
         }
         if request.stop:
             payload["stop_sequences"] = request.stop
+        # Anthropic's own processing tier ('auto' | 'standard_only') — same
+        # field name as OpenAI's, different vocabulary. Forwarded verbatim.
+        if request.service_tier is not None:
+            payload["service_tier"] = request.service_tier
         # Anthropic supports top_p but has no seed/frequency/presence/logit_bias
         # equivalents — those stay RekAI-side rather than erroring upstream.
         if request.top_p is not None:
             payload["top_p"] = request.top_p
+        # Anthropic accepts service_tier too ('auto' | 'standard_only'); an
+        # unrecognized tier surfaces as Anthropic's own validation error.
+        if request.service_tier is not None:
+            payload["service_tier"] = request.service_tier
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
         # Structured output: Anthropic has no `response_format`, but forcing a
@@ -155,6 +163,10 @@ class AnthropicProvider(Provider):
             payload["tools"] = _translate_tools(request.tools)
             choice = _translate_tool_choice(request.tool_choice)
             if choice is not None:
+                # OpenAI's request-level parallel_tool_calls=False is
+                # Anthropic's tool_choice.disable_parallel_tool_use.
+                if request.parallel_tool_calls is False:
+                    choice["disable_parallel_tool_use"] = True
                 payload["tool_choice"] = choice
         # A top-level cache_control marks the end of the cacheable prefix. Place
         # it on the last message block (after tools/system in Anthropic's render
@@ -282,6 +294,7 @@ class AnthropicProvider(Provider):
         # split is a breakdown of it (see pricing.estimate_cost).
         prompt_tokens = usage.get("input_tokens", 0) + cache_read + cache_write
         completion_tokens = usage.get("output_tokens", 0)
+        service_tier = usage.get("service_tier")
         return ProviderResult(
             content=content,
             refusal=refusal,
@@ -295,6 +308,8 @@ class AnthropicProvider(Provider):
                 cache_write_tokens=cache_write,
             ),
             finish_reason=finish_reason,
+            service_tier=service_tier,
+            stop_sequence=data.get("stop_sequence"),
             thinking_blocks=thinking_blocks or None,
             citations=citations or None,
             extra_blocks=extra_blocks or None,
@@ -325,6 +340,8 @@ class AnthropicProvider(Provider):
         cache_read = 0
         cache_write = 0
         saw_usage = False
+        service_tier: str | None = None
+        stop_sequence: str | None = None
         # tool_use blocks: id/name from content_block_start, args from
         # input_json_delta fragments, keyed by block index.
         tool_blocks: dict[int, dict] = {}
@@ -438,6 +455,7 @@ class AnthropicProvider(Provider):
                         input_tokens = usage.get("input_tokens", input_tokens)
                         output_tokens = usage.get("output_tokens", output_tokens)
                         cache_read, cache_write = _cache_tokens(usage)
+                        service_tier = usage.get("service_tier") or service_tier
                         saw_usage = True
                     elif etype == "message_delta":
                         usage = event.get("usage", {})
@@ -450,6 +468,10 @@ class AnthropicProvider(Provider):
                         )
                         if stop_reason is not None:
                             finish_reason = stop_reason
+                        # Anthropic also says *which* stop sequence fired.
+                        seq = event.get("delta", {}).get("stop_sequence")
+                        if isinstance(seq, str):
+                            stop_sequence = seq
         except httpx.HTTPError as exc:
             raise ProviderError(f"Anthropic streaming request failed: {exc}") from exc
         if tool_blocks and not emulating_json:
@@ -471,6 +493,8 @@ class AnthropicProvider(Provider):
                     else None
                 ),
                 finish_reason=finish_reason,
+                service_tier=service_tier,
+                stop_sequence=stop_sequence,
             )
 
     async def list_models(self, api_key: str | None) -> list[str]:

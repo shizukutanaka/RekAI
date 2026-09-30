@@ -193,6 +193,26 @@ button.regenerate {
   color: var(--muted);
 }
 
+/* Extended-thinking block: quieter than the answer, collapsed once done. */
+.msg .thinking {
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.msg .thinking summary {
+  cursor: pointer;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.msg .thinking .thinking-text {
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+  white-space: pre-wrap;
+}
+
 /* Web-search citations under an answer — compact pill list. */
 .msg .sources {
   display: flex;

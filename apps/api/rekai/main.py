@@ -413,6 +413,38 @@ def _guardrail_response(
     return None
 
 
+def _message_texts(messages: list[ChatMessage]) -> list[str]:
+    """Caller-supplied message text — every role, since any of it is forwarded
+    verbatim to the upstream provider."""
+    return [m.content for m in messages if m.content]
+
+
+def _input_secrets_response(
+    texts: list[str], settings: Settings, response: Response
+) -> JSONResponse | None:
+    """Flag or refuse a request carrying a credential in its caller text.
+
+    Runs the same detection set as output redaction against the request side:
+    a user pasting ``sk-…`` into a chat prompt otherwise ships that key to the
+    provider. Honors ``guardrails_action`` — flag sets ``X-Input-Secrets-Flag``,
+    block returns 403 before any provider call."""
+    hits = guardrails.scan_texts_for_secrets(texts, settings.input_secrets_enabled)
+    if not hits:
+        return None
+    if settings.guardrails_action == "block":
+        metrics.record_error("input_secret_detected")
+        return JSONResponse(
+            status_code=403,
+            content=ErrorResponse(
+                error="input_secret_detected",
+                detail="Request appears to contain a credential "
+                f"({', '.join(hits)}). Remove it and retry.",
+            ).model_dump(),
+        )
+    response.headers["X-Input-Secrets-Flag"] = ",".join(hits)
+    return None
+
+
 def _idempotency_error(status_code: int, detail: str) -> JSONResponse:
     """A 409/422 for an Idempotency-Key that conflicts with an existing record."""
     metrics.record_error("idempotency_error")
@@ -529,6 +561,7 @@ def _record_client_usage(
     result: _HasUsageAndCost,
     settings: Settings,
     operation: str = "chat",
+    user: str | None = None,
 ) -> None:
     """Attribute a chat/embeddings response's tokens and cost to the requesting
     client (the masked API-key id, or the client IP with no gateway auth).
@@ -543,6 +576,7 @@ def _record_client_usage(
     current window's bucket used by the budget-cap check."""
     client_id = _client_id(http_request)
     metrics.record_client_usage(client_id, result.usage.total_tokens, result.cost_usd)
+    metrics.record_user_usage(client_id, user, result.usage.total_tokens, result.cost_usd)
     if settings.client_budget_window_seconds is not None:
         metrics.record_client_budget_usage(
             client_id, result.cost_usd, settings.client_budget_window_seconds, time.time()
@@ -578,6 +612,9 @@ async def _run_chat(
     blocked = _guardrail_response(request.messages, settings, response)
     if blocked is not None:
         return blocked
+    leaked = _input_secrets_response(_message_texts(request.messages), settings, response)
+    if leaked is not None:
+        return leaked
     fingerprint: str | None = None
     claimed = False
     client_id = _client_id(http_request)
@@ -597,7 +634,7 @@ async def _run_chat(
         if outcome.kind == "replay" and outcome.response is not None:
             response.headers["Idempotent-Replay"] = "true"
             replayed = _redact_output(ChatResponse(**outcome.response), settings, response)
-            _record_client_usage(http_request, replayed, settings)
+            _record_client_usage(http_request, replayed, settings, user=request.user)
             return replayed
         claimed = True  # we hold the in-progress sentinel
     try:
@@ -613,7 +650,7 @@ async def _run_chat(
         # Disclose that this answer is to a *similar* prompt, not this one —
         # otherwise a semantic hit is indistinguishable from an exact one.
         response.headers["X-Cache-Similarity"] = f"{result.cache_similarity:.4f}"
-    _record_client_usage(http_request, result, settings)
+    _record_client_usage(http_request, result, settings, user=request.user)
     if idempotency_key and fingerprint is not None:
         await idempotency.complete(
             cache_backend,
@@ -1121,7 +1158,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # tenants to separate and the full map is the local operator's own.
             client_id = _client_id(http_request)
             own = snapshot.get("usage_by_client", {}).get(client_id)
-            snapshot = {**snapshot, "usage_by_client": {client_id: own} if own else {}}
+            own_users = snapshot.get("usage_by_user", {}).get(client_id)
+            snapshot = {
+                **snapshot,
+                "usage_by_client": {client_id: own} if own else {},
+                "usage_by_user": {client_id: own_users} if own_users else {},
+            }
         return UsageSummary(**snapshot)
 
     # --- admin: runtime key management (only registered when configured) --
@@ -1300,17 +1342,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             return AdminKeyResponse(status="revoked", key=masked)
 
-    @app.get("/v1/models", response_model=ModelsResponse, tags=["chat"])
-    async def list_models(
-        http_request: Request,
-        type: Literal["chat", "embedding"] | None = Query(
-            None, description="Filter by model type: 'chat' or 'embedding'."
-        ),
-    ) -> ModelsResponse:
-        # A restricted key sees only the models it may call — same allowlist
-        # the ACL enforces on /v1/chat and /v1/embeddings.
-        allowlist: list[str] | None = getattr(http_request.state, "key_model_allowlist", None)
-
+    async def _collect_model_infos(
+        kind_filter: Literal["chat", "embedding"] | None,
+        allowlist: list[str] | None,
+    ) -> list[ModelInfo]:
         def _info(model: str, name: str, kind: Literal["chat", "embedding"]) -> ModelInfo:
             price = price_for_model(model, settings.pricing_override_dict)
             pricing = (
@@ -1325,15 +1360,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             provider = get_provider(name)
             if provider is None:
                 continue
-            if type != "embedding":
+            if kind_filter != "embedding":
                 for model in await provider.list_models(None):
                     if allowlist is None or any(fnmatch.fnmatchcase(model, p) for p in allowlist):
                         data.append(_info(model, name, "chat"))
-            if type != "chat":
+            if kind_filter != "chat":
                 for model in await provider.list_embedding_models(None):
                     if allowlist is None or any(fnmatch.fnmatchcase(model, p) for p in allowlist):
                         data.append(_info(model, name, "embedding"))
-        return ModelsResponse(data=data)
+        return data
+
+    @app.get("/v1/models", response_model=ModelsResponse, tags=["chat"])
+    async def list_models(
+        http_request: Request,
+        type: Literal["chat", "embedding"] | None = Query(
+            None, description="Filter by model type: 'chat' or 'embedding'."
+        ),
+    ) -> ModelsResponse:
+        # A restricted key sees only the models it may call — same allowlist
+        # the ACL enforces on /v1/chat and /v1/embeddings.
+        allowlist: list[str] | None = getattr(http_request.state, "key_model_allowlist", None)
+        return ModelsResponse(data=await _collect_model_infos(type, allowlist))
+
+    # OpenAI-compat "retrieve a model" — `client.models.retrieve("…")` in the
+    # OpenAI SDK calls GET /models/{id}; a drop-in base URL needs it.
+    @app.get("/v1/models/{model_id}", response_model=ModelInfo, tags=["chat"])
+    async def retrieve_model(model_id: str, http_request: Request):
+        allowlist: list[str] | None = getattr(http_request.state, "key_model_allowlist", None)
+        for info in await _collect_model_infos(None, allowlist):
+            if info.id == model_id:
+                return info
+        # The route answers in the OpenAI envelope so SDK callers
+        # (client.models.retrieve) get a typed NotFoundError with a readable
+        # message, same as on api.openai.com.
+        return JSONResponse(
+            status_code=404,
+            content=openai_compat.openai_error(
+                404,
+                f"The model '{model_id}' does not exist",
+                code="model_not_found",
+                error_type="invalid_request_error",
+            ),
+        )
 
     @app.post(
         "/v1/chat",
@@ -1388,6 +1456,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Ahead of any stored-response short circuit — a replayed or cached
         # entry written before a provider's cap existed must not bypass it.
         check_embeddings_dimensions(request, config)
+        input_texts = [request.input] if isinstance(request.input, str) else request.input
+        leaked = _input_secrets_response(input_texts, config, response)
+        if leaked is not None:
+            return leaked
         fingerprint: str | None = None
         claimed = False
         client_id = _client_id(http_request)
@@ -1410,7 +1482,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if outcome.kind == "replay" and outcome.response is not None:
                 response.headers["Idempotent-Replay"] = "true"
                 replayed = EmbeddingsResponse(**outcome.response)
-                _record_client_usage(http_request, replayed, config, operation="embeddings")
+                _record_client_usage(
+                    http_request, replayed, config, operation="embeddings", user=request.user
+                )
                 return replayed
             claimed = True
         try:
@@ -1419,7 +1493,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if claimed:
                 await idempotency.release(cache_backend, client_id, idempotency_key)  # type: ignore[arg-type]
             raise
-        _record_client_usage(http_request, result, config, operation="embeddings")
+        _record_client_usage(
+            http_request, result, config, operation="embeddings", user=request.user
+        )
         if idempotency_key and fingerprint is not None:
             await idempotency.complete(
                 cache_backend,
@@ -1465,6 +1541,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         blocked = _guardrail_response(request.messages, config, response)
         if blocked is not None:
             return blocked
+        leaked = _input_secrets_response(_message_texts(request.messages), config, response)
+        if leaked is not None:
+            return leaked
         guardrail_flag = response.headers.get("X-Guardrail-Flag")
         client_id = _client_id(http_request)
         provider_name, provider = select_provider(request, config)
@@ -1513,6 +1592,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         summary["tool_calls"] = s.tool_calls
                     if s.finish_reason:
                         summary["finish_reason"] = s.finish_reason
+                    if s.system_fingerprint is not None:
+                        summary["system_fingerprint"] = s.system_fingerprint
+                    if s.service_tier is not None:
+                        summary["service_tier"] = s.service_tier
+                    if s.stop_sequence:
+                        summary["stop_sequence"] = s.stop_sequence
                     if s.refusal:
                         summary["refusal"] = s.refusal
                     if s.annotations:
@@ -1570,7 +1655,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tuning params are tolerated and ignored. ``Idempotency-Key`` is honored
         on the non-streaming path only — ``stream: true`` does not accept it,
         same as ``/v1/chat/stream``; see docs/architecture.md.
+
+        BYOK note: when the gateway itself requires no client key (no
+        ``REKAI_API_KEYS`` and dynamic keys off), the SDK's own
+        ``Authorization: Bearer`` is forwarded as the provider key — the
+        OpenRouter convention — so ``OpenAI(base_url=rekai, api_key="sk-…")``
+        just works. Once gateway auth is on, ``Authorization`` is spoken for
+        and BYOK goes through ``X-Provider-Key`` as usual.
         """
+        auth_on = bool(config.api_key_list) or config.dynamic_keys_enabled
+        bearer_as_provider = (
+            x_provider_key
+            if x_provider_key is not None or auth_on
+            else auth.parse_bearer(http_request.headers.get("authorization"))
+        )
         # This route does not wrap its own errors in the OpenAI envelope:
         # OpenAICompatErrorMiddleware translates every error on this path,
         # including the ones raised below and the ones the middlewares above
@@ -1592,7 +1690,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 chat_request,
                 http_request,
                 response,
-                x_provider_key,
+                bearer_as_provider,
                 idempotency_key,
                 config,
                 cache_backend,
@@ -1610,6 +1708,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         blocked = _guardrail_response(chat_request.messages, config, response)
         if blocked is not None:
             return blocked
+        leaked = _input_secrets_response(_message_texts(chat_request.messages), config, response)
+        if leaked is not None:
+            return leaked
         guardrail_flag = response.headers.get("X-Guardrail-Flag")
         client_id = _client_id(http_request)
         provider_name, provider = select_provider(chat_request, config)
@@ -1627,17 +1728,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
             yield sse(openai_compat.chunk_first(chunk_id, created, model))
             finish_reason = "stop"
+            seen_fingerprint: str | None = None
+            seen_tier: str | None = None
             async for ev in handle_chat_stream(
                 chat_request,
-                x_provider_key,
+                bearer_as_provider,
                 config,
                 cache_backend,
                 provider_name,
                 provider,
                 client_id,
             ):
+                if ev.system_fingerprint is not None:
+                    seen_fingerprint = ev.system_fingerprint
+                if ev.service_tier is not None:
+                    seen_tier = ev.service_tier
                 if ev.delta is not None:
-                    yield sse(openai_compat.chunk_delta(chunk_id, created, model, ev.delta))
+                    yield sse(
+                        openai_compat.chunk_delta(
+                            chunk_id,
+                            created,
+                            model,
+                            ev.delta,
+                            system_fingerprint=seen_fingerprint,
+                            service_tier=seen_tier,
+                        )
+                    )
                 elif ev.refusal_delta is not None:
                     yield sse(
                         openai_compat.chunk_refusal(chunk_id, created, model, ev.refusal_delta)
@@ -1659,13 +1775,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         finish_reason = "tool_calls"
                         yield sse(
                             openai_compat.chunk_tool_calls(
-                                chunk_id, created, model, ev.summary.tool_calls
+                                chunk_id,
+                                created,
+                                model,
+                                ev.summary.tool_calls,
+                                system_fingerprint=seen_fingerprint,
+                                service_tier=seen_tier,
                             )
                         )
-                    yield sse(openai_compat.chunk_finish(chunk_id, created, model, finish_reason))
+                    yield sse(
+                        openai_compat.chunk_finish(
+                            chunk_id,
+                            created,
+                            model,
+                            finish_reason,
+                            system_fingerprint=seen_fingerprint,
+                            service_tier=seen_tier,
+                        )
+                    )
                     if include_usage:
                         yield sse(
-                            openai_compat.chunk_usage(chunk_id, created, model, ev.summary.usage)
+                            openai_compat.chunk_usage(
+                                chunk_id,
+                                created,
+                                model,
+                                ev.summary.usage,
+                                system_fingerprint=seen_fingerprint,
+                                service_tier=seen_tier,
+                            )
                         )
             yield "data: [DONE]\n\n"
 
@@ -1767,6 +1904,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             open_block: str | None = None  # "thinking" | "text" | "extra"
             block_index = 0
             finish_reason = "stop"
+            stop_sequence = None
             usage = None
             async for ev in handle_chat_stream(
                 chat_request,
@@ -1864,6 +2002,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     s = ev.summary
                     if s.finish_reason:
                         finish_reason = s.finish_reason
+                    if s.stop_sequence:
+                        stop_sequence = s.stop_sequence
                     for tc in s.tool_calls or []:
                         finish_reason = "tool_calls"
                         fn = tc.get("function", {})
@@ -1882,7 +2022,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         yield anthropic_compat.ev_content_block_stop(bi)
                     usage = s.usage
             stop_reason = anthropic_compat._FINISH_TO_STOP_REASON.get(finish_reason, "end_turn")
-            yield anthropic_compat.ev_message_delta(stop_reason, usage)
+            yield anthropic_compat.ev_message_delta(stop_reason, usage, stop_sequence)
             yield anthropic_compat.ev_message_stop()
 
         stream_headers = {

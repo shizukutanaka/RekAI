@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
@@ -56,6 +57,12 @@ class StreamSummary:
     estimated: bool
     tool_calls: list[dict] | None = None
     finish_reason: str | None = None
+    # OpenAI's response-side identifiers (see ProviderResult).
+    system_fingerprint: str | None = None
+    service_tier: str | None = None
+    # Which stop sequence ended the turn, when the provider reports one
+    # (Anthropic's `stop_sequence` alongside `stop_reason: "stop_sequence"`).
+    stop_sequence: str | None = None
     # Model refusal text (OpenAI `message.refusal`), streamed in refusal_delta
     # events and reproduced here in full for consumers that only read the summary.
     refusal: str | None = None
@@ -82,6 +89,11 @@ class ChatStreamEvent:
     annotations: list[dict] | None = None
     error: ProviderError | None = None
     summary: StreamSummary | None = None
+    # Provider metadata seen on the stream so far (OpenAI's
+    # system_fingerprint/service_tier): set on whichever event carried it —
+    # may arrive alone on the role-announcement chunk.
+    system_fingerprint: str | None = None
+    service_tier: str | None = None
     # Anthropic extended-thinking pieces — a thinking_delta chunk, the block's
     # closing signature, or a whole redacted_thinking block.
     thinking_delta: str | None = None
@@ -430,6 +442,48 @@ def _request_deadline(settings: Settings) -> float | None:
     return time.monotonic() + settings.request_deadline_seconds
 
 
+# Singleflight on a cache miss: how long the `key:inflight` claim lives when
+# there is no request deadline to bound it. Long enough to cover a slow
+# provider call; if a winner outlives it, a waiter simply becomes a second
+# winner — a duplicate upstream call, never a hang.
+_INFLIGHT_LOCK_TTL = 120
+# How long a request that lost the claim polls for the winner's cached result
+# before calling the provider itself. Small on purpose: a slow winner must not
+# turn its followers' latency into its own, so a miss that can't be coalesced
+# quickly degrades to the pre-singleflight behavior (everyone calls upstream).
+_CACHE_FILL_BUDGET_SECONDS = 10.0
+_CACHE_FILL_POLL_SECONDS = 0.2
+
+
+def _inflight_ttl(deadline: float | None) -> int:
+    left = remaining_budget(deadline)
+    if left is None:
+        return _INFLIGHT_LOCK_TTL
+    # Bound the claim by the caller's own budget plus slack for the write.
+    return max(5, int(left) + 30)
+
+
+async def _await_cache_fill(
+    cache: CacheBackend, key: str, inflight_key: str, deadline: float | None
+) -> str | None:
+    """Poll for the value a concurrent in-flight caller is about to store under
+    ``key``. Returns it on arrival, or None when the claim vanished without a
+    stored result (winner failed) or the poll budget ran out — the caller then
+    proceeds to the provider itself."""
+    left = remaining_budget(deadline)
+    budget = _CACHE_FILL_BUDGET_SECONDS if left is None else min(left, _CACHE_FILL_BUDGET_SECONDS)
+    end = time.monotonic() + budget
+    while time.monotonic() < end:
+        raw = await cache.get(key)
+        if raw is not None:
+            metrics.record_cache_fill_coalesced()
+            return raw
+        if await cache.get(inflight_key) is None:
+            return None
+        await asyncio.sleep(_CACHE_FILL_POLL_SECONDS)
+    return await cache.get(key)
+
+
 async def handle_chat(
     request: ChatRequest,
     api_key: str | None,
@@ -577,6 +631,8 @@ async def _handle_chat(
             metrics.record_fallback()
 
         key = cache_key(attempt_request, attempt.provider_name)
+        inflight_key = ""
+        holds_inflight = False
         if use_cache:
             cached_raw = await cache.get(key)
             if cached_raw is not None:
@@ -584,6 +640,22 @@ async def _handle_chat(
                 logger.info("cache hit provider=%s model=%s", attempt.provider_name, attempt.model)
                 payload = json.loads(cached_raw)
                 return ChatResponse(**{**payload, "cached": True})
+            # Singleflight: N concurrent misses on the same key would all call
+            # the provider for what becomes the same entry. The first to claim
+            # `key:inflight` computes; the rest poll briefly for the result and
+            # proceed to the provider themselves if none arrives — fail-open,
+            # never a deadlock.
+            inflight_key = key + ":inflight"
+            holds_inflight = await cache.add(inflight_key, "1", _inflight_ttl(deadline))
+            if not holds_inflight:
+                served = await _await_cache_fill(cache, key, inflight_key, deadline)
+                if served is not None:
+                    metrics.record_cache(hit=True)
+                    return ChatResponse(**{**json.loads(served), "cached": True})
+                # The winner finished without storing (failure or expiry) — try
+                # to take over the claim; if another waiter beat us to it, we
+                # just call the provider without further polling.
+                holds_inflight = await cache.add(inflight_key, "1", _inflight_ttl(deadline))
             metrics.record_cache(hit=False)
 
         started = time.perf_counter()
@@ -597,6 +669,11 @@ async def _handle_chat(
                 deadline=deadline,
             )
         except ProviderError as exc:
+            if holds_inflight:
+                # Free a waiting duplicate immediately instead of letting it
+                # poll until timeout — the value will never arrive for this key.
+                await cache.delete(inflight_key)
+                holds_inflight = False
             metrics.observe_provider_duration(
                 attempt.provider_name, "chat", time.perf_counter() - started
             )
@@ -669,6 +746,9 @@ async def _handle_chat(
             cached=False,
             fallback_used=is_fallback,
             finish_reason=result.finish_reason,
+            system_fingerprint=result.system_fingerprint,
+            service_tier=result.service_tier,
+            stop_sequence=result.stop_sequence,
             thinking_blocks=result.thinking_blocks,
             citations=result.citations,
             extra_blocks=result.extra_blocks,
@@ -681,6 +761,8 @@ async def _handle_chat(
 
         if use_cache:
             await cache.set(key, response.model_dump_json(), settings.cache_ttl_seconds)
+        if holds_inflight:
+            await cache.delete(inflight_key)
         if sem_enabled and sem_embedding is not None:
             semantic_cache.add(
                 sem_bucket,
@@ -752,6 +834,7 @@ async def _handle_chat_stream(
     reported_usage: Usage | None = None
     reported_tool_calls: list[dict] | None = None
     reported_finish_reason: str | None = None
+    reported_stop_sequence: str | None = None
     reported_refusal: list[str] = []
     reported_annotations: list[dict] = []
     errored = False
@@ -774,7 +857,13 @@ async def _handle_chat_stream(
     extra_delta_shapes: dict[str, str] = {}
     extra_hits: list[str] = []
     try:
+        seen_fingerprint: str | None = None
+        seen_tier: str | None = None
         async for event in provider.stream_events(request, api_key):
+            if event.system_fingerprint is not None:
+                seen_fingerprint = event.system_fingerprint
+            if event.service_tier is not None:
+                seen_tier = event.service_tier
             if event.delta:
                 if thinking_redactor is not None:
                     tail = thinking_redactor.flush()
@@ -791,7 +880,18 @@ async def _handle_chat_stream(
                 completion.append(event.delta)
                 emitted = redactor.feed(event.delta) if redactor is not None else event.delta
                 if emitted:
-                    yield ChatStreamEvent(delta=emitted)
+                    yield ChatStreamEvent(
+                        delta=emitted,
+                        system_fingerprint=event.system_fingerprint,
+                        service_tier=event.service_tier,
+                    )
+            elif event.system_fingerprint is not None or event.service_tier is not None:
+                # Metadata-only provider event (e.g. the role-announcement
+                # chunk) — forward so transports can stamp it on their frames.
+                yield ChatStreamEvent(
+                    system_fingerprint=event.system_fingerprint,
+                    service_tier=event.service_tier,
+                )
             if event.refusal_delta:
                 # Refusal text is model output but not the answer; its own
                 # redactor keeps the holdback independent of the content stream.
@@ -894,6 +994,8 @@ async def _handle_chat_stream(
                 reported_tool_calls = event.tool_calls
             if event.finish_reason is not None:
                 reported_finish_reason = event.finish_reason
+            if event.stop_sequence is not None:
+                reported_stop_sequence = event.stop_sequence
         if redactor is not None:
             tail = redactor.flush()
             if tail:
@@ -957,6 +1059,7 @@ async def _handle_chat_stream(
         metrics.record_tokens(usage.total_tokens, provider_name)
         metrics.record_cost(cost_usd)
         metrics.record_client_usage(client_id, usage.total_tokens, cost_usd)
+        metrics.record_user_usage(client_id, request.user, usage.total_tokens, cost_usd)
         if settings.client_budget_window_seconds is not None:
             metrics.record_client_budget_usage(
                 client_id, cost_usd, settings.client_budget_window_seconds, time.time()
@@ -970,6 +1073,9 @@ async def _handle_chat_stream(
                 estimated=estimated,
                 tool_calls=reported_tool_calls or None,
                 finish_reason=reported_finish_reason,
+                system_fingerprint=seen_fingerprint,
+                service_tier=seen_tier,
+                stop_sequence=reported_stop_sequence,
                 refusal="".join(reported_refusal) or None,
                 annotations=reported_annotations or None,
                 redacted=(
@@ -1048,6 +1154,9 @@ async def _handle_embeddings(
         dimensions=request.dimensions,
         encoding_format=request.encoding_format,
     )
+    inflight_key = ""
+    holds_inflight = False
+    deadline = _request_deadline(settings)
     if use_cache:
         cached_raw = await cache.get(key)
         if cached_raw is not None:
@@ -1061,6 +1170,16 @@ async def _handle_embeddings(
             if request.dimensions is None or all(len(v) == request.dimensions for v in vectors):
                 metrics.record_cache(hit=True)
                 return EmbeddingsResponse(**{**cached, "cached": True})
+        # Same singleflight as handle_chat — embedding calls are at least as
+        # expensive, and bulk-indexing jobs fire them in identical bursts.
+        inflight_key = key + ":inflight"
+        holds_inflight = await cache.add(inflight_key, "1", _inflight_ttl(deadline))
+        if not holds_inflight:
+            served = await _await_cache_fill(cache, key, inflight_key, deadline)
+            if served is not None:
+                metrics.record_cache(hit=True)
+                return EmbeddingsResponse(**{**json.loads(served), "cached": True})
+            holds_inflight = await cache.add(inflight_key, "1", _inflight_ttl(deadline))
         metrics.record_cache(hit=False)
 
     started = time.perf_counter()
@@ -1078,8 +1197,13 @@ async def _handle_embeddings(
             base_delay=settings.retry_base_delay_seconds,
             max_delay=settings.retry_max_delay_seconds,
             on_retry=metrics.record_retry,
-            deadline=_request_deadline(settings),
+            deadline=deadline,
         )
+    except BaseException:
+        if holds_inflight:
+            await cache.delete(inflight_key)
+            holds_inflight = False
+        raise
     finally:
         metrics.observe_provider_duration(provider_name, "embed", time.perf_counter() - started)
     metrics.record_tokens(result.usage.total_tokens, provider_name)
@@ -1097,5 +1221,7 @@ async def _handle_embeddings(
     )
     if use_cache:
         await cache.set(key, response.model_dump_json(), settings.cache_ttl_seconds)
+    if holds_inflight:
+        await cache.delete(inflight_key)
     logger.info("embeddings ok provider=%s model=%s n=%s", provider_name, result.model, len(inputs))
     return response

@@ -340,6 +340,15 @@ that doesn't, and how responses cached before this field existed read. The
 OpenAI-compatible endpoint falls back to the old derivation in that case, so it
 always emits one of the documented values.
 
+Anthropic's stop signal is a *pair*: `stop_reason: "stop_sequence"` plus the
+matched string in `stop_sequence`. A caller that sends several stop sequences
+needs both halves to know which one fired, so the matched string rides along
+end-to-end — `ProviderResult`/`StreamEvent.stop_sequence`, the `stop_sequence`
+field on `ChatResponse` and the stream summary, `message.stop_sequence` /
+`message_delta.delta.stop_sequence` on `/v1/messages`, and both SDKs. OpenAI's
+API has no equivalent field, so the compat surface omits it rather than
+inventing one.
+
 The field reaches every consumer, which is the part that makes it useful: both
 SDKs expose it, and the chat UI turns it into a note on the message's metadata
 line — `truncated — raise max tokens` for `length`, `stopped by the provider's
@@ -453,6 +462,20 @@ share an entry. Backends:
 - **Null** when caching is disabled.
 
 A client can opt a single request out with `"cache": false`.
+
+**Concurrent misses coalesce** (singleflight). N identical requests arriving
+before the first completes would each call the provider for what becomes the
+same entry — a stampede. The first miss claims an atomic `key:inflight`
+sentinel (`cache.add`, the same primitive the idempotency store uses, so it
+holds across processes under Redis); the others poll briefly for the stored
+result — up to 10s or the request's own deadline, whichever is shorter — and
+call the provider themselves when nothing arrives or the claim vanishes early
+(winner failed). It can only reduce upstream calls, never add latency beyond
+the bounded poll or block a request on another's failure — fail-open, same as
+every other degraded-cache path. `rekai_cache_fills_coalesced_total` (a subset
+of `rekai_cache_hits_total`) counts the duplicates absorbed. `/v1/embeddings`
+gets the same treatment — bulk-indexing jobs issue identical embedding calls
+in bursts, which is exactly the stampede shape.
 
 ### Semantic cache
 
@@ -763,7 +786,9 @@ report `null`. Embeddings responses carry `cost_usd` too (input-only — the
 (`rekai_cost_usd_total`). Prices are approximate and meant for budgeting, not
 billing. `/v1/models` also reports each model's `pricing`
 (`input_per_1m`/`output_per_1m`, or `null` when unknown), so clients can build
-cost UIs without hardcoding rates.
+cost UIs without hardcoding rates. `GET /v1/models/{id}` retrieves a single
+entry (OpenAI-compat `models.retrieve`); unknown ids get a 404 in the OpenAI
+envelope (`type: invalid_request_error`, `code: model_not_found`).
 
 When a provider streams without reporting usage, tokens are **estimated** from
 the text (`estimated: true`). That estimate is script-aware, not a word count:
@@ -855,6 +880,18 @@ only grows once something resembling the start of a secret appears. Each prefix
 carries the longest run its pattern can plausibly span, so a stray `sk-` in
 prose costs a few hundred characters of delay while a PEM block gets the
 kilobytes it needs.
+
+### Input-side secret detection
+
+`REKAI_INPUT_SECRETS_ENABLED=true` runs the same pattern set the other way —
+against the **request**, not the response. A user pasting `sk-…` into a chat
+prompt otherwise ships that key to the upstream provider. It scans every
+message role on `/v1/chat`, `/v1/chat/stream` and `/v1/chat/completions` plus
+embeddings inputs on `/v1/embeddings`, shares `REKAI_GUARDRAILS_ACTION`
+(`flag` → `X-Input-Secrets-Flag` header, `block` → 403 `input_secret_detected`
+before any provider call), and never rewrites the request — a secret in a
+prompt is usually an accident, so it is refused or signalled, not silently
+mutated. Off by default.
 
 The buffered region is deliberately kept **raw**. Scrubbing it on every delta
 looks tempting and is wrong: the patterns end in `{20,}`, so a half-arrived key
@@ -1010,6 +1047,23 @@ operator who wants the *whole* endpoint behind the key still sets
 `REKAI_METRICS_REQUIRE_AUTH=true` (a no-op if no keys are configured — open
 either way, same fallback as `/v1/*`). With no gateway auth configured there are
 no tenants to separate and nothing is withheld anywhere.
+
+### Per-end-user usage
+
+Requests may carry the OpenAI `user` field — an end-user id within the calling
+tenant's own system. Besides being forwarded upstream for abuse detection, it powers
+`usage_by_user` (`{client: {user: {requests, tokens, cost_usd}}}`) and the
+`rekai_user_requests_total`/`rekai_user_tokens_total`/`rekai_user_cost_usd_total`
+series labelled `{client, user}`. This is the per-end-user spend tracking
+LiteLLM/Portkey operators use to bill their own customers — per-key
+`usage_by_client` answers "which tenant spent it", `usage_by_user` answers
+"which of that tenant's users spent it".
+
+The map is nested under the client specifically so the `/v1/usage` tenant
+scoping above slices it without leaking another tenant's end-user ids. It shares
+`max_tracked_clients` as a *pair* cap (a flood of unique `(client, user)` pairs
+evicts the quietest pair first, never blocking accounting for a busy existing
+pair). User strings are label-escaped in the Prometheus exposition.
 
 ### Per-client budget cap
 
@@ -1174,6 +1228,14 @@ Provider keys arrive per request via the `X-Provider-Key` header. They are
 passed straight to the provider call and never logged, cached, or persisted. A
 server-side default key (e.g. `REKAI_OPENAI_API_KEY`) is used only when no BYOK
 header is present.
+
+On the OpenAI-compatible route specifically, the caller's
+`Authorization: Bearer` doubles as the provider key when the gateway itself is
+unauthenticated (no `REKAI_API_KEYS`, dynamic keys off) — the OpenRouter
+convention, which makes `OpenAI(base_url=rekai, api_key="sk-…")` a working
+drop-in BYOK setup with no custom headers. Once gateway auth is configured,
+`Authorization` belongs to RekAI and BYOK stays on `X-Provider-Key`; forwarding
+a tenant's gateway key upstream would leak it.
 
 ### Readiness
 

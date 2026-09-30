@@ -231,9 +231,16 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
         max_tokens=req.max_tokens,
         stop=req.stop_sequences,
         top_p=req.top_p,
+        service_tier=req.service_tier,
         cache=True,
         tools=[_to_openai_tool(t) for t in req.tools] if req.tools else None,
         tool_choice=_to_openai_tool_choice(req.tool_choice) if req.tool_choice else None,
+        # Anthropic puts the parallel-call switch on tool_choice; OpenAI keeps
+        # it on the request. Explicit `false` is Anthropic's default either way
+        # (parallel allowed), so only a True flag maps onto the internal field.
+        parallel_tool_calls=(
+            False if req.tool_choice and req.tool_choice.disable_parallel_tool_use else None
+        ),
         thinking=req.thinking,
         context_management=req.context_management,
         container=req.container,
@@ -311,7 +318,11 @@ def to_message(resp: ChatResponse) -> dict:
         "content": content,
         "model": resp.model,
         "stop_reason": _FINISH_TO_STOP_REASON.get(finish, "end_turn"),
-        "stop_sequence": None,
+        # Anthropic reports *which* stop sequence fired; it survives the
+        # internal round-trip so a client that sent several can tell which
+        # one matched. Null for providers that don't report it (OpenAI's API
+        # has no equivalent field).
+        "stop_sequence": resp.stop_sequence,
         "usage": _usage_dict(resp.usage),
         # RekAI observability extras — ignored by the SDK, useful to operators.
         "provider": resp.provider,
@@ -434,10 +445,12 @@ def ev_content_block_stop(index: int) -> str:
     return sse("content_block_stop", {"type": "content_block_stop", "index": index})
 
 
-def ev_message_delta(stop_reason: str, usage: Usage | None) -> str:
+def ev_message_delta(
+    stop_reason: str, usage: Usage | None, stop_sequence: str | None = None
+) -> str:
     data: dict[str, Any] = {
         "type": "message_delta",
-        "delta": {"stop_reason": stop_reason, "stop_sequence": None},
+        "delta": {"stop_reason": stop_reason, "stop_sequence": stop_sequence},
     }
     if usage is not None:
         # Anthropic only defines output_tokens here, but we also report

@@ -131,6 +131,19 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
+def scan_texts_for_secrets(texts: Iterable[str], enabled: bool) -> list[str]:
+    """Return the names of every secret pattern found across ``texts``.
+
+    The detection half of ``redact_secrets``: input-side scanning needs the
+    pattern names (for the flag header / block detail) without producing a
+    rewritten copy — a request is refused or flagged, never silently mutated.
+    """
+    if not enabled:
+        return []
+    joined = "\n".join(t for t in texts if t)
+    return [name for name, pattern in _SECRET_PATTERNS if pattern.search(joined)]
+
+
 def redact_secrets(text: str) -> tuple[str, list[str]]:
     """Redact common secret/API-key patterns from ``text``.
 

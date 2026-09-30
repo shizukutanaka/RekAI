@@ -1,10 +1,12 @@
-"""`service_tier` must reach OpenAI-compatible providers, and only them.
+"""`service_tier` must reach the providers that take it — under the same name.
 
 OpenAI's processing tiers (`flex` trades latency for a large discount,
 `priority` pays for lower latency) are a real cost/latency lever. The compat
 layer tolerated the field via ``extra="allow"`` and silently dropped it, so a
 caller routing gpt-5 through RekAI paid default-tier prices regardless.
-Anthropic, Gemini, and Ollama have no such field — it must not reach them.
+Anthropic later added the same field name with its own vocabulary
+(`auto`/`standard_only`); Gemini and Ollama have no such field — it must not
+reach them.
 """
 
 from __future__ import annotations
@@ -69,10 +71,15 @@ async def test_service_tier_reaches_openai(monkeypatch) -> None:
     assert _Client.captured["service_tier"] == "flex"
 
 
+async def test_service_tier_reaches_anthropic_verbatim(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    await AnthropicProvider().chat(_req(service_tier="standard_only"), api_key="sk-x")
+    assert _Client.captured["service_tier"] == "standard_only"
+
+
 @pytest.mark.parametrize(
     ("provider", "api_key", "container"),
     [
-        (AnthropicProvider, "sk-x", lambda p: p),
         (GeminiProvider, "sk-x", lambda p: p["generationConfig"]),
         (OllamaProvider, None, lambda p: p["options"]),
     ],
@@ -109,3 +116,16 @@ def test_compat_maps_service_tier() -> None:
         service_tier="priority",
     )
     assert to_chat_request(req).service_tier == "priority"
+
+
+def test_anthropic_compat_maps_service_tier() -> None:
+    from rekai.anthropic_compat import to_chat_request as anthropic_to_chat_request
+    from rekai.schemas import AnthropicMessagesRequest
+
+    req = AnthropicMessagesRequest(
+        model="claude-x",
+        max_tokens=16,
+        messages=[{"role": "user", "content": "hi"}],
+        service_tier="standard_only",
+    )
+    assert anthropic_to_chat_request(req).service_tier == "standard_only"
