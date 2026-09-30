@@ -1513,6 +1513,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         summary["tool_calls"] = s.tool_calls
                     if s.finish_reason:
                         summary["finish_reason"] = s.finish_reason
+                    if s.stop_sequence:
+                        summary["stop_sequence"] = s.stop_sequence
                     if s.refusal:
                         summary["refusal"] = s.refusal
                     if s.annotations:
@@ -1570,7 +1572,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tuning params are tolerated and ignored. ``Idempotency-Key`` is honored
         on the non-streaming path only — ``stream: true`` does not accept it,
         same as ``/v1/chat/stream``; see docs/architecture.md.
+
+        BYOK note: when the gateway itself requires no client key (no
+        ``REKAI_API_KEYS`` and dynamic keys off), the SDK's own
+        ``Authorization: Bearer`` is forwarded as the provider key — the
+        OpenRouter convention — so ``OpenAI(base_url=rekai, api_key="sk-…")``
+        just works. Once gateway auth is on, ``Authorization`` is spoken for
+        and BYOK goes through ``X-Provider-Key`` as usual.
         """
+        auth_on = bool(config.api_key_list) or config.dynamic_keys_enabled
+        bearer_as_provider = (
+            x_provider_key
+            if x_provider_key is not None or auth_on
+            else auth.parse_bearer(http_request.headers.get("authorization"))
+        )
         # This route does not wrap its own errors in the OpenAI envelope:
         # OpenAICompatErrorMiddleware translates every error on this path,
         # including the ones raised below and the ones the middlewares above
@@ -1592,7 +1607,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 chat_request,
                 http_request,
                 response,
-                x_provider_key,
+                bearer_as_provider,
                 idempotency_key,
                 config,
                 cache_backend,
@@ -1629,7 +1644,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             finish_reason = "stop"
             async for ev in handle_chat_stream(
                 chat_request,
-                x_provider_key,
+                bearer_as_provider,
                 config,
                 cache_backend,
                 provider_name,
@@ -1767,6 +1782,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             open_block: str | None = None  # "thinking" | "text" | "extra"
             block_index = 0
             finish_reason = "stop"
+            stop_sequence = None
             usage = None
             async for ev in handle_chat_stream(
                 chat_request,
@@ -1864,6 +1880,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     s = ev.summary
                     if s.finish_reason:
                         finish_reason = s.finish_reason
+                    if s.stop_sequence:
+                        stop_sequence = s.stop_sequence
                     for tc in s.tool_calls or []:
                         finish_reason = "tool_calls"
                         fn = tc.get("function", {})
@@ -1882,7 +1900,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         yield anthropic_compat.ev_content_block_stop(bi)
                     usage = s.usage
             stop_reason = anthropic_compat._FINISH_TO_STOP_REASON.get(finish_reason, "end_turn")
-            yield anthropic_compat.ev_message_delta(stop_reason, usage)
+            yield anthropic_compat.ev_message_delta(stop_reason, usage, stop_sequence)
             yield anthropic_compat.ev_message_stop()
 
         stream_headers = {

@@ -136,9 +136,11 @@ print(client.chat.completions.create(
 ).choices[0].message.content)
 ```
 
-Set `api_key` to your RekAI gateway key if `REKAI_API_KEYS` is configured, and
-pass a real provider model (`gpt-4o-mini`, `claude-...`, `anthropic/claude-...`)
-with `X-Provider-Key` via `default_headers` for BYOK.
+Set `api_key` to your RekAI gateway key if `REKAI_API_KEYS` is configured —
+otherwise it is forwarded as the BYOK provider key (the OpenRouter
+convention). When gateway auth is on, BYOK goes through `X-Provider-Key` via
+`default_headers`; either way pass a real provider model (`gpt-4o-mini`,
+`claude-...`, `anthropic/claude-...`).
 
 The Anthropic SDK works the same way — RekAI exposes a drop-in
 `POST /v1/messages`:

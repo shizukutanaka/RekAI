@@ -116,6 +116,10 @@ class ProviderResult:
     usage: Usage = field(default_factory=Usage)
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    # Anthropic reports *which* stop sequence ended the turn (`stop_sequence`
+    # alongside `stop_reason: "stop_sequence"`). None for providers that don't
+    # say — OpenAI's API has no equivalent field.
+    stop_sequence: str | None = None
     # The model's refusal text (OpenAI `message.refusal`) — kept out of
     # ``content``, which stays "" on a refusal so "no answer" stays honest.
     refusal: str | None = None
@@ -163,6 +167,7 @@ class StreamEvent:
     usage: Usage | None = None
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    stop_sequence: str | None = None
     # OpenAI streams refusal text as `delta.refusal` chunks, separate from
     # `delta.content` — kept apart for the same reason as ProviderResult.
     refusal_delta: str | None = None
