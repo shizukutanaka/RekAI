@@ -322,6 +322,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   envelope (`type: invalid_request_error`, `code: model_not_found`), matching
   api.openai.com. `openai_compat.openai_error` gained optional `code` /
   `error_type` overrides for this.
+- **`prompt_tokens_details.cached_tokens` on the OpenAI-compat surface.**
+  RekAI's flat `cache_read_tokens` was invisible to OpenAI SDKs, which read the
+  nested field — prompt-cache hits went unreported for drop-in callers. The
+  compat response (and `stream_options.include_usage` chunk) now emits the
+  nested object whenever a provider cache engaged; absent otherwise, matching
+  api.openai.com.
 - **`Authorization: Bearer` doubles as the BYOK key on
   `/v1/chat/completions`.** When the gateway itself is unauthenticated (no
   `REKAI_API_KEYS`, dynamic keys off), the SDK's own Bearer token is forwarded
