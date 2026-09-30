@@ -150,6 +150,7 @@ class OpenAIProvider(Provider):
             ),
             tool_calls=message.get("tool_calls"),
             refusal=message.get("refusal"),
+            annotations=message.get("annotations"),
             finish_reason=_finish_reason(data["choices"][0].get("finish_reason")),
         )
 
@@ -274,13 +275,17 @@ def _parse_openai_sse_event(line: str) -> StreamEvent | None:
         delta_obj = choices[0].get("delta", {})
         delta = delta_obj.get("content")
         refusal = delta_obj.get("refusal")
+        annotations = delta_obj.get("annotations")
         reason = _finish_reason(choices[0].get("finish_reason"))
-        if delta or refusal or reason:
+        if delta or refusal or annotations or reason:
             # The terminal chunk usually carries a finish_reason and an empty
             # delta; a provider may also send both at once. Refusal text arrives
             # in `delta.refusal`, parallel to content.
             return StreamEvent(
-                delta=delta or None, refusal_delta=refusal or None, finish_reason=reason
+                delta=delta or None,
+                refusal_delta=refusal or None,
+                annotations=annotations or None,
+                finish_reason=reason,
             )
     usage = chunk.get("usage")
     if usage:
