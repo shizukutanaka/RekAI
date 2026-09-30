@@ -230,6 +230,23 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   production deployments that deliberately served docs keep them by setting
   `REKAI_DOCS_ENABLED=true`.
 
+### Changed
+- **Providers now read the request-scoped `Settings` instead of the env-cached
+  singleton** (roadmap O-1). Provider code called `get_settings()` directly —
+  an `@lru_cache`d snapshot of process env — so `create_app(settings)` could
+  never reach the provider layer and no test could inject a `Settings` it
+  didn't build the process env for. Provider code now calls
+  `rekai.config.current_settings()`, a `ContextVar` bound by the request
+  middleware and by `handle_chat`/`handle_chat_stream`/`handle_embeddings`
+  themselves (the same idiom `rekai/tracing.py` uses for the trace id), with
+  the env singleton as the fallback outside bound contexts. The registry's
+  import-time initialization is gone: the five builtins register lazily, and
+  `create_app` (un)registers the custom OpenAI-compatible backend from the
+  app's `Settings` via `configure_custom_provider` — re-running `create_app`
+  replaces or removes a stale custom provider instead of leaking it. Public
+  registry API (`get_provider`/`provider_names`/`register_provider`) is
+  unchanged; no behavior change for env-configured deployments.
+
 ### Added
 - **Input-side secret detection** (`REKAI_INPUT_SECRETS_ENABLED`, opt-in).
   Output redaction already scrubbed secrets the *model* emitted; this runs the
@@ -252,6 +269,25 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   end-user ids; the pair cap shares `max_tracked_clients`. Verified live:
   `POST /v1/chat` with `"user":"u1"` → `/v1/usage` shows u1 under the caller's
   client; under `REKAI_API_KEYS` sk-b's view does not contain sk-a's users.
+- **Per-key model allowlists** (`REKAI_KEY_MODELS`, e.g.
+  `"sk-a:gpt-4o*;gpt-4o-mini,sk-b:echo"`). The per-tenant counterpart of
+  `REKAI_ALLOWED_PROVIDERS`: each named key gets a glob allowlist (fnmatch),
+  so tenants can be scoped to the models their tier pays for — previously any
+  valid key could call any configured provider/model. A key with no entry is
+  unrestricted; `key:` with no patterns can call nothing (fail-closed). The
+  check covers `request.model` AND every `fallbacks[].model` — the fallback
+  chain is otherwise a straight path around the allowlist — and runs on all
+  four call surfaces (`/v1/chat`, `/v1/chat/stream`, `/v1/chat/completions`
+  both modes, `/v1/embeddings`). `GET /v1/models` is also filtered to what
+  the caller's key may use. Denied requests return 403 `model_not_allowed`.
+- **Expiring dynamic API keys**: `POST /admin/keys` accepts
+  `expires_in_seconds` and echoes `expires_at`; `GET /admin/keys` returns
+  `dynamic_expires_at` (masked key → unix timestamp), and the `/admin` page
+  shows each key's expiry plus an optional TTL field on the add form. An
+  expired key fails auth exactly like a revoked one — trial tenants and
+  incident access no longer need a manual revoke (LiteLLM's `expires`
+  equivalent). Store blobs written before expiry existed (a bare key list)
+  migrate to `{key: expires_at|null}` on first write.
 - **OpenAI tuning params are forwarded, not just tolerated.** `top_p`, `seed`,
   `frequency_penalty`, `presence_penalty` and `logit_bias` are now typed on
   `ChatRequest`/`ChatCompletionsRequest` (they were previously accepted by

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import importlib
-
 import httpx
 
-from rekai.config import Settings, get_settings
+from rekai.config import Settings
+from rekai.main import create_app
 from rekai.providers.openai_compatible import OpenAICompatibleProvider
+from rekai.providers.registry import configure_custom_provider
 from rekai.schemas import ChatMessage, ChatRequest
 
 
@@ -143,19 +143,24 @@ async def test_chat_uses_custom_base_url_and_key(monkeypatch) -> None:
     assert captured["headers"]["Authorization"] == "Bearer gk"
 
 
-def test_env_registers_custom_provider(monkeypatch) -> None:
-    # The registry wires a custom OpenAI-compatible backend from REKAI_CUSTOM_*
-    # env at import time. The other tests build the provider directly and never
-    # exercise that env -> registry path; this reloads the module to cover it.
+def test_create_app_registers_custom_provider() -> None:
+    # The registry wires a custom OpenAI-compatible backend from the app's
+    # Settings — via create_app -> configure_custom_provider, not the process
+    # env at import time (O-1). The other tests build the provider directly and
+    # never exercise that settings -> registry path; this covers it.
     import rekai.providers.registry as registry
 
-    monkeypatch.setenv("REKAI_CUSTOM_BASE_URL", "https://llm.example.com/v1")
-    monkeypatch.setenv("REKAI_CUSTOM_NAME", "myllm")
-    monkeypatch.setenv("REKAI_CUSTOM_API_KEY", "sk-custom")
-    monkeypatch.setenv("REKAI_CUSTOM_MODELS", "my-model-a, my-model-b")
-    get_settings.cache_clear()
+    create_app(
+        Settings(
+            environment="test",
+            default_provider="echo",
+            custom_base_url="https://llm.example.com/v1",
+            custom_name="myllm",
+            custom_api_key="sk-custom",
+            custom_models="my-model-a, my-model-b",
+        )
+    )
     try:
-        importlib.reload(registry)
         provider = registry.get_provider("myllm")
         assert isinstance(provider, OpenAICompatibleProvider)
         assert provider._url == "https://llm.example.com/v1"
@@ -163,17 +168,15 @@ def test_env_registers_custom_provider(monkeypatch) -> None:
         assert provider._models == ["my-model-a", "my-model-b"]
         assert "myllm" in registry.provider_names()
     finally:
-        # Restore the default (env-free) registry so later tests see clean global
-        # state — the registry holds module-level singletons.
-        monkeypatch.undo()
-        get_settings.cache_clear()
-        importlib.reload(registry)
+        # Restore a clean registry for later tests — configure with no custom
+        # backend removes the registered one.
+        configure_custom_provider(Settings(environment="test", default_provider="echo"))
 
     assert registry.get_provider("myllm") is None
 
 
 def test_no_custom_provider_without_base_url() -> None:
-    # Sanity: the default registry (no REKAI_CUSTOM_BASE_URL) has no custom entry.
+    # Sanity: the default registry (no custom_base_url) has no custom entry.
     import rekai.providers.registry as registry
 
     assert registry.get_provider("myllm") is None

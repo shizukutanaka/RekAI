@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from rekai.config import get_settings
+from rekai.config import current_settings
 from rekai.logging_config import get_logger
 from rekai.providers.base import (
     EmbeddingResult,
@@ -91,7 +91,7 @@ class OllamaProvider(Provider):
     requires_key = False
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
-        settings = get_settings()
+        settings = current_settings()
         _warn_unsupported_fields(request)
         payload: dict = {
             "model": request.model,
@@ -139,7 +139,7 @@ class OllamaProvider(Provider):
         dimensions: int | None = None,
         encoding_format: str | None = None,
     ) -> EmbeddingResult:
-        settings = get_settings()
+        settings = current_settings()
         url = f"{settings.ollama_base_url.rstrip('/')}/api/embed"
         try:
             client = self._client(settings.request_timeout_seconds)
@@ -169,7 +169,7 @@ class OllamaProvider(Provider):
     async def stream_events(
         self, request: ChatRequest, api_key: str | None
     ) -> AsyncIterator[StreamEvent]:
-        settings = get_settings()
+        settings = current_settings()
         _warn_unsupported_fields(request)
         payload: dict = {
             "model": request.model,

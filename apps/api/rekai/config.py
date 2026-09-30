@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar, Token
 from functools import lru_cache
 from typing import Literal
 
@@ -106,6 +107,16 @@ class Settings(BaseSettings):
     # for several providers has no way to say "tenants may only spend on this
     # one" — every authenticated caller can name any of them.
     allowed_providers: str = ""
+
+    # Per-key model allowlists (opt-in): "sk-a:gpt-4o*;gpt-4o-mini,sk-b:echo".
+    # Entries are comma-separated (same as client_budgets_usd); a key's
+    # patterns are ;-separated since , already delimits entries. Glob matching
+    # (fnmatch: *, ?). A key absent from the map is unrestricted; a key listed
+    # with no patterns can call nothing. Applies to the request model and every
+    # fallback model — a restricted key can't reach a disallowed model through
+    # the fallback chain. Only meaningful with gateway auth: the map is keyed
+    # by the raw API key, so per-IP clients can't be distinguished anyway.
+    key_models: str = ""
 
     # Fallback: ordered "provider:model" targets tried on upstream (5xx) errors.
     # e.g. "openai:gpt-4o-mini,echo" — model is optional (defaults to request model).
@@ -361,6 +372,25 @@ class Settings(BaseSettings):
         return overrides
 
     @property
+    def key_model_allowlists(self) -> dict[str, list[str]]:
+        """Parse ``key_models`` into ``{raw_key: [glob, ...]}``, keyed
+        by the raw API key like client_budget_overrides. ``key:`` with no
+        patterns maps to an empty list (deny-all — an operator listing a key
+        intends to restrict it; silently unrestricted would be the footgun).
+        Malformed entries (no ``:``) are skipped."""
+        allowlists: dict[str, list[str]] = {}
+        for raw in self.key_models.split(","):
+            raw = raw.strip()
+            if not raw or ":" not in raw:
+                continue
+            key, _, patterns = raw.partition(":")
+            key = key.strip()
+            if not key:
+                continue
+            allowlists[key] = [p.strip() for p in patterns.split(";") if p.strip()]
+        return allowlists
+
+    @property
     def client_rate_limit_overrides(self) -> dict[str, int]:
         """Parse ``client_rate_limits`` into ``{raw_key: requests_per_window}``,
         same convention as ``client_budget_overrides``. Malformed entries and
@@ -432,3 +462,29 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return a cached Settings instance."""
     return Settings()
+
+
+# The Settings the current request is being served under, so a provider deep in
+# the call stack reads the running app's configuration instead of re-parsing the
+# process env — without threading a settings parameter through every signature
+# from the route handler down. Same ContextVar idiom as the ambient trace id in
+# `rekai/tracing.py`: bound by main.py's request-context middleware (and by the
+# service-layer entry points, so direct ``handle_chat(...)`` calls in tests see
+# the Settings they were passed), and each request gets its own copy, so
+# concurrent requests can't leak into each other's configuration.
+_request_settings: ContextVar[Settings | None] = ContextVar("rekai_request_settings", default=None)
+
+
+def bind_current_settings(settings: Settings) -> Token[Settings | None]:
+    """Bind ``settings`` as the current request's Settings; returns a token for reset."""
+    return _request_settings.set(settings)
+
+
+def reset_current_settings(token: Token[Settings | None]) -> None:
+    _request_settings.reset(token)
+
+
+def current_settings() -> Settings:
+    """The Settings bound to this request, or the env-cached default outside a
+    bound context (import time, a provider invoked directly in a unit test)."""
+    return _request_settings.get() or get_settings()
