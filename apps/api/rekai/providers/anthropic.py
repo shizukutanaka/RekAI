@@ -126,6 +126,10 @@ class AnthropicProvider(Provider):
         }
         if request.stop:
             payload["stop_sequences"] = request.stop
+        # Anthropic's own processing tier ('auto' | 'standard_only') — same
+        # field name as OpenAI's, different vocabulary. Forwarded verbatim.
+        if request.service_tier is not None:
+            payload["service_tier"] = request.service_tier
         # Anthropic supports top_p but has no seed/frequency/presence/logit_bias
         # equivalents — those stay RekAI-side rather than erroring upstream.
         if request.top_p is not None:
@@ -155,6 +159,10 @@ class AnthropicProvider(Provider):
             payload["tools"] = _translate_tools(request.tools)
             choice = _translate_tool_choice(request.tool_choice)
             if choice is not None:
+                # OpenAI's request-level parallel_tool_calls=False is
+                # Anthropic's tool_choice.disable_parallel_tool_use.
+                if request.parallel_tool_calls is False:
+                    choice["disable_parallel_tool_use"] = True
                 payload["tool_choice"] = choice
         # A top-level cache_control marks the end of the cacheable prefix. Place
         # it on the last message block (after tools/system in Anthropic's render
@@ -179,6 +187,9 @@ class AnthropicProvider(Provider):
             payload["diagnostics"] = request.diagnostics
         if request.mcp_servers:
             payload["mcp_servers"] = request.mcp_servers
+        if request.user is not None:
+            # Anthropic's abuse-detection end-user id.
+            payload["metadata"] = {"user_id": request.user}
         # Output config (effort/format) too — Anthropic's own vocabulary.
         if request.output_config is not None:
             payload["output_config"] = request.output_config
@@ -187,10 +198,15 @@ class AnthropicProvider(Provider):
         return payload
 
     def _headers(self, key: str, request: ChatRequest | None = None) -> dict[str, str]:
+        beta = request.anthropic_beta if request is not None else None
         headers = {
             **trace_headers(),
             "x-api-key": key,
             "anthropic-version": current_settings().anthropic_version,
+            # Beta-gated features (interleaved thinking, prompt caching scope,
+            # ...) need the caller's `anthropic-beta` flag set to survive the
+            # compat hop — forward it verbatim when present.
+            **({"anthropic-beta": beta} if beta else {}),
             "content-type": "application/json",
         }
         # Anthropic takes the user profile as a header, not a body field.
@@ -198,7 +214,10 @@ class AnthropicProvider(Provider):
             headers["anthropic-user-profile-id"] = request.user_profile_id
         # Anthropic's MCP connector is a beta: mcp_servers is rejected without it.
         if request is not None and request.mcp_servers:
-            headers["anthropic-beta"] = "mcp-client-2025-11-20"
+            flags = [f.strip() for f in (beta or "").split(",") if f.strip()]
+            if "mcp-client-2025-11-20" not in flags:
+                flags.append("mcp-client-2025-11-20")
+            headers["anthropic-beta"] = ",".join(flags)
         return headers
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
@@ -257,6 +276,14 @@ class AnthropicProvider(Provider):
         finish_reason = _finish_reason(
             data.get("stop_reason"), emulating_json=self._emulating_json(request)
         )
+        # Anthropic sends refusal text as an ordinary text content block, with
+        # stop_reason="refusal" carrying the flag. OpenAI puts it in
+        # `message.refusal` with `content: null` instead — move it there so a
+        # caller checking the documented field finds the text.
+        refusal = None
+        if data.get("stop_reason") == "refusal" and content:
+            refusal, content = content, ""
+            tool_calls = None
         cache_read, cache_write = _cache_tokens(usage)
         # Anthropic reports cached prompt tokens *separately* from input_tokens;
         # fold them in so prompt_tokens stays the true prompt size and the cache
@@ -265,6 +292,7 @@ class AnthropicProvider(Provider):
         completion_tokens = usage.get("output_tokens", 0)
         return ProviderResult(
             content=content,
+            refusal=refusal,
             model=data.get("model", request.model),
             tool_calls=tool_calls,
             usage=Usage(

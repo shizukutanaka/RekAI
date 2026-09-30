@@ -1073,6 +1073,7 @@ async def _handle_embeddings(
                 api_key,
                 dimensions=request.dimensions,
                 encoding_format=request.encoding_format,
+                user=request.user,
             ),
             attempts=settings.retry_max_attempts,
             base_delay=settings.retry_base_delay_seconds,
