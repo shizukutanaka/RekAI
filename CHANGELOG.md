@@ -120,6 +120,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requirement), while an explicit temperature rides as sent. Non-Anthropic
   providers ignore the config and surfaces without the concept (OpenAI chunks)
   drop the blocks. Both SDKs and the web client expose `thinking_blocks`.
+- **`anthropic-beta` header forwarding on `POST /v1/messages`.** Anthropic
+  gates features behind beta headers (interleaved thinking, prompt-caching
+  scope, ...); a compat caller's header was dropped, silently disabling the
+  gated feature. It's now forwarded verbatim to Anthropic upstream and keyed
+  into the response cache (beta flags can change the response shape).
 - **`POST /v1/messages` accepts Anthropic server tools verbatim** —
   `web_search_20250305`, `code_execution_*`, `computer_use_*`,
   `mcp_tool_use`, etc. (any tool whose `type` isn't `custom`) are no longer
