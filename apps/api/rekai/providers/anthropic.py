@@ -173,19 +173,21 @@ class AnthropicProvider(Provider):
             payload["speed"] = request.speed
         if request.diagnostics is not None:
             payload["diagnostics"] = request.diagnostics
-        if request.user_profile_id is not None:
-            payload["user_profile_id"] = request.user_profile_id
         if stream:
             payload["stream"] = True
         return payload
 
-    def _headers(self, key: str) -> dict[str, str]:
-        return {
+    def _headers(self, key: str, request: ChatRequest | None = None) -> dict[str, str]:
+        headers = {
             **trace_headers(),
             "x-api-key": key,
             "anthropic-version": get_settings().anthropic_version,
             "content-type": "application/json",
         }
+        # Anthropic takes the user profile as a header, not a body field.
+        if request is not None and request.user_profile_id is not None:
+            headers["anthropic-user-profile-id"] = request.user_profile_id
+        return headers
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
         settings = get_settings()
@@ -195,7 +197,7 @@ class AnthropicProvider(Provider):
         url = f"{settings.anthropic_base_url.rstrip('/')}/messages"
         try:
             client = self._client(settings.request_timeout_seconds)
-            resp = await client.post(url, json=payload, headers=self._headers(key))
+            resp = await client.post(url, json=payload, headers=self._headers(key, request))
         except httpx.HTTPError as exc:
             raise ProviderError(f"Anthropic request failed: {exc}") from exc
 
@@ -293,7 +295,9 @@ class AnthropicProvider(Provider):
         extra_json: dict[int, str] = {}
         try:
             client = self._client(settings.request_timeout_seconds)
-            async with client.stream("POST", url, json=payload, headers=self._headers(key)) as resp:
+            async with client.stream(
+                "POST", url, json=payload, headers=self._headers(key, request)
+            ) as resp:
                 if resp.status_code >= 400:
                     body = (await resp.aread()).decode()[:200]
                     raise ProviderError(

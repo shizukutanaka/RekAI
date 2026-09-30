@@ -85,10 +85,11 @@ class ChatRequest(BaseModel):
         "(clear old tool uses, clear thinking, compact). Forwarded verbatim "
         "to Anthropic only; other providers ignore it.",
     )
-    container: dict[str, Any] | None = Field(
+    container: dict[str, Any] | str | None = Field(
         default=None,
-        description="Anthropic's `container` — reuse a code-execution "
-        "container across requests. Forwarded verbatim to Anthropic only.",
+        description="Anthropic's `container` — a container id (string) or "
+        "config object ({id, skills}) to reuse a code-execution container "
+        "across requests. Forwarded verbatim to Anthropic only.",
     )
     inference_geo: str | None = Field(
         default=None,
@@ -108,8 +109,9 @@ class ChatRequest(BaseModel):
     )
     user_profile_id: str | None = Field(
         default=None,
-        description="Anthropic's `user_profile_id` — a saved profile to apply "
-        "to the request. Forwarded to Anthropic only.",
+        description="Anthropic's `user_profile_id` — the user profile to "
+        "attribute the request to. Sent to Anthropic only, as the "
+        "`anthropic-user-profile-id` header.",
     )
     include_obfuscation: bool | None = Field(
         default=None,
@@ -301,7 +303,7 @@ class _AnthropicMessagesBase(BaseModel):
     # swallow-by-extra=allow hazard. (`fallbacks` is deliberately absent:
     # RekAI's own extension uses that name with different semantics.)
     context_management: dict[str, Any] | None = None
-    container: dict[str, Any] | None = None
+    container: dict[str, Any] | str | None = None
     inference_geo: str | None = None
     speed: str | None = None
     diagnostics: dict[str, Any] | None = None

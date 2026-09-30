@@ -52,6 +52,7 @@ class _Resp:
 
 class _Client:
     captured: dict = {}
+    headers: dict = {}
 
     def __init__(self, *a: object, **k: object) -> None:
         pass
@@ -67,6 +68,7 @@ class _Client:
 
     async def post(self, url, json=None, headers=None, **kw):
         _Client.captured = json or {}
+        _Client.headers = headers or {}
         return _Resp()
 
 
@@ -82,11 +84,28 @@ _FIELDS = {
 }
 
 
-@pytest.mark.parametrize(("field", "value"), _FIELDS.items())
+_BODY_FIELDS = {k: v for k, v in _FIELDS.items() if k != "user_profile_id"}
+
+
+@pytest.mark.parametrize(("field", "value"), _BODY_FIELDS.items())
 async def test_field_reaches_anthropic(monkeypatch, field: str, value: object) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", _Client)
     await AnthropicProvider().chat(_req(**{field: value}), api_key="sk-x")
     assert _Client.captured[field] == value
+
+
+async def test_user_profile_id_is_sent_as_header(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    await AnthropicProvider().chat(_req(user_profile_id="profile_abc"), api_key="sk-x")
+    assert _Client.headers["anthropic-user-profile-id"] == "profile_abc"
+    assert "user_profile_id" not in _Client.captured
+
+
+async def test_container_id_string_reaches_anthropic(monkeypatch) -> None:
+    # Container reuse passes the bare id string returned by a prior response.
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    await AnthropicProvider().chat(_req(container="container_abc"), api_key="sk-x")
+    assert _Client.captured["container"] == "container_abc"
 
 
 @pytest.mark.parametrize("field", _FIELDS)
