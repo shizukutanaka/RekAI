@@ -33,6 +33,23 @@ interface DisplayMessage extends ChatMessage {
   fallbackUsed?: boolean;
   cacheSimilarity?: number | null;
   redacted?: string[] | null;
+  extraBlocks?: Record<string, unknown>[];
+  contentBlocks?: Record<string, unknown>[];
+}
+
+// Server-side tools the provider ran for an answer (web search, code
+// execution, MCP). Surfaced so "the model just knew" reads honestly — an
+// unattributed web search looks exactly like the model remembering.
+function serverToolNote(blocks?: Record<string, unknown>[]): string {
+  const names = [
+    ...new Set(
+      (blocks ?? [])
+        .filter((b) => b.type === "server_tool_use")
+        .map((b) => String(b.name ?? "tool")),
+    ),
+  ];
+  if (names.length) return ` · used ${names.join(", ")}`;
+  return blocks?.length ? " · used server tools" : "";
 }
 
 // Monotonic id for React keys. Index keys shift when regenerate()/clear drop or
@@ -141,7 +158,15 @@ export default function ChatPage() {
     setError("");
     setLoading(true);
 
-    const convo = history.map(({ role, content }) => ({ role, content }));
+    // Anthropic requires the server-tool trace echoed back in multi-turn
+    // context — the ordered verbatim array replays the exact emitted
+    // sequence, extraBlocks the flattened trace for older replies.
+    const convo = history.map(({ role, content, extraBlocks, contentBlocks }) => ({
+      role,
+      content,
+      ...(extraBlocks?.length ? { extra_blocks: extraBlocks } : {}),
+      ...(contentBlocks?.length ? { content_blocks: contentBlocks } : {}),
+    }));
     // Prepend an optional system prompt (not shown as a chat bubble).
     const wire = system.trim()
       ? [{ role: "system" as const, content: system.trim() }, ...convo]
@@ -168,6 +193,11 @@ export default function ChatPage() {
         // genuine upstream error hits the same "stream ended early" situation
         // and deserves the same treatment, not a deleted reply.
         let streamError: Error | null = null;
+        // The reply reassembled in upstream order — text deltas extend the
+        // last text block, completed tool blocks land between them — so the
+        // next turn can echo the same sequence verbatim (flattened
+        // extraBlocks+text would replay all tools before the answer).
+        const ordered: Record<string, unknown>[] = [];
         try {
           await streamChat(
             {
@@ -182,6 +212,9 @@ export default function ChatPage() {
               onRateLimit: setRateLimit,
             },
             (delta) => {
+              const tail = ordered[ordered.length - 1];
+              if (tail?.type === "text") tail.text = (tail.text as string) + delta;
+              else ordered.push({ type: "text", text: delta });
               setMessages((prev) => {
                 const next = [...prev];
                 const last = next[next.length - 1];
@@ -194,6 +227,20 @@ export default function ChatPage() {
             controller.signal,
             (s) => {
               summary = s;
+            },
+            (block) => {
+              ordered.push(block);
+              setMessages((prev) => {
+                const next = [...prev];
+                const last = next[next.length - 1];
+                if (last?.role === "assistant") {
+                  next[next.length - 1] = {
+                    ...last,
+                    extraBlocks: [...(last.extraBlocks ?? []), block],
+                  };
+                }
+                return next;
+              });
             },
           );
         } catch (e) {
@@ -225,6 +272,7 @@ export default function ChatPage() {
             cost: finalSummary?.cost_usd ?? undefined,
             finishReason: finalSummary?.finish_reason,
             redacted: finalSummary?.redacted,
+            contentBlocks: ordered.some((b) => b.type !== "text") ? ordered : undefined,
           };
           return next;
         });
@@ -261,6 +309,8 @@ export default function ChatPage() {
             fallbackUsed: res.fallback_used,
             cacheSimilarity: res.cache_similarity,
             redacted: res.redacted,
+            extraBlocks: res.extra_blocks ?? undefined,
+            contentBlocks: res.content_blocks ?? undefined,
           },
         ]);
       }
@@ -424,6 +474,7 @@ export default function ChatPage() {
                 {m.fallbackUsed ? " · via fallback" : ""}
                 {finishNote(m.finishReason) ? ` · ${finishNote(m.finishReason)}` : ""}
                 {redactionNote(m.redacted) ? ` · ${redactionNote(m.redacted)}` : ""}
+                {serverToolNote(m.extraBlocks)}
               </span>
             )}
           </div>
