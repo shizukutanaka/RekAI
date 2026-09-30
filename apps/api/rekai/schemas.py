@@ -293,6 +293,7 @@ class ChatCompletionMessage(BaseModel):
     content: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
     refusal: str | None = None
+    annotations: list[dict[str, Any]] | None = None
 
 
 class ChatCompletionChoice(BaseModel):
@@ -337,6 +338,12 @@ class ChatResponse(BaseModel):
         default=None,
         description="The model's refusal text when it declined (OpenAI "
         "'message.refusal'); content is empty in that case. Null otherwise.",
+    )
+    annotations: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Citations etc. attached to the answer (OpenAI "
+        "'message.annotations' — e.g. url_citation entries for web search), "
+        "passed through verbatim.",
     )
     usage: Usage
     cost_usd: float | None = Field(
@@ -452,7 +459,9 @@ class ServiceInfo(BaseModel):
     name: str
     version: str
     description: str
-    docs: str
+    # null when docs are disabled (production default) — don't advertise a
+    # route that doesn't exist.
+    docs: str | None
     health: str
 
 

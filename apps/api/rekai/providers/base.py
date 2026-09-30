@@ -119,6 +119,9 @@ class ProviderResult:
     # The model's refusal text (OpenAI `message.refusal`) — kept out of
     # ``content``, which stays "" on a refusal so "no answer" stays honest.
     refusal: str | None = None
+    # Web-search citations etc. (OpenAI `message.annotations`) — raw dicts,
+    # passed through verbatim so the caller sees what the model cited.
+    annotations: list[dict] | None = None
     # Anthropic extended-thinking blocks (thinking/redacted_thinking), verbatim
     # — text and signature the caller must echo back on the next turn.
     thinking_blocks: list[dict] | None = None
@@ -159,6 +162,8 @@ class StreamEvent:
     # OpenAI streams refusal text as `delta.refusal` chunks, separate from
     # `delta.content` — kept apart for the same reason as ProviderResult.
     refusal_delta: str | None = None
+    # OpenAI streams annotations complete inside one delta chunk.
+    annotations: list[dict] | None = None
     # Anthropic extended-thinking stream pieces: a thinking_delta text chunk,
     # the block's closing signature, or a whole redacted_thinking block.
     thinking_delta: str | None = None
@@ -183,6 +188,12 @@ class Provider(ABC):
 
     #: Whether this provider requires an API key (server-side or BYOK).
     requires_key: bool = True
+
+    #: Largest ``dimensions`` value this provider will embed — enforced before
+    #: the embeddings cache lookup and idempotent replay, since both serve
+    #: stored responses without calling the provider. ``None`` means the
+    #: request value is forwarded verbatim (the contract for real providers).
+    max_embedding_dimensions: int | None = None
 
     def __init__(self) -> None:
         self._http_client: httpx.AsyncClient | None = None

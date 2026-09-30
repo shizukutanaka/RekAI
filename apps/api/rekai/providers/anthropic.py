@@ -202,12 +202,23 @@ class AnthropicProvider(Provider):
             for b in blocks
             if b.get("type") not in ("text", "thinking", "redacted_thinking", "tool_use")
         ]
+        content_blocks = blocks
         if self._emulating_json(request):
             # The caller asked for JSON, not a tool call: unwrap the forced
             # tool_use block's input back into `content` and drop the call, so
-            # the response is shaped like OpenAI's JSON mode.
-            content = _unwrap_structured_output(blocks) or content
+            # the response is shaped like OpenAI's JSON mode. The verbatim
+            # array keeps the answer too — as a text block where the synthetic
+            # call sat — so a nonempty content_blocks (other blocks beside it)
+            # still carries the JSON, which to_message prefers over `content`.
+            unwrapped = _unwrap_structured_output(blocks)
+            content = unwrapped or content
             tool_calls = None
+            content_blocks = [
+                {"type": "text", "text": unwrapped or ""}
+                if b.get("type") == "tool_use" and b.get("name") == _JSON_TOOL_NAME
+                else b
+                for b in blocks
+            ]
         usage = data.get("usage", {})
         finish_reason = _finish_reason(
             data.get("stop_reason"), emulating_json=self._emulating_json(request)
@@ -232,7 +243,7 @@ class AnthropicProvider(Provider):
             finish_reason=finish_reason,
             thinking_blocks=thinking_blocks or None,
             extra_blocks=extra_blocks or None,
-            content_blocks=blocks or None,
+            content_blocks=content_blocks or None,
             extra_fields=_response_extras(data),
         )
 
@@ -318,7 +329,15 @@ class AnthropicProvider(Provider):
                             # Deltas belonging to a tracked extra block (any
                             # type — including text_delta inside a tool-result
                             # block) ride through verbatim, never as answer
-                            # text.
+                            # text. They also merge into the stored block so
+                            # the completed `extra_block` event matches what
+                            # upstream emitted, not the start-of-block stub.
+                            idx = event.get("index", 0)
+                            block = extra_blocks[idx]
+                            if delta.get("type") == "text_delta":
+                                block["text"] = block.get("text", "") + (text or "")
+                            elif delta.get("type") == "citations_delta" and delta.get("citation"):
+                                block.setdefault("citations", []).append(delta["citation"])
                             yield StreamEvent(extra_block_delta=delta)
                         elif delta.get("type") == "thinking_delta":
                             yield StreamEvent(thinking_delta=delta.get("thinking", ""))
@@ -338,10 +357,6 @@ class AnthropicProvider(Provider):
                             elif event.get("index", 0) in extra_json:
                                 extra_json[event.get("index", 0)] += fragment
                                 yield StreamEvent(extra_block_delta=delta)
-                        elif event.get("index", 0) in extra_json:
-                            # Any other delta type on a tracked extra block
-                            # rides through verbatim as well.
-                            yield StreamEvent(extra_block_delta=delta)
                     elif etype == "content_block_stop":
                         idx = event.get("index", 0)
                         if idx in extra_blocks:
@@ -518,34 +533,42 @@ def _translate_messages(messages: list) -> list[dict]:
             # which the flattened thinking→extra→text→tool_use reconstruction
             # can't reproduce.
             if m.content_blocks:
-                out.append({"role": "assistant", "content": m.content_blocks})
-                continue
-            blocks: list[dict] = []
-            # Thinking blocks must precede every other block in an assistant
-            # turn (Anthropic's contract) — they are echoed back verbatim.
-            if m.thinking_blocks:
-                blocks.extend(m.thinking_blocks)
-            # Server-tool trace (server_tool_use, tool-result blocks) sits
-            # between thinking and the answer text, matching upstream order.
-            if m.extra_blocks:
-                blocks.extend(m.extra_blocks)
-            if m.content:
-                blocks.append({"type": "text", "text": m.content})
-            for tc in m.tool_calls or []:
-                fn = tc.get("function", {})
-                try:
-                    args = json.loads(fn.get("arguments") or "{}")
-                except json.JSONDecodeError:
-                    args = {}
-                blocks.append(
+                # Copy the blocks: _apply_cache_control below (or a caller's
+                # own later edit) must not mutate the verbatim history the
+                # client asked to replay unchanged.
+                out.append(
                     {
-                        "type": "tool_use",
-                        "id": tc.get("id", ""),
-                        "name": fn.get("name", ""),
-                        "input": args,
+                        "role": "assistant",
+                        "content": [dict(b) for b in m.content_blocks],
                     }
                 )
-            out.append({"role": "assistant", "content": blocks})
+            else:
+                blocks: list[dict] = []
+                # Thinking blocks must precede every other block in an
+                # assistant turn (Anthropic's contract) — echoed verbatim.
+                if m.thinking_blocks:
+                    blocks.extend(m.thinking_blocks)
+                # Server-tool trace (server_tool_use, tool-result blocks) sits
+                # between thinking and the answer text, matching upstream order.
+                if m.extra_blocks:
+                    blocks.extend(m.extra_blocks)
+                if m.content:
+                    blocks.append({"type": "text", "text": m.content})
+                for tc in m.tool_calls or []:
+                    fn = tc.get("function", {})
+                    try:
+                        args = json.loads(fn.get("arguments") or "{}")
+                    except json.JSONDecodeError:
+                        args = {}
+                    blocks.append(
+                        {
+                            "type": "tool_use",
+                            "id": tc.get("id", ""),
+                            "name": fn.get("name", ""),
+                            "input": args,
+                        }
+                    )
+                out.append({"role": "assistant", "content": blocks})
         else:
             out.append({"role": m.role, "content": m.content or ""})
         _apply_cache_control(out[-1], getattr(m, "cache_control", None))
