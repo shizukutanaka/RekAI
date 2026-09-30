@@ -12,12 +12,17 @@ it. Echo honors ``dimensions`` itself so the parameter is exercisable keyless.
 from __future__ import annotations
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
-from rekai.cache import embedding_cache_key
+from rekai.cache import MemoryCache, embedding_cache_key
+from rekai.providers.base import ProviderError
+from rekai.providers.echo import EchoProvider
 from rekai.providers.gemini import GeminiProvider
 from rekai.providers.ollama import OllamaProvider
 from rekai.providers.openai import OpenAIProvider
+from rekai.schemas import EmbeddingsRequest, EmbeddingsResponse, Usage
+from rekai.service import handle_embeddings
 
 
 class _Resp:
@@ -114,3 +119,33 @@ def test_echo_honors_dimensions(client: TestClient) -> None:
     resp = client.post("/v1/embeddings", json={"model": "echo", "input": "hi"})
     assert resp.status_code == 200
     assert [len(v) for v in resp.json()["embeddings"]] == [16]  # unchanged default
+
+
+async def test_echo_dimensions_capped() -> None:
+    # echo allocates `dimensions` floats per input in-process; the schema only
+    # enforces ge=1, so an unbounded value would exhaust a worker on one request.
+    with pytest.raises(ProviderError) as exc:
+        await EchoProvider().embed(["hi"], "echo", None, dimensions=10**7)
+    assert exc.value.status_code == 400
+
+
+async def test_stale_cached_vector_with_wrong_length_is_a_miss(settings) -> None:
+    # Cache keys already scope to `dimensions`, but an entry written before the
+    # provider honored it holds the old vector size under that same key — the
+    # hit path checks the length so a stale entry recomputes instead of
+    # answering until its TTL expires.
+    cache = MemoryCache()
+    key = embedding_cache_key("echo", "echo", ["hi"], dimensions=8)
+    stale = EmbeddingsResponse(
+        provider="echo",
+        model="echo",
+        embeddings=[[0.0] * 16],
+        usage=Usage(prompt_tokens=1, total_tokens=1),
+    )
+    await cache.set(key, stale.model_dump_json(), ttl=60)
+
+    result = await handle_embeddings(
+        EmbeddingsRequest(model="echo", input="hi", dimensions=8), None, settings, cache
+    )
+    assert result.cached is False
+    assert len(result.embeddings[0]) == 8

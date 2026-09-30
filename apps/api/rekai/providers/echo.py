@@ -10,10 +10,22 @@ import hashlib
 from collections.abc import AsyncIterator
 
 from rekai import models
-from rekai.providers.base import EmbeddingResult, Provider, ProviderResult, StreamEvent
+from rekai.providers.base import (
+    EmbeddingResult,
+    Provider,
+    ProviderError,
+    ProviderResult,
+    StreamEvent,
+)
 from rekai.schemas import ChatRequest, Usage
 
 _EMBED_DIM = 16
+
+# echo allocates `dimensions` floats *per input* in-process, and the schema only
+# enforces `ge=1` — an unbounded request would exhaust the worker. Larger than
+# any real model's ceiling (OpenAI tops out at 3072), so this never gates a
+# demo a real provider would have served.
+_MAX_ECHO_DIM = 4096
 
 
 def _count_tokens(text: str) -> int:
@@ -78,6 +90,11 @@ class EchoProvider(Provider):
         dimensions: int | None = None,
         encoding_format: str | None = None,
     ) -> EmbeddingResult:
+        if dimensions is not None and dimensions > _MAX_ECHO_DIM:
+            raise ProviderError(
+                f"echo's pseudo-embeddings cap at {_MAX_ECHO_DIM} dimensions.",
+                status_code=400,
+            )
         tokens = sum(_count_tokens(t) for t in inputs)
         return EmbeddingResult(
             # `encoding_format` stays unhonored: the API response is JSON

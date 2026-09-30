@@ -878,8 +878,16 @@ async def handle_embeddings(
     if use_cache:
         cached_raw = await cache.get(key)
         if cached_raw is not None:
-            metrics.record_cache(hit=True)
-            return EmbeddingsResponse(**{**json.loads(cached_raw), "cached": True})
+            cached = json.loads(cached_raw)
+            vectors = cached.get("embeddings") or []
+            # Entries written before the provider honored this `dimensions`
+            # value hold the old size under the same key — a hit must not
+            # return a wrong-length vector until the TTL expires (Redis can
+            # carry one across a deploy). Fall through and recompute; the
+            # store below overwrites the stale entry.
+            if request.dimensions is None or not vectors or len(vectors[0]) == request.dimensions:
+                metrics.record_cache(hit=True)
+                return EmbeddingsResponse(**{**cached, "cached": True})
         metrics.record_cache(hit=False)
 
     started = time.perf_counter()
