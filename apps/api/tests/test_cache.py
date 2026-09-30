@@ -277,7 +277,7 @@ async def test_embeddings_concurrent_misses_coalesce_to_one_provider_call() -> N
             raise NotImplementedError
 
         async def embed(
-            self, inputs, model, api_key, *, dimensions=None, encoding_format=None
+            self, inputs, model, api_key, *, dimensions=None, encoding_format=None, user=None
         ) -> EmbeddingResult:
             nonlocal calls
             calls += 1
