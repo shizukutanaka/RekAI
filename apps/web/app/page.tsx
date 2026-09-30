@@ -193,6 +193,11 @@ export default function ChatPage() {
         // genuine upstream error hits the same "stream ended early" situation
         // and deserves the same treatment, not a deleted reply.
         let streamError: Error | null = null;
+        // The reply reassembled in upstream order — text deltas extend the
+        // last text block, completed tool blocks land between them — so the
+        // next turn can echo the same sequence verbatim (flattened
+        // extraBlocks+text would replay all tools before the answer).
+        const ordered: Record<string, unknown>[] = [];
         try {
           await streamChat(
             {
@@ -207,6 +212,9 @@ export default function ChatPage() {
               onRateLimit: setRateLimit,
             },
             (delta) => {
+              const tail = ordered[ordered.length - 1];
+              if (tail?.type === "text") tail.text = (tail.text as string) + delta;
+              else ordered.push({ type: "text", text: delta });
               setMessages((prev) => {
                 const next = [...prev];
                 const last = next[next.length - 1];
@@ -221,6 +229,7 @@ export default function ChatPage() {
               summary = s;
             },
             (block) => {
+              ordered.push(block);
               setMessages((prev) => {
                 const next = [...prev];
                 const last = next[next.length - 1];
@@ -263,6 +272,7 @@ export default function ChatPage() {
             cost: finalSummary?.cost_usd ?? undefined,
             finishReason: finalSummary?.finish_reason,
             redacted: finalSummary?.redacted,
+            contentBlocks: ordered.some((b) => b.type !== "text") ? ordered : undefined,
           };
           return next;
         });
