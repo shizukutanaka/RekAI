@@ -231,6 +231,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `REKAI_DOCS_ENABLED=true`.
 
 ### Added
+- **OpenAI tuning params are forwarded, not just tolerated.** `top_p`, `seed`,
+  `frequency_penalty`, `presence_penalty` and `logit_bias` are now typed on
+  `ChatRequest`/`ChatCompletionsRequest` (they were previously accepted by
+  `extra="allow"` and silently dropped — a `seed=42` request got a
+  non-deterministic 200). Forwarded per provider support: OpenAI-compatible
+  takes all five, Anthropic `top_p`, Gemini `topP`, Ollama `top_p` + `seed`.
+  All five join the cache key and semantic bucket. Both SDKs expose them
+  (`topP`, `frequencyPenalty`, … in JS; snake_case in Python). The
+  Anthropic-compat surface's own declared `top_p` (which parsed and
+  range-validated, then silently dropped) now maps onto it too.
 - **`web_search_options` and `stream_options.include_obfuscation` forwarding.**
   Two more OpenAI request fields the compat layer accepted and dropped now
   reach OpenAI-compatible providers: `web_search_options` (hosted web-search

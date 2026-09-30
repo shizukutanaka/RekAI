@@ -45,6 +45,10 @@ def _options(request: ChatRequest) -> dict:
         options["num_predict"] = request.max_tokens
     if request.stop:
         options["stop"] = request.stop
+    if request.top_p is not None:
+        options["top_p"] = request.top_p
+    if request.seed is not None:
+        options["seed"] = request.seed
     return options
 
 

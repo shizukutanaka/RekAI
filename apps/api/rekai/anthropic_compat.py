@@ -221,6 +221,7 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
         temperature=temperature,
         max_tokens=req.max_tokens,
         stop=req.stop_sequences,
+        top_p=req.top_p,
         cache=True,
         tools=[_to_openai_tool(t) for t in req.tools] if req.tools else None,
         tool_choice=_to_openai_tool_choice(req.tool_choice) if req.tool_choice else None,

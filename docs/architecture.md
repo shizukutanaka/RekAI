@@ -224,9 +224,13 @@ covers it.
 Two RekAI extensions select a provider (OpenAI's schema has no provider field):
 an optional `provider` body field, or an OpenRouter-style `"<provider>/<model>"`
 model string (split only when the prefix is a *registered* provider, so a custom
-backend's own slash-containing model ids are left intact). Unknown OpenAI tuning
-params are tolerated and ignored; `n > 1` is a 400. It is part of the cache key,
-so a JSON-mode request and a plain one never collide.
+backend's own slash-containing model ids are left intact). `top_p`, `seed`,
+`frequency_penalty`, `presence_penalty` and `logit_bias` are now first-class:
+typed on both request schemas and forwarded — OpenAI-compatible backends take
+all five, Anthropic `top_p`, Gemini `topP`, Ollama `top_p` + `seed` — and they
+participate in the cache key and semantic bucket. Other unknown OpenAI tuning
+params are still tolerated and ignored; `n > 1` is a 400. `response_format` is
+part of the cache key too, so a JSON-mode request and a plain one never collide.
 
 ### Errors on the compatible endpoint
 

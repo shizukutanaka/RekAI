@@ -99,6 +99,16 @@ class OpenAIProvider(Provider):
                 payload["stream_options"]["include_obfuscation"] = request.include_obfuscation
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
+        if request.top_p is not None:
+            payload["top_p"] = request.top_p
+        if request.seed is not None:
+            payload["seed"] = request.seed
+        if request.frequency_penalty is not None:
+            payload["frequency_penalty"] = request.frequency_penalty
+        if request.presence_penalty is not None:
+            payload["presence_penalty"] = request.presence_penalty
+        if request.logit_bias is not None:
+            payload["logit_bias"] = request.logit_bias
         if request.stop:
             payload["stop"] = request.stop
         if request.service_tier is not None:
