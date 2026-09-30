@@ -52,6 +52,8 @@ class StreamSummary:
     estimated: bool
     tool_calls: list[dict] | None = None
     finish_reason: str | None = None
+    # Web-search citations etc. (OpenAI `message.annotations`), verbatim dicts.
+    annotations: list[dict] | None = None
     # Secret patterns scrubbed from the streamed text. Reported here rather
     # than as a header because response headers are long gone by the time the
     # first delta is redacted.
@@ -69,6 +71,7 @@ class ChatStreamEvent:
     """
 
     delta: str | None = None
+    annotations: list[dict] | None = None
     error: ProviderError | None = None
     summary: StreamSummary | None = None
     # Anthropic extended-thinking pieces — a thinking_delta chunk, the block's
@@ -580,6 +583,7 @@ async def handle_chat(
             model=result.model,
             content=result.content,
             tool_calls=result.tool_calls,
+            annotations=result.annotations,
             usage=usage,
             cost_usd=cost_usd,
             cached=False,
@@ -647,6 +651,7 @@ async def handle_chat_stream(
     reported_usage: Usage | None = None
     reported_tool_calls: list[dict] | None = None
     reported_finish_reason: str | None = None
+    reported_annotations: list[dict] = []
     errored = False
     started = time.perf_counter()
     first_token_at: float | None = None
@@ -683,6 +688,9 @@ async def handle_chat_stream(
                 emitted = redactor.feed(event.delta) if redactor is not None else event.delta
                 if emitted:
                     yield ChatStreamEvent(delta=emitted)
+            if event.annotations is not None:
+                reported_annotations.extend(event.annotations)
+                yield ChatStreamEvent(annotations=event.annotations)
             if event.thinking_delta is not None:
                 # Thinking text gets the same secret redaction as the answer —
                 # a second redactor keeps its holdback independent so the two
@@ -840,6 +848,7 @@ async def handle_chat_stream(
                 estimated=estimated,
                 tool_calls=reported_tool_calls or None,
                 finish_reason=reported_finish_reason,
+                annotations=reported_annotations or None,
                 redacted=(
                     (redactor.hits if redactor is not None else [])
                     + (thinking_redactor.hits if thinking_redactor is not None else [])

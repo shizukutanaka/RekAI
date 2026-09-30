@@ -149,6 +149,7 @@ class OpenAIProvider(Provider):
                 reasoning_tokens=_reasoning_tokens(usage),
             ),
             tool_calls=message.get("tool_calls"),
+            annotations=message.get("annotations"),
             finish_reason=_finish_reason(data["choices"][0].get("finish_reason")),
         )
 
@@ -270,12 +271,16 @@ def _parse_openai_sse_event(line: str) -> StreamEvent | None:
         return None
     choices = chunk.get("choices") or []
     if choices:
-        delta = choices[0].get("delta", {}).get("content")
+        delta_obj = choices[0].get("delta", {})
+        delta = delta_obj.get("content")
+        annotations = delta_obj.get("annotations")
         reason = _finish_reason(choices[0].get("finish_reason"))
-        if delta or reason:
+        if delta or annotations or reason:
             # The terminal chunk usually carries a finish_reason and an empty
             # delta; a provider may also send both at once.
-            return StreamEvent(delta=delta or None, finish_reason=reason)
+            return StreamEvent(
+                delta=delta or None, annotations=annotations or None, finish_reason=reason
+            )
     usage = chunk.get("usage")
     if usage:
         return StreamEvent(

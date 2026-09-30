@@ -19,6 +19,7 @@ export interface StreamSummary {
   cost_usd: number | null;
   estimated: boolean;
   tool_calls?: Record<string, unknown>[];
+  annotations?: Record<string, unknown>[];
 }
 
 export interface ChatOptions {
@@ -58,6 +59,8 @@ export interface ChatOptions {
   thinking?: Record<string, unknown>;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
+  /** Called with citations etc. (e.g. web-search url_citation entries). */
+  onAnnotations?: (annotations: Record<string, unknown>[]) => void;
 }
 
 export interface Usage {
@@ -91,6 +94,8 @@ export interface ChatResult {
    */
   cache_similarity: number | null;
   fallback_used: boolean;
+  /** Citations etc. attached to the answer (e.g. web-search url_citation). */
+  annotations?: Record<string, unknown>[] | null;
   /** Secret patterns scrubbed from `content` by the output-redaction guardrail. */
   redacted: string[] | null;
   /** Anthropic thinking/redacted_thinking blocks produced before the answer. */

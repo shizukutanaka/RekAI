@@ -70,6 +70,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requirement), while an explicit temperature rides as sent. Non-Anthropic
   providers ignore the config and surfaces without the concept (OpenAI chunks)
   drop the blocks. Both SDKs and the web client expose `thinking_blocks`.
+- **Web-search citations pass through end-to-end.** OpenAI attaches
+  `message.annotations` (e.g. `url_citation` entries) when a web-search model
+  answers; RekAI previously dropped them, so the caller paid for search but
+  could not see what was cited. `ProviderResult`/`StreamEvent`/`ChatResponse`
+  now carry `annotations` verbatim; the native SSE stream emits
+  `{"annotations": [...]}` events and the summary field, the OpenAI-compat
+  surface reproduces `message.annotations`/`delta.annotations`, and the
+  Anthropic-compat surface passes them as a response extra (Anthropic's own
+  citations schema needs `cited_text` upstreams don't send). Both SDKs expose
+  them (`ChatResult.annotations`, `on_annotations`/`onAnnotations` hooks).
 - **Guardrail scans tool results.** The prompt-injection guardrail now covers
   `role="tool"` messages on every chat surface (native, OpenAI-, and
   Anthropic-compat) — tool output is external content and the canonical
