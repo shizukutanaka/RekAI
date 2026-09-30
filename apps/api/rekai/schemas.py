@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Role = Literal["system", "user", "assistant", "tool"]
 
@@ -106,6 +106,13 @@ class ChatRequest(BaseModel):
         "user location, etc. for models with hosted web search. Forwarded "
         "verbatim to OpenAI-compatible providers only.",
     )
+    anthropic_beta: str | None = Field(
+        default=None,
+        description="Anthropic `anthropic-beta` header value (comma-joined "
+        "beta flags). Set by the Anthropic-compat route from the incoming "
+        "header; forwarded upstream so beta-gated features work. In the "
+        "cache key — beta flags can change the response.",
+    )
     thinking: dict[str, Any] | None = Field(
         default=None,
         description="Anthropic's `thinking` config — e.g. {'type': 'enabled', "
@@ -113,6 +120,40 @@ class ChatRequest(BaseModel):
         "to Anthropic only; other providers ignore it. Anthropic requires "
         "temperature=1 under thinking, so the compat layer defaults to that "
         "when the caller left temperature unset.",
+    )
+    context_management: dict[str, Any] | None = Field(
+        default=None,
+        description="Anthropic's `context_management` — context-editing rules "
+        "(clear old tool uses, clear thinking, compact). Forwarded verbatim "
+        "to Anthropic only; other providers ignore it.",
+    )
+    container: dict[str, Any] | str | None = Field(
+        default=None,
+        description="Anthropic's `container` — a container id (string) or "
+        "config object ({id, skills}) to reuse a code-execution container "
+        "across requests. Forwarded verbatim to Anthropic only.",
+    )
+    inference_geo: str | None = Field(
+        default=None,
+        description="Anthropic's `inference_geo` — data-residency region "
+        "(e.g. 'us'). Forwarded to Anthropic only.",
+    )
+    speed: str | None = Field(
+        default=None,
+        description="Anthropic's `speed` ('standard' | 'fast') — latency "
+        "preference billed differently upstream. Forwarded to Anthropic only.",
+    )
+    diagnostics: dict[str, Any] | None = Field(
+        default=None,
+        description="Anthropic's `diagnostics` — request-level diagnostics "
+        "(e.g. previous response id for prompt-cache divergence reporting). "
+        "Forwarded verbatim to Anthropic only.",
+    )
+    user_profile_id: str | None = Field(
+        default=None,
+        description="Anthropic's `user_profile_id` — the user profile to "
+        "attribute the request to. Sent to Anthropic only, as the "
+        "`anthropic-user-profile-id` header.",
     )
     output_config: dict[str, Any] | None = Field(
         default=None,
@@ -140,6 +181,12 @@ class ChatRequest(BaseModel):
         default=None,
         description="Tool choice ('auto' | 'none' | 'required' | {...}), passed through.",
     )
+    parallel_tool_calls: bool | None = Field(
+        default=None,
+        description="OpenAI's parallel_tool_calls — whether the model may emit "
+        "several tool calls in one turn. Forwarded to providers that support it "
+        "(OpenAI/OpenAI-compatible); ignored by others.",
+    )
     response_format: dict[str, Any] | None = Field(
         default=None,
         description="OpenAI-style response_format, e.g. {'type': 'json_object'} or "
@@ -154,6 +201,23 @@ class ChatRequest(BaseModel):
         "prompt prefixes are billed at a large discount); OpenAI caches "
         "automatically and ignores it. Per-message placement is also supported "
         "via a message's own cache_control.",
+    )
+    mcp_servers: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Anthropic MCP connector servers (forwarded verbatim to "
+        "Anthropic; ignored by other providers).",
+    )
+    user: str | None = Field(
+        default=None,
+        description="End-user id for upstream abuse detection — OpenAI's "
+        "`user`, Anthropic's `metadata.user_id`. Forwarded to providers that "
+        "take one; a routing hint only, so it does not join the cache key.",
+    )
+    safety_identifier: str | None = Field(
+        default=None,
+        description="OpenAI's newer abuse-detection identifier (hashed "
+        "end-user handle) — the successor to `user` on OpenAI-compatible "
+        "providers. Forwarded verbatim; ignored elsewhere.",
     )
 
     @field_validator("stop", mode="before")
@@ -246,8 +310,10 @@ class ChatCompletionsRequest(BaseModel):
     stream_options: StreamOptions | None = None
     tools: list[dict[str, Any]] | None = None
     tool_choice: Any | None = None
+    parallel_tool_calls: bool | None = None
     response_format: dict[str, Any] | None = None
-    user: str | None = None  # accepted, ignored
+    user: str | None = None  # forwarded to the provider as its end-user id
+    safety_identifier: str | None = None  # OpenAI's newer abuse-detection id
     n: int | None = None  # 400 if n > 1 (RekAI returns a single choice)
     provider: str | None = None  # RekAI extension: explicit provider override
     # OpenAI's pre-tools function-calling API (deprecated since 0613 but still
@@ -286,16 +352,39 @@ class AnthropicMessage(BaseModel):
 
 
 class AnthropicTool(BaseModel):
-    name: str
+    model_config = ConfigDict(extra="allow")
+
+    # Absent or "custom" -> a client tool (translated to an OpenAI function).
+    # Anything else is an Anthropic server tool (web_search_20250305,
+    # code_execution, computer_use, mcp_tool_use, ...) whose extra fields
+    # (max_uses, allowed_domains, ...) must pass through verbatim.
+    type: str | None = None
+    # Required for client tools; some server tools (mcp_toolset) have none.
+    name: str | None = None
     description: str | None = None
     input_schema: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _client_tool_needs_name(self) -> AnthropicTool:
+        if self.type in (None, "custom") and not self.name:
+            raise ValueError("client tools require a 'name'")
+        return self
 
 
 class AnthropicToolChoice(BaseModel):
     type: Literal["auto", "none", "any", "tool"]
     name: str | None = None
-    # disable_parallel_tool_use is Anthropic-specific; the OpenAI-equivalent
-    # flag (parallel_tool_calls) lives on the request, not on tool_choice.
+    # Anthropic carries the parallel-call switch *on* tool_choice; the
+    # OpenAI-equivalent flag (parallel_tool_calls) lives on the request.
+    # Mapped onto ChatRequest.parallel_tool_calls so it round-trips.
+    disable_parallel_tool_use: bool | None = None
+
+
+class AnthropicMetadata(BaseModel):
+    """Messages-API ``metadata`` object — Anthropic defines only ``user_id``,
+    an abuse-detection end-user id (the counterpart of OpenAI's ``user``)."""
+
+    user_id: str | None = None
 
 
 class _AnthropicMessagesBase(BaseModel):
@@ -313,9 +402,23 @@ class _AnthropicMessagesBase(BaseModel):
     stream: bool = False
     tools: list[AnthropicTool] | None = None
     tool_choice: AnthropicToolChoice | None = None
+    # Anthropic's MCP connector — remote MCP servers the provider calls
+    # itself ({name, url, type:"url", authorization_token?, tool_configuration?}).
+    # Forwarded verbatim to Anthropic; requires the mcp-client beta header.
+    mcp_servers: list[dict[str, Any]] | None = None
+    metadata: AnthropicMetadata | None = None
     # Anthropic's extended-thinking config, verbatim ({'type': 'enabled',
     # 'budget_tokens': N}). Declared so it isn't swallowed by extra=allow.
     thinking: dict[str, Any] | None = None
+    # Remaining real Anthropic request fields — verbatim, same
+    # swallow-by-extra=allow hazard. (`fallbacks` is deliberately absent:
+    # RekAI's own extension uses that name with different semantics.)
+    context_management: dict[str, Any] | None = None
+    container: dict[str, Any] | str | None = None
+    inference_geo: str | None = None
+    speed: str | None = None
+    diagnostics: dict[str, Any] | None = None
+    user_profile_id: str | None = None
     # Anthropic's output config, verbatim ({'effort': ...}, {'format': ...}).
     # Same swallow-by-extra=allow hazard.
     output_config: dict[str, Any] | None = None
@@ -427,6 +530,13 @@ class ChatResponse(BaseModel):
         "when thinking was enabled; the /v1/messages surface re-emits them as "
         "content blocks so the caller can echo them back verbatim.",
     )
+    citations: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Anthropic citations on the answer's text (web-search "
+        "sources), verbatim — each carries its own cited_text. Present only "
+        "when the model cited sources; the /v1/messages surface attaches them "
+        "to the text block they belong to.",
+    )
     extra_blocks: list[dict[str, Any]] | None = Field(
         default=None,
         description="Anthropic server-side tool blocks (server_tool_use, "
@@ -481,6 +591,12 @@ class EmbeddingsRequest(BaseModel):
         description="OpenAI's `encoding_format` ('float' | 'base64'). "
         "Forwarded to OpenAI-compatible providers only; note the API's own "
         "response stays JSON floats either way.",
+    )
+    user: str | None = Field(
+        default=None,
+        description="OpenAI's end-user id for abuse detection. Forwarded to "
+        "OpenAI-compatible providers only; a routing hint, so it does not join "
+        "the cache key.",
     )
 
 
