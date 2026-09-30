@@ -1032,6 +1032,7 @@ async def _handle_chat_stream(
         metrics.record_tokens(usage.total_tokens, provider_name)
         metrics.record_cost(cost_usd)
         metrics.record_client_usage(client_id, usage.total_tokens, cost_usd)
+        metrics.record_user_usage(client_id, request.user, usage.total_tokens, cost_usd)
         if settings.client_budget_window_seconds is not None:
             metrics.record_client_budget_usage(
                 client_id, cost_usd, settings.client_budget_window_seconds, time.time()
