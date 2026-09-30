@@ -52,6 +52,8 @@ class StreamSummary:
     estimated: bool
     tool_calls: list[dict] | None = None
     finish_reason: str | None = None
+    # Web-search citations etc. (OpenAI `message.annotations`), verbatim dicts.
+    annotations: list[dict] | None = None
     # Secret patterns scrubbed from the streamed text. Reported here rather
     # than as a header because response headers are long gone by the time the
     # first delta is redacted.
@@ -69,6 +71,7 @@ class ChatStreamEvent:
     """
 
     delta: str | None = None
+    annotations: list[dict] | None = None
     error: ProviderError | None = None
     summary: StreamSummary | None = None
     # Anthropic extended-thinking pieces — a thinking_delta chunk, the block's
@@ -609,6 +612,7 @@ async def handle_chat(
             model=result.model,
             content=result.content,
             tool_calls=result.tool_calls,
+            annotations=result.annotations,
             usage=usage,
             cost_usd=cost_usd,
             cached=False,
@@ -676,6 +680,7 @@ async def handle_chat_stream(
     reported_usage: Usage | None = None
     reported_tool_calls: list[dict] | None = None
     reported_finish_reason: str | None = None
+    reported_annotations: list[dict] = []
     errored = False
     started = time.perf_counter()
     first_token_at: float | None = None
@@ -712,6 +717,9 @@ async def handle_chat_stream(
                 emitted = redactor.feed(event.delta) if redactor is not None else event.delta
                 if emitted:
                     yield ChatStreamEvent(delta=emitted)
+            if event.annotations is not None:
+                reported_annotations.extend(event.annotations)
+                yield ChatStreamEvent(annotations=event.annotations)
             if event.thinking_delta is not None:
                 # Thinking text gets the same secret redaction as the answer —
                 # a second redactor keeps its holdback independent so the two
@@ -859,6 +867,7 @@ async def handle_chat_stream(
                 estimated=estimated,
                 tool_calls=reported_tool_calls or None,
                 finish_reason=reported_finish_reason,
+                annotations=reported_annotations or None,
                 redacted=(
                     list(
                         dict.fromkeys(
@@ -873,6 +882,26 @@ async def handle_chat_stream(
         )
 
 
+def _check_embedding_dimensions(
+    provider_name: str, provider: Provider | None, dimensions: int | None
+) -> None:
+    limit = provider.max_embedding_dimensions if provider is not None else None
+    if limit is not None and dimensions is not None and dimensions > limit:
+        raise ProviderError(
+            f"Provider '{provider_name}' caps embedding dimensions at {limit}.",
+            status_code=400,
+        )
+
+
+def check_embeddings_dimensions(request: EmbeddingsRequest, settings: Settings) -> None:
+    """Apply the provider's declared ``dimensions`` cap ahead of any cache hit
+    or idempotent replay — both return a stored response without calling the
+    provider, so an oversized entry written before the cap existed would
+    otherwise be served verbatim under the new limit."""
+    provider_name = resolve_provider(request.provider, request.model, settings)
+    _check_embedding_dimensions(provider_name, get_provider(provider_name), request.dimensions)
+
+
 async def handle_embeddings(
     request: EmbeddingsRequest,
     api_key: str | None,
@@ -885,6 +914,7 @@ async def handle_embeddings(
     if provider is None:
         raise ProviderError(f"Unknown provider '{provider_name}'.", status_code=400)
     metrics.record_request(provider_name)
+    _check_embedding_dimensions(provider_name, provider, request.dimensions)
 
     inputs = [request.input] if isinstance(request.input, str) else list(request.input)
     if not inputs:
@@ -901,8 +931,16 @@ async def handle_embeddings(
     if use_cache:
         cached_raw = await cache.get(key)
         if cached_raw is not None:
-            metrics.record_cache(hit=True)
-            return EmbeddingsResponse(**{**json.loads(cached_raw), "cached": True})
+            cached = json.loads(cached_raw)
+            vectors = cached.get("embeddings") or []
+            # Entries written before the provider honored this `dimensions`
+            # value hold the old size under the same key — a hit must not
+            # return a wrong-length vector until the TTL expires (Redis can
+            # carry one across a deploy). Fall through and recompute; the
+            # store below overwrites the stale entry.
+            if request.dimensions is None or all(len(v) == request.dimensions for v in vectors):
+                metrics.record_cache(hit=True)
+                return EmbeddingsResponse(**{**cached, "cached": True})
         metrics.record_cache(hit=False)
 
     started = time.perf_counter()
