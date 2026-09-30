@@ -6,6 +6,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **`POST /v1/messages` no longer counts cached prompt tokens twice.** The
+  Anthropic-compat usage block reported RekAI's all-inclusive `prompt_tokens`
+  as `input_tokens`, but on Anthropic's wire `input_tokens` *excludes* cached
+  tokens — a caller summing the fields saw cache hits counted once in
+  `input_tokens` and would have counted them again in the cache keys had those
+  been emitted. Usage now decomposes back to Anthropic's shape:
+  `input_tokens` = `prompt_tokens - cache_read - cache_write`, plus
+  `cache_read_input_tokens` and `cache_creation_input_tokens` (both always
+  present, matching Anthropic's schema).
+
 ### Added
 
 - **Anthropic web-search citations end-to-end** — `citations` on upstream text
@@ -16,6 +27,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (both paths), since it echoes model-generated content. Both SDKs and the
   web playground (Sources pills under replies) expose them. Surfaces without
   the concept omit them honestly.
+- **Anthropic `output_config` forwarded verbatim** — `POST /v1/messages`
+  accepts `output_config` (e.g. `{"effort": "medium"}` or `{"format": ...}`),
+  Anthropic's lever for response effort and structured output. It previously
+  rode in under `extra="allow"` and was silently dropped; now it reaches the
+  upstream payload and the exact/semantic cache keys. Other providers never
+  receive it.
 - **JS SDK request timeout** — `fetch` has no built-in timeout, so a hung
   connection parked `chat()`/`stream()` forever. A new `timeout` client option
   (default 60s, matching the Python SDK) bounds each non-streaming request via
@@ -95,6 +112,34 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requirement), while an explicit temperature rides as sent. Non-Anthropic
   providers ignore the config and surfaces without the concept (OpenAI chunks)
   drop the blocks. Both SDKs and the web client expose `thinking_blocks`.
+- **`POST /v1/messages` accepts Anthropic server tools verbatim** —
+  `web_search_20250305`, `code_execution_*`, `computer_use_*`,
+  `mcp_tool_use`, etc. (any tool whose `type` isn't `custom`) are no longer
+  re-shaped into OpenAI client functions, which had silently rewired them into
+  ordinary tools upstream so the hosted capability never ran. Server tools
+  keep every field (`max_uses`, `allowed_domains`, ...) through to the
+  Anthropic payload; a non-Anthropic upstream surfaces a readable provider
+  error instead of a silent miswire. The top-level `mcp_servers` field
+  (Anthropic's MCP connector) likewise forwards verbatim instead of being
+  dropped.
+- **`tool_result.is_error` round-trips through the compat layer** — a failed
+  tool call on `POST /v1/messages` used to flatten into an indistinguishable
+  tool message, so the model couldn't tell failure from success. The flag now
+  rides on `ChatMessage.is_error` and the Anthropic provider re-emits
+  `is_error: true` upstream; surfaces without the concept (OpenAI tool
+  messages) drop the flag and keep the error text in `content`. Non-text
+  blocks nested inside a `tool_result`'s content (images, documents) now
+  fail as a readable 400 like top-level blocks instead of silently
+  dropping.
+- **Model refusal text is surfaced end-to-end instead of dropped.** OpenAI
+  returns a refusal as `message.refusal` / `delta.refusal` chunks with
+  `content` null; RekAI flattened that to an empty answer. `ProviderResult`,
+  `StreamEvent`, `ChatResponse` and the stream summary now carry `refusal`;
+  the native SSE stream emits `{"refusal": ...}` events, the OpenAI-compat
+  surface reproduces `message.refusal`/`delta.refusal` chunks, and the
+  Anthropic-compat surface folds the text into a content block with
+  `stop_reason: "refusal"` (Anthropic's own encoding). Both SDKs expose it
+  (`ChatResult.refusal`, `on_refusal`/`onRefusal` stream hooks).
 - **Web-search citations pass through end-to-end.** OpenAI attaches
   `message.annotations` (e.g. `url_citation` entries) when a web-search model
   answers; RekAI previously dropped them, so the caller paid for search but
@@ -203,7 +248,53 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   production deployments that deliberately served docs keep them by setting
   `REKAI_DOCS_ENABLED=true`.
 
+### Changed
+- **Providers now read the request-scoped `Settings` instead of the env-cached
+  singleton** (roadmap O-1). Provider code called `get_settings()` directly —
+  an `@lru_cache`d snapshot of process env — so `create_app(settings)` could
+  never reach the provider layer and no test could inject a `Settings` it
+  didn't build the process env for. Provider code now calls
+  `rekai.config.current_settings()`, a `ContextVar` bound by the request
+  middleware and by `handle_chat`/`handle_chat_stream`/`handle_embeddings`
+  themselves (the same idiom `rekai/tracing.py` uses for the trace id), with
+  the env singleton as the fallback outside bound contexts. The registry's
+  import-time initialization is gone: the five builtins register lazily, and
+  `create_app` (un)registers the custom OpenAI-compatible backend from the
+  app's `Settings` via `configure_custom_provider` — re-running `create_app`
+  replaces or removes a stale custom provider instead of leaking it. Public
+  registry API (`get_provider`/`provider_names`/`register_provider`) is
+  unchanged; no behavior change for env-configured deployments.
+
 ### Added
+- **Per-key model allowlists** (`REKAI_KEY_MODELS`, e.g.
+  `"sk-a:gpt-4o*;gpt-4o-mini,sk-b:echo"`). The per-tenant counterpart of
+  `REKAI_ALLOWED_PROVIDERS`: each named key gets a glob allowlist (fnmatch),
+  so tenants can be scoped to the models their tier pays for — previously any
+  valid key could call any configured provider/model. A key with no entry is
+  unrestricted; `key:` with no patterns can call nothing (fail-closed). The
+  check covers `request.model` AND every `fallbacks[].model` — the fallback
+  chain is otherwise a straight path around the allowlist — and runs on all
+  four call surfaces (`/v1/chat`, `/v1/chat/stream`, `/v1/chat/completions`
+  both modes, `/v1/embeddings`). `GET /v1/models` is also filtered to what
+  the caller's key may use. Denied requests return 403 `model_not_allowed`.
+- **Expiring dynamic API keys**: `POST /admin/keys` accepts
+  `expires_in_seconds` and echoes `expires_at`; `GET /admin/keys` returns
+  `dynamic_expires_at` (masked key → unix timestamp), and the `/admin` page
+  shows each key's expiry plus an optional TTL field on the add form. An
+  expired key fails auth exactly like a revoked one — trial tenants and
+  incident access no longer need a manual revoke (LiteLLM's `expires`
+  equivalent). Store blobs written before expiry existed (a bare key list)
+  migrate to `{key: expires_at|null}` on first write.
+- **OpenAI tuning params are forwarded, not just tolerated.** `top_p`, `seed`,
+  `frequency_penalty`, `presence_penalty` and `logit_bias` are now typed on
+  `ChatRequest`/`ChatCompletionsRequest` (they were previously accepted by
+  `extra="allow"` and silently dropped — a `seed=42` request got a
+  non-deterministic 200). Forwarded per provider support: OpenAI-compatible
+  takes all five, Anthropic `top_p`, Gemini `topP`, Ollama `top_p` + `seed`.
+  All five join the cache key and semantic bucket. Both SDKs expose them
+  (`topP`, `frequencyPenalty`, … in JS; snake_case in Python). The
+  Anthropic-compat surface's own declared `top_p` (which parsed and
+  range-validated, then silently dropped) now maps onto it too.
 - **`web_search_options` and `stream_options.include_obfuscation` forwarding.**
   Two more OpenAI request fields the compat layer accepted and dropped now
   reach OpenAI-compatible providers: `web_search_options` (hosted web-search

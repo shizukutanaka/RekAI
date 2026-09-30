@@ -116,6 +116,9 @@ class ProviderResult:
     usage: Usage = field(default_factory=Usage)
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    # The model's refusal text (OpenAI `message.refusal`) — kept out of
+    # ``content``, which stays "" on a refusal so "no answer" stays honest.
+    refusal: str | None = None
     # Web-search citations etc. (OpenAI `message.annotations`) — raw dicts,
     # passed through verbatim so the caller sees what the model cited.
     annotations: list[dict] | None = None
@@ -160,6 +163,9 @@ class StreamEvent:
     usage: Usage | None = None
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    # OpenAI streams refusal text as `delta.refusal` chunks, separate from
+    # `delta.content` — kept apart for the same reason as ProviderResult.
+    refusal_delta: str | None = None
     # OpenAI streams annotations complete inside one delta chunk.
     annotations: list[dict] | None = None
     # Anthropic extended-thinking stream pieces: a thinking_delta text chunk,

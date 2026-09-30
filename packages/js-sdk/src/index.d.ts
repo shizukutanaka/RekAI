@@ -19,6 +19,7 @@ export interface StreamSummary {
   cost_usd: number | null;
   estimated: boolean;
   tool_calls?: Record<string, unknown>[];
+  refusal?: string;
   annotations?: Record<string, unknown>[];
 }
 
@@ -45,6 +46,16 @@ export interface ChatOptions {
    * accepted too; the server normalizes it to a one-element list.
    */
   stop?: string | string[];
+  /** Nucleus sampling, as OpenAI's `top_p`. */
+  topP?: number;
+  /** Deterministic-sampling seed, as OpenAI's `seed`. */
+  seed?: number;
+  /** Token-frequency penalty (-2..2), as OpenAI's `frequency_penalty`. */
+  frequencyPenalty?: number;
+  /** Token-presence penalty (-2..2), as OpenAI's `presence_penalty`. */
+  presencePenalty?: number;
+  /** Token-id → bias map, as OpenAI's `logit_bias`. */
+  logitBias?: Record<string, number>;
   /**
    * OpenAI's processing tier ('auto' | 'default' | 'flex' | 'priority' |
    * 'scale'). Forwarded to OpenAI-compatible providers only.
@@ -59,6 +70,8 @@ export interface ChatOptions {
   thinking?: Record<string, unknown>;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
+  /** Called with each refusal-text chunk when the model declines. */
+  onRefusal?: (text: string) => void;
   /** Called with citations etc. (e.g. web-search url_citation entries). */
   onAnnotations?: (annotations: Record<string, unknown>[]) => void;
 }
@@ -94,6 +107,8 @@ export interface ChatResult {
    */
   cache_similarity: number | null;
   fallback_used: boolean;
+  /** The model's refusal text when it declined; `content` is empty then. */
+  refusal: string | null;
   /** Citations etc. attached to the answer (e.g. web-search url_citation). */
   annotations?: Record<string, unknown>[] | null;
   /** Secret patterns scrubbed from `content` by the output-redaction guardrail. */
