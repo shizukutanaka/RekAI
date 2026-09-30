@@ -326,6 +326,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `rekai_cache_fills_coalesced_total` (subset of `rekai_cache_hits_total`,
   also in `/v1/usage` as `cache_fills_coalesced_total`). Verified live: two
   simultaneous identical requests → one provider call.
+- **`prompt_tokens_details.cached_tokens` on the OpenAI-compat surface.**
+  RekAI's flat `cache_read_tokens` was invisible to OpenAI SDKs, which read the
+  nested field — prompt-cache hits went unreported for drop-in callers. The
+  compat response (and `stream_options.include_usage` chunk) now emits the
+  nested object whenever a provider cache engaged; absent otherwise, matching
+  api.openai.com.
 - **`Authorization: Bearer` doubles as the BYOK key on
   `/v1/chat/completions`.** When the gateway itself is unauthenticated (no
   `REKAI_API_KEYS`, dynamic keys off), the SDK's own Bearer token is forwarded
