@@ -1,0 +1,1947 @@
+# Changelog
+
+All notable changes to RekAI are documented here. The format is based on
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
+to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Fixed
+- **`POST /v1/messages` no longer counts cached prompt tokens twice.** The
+  Anthropic-compat usage block reported RekAI's all-inclusive `prompt_tokens`
+  as `input_tokens`, but on Anthropic's wire `input_tokens` *excludes* cached
+  tokens — a caller summing the fields saw cache hits counted once in
+  `input_tokens` and would have counted them again in the cache keys had those
+  been emitted. Usage now decomposes back to Anthropic's shape:
+  `input_tokens` = `prompt_tokens - cache_read - cache_write`, plus
+  `cache_read_input_tokens` and `cache_creation_input_tokens` (both always
+  present, matching Anthropic's schema).
+
+### Added
+
+- **Remaining Anthropic request fields forwarded verbatim** — `context_management`
+  (context editing), `container` (code-execution reuse), `inference_geo` (data
+  residency), `speed` (fast/standard), `diagnostics` (prompt-cache divergence),
+  and `user_profile_id` all rode in under `extra="allow"` and were silently
+  dropped. Each is now declared on `/v1/messages`, mapped through the compat
+  layer, sent verbatim upstream, and part of the exact/semantic cache keys.
+  Anthropic's `fallbacks` is deliberately not forwarded: RekAI's extension uses
+  the same name with different semantics.
+- **Anthropic web-search citations end-to-end** — `citations` on upstream text
+  blocks ride the response (`ChatResponse.citations`, verbatim), stream
+  `citations_delta` events reach both the `/v1/messages` typed SSE and the
+  RekAI-native stream, and the compat response reattaches them to the text
+  block they cite. `cited_text` gets the same secret redaction as answer text
+  (both paths), since it echoes model-generated content. Both SDKs and the
+  web playground (Sources pills under replies) expose them. Surfaces without
+  the concept omit them honestly.
+- **Anthropic `output_config` forwarded verbatim** — `POST /v1/messages`
+  accepts `output_config` (e.g. `{"effort": "medium"}` or `{"format": ...}`),
+  Anthropic's lever for response effort and structured output. It previously
+  rode in under `extra="allow"` and was silently dropped; now it reaches the
+  upstream payload and the exact/semantic cache keys. Other providers never
+  receive it.
+- **JS SDK request timeout** — `fetch` has no built-in timeout, so a hung
+  connection parked `chat()`/`stream()` forever. A new `timeout` client option
+  (default 60s, matching the Python SDK) bounds each non-streaming request via
+  `AbortSignal` and bounds the idle gap between stream chunks with a per-read
+  watchdog — a slow-but-steady stream is unaffected, a stalled one throws.
+  `timeout: 0` disables. `RekAIClientOptions` in the type declarations also
+  gains the previously-undeclared `maxRetries`/`retryBackoff`/`maxRetryDelay`.
+- **Three pass-through fidelity fixes** — JSON-mode's synthetic `json_response`
+  tool now becomes a text block holding the unwrapped answer inside
+  `content_blocks` (deleting it left a nonempty array without the answer, and
+  `to_message` prefers the array, so `/v1/messages` dropped the JSON whenever
+  another block travelled with it); streamed extra-block deltas scrub through
+  one `StreamRedactor` per payload field instead of one per block, so a
+  held-back tail can never re-emerge under another field's key; and secrets
+  scrubbed from `extra_block_start`/`extra_block`/`extra_fields` frames now
+  count in `summary.redacted` (deduplicated against the delta-redactor hits
+  that already reported them).
+- **Embeddings `dimensions` hardening** — a provider-declared
+  `max_embedding_dimensions` (echo: 4096) is enforced before the cache lookup
+  and any idempotent replay, so a stored oversized response can't bypass it;
+  echo also bounds total embedding work (`inputs × dimensions` ≤ 262144
+  floats, since batch size alone could still exhaust a worker), and a cached
+  hit whose stored vector length doesn't match the requested `dimensions`
+  recomputes instead of serving a stale-size entry until its TTL expires
+  (Redis can carry one across a deploy).
+- **Echo provider honors `dimensions`** — `/v1/embeddings` accepted the
+  parameter for `model="echo"` but always returned the default 16-dim
+  pseudo-embedding, so the only way to see `dimensions` do anything was a
+  paid provider key. The demo provider now sizes its vector to the request
+  (`encoding_format` still stays float — the API response is JSON either way).
+- **Five pass-through fidelity fixes** — streamed extra-block deltas now merge
+  into the completed `extra_block` (a `text_delta` inside a tool-result block
+  reached frames but not the stored block clients echo back); extra-block
+  deltas scrub incrementally through a per-block `StreamRedactor` so a secret
+  split across frames can't leak (the held-back tail re-emits in the last
+  delta's shape before the completed block); `content_blocks` history gets
+  `cache_control` breakpoints on a copy — the caller's verbatim array stays
+  untouched; JSON-mode's synthetic `json_response` tool leaves the verbatim
+  array (it's instrumentation, not the answer); and the playground reassembles
+  streamed replies in upstream order so the next turn echoes the real
+  text/tool sequence instead of tools-then-text.
+- **Anthropic server-side tool blocks pass through verbatim** — blocks RekAI
+  doesn't map (`server_tool_use`, `web_search_tool_result`, `mcp_tool_use`/
+  `mcp_tool_result`, `code_execution_tool_result`, and any future block type)
+  were silently dropped: a `web_search` answer came back without its
+  tool-trace, and echoing that history on the next turn was a 400. Response
+  blocks now ride `ChatResponse.extra_blocks` (re-emitted on `/v1/messages`
+  between thinking and the answer text, matching upstream order), stream as
+  their own `content_block_start`/verbatim deltas/`content_block_stop` on both
+  SSE surfaces, and assistant `extra_blocks` echo back through the compat
+  layer for multi-turn continuity. Both SDKs and the playground ("used
+  web_search" badge) expose them; the OpenAI surface omits them honestly.
+- **Verbatim order + redaction coverage for the pass-through** — the response
+  also carries `content_blocks`, the whole upstream content array verbatim,
+  so interleaved text/tool-trace replays in emitted order on `/v1/messages`
+  and echoes verbatim in history (instead of the flattened
+  thinking→extra→text reconstruction). Server-tool block text (search
+  results, tool inputs, code-exec output) gets the same secret scrub as the
+  answer — streaming frames included — while `signature` blobs stay intact;
+  requests carrying tool-trace history skip the semantic cache (plain-text
+  embeddings can't see that context), and a text delta buffered by the
+  redactor flushes before any non-text block starts so answer order can't
+  invert.
+- **Message-level Anthropic response fields pass through verbatim** —
+  `container` (code execution, needed to reference it on the next turn),
+  `context_management` edit reports, and anything new ride
+  `ChatResponse.extra_fields`, reattach on `/v1/messages` without clobbering
+  gateway-computed fields, and merge into the streamed `message_start`
+  skeleton. Forward-compatible the same way `extra_blocks` is.
+- **Anthropic extended thinking end-to-end** — `POST /v1/messages` accepts
+  `thinking` (e.g. `{"type": "enabled", "budget_tokens": 4096}`), forwards it
+  verbatim upstream, and returns `thinking`/`redacted_thinking` content blocks
+  (text + signature) in the response and the typed SSE stream. Assistant
+  history carrying thinking blocks — which Anthropic requires echoed back in
+  multi-turn thinking conversations — round-trips verbatim instead of erroring.
+  An unset caller temperature defaults to 1.0 under thinking (Anthropic's
+  requirement), while an explicit temperature rides as sent. Non-Anthropic
+  providers ignore the config and surfaces without the concept (OpenAI chunks)
+  drop the blocks. Both SDKs and the web client expose `thinking_blocks`.
+- **`POST /v1/messages` accepts Anthropic server tools verbatim** —
+  `web_search_20250305`, `code_execution_*`, `computer_use_*`,
+  `mcp_tool_use`, etc. (any tool whose `type` isn't `custom`) are no longer
+  re-shaped into OpenAI client functions, which had silently rewired them into
+  ordinary tools upstream so the hosted capability never ran. Server tools
+  keep every field (`max_uses`, `allowed_domains`, ...) through to the
+  Anthropic payload; a non-Anthropic upstream surfaces a readable provider
+  error instead of a silent miswire. The top-level `mcp_servers` field
+  (Anthropic's MCP connector) likewise forwards verbatim instead of being
+  dropped.
+- **`tool_result.is_error` round-trips through the compat layer** — a failed
+  tool call on `POST /v1/messages` used to flatten into an indistinguishable
+  tool message, so the model couldn't tell failure from success. The flag now
+  rides on `ChatMessage.is_error` and the Anthropic provider re-emits
+  `is_error: true` upstream; surfaces without the concept (OpenAI tool
+  messages) drop the flag and keep the error text in `content`. Non-text
+  blocks nested inside a `tool_result`'s content (images, documents) now
+  fail as a readable 400 like top-level blocks instead of silently
+  dropping.
+- **Model refusal text is surfaced end-to-end instead of dropped.** OpenAI
+  returns a refusal as `message.refusal` / `delta.refusal` chunks with
+  `content` null; RekAI flattened that to an empty answer. `ProviderResult`,
+  `StreamEvent`, `ChatResponse` and the stream summary now carry `refusal`;
+  the native SSE stream emits `{"refusal": ...}` events, the OpenAI-compat
+  surface reproduces `message.refusal`/`delta.refusal` chunks, and the
+  Anthropic-compat surface folds the text into a content block with
+  `stop_reason: "refusal"` (Anthropic's own encoding). Both SDKs expose it
+  (`ChatResult.refusal`, `on_refusal`/`onRefusal` stream hooks).
+- **Web-search citations pass through end-to-end.** OpenAI attaches
+  `message.annotations` (e.g. `url_citation` entries) when a web-search model
+  answers; RekAI previously dropped them, so the caller paid for search but
+  could not see what was cited. `ProviderResult`/`StreamEvent`/`ChatResponse`
+  now carry `annotations` verbatim; the native SSE stream emits
+  `{"annotations": [...]}` events and the summary field, the OpenAI-compat
+  surface reproduces `message.annotations`/`delta.annotations`, and the
+  Anthropic-compat surface passes them as a response extra (Anthropic's own
+  citations schema needs `cited_text` upstreams don't send). Both SDKs expose
+  them (`ChatResult.annotations`, `on_annotations`/`onAnnotations` hooks).
+- **Guardrail scans tool results.** The prompt-injection guardrail now covers
+  `role="tool"` messages on every chat surface (native, OpenAI-, and
+  Anthropic-compat) — tool output is external content and the canonical
+  *indirect* injection vector (OWASP LLM01): a fetched page carrying "ignore
+  previous instructions" never appears in the user's own text. Same flag/block
+  semantics; still opt-in via `REKAI_GUARDRAILS_ENABLED`.
+- **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
+  `cache: false` so you can compare a fresh answer against the cached one.
+  It defaults to on; the meta line already marks cache hits.
+- `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
+  check (`client.messages.count_tokens`) now works against the compat surface.
+  Returns a local script-aware estimate (the same heuristic the pricing path
+  uses); it makes no upstream call and has no billing side effects.
+- **Reasoning-token accounting in `usage`.** Reasoning models (OpenAI o-series
+  and gpt-5, Gemini thinking models) bill a separate slice of completion tokens
+  for chain-of-thought; the provider-reported count now surfaces as
+  `usage.reasoning_tokens` (a breakdown of `completion_tokens`, not additive).
+  OpenAI's `completion_tokens_details.reasoning_tokens` and Gemini's
+  `thoughtsTokenCount` are parsed on both the unary and streaming paths; the
+  OpenAI-compat surface re-nests the count under `completion_tokens_details`
+  so SDKs read it at the standard location (including the
+  `stream_options.include_usage` chunk). Anthropic and Ollama report no
+  separate count — thinking folds into output tokens there.
+- **Legacy `functions`/`function_call` on `POST /v1/chat/completions` are
+  normalized onto `tools`/`tool_choice`.** OpenAI's pre-tools calling fields
+  (deprecated since the 0613 models but still emitted by older SDKs and
+  codebases) were silently ignored — the caller's declared function never
+  reached the provider. `functions=[{name,description,parameters}]` becomes
+  `tools=[{"type":"function","function":…}]`; `function_call={"name":"f"}`
+  becomes the equivalent `tool_choice` object, and the `"auto"`/`"none"`
+  strings pass through. Modern `tools`/`tool_choice` win when both spellings
+  arrive.
+
+### Fixed
+- **Thinking follow-ups.** Output redaction now scrubs thinking text like the
+  answer (a secret pondered aloud was shipped verbatim); streamed thinking
+  held back by that scrubber is now flushed before its signature event, so the
+  SSE builder no longer drops the signature a thinking block needs to be
+  replayed in history; requests carrying prior thinking blocks skip the
+  semantic cache, which would otherwise collide thinking-variant answers on
+  identical plain text; `POST /v1/messages/count_tokens` no longer estimates
+  prior thinking blocks, which Anthropic strips from billed context; and both
+  SDKs expose the `thinking` request option (`thinking=` in Python,
+  `thinking` in JS) so the config is reachable without hand-building a body.
+- Provider `httpx.AsyncClient` connection pools are now closed on app shutdown
+  via `Provider.aclose()` in the lifespan teardown — previously the pooled
+  sockets were severed un-gracefully when the loop ended.
+- **`dimensions`/`encoding_format` on `POST /v1/embeddings` now reach the
+  provider instead of being silently ignored.** `EmbeddingsRequest` accepted
+  only the OpenAI core fields, so a caller asking text-embedding-3-small for
+  a 256-dim vector silently got the 1536-dim one — the request schema's
+  default `extra="ignore"` dropped the sizing field. The provider `embed()`
+  contract gained the two keyword args: OpenAI-compatible providers forward
+  both verbatim, Gemini maps `dimensions` to its `outputDimensionality`,
+  Ollama and echo ignore them (no upstream equivalent). The embeddings cache
+  key now mixes both fields in, so differently-sized results can't collide;
+  both SDKs expose them (`dimensions=`, `encoding_format=` / `dimensions`,
+  `encodingFormat`).
+- **`_verify_semantic_hit` no longer raises `TypeError` on every verified
+  lookup.** The semantic-verify feature and the per-provider token metric
+  landed through separate PRs whose CI each passed — but the verify helper
+  still called the old one-argument `record_tokens()`, which only exists in a
+  merge that combines both. The verify call now passes its provider name like
+  every other call site.
+
+### Security
+- **`Cache-Control: no-store` on data-bearing endpoints** (`/v1/*`,
+  `/admin/*`, `/metrics`). They serve per-client usage, model ACLs and key
+  listings — an intermediary or shared cache could previously persist and
+  replay them to another tenant. SSE routes keep their own `no-cache`.
+- **The Render blueprint now runs the API in production mode.** `deploy/
+  render.yaml` never set `REKAI_ENVIRONMENT`, so the open-proxy guard only
+  *warned* on the one deployment shape that is internet-facing by definition —
+  and `deploy/README.md` tells operators to add `REKAI_OPENAI_API_KEY` to
+  `rekai-api`, which is exactly the combination (server-side provider keys, no
+  gateway auth) the guard exists to refuse. New Render deploys now boot with
+  `REKAI_ENVIRONMENT=production`: adding a provider key without
+  `REKAI_API_KEYS`/`REKAI_DYNAMIC_KEYS_ENABLED` fails fast with the named fixes
+  instead of silently spending the operator's balance on an open port. Existing
+  deployments that already run the unsafe combination will fail to boot on
+  their next deploy — that refusal is the intended behavior, and the error
+  message names both ways out.
+- **`docker-compose.yml` now documents why `REKAI_CORS_ORIGINS` stays `*`.**
+  The default is deliberate — Bearer-key auth holds no ambient credentials a
+  foreign origin could abuse, and pinning it would break reaching the compose
+  web UI via any hostname or port other than `localhost:3000`. The comment
+  says when a pin is safe. Roadmap O-7 (secure-defaults policy) is recorded
+  as decided in `docs/ai/instructions-opus.md`; S-9's manifest work is
+  complete.
+- **The OpenAPI surface is off in production.** `/docs`, `/redoc` and
+  `/openapi.json` answered unauthenticated on every environment, publishing
+  the request schema of every route — `/admin/*` included — to anyone who can
+  reach the port. `REKAI_ENVIRONMENT=production` now omits them (`/`'s `docs`
+  field reports `null` instead of advertising a dead route), and
+  `REKAI_DOCS_ENABLED=true|false` overrides the default either way. Existing
+  production deployments that deliberately served docs keep them by setting
+  `REKAI_DOCS_ENABLED=true`.
+
+### Changed
+- **Providers now read the request-scoped `Settings` instead of the env-cached
+  singleton** (roadmap O-1). Provider code called `get_settings()` directly —
+  an `@lru_cache`d snapshot of process env — so `create_app(settings)` could
+  never reach the provider layer and no test could inject a `Settings` it
+  didn't build the process env for. Provider code now calls
+  `rekai.config.current_settings()`, a `ContextVar` bound by the request
+  middleware and by `handle_chat`/`handle_chat_stream`/`handle_embeddings`
+  themselves (the same idiom `rekai/tracing.py` uses for the trace id), with
+  the env singleton as the fallback outside bound contexts. The registry's
+  import-time initialization is gone: the five builtins register lazily, and
+  `create_app` (un)registers the custom OpenAI-compatible backend from the
+  app's `Settings` via `configure_custom_provider` — re-running `create_app`
+  replaces or removes a stale custom provider instead of leaking it. Public
+  registry API (`get_provider`/`provider_names`/`register_provider`) is
+  unchanged; no behavior change for env-configured deployments.
+
+### Added
+- **Per-key model allowlists** (`REKAI_KEY_MODELS`, e.g.
+  `"sk-a:gpt-4o*;gpt-4o-mini,sk-b:echo"`). The per-tenant counterpart of
+  `REKAI_ALLOWED_PROVIDERS`: each named key gets a glob allowlist (fnmatch),
+  so tenants can be scoped to the models their tier pays for — previously any
+  valid key could call any configured provider/model. A key with no entry is
+  unrestricted; `key:` with no patterns can call nothing (fail-closed). The
+  check covers `request.model` AND every `fallbacks[].model` — the fallback
+  chain is otherwise a straight path around the allowlist — and runs on all
+  four call surfaces (`/v1/chat`, `/v1/chat/stream`, `/v1/chat/completions`
+  both modes, `/v1/embeddings`). `GET /v1/models` is also filtered to what
+  the caller's key may use. Denied requests return 403 `model_not_allowed`.
+- **Expiring dynamic API keys**: `POST /admin/keys` accepts
+  `expires_in_seconds` and echoes `expires_at`; `GET /admin/keys` returns
+  `dynamic_expires_at` (masked key → unix timestamp), and the `/admin` page
+  shows each key's expiry plus an optional TTL field on the add form. An
+  expired key fails auth exactly like a revoked one — trial tenants and
+  incident access no longer need a manual revoke (LiteLLM's `expires`
+  equivalent). Store blobs written before expiry existed (a bare key list)
+  migrate to `{key: expires_at|null}` on first write.
+- **OpenAI tuning params are forwarded, not just tolerated.** `top_p`, `seed`,
+  `frequency_penalty`, `presence_penalty` and `logit_bias` are now typed on
+  `ChatRequest`/`ChatCompletionsRequest` (they were previously accepted by
+  `extra="allow"` and silently dropped — a `seed=42` request got a
+  non-deterministic 200). Forwarded per provider support: OpenAI-compatible
+  takes all five, Anthropic `top_p`, Gemini `topP`, Ollama `top_p` + `seed`.
+  All five join the cache key and semantic bucket. Both SDKs expose them
+  (`topP`, `frequencyPenalty`, … in JS; snake_case in Python). The
+  Anthropic-compat surface's own declared `top_p` (which parsed and
+  range-validated, then silently dropped) now maps onto it too.
+- **`web_search_options` and `stream_options.include_obfuscation` forwarding.**
+  Two more OpenAI request fields the compat layer accepted and dropped now
+  reach OpenAI-compatible providers: `web_search_options` (hosted web-search
+  config — keyed into the cache since it changes what the answer is grounded
+  on) and `include_obfuscation` (merged into the upstream `stream_options`
+  RekAI already sends; keyed out of the cache since it only scrambles the
+  streamed encoding). Both are on `ChatRequest` too, and both SDKs expose
+  `web_search_options`/`webSearchOptions`.
+- **Anthropic-compatible `POST /v1/messages`.** Point an Anthropic SDK at
+  RekAI — `Anthropic(base_url="http://localhost:8000")`, the SDK appends
+  `/v1/messages` itself — and it works unmodified: Anthropic's request shape
+  (`system`, `max_tokens` required, content-block arrays, `tool_use`/
+  `tool_result` blocks, `tool_choice`), its response shape (`type: "message"`,
+  `stop_reason`, `usage.{input,output}_tokens`), its typed SSE stream
+  (`message_start` → `content_block_*` → `message_delta` → `message_stop`),
+  and its `{type: "error", error: {type, message}}` error envelope — including
+  for errors raised before the route runs (auth 401, budget 402, body cap 413,
+  rate limit 429, validation 422). Auth accepts the SDK's `x-api-key` header
+  as the gateway credential alongside `Authorization: Bearer`. A thin
+  translation layer (`rekai/anthropic_compat.py`, pure functions) over the
+  same pipeline as `/v1/chat` — routing, cache, retries, fallback, budgets,
+  metrics all apply — so `"model": "claude-*"` still routes to Anthropic by
+  prefix and a RekAI `provider` extension field overrides it.
+- **Per-key rate-limit overrides** (`REKAI_CLIENT_RATE_LIMITS`, e.g.
+  `"sk-premium:600,sk-trial:5"`): the global `REKAI_RATE_LIMIT_REQUESTS`
+  applied the same ceiling to every tenant — there was no way to sell a
+  higher tier or throttle one noisy key. Entries are keyed by the raw API
+  key (same convention as `REKAI_CLIENT_BUDGETS_USD`); keys not listed use
+  the global default. The limiter's bucket now carries its own capacity,
+  and eviction's "closest to full" ordering compares fill fractions so a
+  cap-5 bucket at 4 tokens is correctly judged tighter than a cap-600
+  bucket at 4. `X-RateLimit-Limit`/`Retry-After` reflect the effective cap.
+- **`service_tier` request parameter** — OpenAI's processing tiers ('auto' |
+  'default' | 'flex' | 'priority' | 'scale') are a real cost/latency lever
+  (flex trades latency for a large discount); the compat layer tolerated the
+  field via `extra="allow"` and silently dropped it. Forwarded to
+  OpenAI-compatible providers only; part of the cache key and semantic bucket.
+  Exposed in both SDKs (`service_tier=` / `serviceTier`).
+- **Opt-in verify band for the semantic cache** (`REKAI_SEMANTIC_CACHE_VERIFY_*`,
+  roadmap O-2). A single cosine threshold forced every candidate to be served
+  or dropped on embedding distance alone; similarity is not proof two prompts
+  share an answer, and the miss case that fails hardest — the paraphrase that
+  *isn't* one — sits in the middle. With verification enabled, hits in
+  `[verify_min_similarity, threshold)` are checked against the provider with a
+  short "does this answer that question?" call on the same provider that would
+  otherwise answer, paying a few output tokens instead of a full generation.
+  The verdict can only downgrade a hit to a miss; an unclear or failed judge
+  call falls through to the real provider. The lookup histogram's `result`
+  label gains `verify_hit`/`verify_miss` (it keeps measuring only the scan;
+  judge latency is metered under `provider_duration{operation="semantic_verify"}`
+  alongside the token/cost accounting the embedding call already gets).
+- **Startup warnings for contradictory fallback config.** Two knobs drive the
+  server fallback chain, and both contradictory combinations used to pass
+  silently: `REKAI_FALLBACK_ENABLED=true` with empty `REKAI_FALLBACK_TARGETS`
+  (expects a chain that was never configured) and targets set while the flag
+  is `false` (a configured chain that's ignored). `create_app` now logs a
+  warning naming the contradiction — same treatment the semantic-cache config
+  already got. Request-level `fallbacks` are unaffected.
+- **Production mode now warns on `REKAI_CORS_ORIGINS=*`.** Questioning the
+  wildcard for the hazard guard surfaced the reason it doesn't belong there:
+  RekAI auth is Bearer-key based, so browsers hold no ambient credentials for
+  a foreign page to abuse, and the compose topology genuinely needs it (web on
+  :3000 calls the API on :8000 — cross-origin). Warnable, not refusable: in
+  production it now logs a nudge to pin the web origin; everywhere else it
+  stays silent.
+- **Per-provider token accounting.** `rekai_tokens_total` was fleet-wide only,
+  so "which provider is spending the budget" needed external archaeology. The
+  metrics store now keeps `tokens_by_provider` (a bounded key set — registered
+  provider names, same bound as `requests_by_provider`), exposes it as
+  `rekai_provider_tokens_total{provider="…"}` (a separate family, for the same
+  double-counting reason requests got one), persists it through snapshot/seed/
+  merge, and returns it as `tokens_by_provider` in `GET /v1/usage`. The web
+  Usage page shows it alongside each provider's request count, and the JS SDK
+  type and the web client's `UsageSummary` declare it — the client-coverage
+  contract test enforces all three staying in sync.
+
+### Fixed
+- **`test_chain_stops_starting_targets_once_the_budget_is_spent` was a
+  wall-clock flake.** It asserted `elapsed < 0.3s` around a 0.1s deadline, so
+  ordinary scheduler jitter — on a loaded machine or a slower platform — could
+  burn the 0.2s slack and fail a correct implementation (observed at 0.378s).
+  Worse, the bound was too weak for its own purpose: an implementation that let
+  the first attempt run to its full 0.15s failure and *then* stopped the chain
+  also passes it. The test now asserts the observable mechanics instead: the
+  first attempt's cancellation flag (set only when the deadline's `wait_for`
+  fires mid-call), `slow.calls == 1`, and `never.calls == 0` — strictly
+  stronger, and immune to timing noise.
+- **The architecture doc claimed failover applies to embeddings. It doesn't
+  and shouldn't.** `EmbeddingsRequest` has no `fallbacks` field and
+  `handle_embeddings` never consults `REKAI_FALLBACK_TARGETS` — only retry
+  applies. The doc now says so and says why the gap is deliberate: a fallback
+  target naming a different model returns a vector in a different space and
+  dimension, silently corrupting a similarity index. Failing loudly is the
+  safer default; a same-model fallback is the only coherent version and hasn't
+  been needed yet.
+
+## [1.3.1] - 2026-09-18
+
+### Security
+- **Secret redaction had no pattern for Google/Gemini API keys.** RekAI proxies
+  Gemini — one of its four core providers alongside OpenAI, Anthropic and
+  Ollama — but `_SECRET_PATTERNS` only covered OpenAI's and Anthropic's own key
+  formats. A Google API key (`AIza` + 35 more chars, 39 total — Gemini, Maps,
+  every Google Cloud API) echoed back in a model's output — a tool result, RAG
+  context, or an injected instruction asking the model to repeat it — passed
+  through both `/v1/chat` and `/v1/chat/stream` untouched, while the identical
+  scenario with an OpenAI or Anthropic key was already caught. Measured
+  directly: `redact_secrets()` against text containing a synthetic Gemini-shaped
+  key returned zero hits. Added `google_api_key` to `_SECRET_PATTERNS` and its
+  required streaming sentinel (`"AIza"`, so `StreamRedactor` holds back the
+  right span rather than letting the pattern straddle an SSE chunk boundary
+  undetected) — the codebase already has a test enforcing that every secret
+  pattern ships with one, which failed immediately and correctly on the new
+  pattern alone. Verified live end-to-end on both the non-streaming and
+  streaming chat endpoints: a Gemini-shaped key in a prompt now comes back as
+  `[REDACTED:google_api_key]` on both.
+- **Concurrent `add()`/`revoke()` on the dynamic key store could silently lose
+  one of them — including a revocation.** Both are read-modify-write against a
+  single JSON blob (`list_keys()` then a write), with no synchronization
+  between them. With the Redis-backed store — the shared, multi-worker
+  configuration this feature exists for — `cache.get`/`cache.set` perform real
+  network I/O and each suspends the calling coroutine, so two concurrent
+  writers can both read the same set before either writes, and the second
+  write silently overwrites the first's. Measured directly with a cache stub
+  whose `get`/`set` genuinely suspend (mirroring real Redis I/O, which the
+  process-local `MemoryCache` never does): two concurrent `add()` calls for
+  different keys left only one stored; six concurrent adds left only one of
+  six. The dangerous case is a revocation racing anything else — an operator
+  revoking a key they believe is compromised, concurrently with any other key
+  operation, could have the revocation silently discarded while the API
+  reports success, leaving the compromised key valid. `add`/`revoke` now
+  serialize their critical section behind a short-lived mutex built from
+  `cache.add` (Redis `SET NX`) — this codebase's existing atomic-claim idiom,
+  already used the same way by `idempotency.py`'s in-progress sentinel — with
+  a TTL so a crashed holder can't wedge every future write. Fails open on a
+  lock-backend error or exhausted retries, consistent with the rest of the
+  codebase's Redis posture. Verified: 3 new tests reproduce the race
+  deterministically (a wrapper that forces the same real-I/O suspension a
+  Redis backend has) and fail against the code before this fix; live via real
+  concurrent HTTP requests against a running server's `/admin/keys` — 10
+  concurrent adds all return 201 and all 10 keys persist.
+
+### Fixed
+- **`stop` was accepted and silently discarded.** OpenAI's `stop` sequences are
+  a control parameter — where generation ends — not a tuning knob like `seed`
+  that RekAI deliberately tolerates and ignores. `ChatCompletionsRequest`'s
+  `extra="allow"` meant a caller's `stop` was accepted with a 200 and never
+  reached any provider: measured directly against all four backends with the
+  HTTP layer captured, OpenAI, Anthropic and Gemini already forward
+  `max_tokens` under their own spelling, but none of them received `stop` under
+  any name, and the model ran past the point the caller asked it to stop.
+  `stop` is now a declared field on `ChatRequest`, forwarded as `stop` (OpenAI,
+  Ollama's `options.stop`), `stop_sequences` (Anthropic) or
+  `generationConfig.stopSequences` (Gemini). A bare string (OpenAI's other
+  accepted shape) is normalized to a one-element list in one place, rather than
+  every payload builder remembering to widen it — the kind of duplication that
+  let Ollama's `max_tokens` go missing in the first place. It also now keys
+  both the exact and semantic cache, matching every other field that changes
+  the response. Verified: 16 new tests, 12 of which fail against the code
+  before this fix; live end-to-end against the OpenAI-compatible endpoint with
+  both list and bare-string forms.
+- **`tool_choice: "none"` let Anthropic call a tool anyway.** OpenAI's `"none"`
+  means "the tools are declared for context, but do not call one this turn" —
+  a real, documented instruction, not the absence of one. RekAI's own
+  translation collapsed it to the same `None` used for "the caller didn't set
+  this," so `_build_payload` sent Anthropic `tools: [...]` with no
+  `tool_choice` key at all. Anthropic defaults an omitted `tool_choice` to
+  `auto` once tools are present, so the model could call the very tool the
+  caller had just forbidden — measured directly: a request with
+  `tool_choice: "none"` reached a stub Anthropic server with `tools` present
+  and `tool_choice` **absent**. Anthropic's API has a distinct
+  `{"type": "none"}` for exactly this case, confirmed against Anthropic's own
+  docs; other gateways translating this same field (LiteLLM, Vercel's AI SDK)
+  have hit and fixed the identical bug. `_translate_tool_choice` now returns
+  `{"type": "none"}` for `"none"`, distinct from the `None` it still returns
+  for "unset." `"auto"`, an explicit tool name, and the unset case are all
+  unaffected — verified live against a stub Anthropic server for all four.
+- **The 5xx circuit breaker could re-trip on a single failure.** Its own module
+  docstring promises cooldown only after `circuit_breaker_threshold` failures
+  *in a row*; the counter isn't reset anywhere when a trip actually happens —
+  only `record_success` clears it. So the count left behind by a trip
+  (>= threshold) was still sitting in `ConsecutiveFailureTracker` once cooldown
+  expired and the provider was retried, and a single fresh failure added to it
+  crossed the threshold again immediately. Measured directly: threshold 3,
+  three failures trip the breaker as intended (count 1, 2, 3); one more
+  failure after that reads count 4 — one request, not three. `record_failure`
+  and `record_success`/`reset` were always correct in isolation; the gap was
+  that neither call site in `service.py` reset the tracker at the moment of a
+  trip. Both now call the tracker's new `reset()` right after `mark_shared`.
+  Verified: 3 new tests (1 driving `handle_chat_stream` directly with a
+  provider that always 503s, reproducing the exact trip → expire → one-failure
+  sequence) fail against the code before this fix; live against a real uvicorn
+  and a stub 5xx backend — two failures park the provider
+  (`parked_providers: {"custom": ...}`), cooldown expires, one more failure
+  leaves it unparked, and a second fresh consecutive failure parks it again.
+- **Neither first-party SDK could send `stop`.** The API-side fix above added
+  `stop` to `ChatRequest`, but the Python and JS SDKs' `chat()` methods
+  restate the request shape by hand and neither had a path for it — unlike
+  `tools`, `tool_choice`, `response_format`, and `fallbacks`, which are all
+  typed parameters (Python) or read from `opts` (JS). A caller had to bypass
+  the client and hand-build the HTTP request to use a field the server had
+  supported since the previous entry. Python's `RekAIClient.chat()` and
+  `AsyncRekAIClient.chat()` gain a `stop: list[str] | str | None` parameter,
+  threaded through `_build_payload`; the JS client's `_payload()` now reads
+  `opts.stop`, and `ChatOptions.stop` is declared in `index.d.ts`. Verified: 5
+  new Python tests and 2 new JS tests forwarding a list and a bare string and
+  omitting the field when absent; the "forwards" cases (3 Python, 2 JS) fail
+  against the code before this fix. Live end-to-end against a running RekAI
+  server: the sync client, the async client, and the JS client each send a
+  request the server accepts with `stop` present in the actual payload built
+  by each client's own code.
+- **A stream that failed partway through erased the reply the reader had
+  already watched appear.** `runChat`'s own comment on the abort path says the
+  right thing — "A user-initiated stop is not an error — keep what streamed so
+  far" — but a genuine upstream error hits the exact same "the stream ended
+  early" situation and was handled differently: it re-threw past that comment
+  to a generic `catch` whose recovery is `prev.filter((m) => !(m.role ===
+  "assistant" && m.streaming))`, deleting *any* assistant bubble still marked
+  `streaming: true` — which is precisely the bubble holding the partial text,
+  since nothing had finalized it yet. Confirmed with a Playwright test that
+  stubs `/v1/chat/stream` to emit a delta and then an `{"error": ...}` frame:
+  the reply text the reader had already seen render on screen was gone,
+  replaced only by a generic error banner. Mid-stream errors are now caught in
+  the same place the abort is, finalizing the bubble with whatever arrived
+  (marked `· error`) instead of deleting it, and still surfacing the error
+  message and refreshing the cooldown snapshot exactly as before — an empty
+  bubble (nothing ever streamed) is still dropped, matching the prior
+  behavior for that case. Verified: the new test fails against the code
+  before this fix; a second test pins the pre-existing abort path is
+  unaffected. Full web suite: `tsc`, lint, 42 vitest, `next build`, and all 22
+  Playwright E2E specs (2 new) pass.
+
+## [1.3.0] - 2026-08-18
+
+### Security
+- **RekAI refuses to run as an open proxy for your own provider keys.** A
+  gateway with no client auth *and* a server-side provider key
+  (`REKAI_OPENAI_API_KEY` and friends) is an unauthenticated proxy to a paid
+  API: anyone who can reach the port spends the operator's money, and every
+  request looks legitimate to the provider. Neither half is a hazard alone — an
+  open gateway with no server key can only serve BYOK and `echo`, and a server
+  key behind auth is the ordinary single-tenant deployment — so the check fires
+  only on the combination.
+  `REKAI_ENVIRONMENT=production` now **refuses to start** in that state, with a
+  message naming the exposed keys and both ways out. Any other value logs the
+  same message as a startup warning and starts, so no existing deployment breaks
+  on upgrade. The auth condition mirrors the middleware's exactly (static
+  `REKAI_API_KEYS` *or* `REKAI_DYNAMIC_KEYS_ENABLED`), so an authenticated
+  deployment is never refused. A wildcard `REKAI_CORS_ORIGINS` was considered
+  and deliberately excluded: with auth on and no credentials it lets a foreign
+  origin spend nothing, and with auth off it changes nothing already open.
+  This also gives `REKAI_ENVIRONMENT` its first behavior — it was declared,
+  documented, set by compose and by ~40 tests, and read nowhere in the
+  application.
+- **A non-ASCII `Authorization` header no longer crashes the auth gate.**
+  `secrets.compare_digest` rejects a `str` containing any non-ASCII character
+  with `TypeError`, and the presented token is attacker-controlled — so
+  `Authorization: Bearer ké` raised out of the auth middleware as an unhandled
+  **500 instead of a 401**, on `/v1/*` and `/admin/*` alike. Three things made
+  that more than cosmetic: auth runs *before* the rate limiter, so these
+  requests consumed **no rate-limit budget**; the exception escaped before
+  `metrics.record_error`, so they were **invisible in `rekai_errors_*`**
+  (measured: `errors_total` 1 after 9 crashes); and each one logged a full
+  stack trace. An unauthenticated client could therefore generate unbounded,
+  unmetered, uncounted 500s and log volume by changing one character. Keys are
+  now compared as bytes (`surrogatepass`, so a lone surrogate can't reintroduce
+  it), which keeps the comparison constant-time and turns every malformed
+  credential into an ordinary 401.
+- **The in-process rate limiter no longer degrades under the flood it exists to
+  stop.** Its bucket cap was enforced by reclaiming only *fully-refilled*
+  buckets — which reclaims nothing during a flood of distinct client ids, since
+  every bucket is then mid-refill. So the dict grew past `max_buckets` without
+  limit, and because the reclaim scan ran on every request once at the cap, cost
+  grew quadratically: **8000 distinct ids against the default 60-per-60s config
+  took 4.4 s and left 1612 buckets under a 1000 cap** (an algorithmic-complexity
+  attack, Crosby & Wallach, USENIX Security 2003 — the component meant to stop
+  abuse amplifying it). Reclaim now falls back to evicting the buckets closest
+  to full, in amortized batches: the same workload is **44 ms and exactly 1000
+  buckets**, ~288× faster with the cap actually enforced. Eviction order is
+  deliberate — evicting a bucket resets that client to full capacity, so
+  discarding the *least*-throttled gives away the least budget and can't be used
+  by an attacker to flood their own exhausted bucket out and reset their limit.
+- **Streaming cost/budget estimation is script-aware — CJK no longer counts as
+  ~1 token.** When a provider streams without reporting usage, RekAI estimates
+  the token count, and that estimate feeds both `cost_usd` and the per-client
+  budget cap (`REKAI_CLIENT_BUDGET_USD`). The estimator was `len(text.split())`
+  — a whitespace word count — which undercounts Latin text ~30% and, for scripts
+  without spaces (Japanese, Chinese), collapsed an entire reply to ~1 token: a
+  100×+ undercount that let a CJK-language app run past its spend cap
+  effectively unmetered. It now counts CJK/kana/Hangul characters ~1 token each
+  and the rest at OpenAI's ~4-chars-per-token rule, landing within ~15% of
+  `o200k_base` across English, Japanese, Chinese, and Korean and erring slightly
+  high (the safe direction for a cap). Still a dependency-free heuristic — an
+  exact tokenizer needs a per-model vocab download a self-hosted deployment
+  can't assume, and providers that report exact usage never hit this path.
+- **Output redaction now covers streaming.** `REKAI_OUTPUT_REDACTION_ENABLED`
+  scrubbed `/v1/chat` but not `/v1/chat/stream` — the endpoint a chat UI
+  actually uses — so a deployment that enabled redaction for compliance got no
+  protection on most of its traffic. This was documented as unavoidable: a
+  secret can straddle two SSE chunks (`sk-aaaa` | `aaaa…` matches nothing in
+  either half) and catching it looked to require buffering the whole reply. It
+  doesn't. A match can only *begin* at one of a small set of literal prefixes
+  (`sk-`, `AKIA`, `ghp_`, `-----BEGIN`, …), so `guardrails.StreamRedactor` holds
+  back only the text from the last such prefix onward: ordinary prose is delayed
+  by 9 characters, and the buffer grows only once something resembling a secret
+  appears. A stream reports what it caught in its terminal summary event
+  (`"redacted": [...]`), since headers are long gone by then. A regression test
+  splits each of the eight secret formats at *every* byte boundary and asserts
+  neither the secret nor its tail survives, and that streamed output is
+  byte-identical to the non-streaming path.
+- **Output redaction now runs before the response is cached** — the documented
+  promise ("redaction happens before the response is cached or stored for
+  `Idempotency-Key` replay") was only half true. The idempotency store was
+  scrubbed, but the response cache and the semantic cache were written inside
+  `handle_chat`, *before* the edge redacted, so a secret the model echoed back
+  was persisted verbatim — in Redis, in plaintext, for the whole
+  `REKAI_CACHE_TTL_SECONDS`. The scrub moved into `service.handle_chat` ahead of
+  every store, and `ChatResponse` gained a `redacted: ["<pattern>", …]` field so
+  a cache hit or an idempotent replay still reports `X-Redacted` (previously the
+  replay path emitted no header at all). The edge keeps a re-scan as a backstop
+  for entries cached before the setting was switched on. Only affects
+  deployments with `REKAI_OUTPUT_REDACTION_ENABLED=true`.
+- **Idempotency records are scoped per client** — the store key was
+  `sha256(Idempotency-Key)` alone, a single global namespace. Since idempotency
+  keys are caller-chosen and collide constantly (`req-1`), tenant B sending
+  tenant A's key with a matching body was served **A's stored response**, and
+  claiming the in-progress sentinel first would 409 A out of its own key. The
+  key now hashes the client id (masked API-key id under gateway auth, else the
+  client IP) together with the header value, length-prefixed so no
+  `(client, key)` split can be rearranged into another's digest — the same
+  per-API-key scoping Stripe uses. `idempotency.claim/complete/release` take a
+  `client_id` argument.
+- **`REKAI_ALLOWED_PROVIDERS` — operator control over which providers a request
+  may reach** (new, empty = unrestricted, so no behavior change by default). An
+  operator holding server-side keys for several providers had no way to restrict
+  tenants to a subset: any authenticated caller could name any registered
+  provider (via `provider`, a model prefix, or request-level `fallbacks`) and
+  bill the operator's key for it. `router.ensure_allowed` now gates all three
+  paths with a 403; `REKAI_DEFAULT_PROVIDER` is always allowed. Request-level
+  `fallbacks` reject off-list targets outright rather than skipping them
+  silently, so a caller can't end up believing it has a chain it doesn't.
+- **Per-tenant spend is no longer visible to other tenants** — `usage_by_client`
+  names each tenant and what it spent, and both endpoints carrying it were
+  readable by the wrong audience: `/v1/usage` returned the full cross-tenant map
+  to any valid gateway key, and `/metrics` (open by default, so Prometheus can
+  scrape) emitted `rekai_client_*{client="key:…"}` to *unauthenticated* callers.
+  `/v1/usage` is now a tenant view — aggregate counters stay fleet-wide,
+  `usage_by_client` holds only the calling key's row; `/metrics` keeps its
+  operational series open but emits the `rekai_client_*` series only to an
+  authenticated scrape. **Breaking for unauthenticated Prometheus setups that
+  graph per-client series** — authenticate the scrape (any valid gateway key) to
+  restore them. New **`GET /admin/usage`** returns the full fleet breakdown under
+  `REKAI_ADMIN_KEY`, with the same rate limiting and audit logging as
+  `/admin/keys`. Nothing changes when no gateway auth is configured.
+- **Semantic cache correctness** (opt-in feature; five defects, all of which
+  could return a *wrong answer*):
+  - **Bucket was under-specified.** Entries were partitioned by
+    `f"{provider}:{model}:{temperature}:{max_tokens}"` — omitting `tools`,
+    `tool_choice`, `response_format`, and `cache_control`, i.e. exactly the
+    collisions `cache_key`'s own comments warn about. A JSON-mode request could
+    be answered from a prose entry. Now `cache.semantic_bucket`, defined beside
+    `cache_key` as its payload minus `messages`.
+  - **Entries were shared across tenants.** A semantic hit answers a prompt the
+    caller never sent, so the bucket now includes the client id. (The exact
+    cache still shares: a hit there requires the caller to have sent the
+    identical prompt itself.)
+  - **`REKAI_SEMANTIC_CACHE_MAX_ENTRIES` was dead config** — declared,
+    documented, and never passed to `SemanticCache()`, which used its own
+    default of 1000. Now applied in `create_app`.
+  - **Entries never expired**, while the exact cache honors
+    `REKAI_CACHE_TTL_SECONDS`. They now share that TTL.
+  - **The embedding call was unmetered** — a real upstream call per request,
+    billed to the operator's key, invisible in `/v1/usage`. Now counted.
+- **`REKAI_SEMANTIC_CACHE_MODEL` no longer defaults to `echo`** (**breaking** for
+  anyone who enabled the semantic cache without setting a model: startup now
+  fails with an explanatory error instead of silently using `echo`). `echo`
+  embeddings are a 16-dimension SHA-256 slice, so every vector is in the positive
+  orthant, unrelated prompts sit around 0.78 cosine, and ~12% of random pairs
+  clear the 0.85 default threshold — a false-hit generator, not a cache.
+  Explicitly setting it to `echo` still works for tests, with a loud warning.
+- **Web dev-tooling audit cleanup** — bumped `vitest` 2 → 4, clearing the
+  critical advisory in its bundled `vite`/`esbuild`/`vite-node`/`@vitest/mocker`
+  chain, and ran `npm audit fix` for a transitive `brace-expansion` fix — from
+  11 advisories (1 critical) down to 5. The remaining five are the Next.js
+  framework advisories, which only a `next` 14 → 16 major resolves; tracked as
+  a dedicated follow-up (S-3b) since a framework major needs its own migration
+  and full re-verification. All web gates (tsc/lint/vitest/build/E2E) pass on
+  vitest 4.
+
+### Fixed
+- **Ollama ignored `max_tokens`.** The field is declared on RekAI's own
+  `ChatRequest`, documented, and forwarded by the other three providers —
+  `max_tokens` on OpenAI and Anthropic, `maxOutputTokens` on Gemini. The Ollama
+  provider sent no cap under any name, on either the chat or the streaming path,
+  so a request that asked for 16 tokens got as many as the local model felt like
+  producing. Measured against all four backends with the HTTP layer captured:
+  three sent the cap, Ollama sent `{"temperature": 0.7}`.
+
+  It was not a known limitation. Ollama spells it `options.num_predict` and has
+  all along, so it never reached `_warn_unsupported_fields` — whose docstring
+  says it exists to log "the request fields this provider can't honor, rather
+  than dropping them without a trace". Everything around it read as though the
+  cap were in force: the `done_reason` mapping already translated Ollama's
+  `length` into the normalized "truncated" reason that this release also made
+  visible to callers. That reason could never fire from a RekAI-set cap.
+
+  Both payloads are now built by one helper, so the chat and streaming paths
+  cannot drift apart again — which is how this arose. An absent `max_tokens`
+  still sends nothing, leaving the model's own default alone. Verified live
+  against a stub Ollama: `options` arrives as
+  `{"temperature": 0.7, "num_predict": 16}` on `/v1/chat`,
+  `/v1/chat/completions` and the streaming path, and as
+  `{"temperature": 0.7}` when no cap is set.
+- **Most errors on the OpenAI-compatible endpoint were not OpenAI-shaped, and
+  one of them said the wrong thing entirely.** `openai_compat.openai_error`
+  existed and was correct, but it was applied *by hand inside the route
+  function*, which can only cover errors that function produces. Everything else
+  on `/v1/chat/completions` escaped it, with five measured consequences:
+  - An upstream provider's **429 lost its `Retry-After`**. The route caught
+    `ProviderError` itself and rebuilt the response, bypassing
+    `_provider_error_handler`, which is what attaches that header. `/v1/chat`
+    kept it; the endpoint that exists *for* the OpenAI SDK was the one denying
+    the SDK the header it backs off by — inverting the same design this release
+    already fixed on the SDK side.
+  - Provider errors on that path were **counted nowhere**. The same bypass
+    skipped `metrics.record_error`, so `/v1/usage` and `rekai_errors_total`
+    under-reported failures for what is, for many deployments, *the* endpoint.
+  - An `Idempotency-Key` conflict was reported as **"Request blocked by
+    prompt-injection guardrail."** `_run_chat` returns a `JSONResponse` for a
+    guardrail block *and* for a key reused with a different body (422) or one
+    already in flight (409) — but its docstring claimed only the first, and the
+    route believed it. A caller with a duplicate key was sent after a security
+    problem they did not have. The docstring is fixed too, since it is the
+    original error.
+  - Auth (401), budget (402), body cap (413) and rate limiting (429) kept
+    RekAI's flat body, which the OpenAI SDK cannot read: `exc.body` arrived as
+    the bare string `'unauthorized'` — so `exc.body.get(...)` is an
+    `AttributeError` — with `exc.type` empty and the real message reachable only
+    by parsing the repr in `exc.message`.
+  - A schema-invalid body kept FastAPI's `{"detail": [ …pydantic dicts… ]}`,
+    which is neither shape. This is the commonest client error there is.
+
+  The envelope now has one owner, `OpenAICompatErrorMiddleware`, installed
+  outside the middlewares whose rejections it rewrites; the route no longer
+  knows about the envelope at all, which is what restores the header and the
+  metric. `param` is populated when a single field is at fault, as OpenAI does.
+  Scoped to `/v1/chat/completions` alone: `/v1/chat`, `/v1/embeddings` and the
+  rest keep the flat shape the web app and both SDKs parse. A 200 — including a
+  stream — is forwarded untouched. Verified live on uvicorn for each case, and
+  through the real `openai` SDK.
+- **A typo'd `fallbacks` entry was silently dropped.** `_build_attempts` runs
+  `ensure_allowed` over request-level fallbacks for a stated reason — "quietly
+  dropping it would leave the client believing it had a fallback chain it
+  doesn't have" — but `ensure_allowed` only checks the operator's allowlist. A
+  provider that simply **does not exist** passed it, then hit the
+  `provider is None` skip further down and was dropped with a log line. The
+  caller got the primary's error and nothing to say their chain had been
+  ignored, and a typo is far likelier than an allowlist violation:
+  `"provider": "opneai"` bought no failover at all. Worse, one good target
+  masked a bad one, so the mistake shipped looking healthy. An unknown
+  request-level fallback is now a **400**, matching how an unknown *primary*
+  provider is already reported. Server-configured `REKAI_FALLBACK_TARGETS`
+  entries are deliberately still skipped with a warning: that is an operator
+  misconfiguration the caller cannot fix and did not ask for, and failing every
+  request over it would be worse. Verified live: `fallbacks: [{"provider":
+  "opneai"}]` returns `400 Unknown fallback provider 'opneai'`, a valid chain
+  still 200.
+- **`RedisCache.add()` failed open by asserting something false.** Found by
+  measuring coverage: at 94% overall, the least-covered module was `cache.py`
+  (79%), and the uncovered lines were the Redis error paths — the error handling
+  of the error handler. Reading them turned up an asymmetry. Every other method
+  fails open by reporting an *absence*: `get` a miss, `set`/`delete` a no-op.
+  `add` returned `False`, which reports a *fact* — "someone else holds this
+  key" — when the truth is that the backend could not be reached. `cache.add` is
+  the codebase's atomic-claim idiom (idempotency's in-progress sentinel), so a
+  caller using it as a lock would deny service on a Redis blip. It now retries
+  against the fallback `_degrade` has just installed, so `True` means it really
+  did claim the key and a second call really is refused — both true statements.
+  To be clear, this was **not** a live bug: `idempotency.claim()` re-reads after
+  a failed claim and gets a miss from that same fallback, so it already came out
+  at `proceed`. That was verified, not assumed, and the end-to-end test added
+  here passes against the old code too — it is kept because the behaviour it
+  pins (a Redis outage must not make the gateway believe a request is already in
+  flight) is worth holding still regardless of which layer provides it.
+- **Both SDKs honored `Retry-After` without a bound, undoing the gateway's own
+  design.** RekAI deliberately refuses to wait longer than
+  `REKAI_RETRY_MAX_DELAY_SECONDS` (default 8s) and passes the header to the
+  client instead — the architecture doc's words: "so its SDK can back off
+  precisely (rather than blocking the gateway)". The SDKs then slept for
+  whatever the header said. Measured through the Python client's `_send` with
+  the default 3 retries against a `Retry-After: 3600`: **10,800 seconds of
+  `time.sleep` inside one `chat()` call**, on the caller's thread; the JS twin
+  parked the event loop the same way. Both now honor `Retry-After` up to a
+  configurable `max_retry_delay` / `maxRetryDelay` (60s default) and, past it,
+  return the 429 with its header intact so the caller decides — mirroring the
+  server. Clamping and retrying anyway would have been wrong: retrying sooner
+  than the server asked just earns another 429. The JS client also treated an
+  empty `Retry-After` as `Number("") === 0` and retried immediately in a hot
+  loop; an unparseable value now falls through to backoff, as an HTTP-date
+  already did on the Python side.
+- **CI had never been green — mypy died inside numpy's stubs.** Installing the
+  workflow made CI run; it did not make it pass. Every run since, on `main` and
+  on every branch, failed the `api` job identically:
+  `numpy/__init__.pyi:737: error: Type statement is only supported in Python 3.12
+  and greater [syntax]` — mypy giving up before checking a single line of RekAI.
+  The mechanism: `[tool.mypy] python_version = "3.10"` pins the *supported floor*
+  (correctly — it is what keeps `requires-python = ">=3.10"` honest), and mypy
+  applies that version to third-party stubs too. numpy's shipped `.pyi` uses the
+  PEP 695 `type` statement, which is 3.12 syntax, so any runner resolving a
+  current numpy hits a syntax error in a dependency. numpy is now skipped for
+  type-checking purposes, which costs nothing: `semantic_cache.py` imports it in
+  a try/except with `type: ignore[import-not-found]`, so it was already `Any` to
+  mypy. Both `follow_imports = "skip"` and `follow_imports_for_stubs = true` are
+  required — the former does not apply to stub files on its own, and without the
+  latter mypy still parses the `.pyi` and still fails.
+  This is also a lesson about local verification: the commit that installed the
+  workflow reported "mypy … 550 passed" locally, and the merge before this one
+  reported 676. Both were true, and neither predicted CI, because a local venv
+  pins yesterday's dependencies while CI resolves today's. Verified the way that
+  gap demands: reproduced the exact failure in a scratch venv built to CI's
+  versions (Python 3.12.3, numpy 2.5.2, mypy 2.3.1), then confirmed the fix
+  green there, on the local 3.11/numpy 2.4.6 environment, and with numpy absent.
+- **The first-party clients no longer lie about the API's response shape, and
+  cannot drift again.** The web app, the JS SDK and the Python SDK each restate
+  the response shape by hand, and nothing kept those restatements honest. All
+  three had drifted: the web `ChatResponse` omitted `fallback_used` and
+  `tool_calls`; both SDKs' `ChatResult` omitted `created`; and the JS SDK's
+  `UsageSummary` omitted `retries_total`, `cooldowns_total` and
+  `usage_by_client`, so a TypeScript caller got a compile error for fields
+  `GET /v1/usage` definitely returns — a type that lies about the payload is
+  worse than no type, because it makes correct code fail to build. A dropped
+  field fails silently: the JSON still parses, the value is just gone.
+  `apps/api/tests/test_client_types_cover_the_api.py` now makes live requests
+  against the app and asserts every response key is declared by every client,
+  parsing the TypeScript interfaces and Python dataclasses textually and
+  **skipping rather than passing** when a declaration cannot be parsed, so a
+  refactor that defeats the regex can never show up as a false green. It caught
+  the two web omissions that a by-hand audit had missed. `fallback_used` is also
+  surfaced now: the chat metadata line reads `via fallback` when a failover
+  answered, since the provider label alone shows *who* replied but not that the
+  caller's own choice had failed.
+- **The response cache no longer turns a Redis outage into a site-wide 500.** A
+  configured `REKAI_REDIS_URL` that is unreachable (wrong host, Redis down,
+  network partition) made `RedisCache.get()` raise `redis.exceptions.ConnectionError`
+  on every `/v1/chat`, `/v1/chat/completions`, and `/v1/embeddings` request —
+  so the gateway returned `Internal Server Error` instead of serving, despite
+  Redis being "optional". This broke the repo's own core invariant ("Redis-when-
+  configured, process-local otherwise, **fail-open on Redis errors**"), which the
+  rate limiter and metrics store already honored but the cache did not. `RedisCache`
+  now catches errors on `get`/`set`/`add`/`delete`, returns a miss (and a no-op
+  write) instead of propagating, logs a single `redis cache failing open` warning,
+  and transparently downgrades to an in-process `MemoryCache` for the rest of the
+  process — so a transient Redis blip no longer keeps recomputing every cacheable
+  hit for the server's lifetime. `/health` still reports `cache: "redis"` (the
+  configured backend). Verified live: with `REKAI_REDIS_URL` pointed at a dead
+  port, chat/embeddings now return 200 (was 500) with zero tracebacks; a new
+  `test_redis_cache_fails_open_on_errors` regression test asserts the downgrade.
+- **CI was silently dead — the workflow file lived outside `.github/workflows/`.**
+  GitHub Actions only loads workflows from `.github/workflows/`, but the CI
+  definition was committed as `.github/ci-workflow.yml`, so **no CI ever ran**
+  despite the README badge and the `ci: consolidate the two divergent staged CI
+  workflows into one` commit both pointing at `workflows/ci.yml`. Moved it to
+  `.github/workflows/ci.yml` so push/PR triggers actually fire. Verified the YAML
+  parses and the file now sits at the path GitHub scans.
+
+- **`text-embedding-004` was advertised as Gemini but routed to OpenAI.** The
+  model registry (`rekai/models.py`) is meant to be the single source of truth
+  for routing, pricing, and the advertised `/v1/models` list, but its two halves
+  disagreed for exactly one id: `MODEL_SPECS` advertises `text-embedding-004` as
+  a **gemini** embedding model, while the broader `("text-embedding", "openai")`
+  family rule in `PROVIDER_PREFIXES` matched it first. A client that read the id
+  straight off `/v1/models` and posted it to `/v1/embeddings` therefore reached
+  **OpenAI**, not Gemini — an unknown-model error against the wrong upstream, or
+  a silent charge on the operator's OpenAI key when one is configured. Fixed by
+  matching the exact `text-embedding-004` prefix ahead of the OpenAI family
+  rule; `text-embedding-3-*` / `-ada-002` still route to OpenAI. The drift
+  survived because `test_models.py` asserted advertised-vs-routed consistency
+  for **chat** models only, so two regression tests now extend that guarantee to
+  every advertised embedding model.
+- **The chat UI warns when the selected provider is cooling down.** `/health`
+  reports `parked_providers` (provider → seconds of cooldown left), and the web
+  client did not carry the field at all. A parked provider is precisely why a
+  reply arrives from somewhere other than the one selected — RekAI skips it in
+  favour of a healthy fallback — so the reroute looked arbitrary. A notice now
+  names the provider and the time left, alongside the existing "needs an API
+  key" notice. `/health` is also re-read when the tab regains focus and after a
+  failed request, since a cooldown countdown taken once at mount goes stale
+  within seconds and the moment a request fails is exactly when one starts.
+  Completes a sweep that diffed every API response the web app consumes against
+  the fields it carries; `EmbeddingsResponse`, `UsageSummary` and `ModelInfo`
+  came back clean.
+- **The usage dashboard's cache hit rate no longer hides approximate matches.**
+  `semantic_cache_hits_total` is a **subset** of `cache_hits_total`, and the
+  dashboard reported only the combined figure — so the one number an operator
+  uses to judge whether the cache is earning its keep silently counted answers
+  to prompts nobody asked. Observed live against a gateway with the semantic
+  cache on: `cache_hits_total 1, semantic_cache_hits_total 1` — every hit was an
+  approximate match, displayed as a plain hit rate. The tile's detail line now
+  reads `12 / 30 · 5 semantic`, and stays exactly as it was when there are none.
+- **A streamed reply is labelled with the provider that served it.** The chat
+  UI's metadata line filled one slot from two different fields depending on a
+  toggle: the non-streaming path put the response's `provider` there, the
+  streaming path put the *requested model* there and discarded the
+  `provider`/`model` the stream summary already carried. So the same label meant
+  two different things, and a request routed by model name never showed which
+  provider actually answered. Streaming now uses the summary's `provider`,
+  falling back to the requested model only when no summary arrived (an aborted
+  or failed stream), which is also where the existing `· stopped` marker lives.
+- **A semantic cache hit and a redacted answer are now visible in the chat UI.**
+  Both are things the API reports and the reader could not see from the text.
+  `cache_similarity` marks a *semantic* hit — the reply is the stored answer to a
+  **different, similar** prompt — and the UI rendered it identically to an exact
+  hit, as a bare `cached ⚡`, telling the reader their question had been answered
+  when a neighbouring one was. Confirmed live with the semantic cache on: asking
+  "what is the capital city of France" returned the stored answer to "what is the
+  capital of France" with `cached: true, cache_similarity: 0.7458`. It now reads
+  `cached ⚡ answer to a 75% similar prompt`, while an exact hit stays a plain
+  `cached ⚡`. Separately, `redacted` names the secret patterns the output
+  guardrail scrubbed; a redaction leaves a placeholder that reads like ordinary
+  content, so the answer is silently not what the model produced. The metadata
+  line now says e.g. `2 secrets redacted`, on both the streamed and non-streamed
+  paths. Four new Playwright specs cover all four states and the two positive
+  ones were confirmed to fail with the render removed.
+- **A truncated reply now looks truncated in the chat UI.** The API was fixed to
+  report the provider's real `finish_reason` instead of synthesising `"stop"`,
+  and both SDKs surface it — but the web app never carried the field at all, so
+  the one place a human actually reads the answer still could not tell a reply
+  cut short by `max_tokens` from a complete one. On screen the text simply stops.
+  `ChatResponse` and `StreamSummary` gain `finish_reason`, and the message
+  metadata line now says `truncated — raise max tokens` for `length` and
+  `stopped by the provider's content filter` for `content_filter`. It stays
+  silent for `stop` and `tool_calls`, which are ordinary completions — a marker
+  that fires on the common path is noise that gets ignored exactly when it
+  matters. Verified end to end against a fake upstream that truncates: RekAI
+  returns `finish_reason: "length"` on `/v1/chat` and in the `/v1/chat/stream`
+  summary, and three new Playwright specs assert the marker appears on both the
+  streamed and non-streamed paths and stays absent on a normal reply — all three
+  confirmed to fail with the render removed.
+- **Persisted metrics snapshots no longer accumulate forever.** Each process
+  writes `rekai:metrics:snapshot:<instance-id>` and the id is a fresh uuid unless
+  `REKAI_INSTANCE_ID` is set — correctly so, since uvicorn workers share a host
+  and a host-derived id would collapse N workers onto one key and undercount by
+  N. But the key was written with a plain `SET` and no expiry, so **every process
+  start leaked one permanently**, and `load_others()` — which runs on every
+  `/v1/usage` request and does one GET per key — got slower with each restart
+  ever performed. Measured against a local Redis: 200 restarts left 200 keys, all
+  at `TTL -1`, and one `/v1/usage` call took **194 ms**, growing linearly and
+  never shrinking. Snapshots now carry a 24-hour TTL refreshed on every flush
+  (floored at three flush intervals so a long
+  `REKAI_METRICS_PERSIST_INTERVAL_SECONDS` cannot expire a key between its own
+  writes), so a live replica never expires and only one that stopped flushing is
+  collected. Totals were never wrong — verified before and after against a real
+  Redis and a real gateway, where three successive runs of two requests each
+  report 2, 4, 6 — the cost was unbounded memory and a read path that decayed.
+  The module docstring also claimed a restart "resumes where it left off", which
+  is only true when `REKAI_INSTANCE_ID` is set; it now says so.
+- **A keyless OpenAI-compatible backend was unreachable.** The README's second
+  feature bullet promises you can point RekAI at "any OpenAI-compatible
+  endpoint (Groq, Together, OpenRouter, Mistral, vLLM, LM Studio…) with one env
+  var" — but `OpenAICompatibleProvider` set `requires_key = True`, so with only
+  `REKAI_CUSTOM_BASE_URL` configured a request was rejected with RekAI's own
+  `401 No custom API key…` before anything left the process. Three of the
+  backends named — vLLM, LM Studio, llama.cpp — serve **unauthenticated** by
+  default, so the gateway was locked out of exactly the case the sentence
+  advertises, and `/health` reported such a backend as not ready. The provider
+  no longer requires a key: `Authorization` is sent when a key is configured or
+  supplied per request as BYOK, and omitted when there is none, so a hosted
+  backend that does need one answers with its own 401 instead of RekAI guessing
+  on its behalf. Verified live against a keyless OpenAI-shaped server: with
+  `REKAI_CUSTOM_BASE_URL` as the only setting, `/v1/chat` returns the upstream's
+  completion and `/health` reports `custom: ready`. Two tests that encoded the
+  old refusal as intended behavior were replaced. The README and
+  `docs/architecture.md` now state exactly which variables each case needs
+  rather than "one env var".
+- **The quickstart's provider keys never reached the container.** The README's
+  three-line Docker path is `cp apps/api/.env.example apps/api/.env` (add keys),
+  then `docker compose up --build` — and the middle step was a **no-op**.
+  `.env` is `.dockerignore`d, correctly (a key must never be baked into an
+  image), but `docker-compose.yml` declared no `env_file`, so nothing carried it
+  into the api service. Verified with `docker compose config`: with
+  `REKAI_ANTHROPIC_API_KEY` in `apps/api/.env`, the rendered api environment
+  contained only `REKAI_CORS_ORIGINS`, `REKAI_OPENAI_API_KEY: ""` and
+  `REKAI_REDIS_URL`. So the documented way to configure a real provider silently
+  did nothing, and the product appeared to work only on `echo`. The api service
+  now reads `apps/api/.env` as an optional `env_file`.
+  Two related traps removed while proving the fix: `REKAI_OPENAI_API_KEY:
+  ${REKAI_OPENAI_API_KEY:-}` resolved to an **explicit empty string**, and an
+  `environment:` entry outranks `env_file:` — so an unset shell would have
+  erased the key the user had just put in `.env`. The value-less form
+  (`REKAI_OPENAI_API_KEY:`) turned out to do the same thing, deleting the
+  variable outright rather than falling through (both measured with `docker
+  compose config`, not assumed). Provider keys are therefore configured in
+  exactly one place now. `REKAI_CORS_ORIGINS: "*"` was dropped from compose as
+  well — it only restated the default.
+- **W3C Trace Context conformance.** `traceparent` was validated with
+  `int(value, 16)`, far more permissive than the spec's `HEXDIGLC` (lowercase
+  hex only): a leading sign, underscore digit separators, and surrounding ASCII
+  whitespace all passed, so values like `+bf92…` and `4bf9…47_6` were accepted
+  as trace ids — then formatted back into the response header *and* the outbound
+  provider header, i.e. RekAI emitted a `traceparent` that a conforming parser
+  must reject, silently breaking the correlation the header exists to provide.
+  (Not header injection: a raw CR/LF can't reach a single header value, since
+  the HTTP parser splits on it first.) Now validated by regex. A **future
+  version is parsed rather than rejected**, per the spec's forward-compatibility
+  rule — the previous code accepted only `00`, so it would have restarted every
+  trace the day the spec advanced, and an existing test had encoded that as
+  intended. `ff` stays reserved and rejected.
+
+### Changed
+- **One CI workflow instead of two divergent staged copies.** `ci/ci.yml` and
+  `.github/ci-workflow.yml` were both complete, both parked (the GitHub App
+  token cannot push `.github/workflows/`), and each shipped its own README
+  telling a maintainer to `git mv` it into place — so whichever was installed
+  first, the other's instructions became wrong. They had also drifted apart in
+  ways that mattered: Python 3.12 vs 3.11, `main`+`claude/**` vs `main` only,
+  and neither was a superset — `ci/ci.yml` alone had smoke and Docker-build
+  jobs, `.github/ci-workflow.yml` alone had Playwright E2E. `ci/` is deleted and
+  the surviving file carries the union, with two changes on top:
+  the `api` job now runs a **3.10 + 3.12 matrix** (the `requires-python` floor
+  and the version the shipped image runs — both confirmed green locally, 645
+  tests each, before the matrix was written, so a red build there is a real
+  regression), and the separate smoke and docker-build jobs are merged into one
+  `stack` job that validates the compose file, builds both images, brings the
+  stack up with `--wait`, and runs `scripts/smoke.sh` against the actual
+  containers. That job is the only build verification the images ever get:
+  agent sessions on this repo have no Docker daemon.
+
+### Added
+- **The LangChain compatibility claim is now a test, not a promise.** The
+  README's first feature bullet names "any OpenAI SDK, LangChain, or
+  OpenAI-format client"; `test_openai_sdk_e2e.py` covered the first and nothing
+  covered the second, in five places where the claim is made. That is not the
+  same test — `langchain_openai.ChatOpenAI` sends fields the plain SDK does not
+  (notably `stream_options.include_usage`) and maps the response back through
+  its own `AIMessage`, so a gap would surface only there.
+  `tests/test_langchain_e2e.py` drives the real client against the in-process
+  app (ASGITransport, no network) and asserts `ainvoke` content plus
+  `finish_reason`/`model_name`/`usage_metadata`, `astream` reassembly, and the
+  trailing usage-only chunk that `stream_usage=True` depends on — without which
+  every LangChain caller's token accounting would silently read zero. It was
+  verified to fail against a build with `include_usage` forced off. The claim
+  held up on inspection; it is simply checked now. `langchain-openai` joins the
+  optional dev extras and the tests skip when it is absent.
+- **`REKAI_REQUEST_DEADLINE_SECONDS` — a total budget for one request.**
+  `REKAI_REQUEST_TIMEOUT_SECONDS` reads like a request bound and is not one: it
+  caps a *single* outbound call, which `REKAI_RETRY_MAX_ATTEMPTS` multiplies and
+  the fallback chain multiplies again. Measured against a hung upstream with a
+  1.0 s per-call bound: **6 upstream calls and 6.04 s of client wait** — scaled
+  to the shipped defaults (60 s, 2 attempts, a 3-target chain) that is **~6
+  minutes** holding a connection and a concurrency slot for a request whose
+  "timeout" is one minute. The new setting is the missing half — the split Envoy
+  draws between `route.timeout` and `retry_policy.per_try_timeout`, and that
+  LiteLLM/Portkey expose as two settings. It is enforced before starting each
+  fallback target, around each attempt (so one hung upstream cannot overrun the
+  budget by itself), and before each backoff sleep (a sleep that would leave no
+  time to actually retry is skipped, and the real upstream error raised
+  instead). Exceeding it returns **504**; when a genuine upstream failure is in
+  hand that is surfaced instead, so the client sees the cause and not the
+  budget. `0` (the default) keeps today's unlimited behavior. Streaming is
+  exempt — a stream's duration is the length of the answer, not a fault, and
+  `REKAI_MAX_CONCURRENT_REQUESTS` already bounds occupancy there.
+- **`tracestate` is now propagated.** `traceparent`'s companion header carries
+  vendor state (sampling decisions, a vendor's own trace id) and was dropped
+  entirely — the spec pairs the two, and a gateway is the hop every call
+  crosses, so this stranded that state on every request. It is now forwarded to
+  providers alongside `traceparent` and echoed to the client. Since it is
+  attacker-controlled and goes back out in a header, it is validated rather than
+  passed through verbatim: printable ASCII only, at most 32 list members,
+  truncated to 512 bytes on a member boundary.
+- **`finish_reason` now comes from the provider instead of being synthesised.**
+  All five backends report why generation stopped — OpenAI `finish_reason`,
+  Anthropic `stop_reason`, Gemini `finishReason`, Ollama `done_reason` — and
+  RekAI parsed none of them, emitting `"tool_calls" if tool_calls else "stop"`
+  at the edge. So an answer **cut off by `max_tokens` was reported as a normal
+  completion**: the standard "retry with a larger budget when
+  `finish_reason == 'length'`" pattern could never fire, and the truncated
+  answer was cached and replayed to later callers as if it were whole. The four
+  vocabularies are normalized onto OpenAI's (`stop` / `length` / `tool_calls` /
+  `content_filter`) and carried through `ProviderResult`, `StreamEvent`,
+  `ChatResponse` (new nullable `finish_reason` field), both streaming paths, and
+  the OpenAI-compatible translation. Two wrinkles are handled rather than passed
+  through: Gemini says `STOP` even when emitting a `functionCall` (a tool call is
+  inferred from the parts), and Anthropic's forced-tool JSON emulation says
+  `tool_use` (rewritten to `stop`, since the caller never sees a tool call).
+  `null` means the provider said nothing — also how responses cached before this
+  field existed read, and the OpenAI endpoint falls back to the old derivation
+  there. Both SDKs expose it.
+- **`response_format` is now honored by every provider.** RekAI advertised JSON
+  mode in its OpenAPI schema and README, but Anthropic and Ollama accepted the
+  field and dropped it with only a debug log — a caller who asked for JSON got
+  prose and no signal, which breaks the one promise a gateway makes. Neither
+  provider lacked the capability:
+  - **Ollama** takes a top-level `format`: `"json"` for free-form JSON, or the
+    JSON schema itself, which it uses for *constrained decoding* so the output
+    conforms by construction. The old log line said "unsupported by the ollama
+    provider", which was simply untrue.
+  - **Anthropic** has no `response_format` at all, so RekAI uses its documented
+    route — forced tool use: inject one tool whose `input_schema` is the
+    requested shape, pin `tool_choice` to it, then **unwrap the resulting
+    `tool_use` block back into JSON `content`** and suppress the tool call, so
+    the response looks like OpenAI's JSON mode. Streaming included: the forced
+    tool's `input_json_delta` fragments are emitted as text deltas.
+
+  Two documented limits: a `json_object` request has no schema, so the injected
+  tool uses a permissive `{"type": "object"}`; and if the caller sends their own
+  `tools` alongside `response_format`, the tools win — only one tool can be
+  forced, and silently disabling tools someone explicitly asked for is worse
+  than leaving the ambiguity with them.
+- **Semantic cache: meaning-flipping edits can no longer produce a hit.** A
+  cosine threshold cannot catch the failure mode that matters most, because the
+  vectors really are that close: "is aspirin safe during pregnancy" vs "is
+  aspirin **not** safe during pregnancy", or "convert **5** USD" vs "convert
+  **500** USD", are near-identical to an embedding model and opposite questions
+  to a user. Candidates are now rejected when their negation count or their
+  ordered numeric literals differ from the query's, however similar the
+  embeddings — the check *GPTCache* (arXiv:2311.13133) delegates to a second
+  model, minus the second model call. It can only turn a hit into a miss (a
+  wrong miss costs one upstream call; a wrong hit answers a question nobody
+  asked), and prompts with neither feature — most conversational traffic — are
+  unaffected. Only the digest is retained, never the prompt text.
+- **Semantic cache lookups are ~60× faster, and their cost is now measured** —
+  the similarity scan called a cosine that re-derived *both* vectors' norms on
+  every entry, including the stored vector's, once per entry per lookup.
+  Measured on the default 1000-entry bound with 1536-dim embeddings, per lookup:
+  **~124 ms → ~48 ms** by unit-normalizing on insert so a comparison is a bare
+  dot product, **→ ~2.1 ms** when NumPy is installed. NumPy is optional (a dev
+  extra so the suite tests both paths; the pure-Python path stays the
+  reference), not a runtime dependency. New
+  `rekai_semantic_cache_lookup_seconds{result}` histogram, because the residual
+  cost is paid on every request including misses — at ~48 ms a pure-Python
+  deployment fronting a fast provider can spend more than the cache saves, and
+  that should be visible rather than inferred.
+- **Semantic cache: entries from a different embedding model can no longer
+  match.** Changing `REKAI_SEMANTIC_CACHE_MODEL` leaves old-dimension entries in
+  the process-local store; they scored `0.0`, which under a threshold of `0.0`
+  counts as a hit (`0.0 >= 0.0`). They are now skipped outright. Also, a
+  vector's similarity to itself came out as `0.9999999999999998` from float
+  accumulation, so a threshold of exactly `1.0` — "only an identical embedding
+  may hit" — could never match anything; similarity is now rounded at 1e-12,
+  well above the noise floor and far below any meaningful discrimination.
+- **Semantic cache hits disclose their similarity** — a hit that answers a
+  *different* prompt arrived as `cached: true`, identical to an exact hit, and
+  landed in the same `rekai_cache_hits_total` counter, so neither a caller nor
+  an operator could tell the two apart. Responses now carry
+  `cache_similarity` (plus an `X-Cache-Similarity` header), null on a miss and
+  on an exact hit so a value is exactly the signal that an approximate match was
+  used; `rekai_semantic_cache_hits_total` / `UsageSummary.semantic_cache_hits_total`
+  count the subset. Both SDKs expose the new fields.
+- **`REKAI_MAX_CONCURRENT_REQUESTS` — a cap on in-flight `/v1/*` requests**
+  (opt-in, `0` = unlimited, so no behavior change by default). The rate limiter
+  bounds *arrivals*; nothing bounded *occupancy*, which for an LLM gateway is a
+  different quantity — 60 requests/minute is satisfiable by 60 concurrent
+  60-second streams. And since `httpx`'s read timeout resets per chunk, a
+  slow-trickling upstream could hold a streaming request open indefinitely
+  without ever reaching `REKAI_REQUEST_TIMEOUT_SECONDS`. Excess requests get 429
+  + `Retry-After` (`error: "concurrency_limit"`) rather than queueing. Pure-ASGI
+  and wrapped around the whole app, so a slot is held until the last byte of a
+  streamed body is sent — a `BaseHTTPMiddleware` dispatch would release it
+  before the first token. `/health` and `/metrics` are outside the cap, so they
+  stay answerable exactly when the gateway is saturated.
+- **`/health` can report `degraded`** — `status` was typed `Literal["ok"]`, so
+  the endpoint structurally could not signal a problem, even though the cooldown
+  and circuit-breaker machinery already knew which providers were parked (the
+  only external evidence was `rekai_cooldowns_total`, which says something
+  happened, not what is happening). It now returns `degraded` while any provider
+  is in cooldown, with `parked_providers` giving each one's remaining seconds.
+  Still HTTP 200 when degraded — the gateway is serving, and failing a liveness
+  probe over one parked provider would take down a working deployment. Still no
+  I/O: no upstream probe (an unauthenticated request amplifier) and no Redis
+  ping, so `parked_providers` is the local worker's view.
+- **Errors are dimensioned** — `record_error()` took no arguments, so
+  `rekai_errors_total` mixed a bad Bearer token with an upstream outage: enough
+  for an alert threshold, useless for deciding what to do about it. Adds
+  `rekai_errors_by_kind_total{kind}` (`unauthorized`, `rate_limited`,
+  `concurrency_limit`, `budget_exceeded`, `payload_too_large`,
+  `guardrail_blocked`, `idempotency_error`, `provider_error`) and
+  `rekai_provider_errors_total{provider,status}`, the latter recorded for every
+  upstream failure — including non-transient 4xx and the last attempt in a
+  fallback chain, which the old fallback-only call site dropped — so a
+  per-provider success rate is computable against
+  `rekai_provider_requests_total`. Two paths that returned an error and counted
+  *nothing* now do: the hard body-size cap (the one a chunked upload actually
+  trips) and `Idempotency-Key` 409/422 conflicts.
+- **Latency is measured** — RekAI reported cost, tokens, cache hits, retries and
+  cooldowns, but not a single duration: `elapsed_ms` was computed in the request
+  middleware for the `X-Response-Time-Ms` header and the access log, then thrown
+  away, and upstream calls were never timed at all. Three Prometheus histograms
+  on the OpenTelemetry GenAI advisory bucket boundaries for
+  `gen_ai.client.operation.duration`: `rekai_request_duration_seconds{path}`
+  (end-to-end, labelled by route template so a parameterised route is one
+  series), `rekai_provider_duration_seconds{provider,operation}` (upstream,
+  retries included), and `rekai_stream_ttft_seconds{provider}` (time to first
+  streamed token). The gap between the first two is RekAI's own overhead — the
+  thing that was previously unknowable.
+
+### Changed
+- **Prompt-injection guardrail: patterns narrowed, and the default action is now
+  `flag` instead of `block`** (**breaking** for deployments running with
+  `REKAI_GUARDRAILS_ENABLED=true` and no explicit action — they stop returning
+  403 and start returning 200 with `X-Guardrail-Flag`; set
+  `REKAI_GUARDRAILS_ACTION=block` to keep the old behavior). The patterns matched
+  a verb plus a bare noun, so all 17 benign phrasings now in the test corpus were
+  flagged — "show me the instructions for assembling this bookshelf", "override
+  the system clock in a unit test", "summarize this security paper about
+  jailbreak techniques", "disregard the previous draft" — each a hard 403 on
+  ordinary traffic. Every pattern now requires an object referring to the model's
+  own instructions or safety configuration: 0/17 false positives, 0/21 attack
+  phrasings missed (up from 6 attack cases covered). The default changed because
+  a regex wrong in the blocking direction deletes a legitimate request with no
+  recourse, while one wrong in the flagging direction costs a header — and since
+  pattern matching can't be a boundary against an adversary who rephrases
+  (arXiv:2504.11168), its realistic value is signal, which doesn't require
+  blocking.
+- **`rekai_requests_total{provider="…"}` renamed to
+  `rekai_provider_requests_total{provider="…"}`** (**breaking** for dashboards
+  using the old series). The per-provider breakdown shared a metric name with
+  the bare total, so `sum(rekai_requests_total)` counted every request twice and
+  Prometheus saw inconsistent label sets within one family.
+- **E2E coverage for the v1.2 OpenAI-compatible surface** — added
+  `e2e/openai-compat.spec.ts`: a direct `POST /v1/chat/completions` asserting
+  the `chat.completion` shape (object, choices, `finish_reason`, usage), a
+  `stream: true` run asserting `chat.completion.chunk` frames and a terminal
+  `[DONE]` with reassembled deltas, and a check that the Settings page's "Use it
+  from the OpenAI SDK" snippet shows the drop-in base URL.
+- **Registry test for `REKAI_CUSTOM_*` env wiring** — the env → registry path
+  that registers a custom OpenAI-compatible backend at import time was
+  untested (existing tests only built the provider directly). Added a
+  reload-based test that sets `REKAI_CUSTOM_BASE_URL`/`_NAME`/`_MODELS` and
+  asserts the provider is registered with the right URL, key, and models (and
+  cleans up so global registry state is restored for later tests).
+- **`scripts/smoke.sh` asserts JSON fields with `jq`, not substring greps** —
+  the smoke test matched compact-JSON fragments (`"status":"ok"`), which is
+  brittle to whitespace/key-order changes and can't check nested values. It now
+  uses `jq -e` field assertions (e.g. `.usage.total_tokens > 0`, the echo
+  provider present in `.data`) and gained an optional auth negative case: set
+  `REKAI_API_KEY` and it verifies an unauthenticated `/v1/chat` returns 401 (and
+  authenticates the other checks). Documents the `jq` prerequisite in the
+  README and Makefile.
+- **Single model registry (`rekai/models.py`)** — model→provider routing, the
+  price table, and each provider's advertised `/v1/models` list were maintained
+  in three separate places and drifted (o1/o3 and gemini-2.5-pro were priced but
+  hidden from `/v1/models`, fixed earlier by hand-syncing all three). They now
+  derive from one `ModelSpec` registry: `router` reads its prefix rules,
+  `pricing` builds its table from it, and providers advertise from it. A
+  `test_models.py` invariant asserts every advertised chat model routes back to
+  its provider and is priced, so a model can't be added to one surface and
+  forgotten on the others. No behavior change — `/v1/models`, routing, and cost
+  estimates are identical.
+- **Multi-replica metrics aggregation** — persisted metrics used a single Redis
+  key that every replica overwrote (last-writer-wins), so `/v1/usage` reflected
+  only whichever process flushed last. Each replica now persists to its own
+  `rekai:metrics:snapshot:<instance-id>` key and loads only *its own* snapshot as
+  its startup baseline; `/v1/usage` sums this instance's live counters with every
+  other replica's persisted snapshot for a fleet-wide view. `/metrics` stays
+  per-instance so a Prometheus scraper (which already sums targets) doesn't
+  double-count. Instance id comes from `REKAI_INSTANCE_ID` or a random
+  per-process id. Added a pure `merge_snapshots()` and `MetricsStore.load_others()`.
+- **Idempotency-Key semantics hardened (Stripe-style)** — a key reused with a
+  *different* request body now returns **422** instead of silently replaying the
+  first (unrelated) response, and a second request that arrives while the first
+  is still in flight returns **409** instead of racing it. Each record stores a
+  sha256 fingerprint of the request body, and the key is claimed atomically with
+  an in-progress sentinel (`cache.add` → Redis `SET NX` / an event-loop-atomic
+  memory write) that is released if processing errors so a retry isn't blocked.
+  All cache access fails open on backend errors. Applies to both `/v1/chat`
+  (and the OpenAI-compatible route) and `/v1/embeddings`. The `CacheBackend`
+  protocol gained atomic `add()` and `delete()`.
+
+### Fixed
+- **Two divergent CI workflows were staged for the same destination.** Both
+  `ci/ci.yml` and `.github/ci-workflow.yml` existed, and `ci/README.md` and
+  `.github/README.md` each instructed a maintainer to `git mv` *their* file to
+  `.github/workflows/ci.yml` — so whichever instruction was followed silently
+  decided which gates ran, and the second `git mv` would clobber the first. The
+  two files had drifted apart and neither ran the full `CLAUDE.md` gate set:
+  `ci/ci.yml` had `smoke` + `docker` but no `e2e` and no `tsc --noEmit`;
+  `.github/ci-workflow.yml` had `e2e` but no `smoke`, no `docker`, and also no
+  `tsc --noEmit`. They also disagreed on Python version (3.12 vs 3.11), on the
+  `ruff format` scope (`.` vs `rekai tests`), and on trigger branches.
+  Consolidated into the single staged file `.github/ci-workflow.yml`, now the
+  union of both — `api`, `python-sdk`, `js-sdk`, `web`, `smoke`, `e2e`,
+  `docker` — with `tsc --noEmit` added to the web job to match `CLAUDE.md`, and
+  Python pinned to 3.12 throughout. `ci/` is removed and the `CONTRIBUTING.md`
+  pointer updated, so there is exactly one file and one install instruction.
+- **`MemoryCache.add()` can re-claim a just-expired key** — the previous fix
+  moved `get()` and `_evict_expired_if_full()` to `expires_at <= now`, but
+  `add()` was left on `item[0] >= now`, so at the boundary (an entry written
+  with `ttl=0`, or read exactly when it is due) `add()` still saw the entry as
+  live and returned `False` while `get()` reported it gone. The in-progress
+  idempotency sentinel is claimed through `add()`, so on that path a key could
+  never be re-claimed: the caller was refused the claim yet found no stored
+  response. `add()` now uses the same strict boundary (`item[0] > now`).
+  Regression tests `test_memory_cache_add_reclaims_an_expired_key` (frozen
+  clock, no intervening `get()` — a read would evict the entry and mask the
+  bug) and `test_memory_cache_add_refuses_a_live_key`.
+- **`MemoryCache` expires entries with `ttl=0` correctly** — `get()` and
+  `_evict_expired_if_full()` compared `expires_at < now`, so an entry written
+  with `ttl=0` (expires immediately) had `expires_at == now` and was treated as
+  still valid. Both comparisons now use `<=` so `ttl=0` is expired on the next
+  read and is pruned when the cache is at capacity. `tests/test_cache.py`
+  (`test_memory_cache_expiry`, `test_memory_cache_evicts_expired_at_capacity`)
+  now pass.
+- **Provider HTTP client honors a changed request timeout** — `Provider._client()`
+  cached its persistent `httpx.AsyncClient` keyed only on the event loop, so a
+  changed `request_timeout_seconds` (e.g. re-running `create_app` with new
+  settings) was frozen at the value seen when the client was first built. The
+  cache key now includes the timeout, so the client is rebuilt when it changes.
+- **`/v1/models` now lists every model RekAI routes and prices** — the router
+  sends `o1*`/`o3*` to OpenAI and the price table knows `o1`, `o1-mini`,
+  `o3-mini`, and `gemini-2.5-pro`, but each provider's `list_models()` omitted
+  them, so `/v1/models` hid models that RekAI actually handles (and their
+  cost estimates). Added them, and a `test_providers.py` invariant that every
+  advertised chat model both has a price and routes back to the advertising
+  provider — locking the three surfaces (router, price table, model list)
+  together so they can't drift apart again.
+- **Admin page detects "admin API not configured" by status code, not error
+  text** — the page treated a `404` as "this deployment has no admin API"
+  (the routes aren't mounted unless `REKAI_ADMIN_KEY` is set) but did so by
+  matching FastAPI's `"Not Found"` message string, which silently breaks if
+  that server-controlled text ever changes. `errorFromResponse` now returns a
+  typed `ApiError` carrying `.status`, and the page branches on
+  `e.status === 404`.
+- **Chat UI accessibility** — the conversation is now a labelled `role="log"`
+  `aria-live="polite"` region so assistive tech announces streamed and appended
+  replies, the error banner is `role="alert"`, and message bubbles carry stable
+  ids instead of array-index React keys (which shifted on
+  regenerate/clear and confused reconciliation). Added an E2E assertion for the
+  live region.
+
+### Added
+- **Provider prompt-cache passthrough and discounted cost accounting** — RekAI
+  dropped `cache_control` on the way to the provider, so callers couldn't use
+  Anthropic's prompt caching (up to ~90% off a cached prefix) through the
+  gateway, and cost estimates ignored caching entirely. `ChatRequest` and
+  `ChatMessage` now accept a `cache_control` breakpoint: a top-level one marks
+  the last prompt block, a per-message one marks that message (a plain string
+  body is promoted to a text block so the marker has somewhere to live).
+  `Usage` gained `cache_read_tokens` / `cache_write_tokens` — a *breakdown* of
+  `prompt_tokens`, defaulting to 0 so existing responses are unchanged —
+  populated from Anthropic's `cache_read_input_tokens` /
+  `cache_creation_input_tokens` (non-streaming and streaming) and OpenAI's
+  `prompt_tokens_details.cached_tokens`. `estimate_cost` bills cache reads at
+  0.1x and writes at 1.25x the input rate, with the remainder at full price, so
+  a cached prompt is never double-counted. `cache_key` includes the breakpoint
+  so differently-cached requests don't share an entry.
+- **First-class streaming tool calls in both SDKs** — when a streamed
+  completion ends with tool calls, they ride on the summary event under
+  `tool_calls`. The SDKs now expose an `on_tool_calls` (`onToolCalls`) stream
+  callback invoked with just that list, so callers no longer have to dig them
+  out of the usage summary. The server's SSE frame shape is unchanged
+  (backward-compatible); `on_usage` still receives the full summary.
+- **SDK idempotency keys + client-side retry (both SDKs)** — the Python and JS
+  clients now retry transient failures (connection errors and
+  `429`/`502`/`503`/`504`) with exponential backoff, honoring `Retry-After`;
+  tunable via `max_retries`/`retry_backoff` (`maxRetries`/`retryBackoff` in JS),
+  set retries to 0 to disable. `chat()` accepts an `idempotency_key`
+  (`idempotencyKey`) sent as the `Idempotency-Key` header so the server replays
+  the first response instead of re-processing; when retries are enabled and no
+  key is given, one is generated per call (and reused across a request's own
+  retries) so an auto-retry can't double-execute. `AsyncRekAIClient` shares the
+  same options.
+- **`AsyncRekAIClient` in the Python SDK** — an `async`/`await` mirror of the
+  synchronous `RekAIClient`, backed by `httpx.AsyncClient` so the connection
+  pool is reused across awaits. `stream()` is an async generator driven with
+  `async for`, and its `on_usage` callback accepts a coroutine function.
+  Shared request/response plumbing (header/payload builders, SSE decoding) was
+  factored to module level so the two clients can't drift. Bumps the SDK
+  package `__version__` to 1.2.0 (it lagged at 1.1.0 behind `pyproject.toml`).
+- **AI-agent working docs** — a root `CLAUDE.md` (shared conventions: the
+  exact verification gates, established code idioms, and this environment's
+  git constraints) plus `docs/ai/instructions-opus.md` and
+  `docs/ai/instructions-sonnet.md`: a strengths/weaknesses summary of the
+  codebase and a prioritized improvement backlog split by task difficulty —
+  architecture-level work (settings DI for the provider layer, semantic-cache
+  confidence bands, cost-quality cascade routing) for Opus-class sessions,
+  pattern-following implementation (E2E coverage for v1.2 features, custom-
+  provider registry tests, npm audit cleanup, post-permission-grant release
+  steps) for Sonnet-class sessions. Every command in the docs was executed
+  as written before committing. A second audit pass deepened the backlog
+  with 10 more findings (body-unbound Idempotency-Key and in-flight
+  coalescing, multi-replica metrics last-writer-wins, stale price/model
+  tables, insecure-by-default CORS, admin-page 404 string-matching, chat-UI
+  accessibility, async Python SDK, SDK idempotency/retry, streamed tool-call
+  surfacing, brittle smoke.sh) plus two strengths to guard against
+  regression (dependency-free W3C tracing, bounded Retry-After waits), all
+  cited to file:line.
+
+## [1.2.0] - 2026-07-17
+
+### Performance
+- **Providers reuse a persistent `httpx.AsyncClient`** — every provider
+  (OpenAI, Anthropic, Gemini, Ollama, and OpenAI-compatible) opened a brand-new
+  `httpx.AsyncClient` in an `async with` block and tore it down on *every*
+  chat/streaming/embeddings request, so no TCP/TLS connection to an upstream
+  provider was ever reused — a full handshake per call. A new
+  `Provider._client()` helper (in `providers/base.py`) returns a client cached
+  per provider instance, keyed by the running event loop (a client's pool is
+  loop-bound, so it's rebuilt only when the loop changes — routine only under
+  pytest-asyncio, a no-op in production's single long-lived loop). Meaningful
+  latency/throughput win under load; no behavior change.
+
+### Added
+- **`tests/test_service.py`** — direct unit tests for
+  `service.handle_chat_stream`, the shared streaming pipeline extracted in an
+  earlier commit. It previously had no dedicated test file, only indirect
+  coverage via the streaming endpoints' SSE-serialized output; these drive it
+  directly and assert on the typed `ChatStreamEvent`/`StreamSummary` values
+  (usage estimation vs provider-reported, tool-call surfacing, 429/5xx
+  cooldown and circuit-breaker behavior including reset-on-success, and
+  per-client budget-window recording).
+
+### Fixed
+- **Dynamic-key decryption failure now logs a warning instead of failing
+  silently** — a wrong or rotated `REKAI_DYNAMIC_KEYS_ENCRYPTION_KEY` made
+  `DynamicKeyStore.list_keys()` quietly return an empty list, which looks
+  identical to "all runtime-added keys were revoked" from an operator's
+  side, with nothing in the logs to explain it. Now logs at warning with the
+  likely cause, and calls out that the next `add()` (which reads the
+  existing list first) would otherwise silently overwrite the undecryptable
+  blob.
+- **Ollama silently dropped `tools` and `response_format`** — Ollama's
+  `/api/chat` has no equivalent for either, and unlike Anthropic's
+  `response_format` handling (added earlier), nothing logged that they were
+  being ignored. Now logs at debug, matching the Anthropic precedent. Also
+  added `tests/test_ollama.py` — previously the provider had only incidental
+  coverage via a fake-client embeddings test and generic router/streaming
+  tests using the `echo` provider.
+- **Documented that `Idempotency-Key` doesn't cover streaming** — neither
+  `POST /v1/chat/stream` nor `stream: true` on the OpenAI-compatible
+  endpoint accept it (a retried streaming request always re-runs), but this
+  was previously undocumented — a new integrator would only discover it by
+  reading `main.py`. Now called out in both endpoint docstrings and
+  docs/architecture.md's Idempotency section.
+- **Request body size limit is now a hard cap, not just a Content-Length
+  check** — the previous check only rejected requests that sent an oversized
+  `Content-Length` header; a client using chunked transfer-encoding (which
+  omits `Content-Length` entirely) sailed straight past it, and Starlette
+  would buffer the *entire* body before any size validation ran — no real
+  protection against a memory-exhaustion DoS. Added `MaxBodySizeMiddleware`
+  (`apps/api/rekai/main.py`), a pure-ASGI middleware wrapping the whole app:
+  it buffers `/v1/*` request bodies up to the limit and sends a 413 directly
+  the moment the running total is exceeded, without ever invoking the
+  downstream app. (A `BaseHTTPMiddleware`-based approach — raising mid-read
+  from inside the existing `_rate_limit` middleware — turned out to be
+  fundamentally broken: Starlette's internal receive-forwarding wraps such an
+  exception in an `anyio.ExceptionGroup`, which loses its type before
+  FastAPI's body-parsing code can recognize it as an `HTTPException`, so it
+  fell through to a generic 400. The pure-ASGI buffer-then-replay approach
+  sidesteps that translation entirely.) The existing Content-Length check
+  remains as a cheap, no-buffering fast-path rejection.
+- **Per-client tracking is now bounded** (`REKAI_MAX_TRACKED_CLIENTS`, default
+  10,000; `0` = unlimited) — `usage_by_client` and the budget-window store grew
+  one entry per distinct client id forever, and without gateway auth that id is
+  the raw request IP, making any internet-facing deployment a slow memory leak
+  (persisted across restarts via the metrics snapshot, no less). The rate
+  limiter already capped its buckets for exactly this reason; the metrics
+  structures now do too. At the cap, admitting a new client evicts the
+  least-active tracked client (the budget-window store first clears entries
+  from already-expired windows); `seed()` applies the cap to oversized
+  persisted snapshots, keeping the busiest clients. Eviction resets that
+  client's lifetime-budget baseline — consistent with budget enforcement being
+  documented as approximate, not billing (see docs/architecture.md).
+
+### Added
+- **`response_format` in both SDKs** — the Python client's `chat()`/`stream()`
+  take `response_format={...}` and the JS client takes
+  `responseFormat: {...}`, forwarded to the gateway's `response_format`
+  passthrough added below, so SDK users get structured outputs without
+  hand-building requests.
+- **OpenTelemetry GenAI attributes in the access log** — chat and embeddings
+  requests now attach the OTel GenAI semantic-convention fields
+  (`gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`,
+  `gen_ai.usage.input_tokens`/`output_tokens`) to the structured access-log
+  line, so RekAI's JSON logs drop straight into a GenAI observability dashboard
+  (Datadog, Grafana, …) without a full OTel SDK integration. Streaming requests
+  carry the model/provider fields (set pre-stream) but not token usage (the log
+  line fires before the stream body is consumed).
+- **`response_format` passthrough (structured outputs)** — both `/v1/chat` and
+  the OpenAI-compatible endpoint now accept OpenAI's `response_format`
+  (`{"type": "json_object"}` or `{"type": "json_schema", ...}`) and forward it
+  to providers that support it: OpenAI and OpenAI-compatible backends natively,
+  Gemini best-effort (mapped to `responseMimeType`/`responseSchema`). Anthropic
+  and Ollama have no equivalent and ignore it (logged at debug, never an error).
+  The 2026 production default for reliable JSON output, which RekAI didn't pass
+  through at all. Note: `response_format` is now part of the chat cache key (a
+  JSON-mode and a plain request must not collide), so existing cache entries are
+  invalidated once on deploy — TTL-bounded and harmless.
+- **OpenAI-compatible `POST /v1/chat/completions`** — point any OpenAI SDK,
+  LangChain, or other OpenAI-format client at RekAI's base URL (`.../v1`) and it
+  works as a drop-in: same request/response shapes, non-streaming and
+  `stream: true` (SSE `chat.completion.chunk` frames, with
+  `stream_options.include_usage` honored). It's a thin translation
+  (`rekai/openai_compat.py`) over the same internal pipeline as `/v1/chat`, so
+  routing, cache, retries, fallback, budgets, per-client accounting, and
+  Idempotency-Key all apply unchanged. RekAI extensions: an optional `provider`
+  field or an OpenRouter-style `"<provider>/<model>"` model string forces a
+  provider; unknown OpenAI tuning params (`seed`, `frequency_penalty`, …) are
+  tolerated and ignored; `n > 1` is a 400. Errors use the OpenAI error envelope
+  so SDK error handling parses them. This is the 2026 de-facto gateway
+  interface (LiteLLM/OpenRouter/vLLM/Ollama all expose it); RekAI previously
+  had only its own custom `/v1/chat` schema. Verified end-to-end against the
+  real `openai` Python SDK (`tests/test_openai_sdk_e2e.py`, ASGITransport).
+
+### Changed
+- **Streaming chat pipeline extracted to `service.handle_chat_stream`** — the
+  provider-driving loop (deltas, cooldown/circuit-breaker on error, usage
+  estimation, per-client accounting) previously lived inline in the
+  `/v1/chat/stream` route and hardcoded the SSE frame format. It now yields
+  typed `ChatStreamEvent`s and the route formats them, so a second transport
+  (the upcoming OpenAI-compatible endpoint) can reuse the exact same pipeline.
+  The non-streaming path's guardrail/idempotency/redaction/accounting wrapper
+  was likewise factored into `_run_chat`. Byte-for-byte identical output on
+  `/v1/chat` and `/v1/chat/stream`; pure refactor, no behavior change.
+
+### Added
+- **Gateway-key support in `examples/`** — `curl.sh` and all 7 Python/JS
+  example scripts only ever sent the BYOK provider key; none could reach a
+  gateway with `REKAI_API_KEYS` configured. All now read a `REKAI_GATEWAY_KEY`
+  env var and send it as `Authorization: Bearer`, matching the SDK fix above.
+- **Documented `REKAI_APP_NAME` and `REKAI_REQUEST_TIMEOUT_SECONDS` in
+  `.env.example`** — both are real, active `Settings` fields (the latter
+  controls every outbound HTTP timeout to a provider — chat, streaming,
+  embeddings) that had no entry in the example file, found via a
+  config-fields-vs-`.env.example` diff. No behavior change.
+- **Gateway-key support in both SDKs** — the Python and JS clients only ever
+  sent the BYOK provider key (`X-Provider-Key`); neither could authenticate to
+  a gateway with `REKAI_API_KEYS` configured, since that needs a separate
+  `Authorization: Bearer` header. Both now accept a `gateway_key`/`gatewayKey`
+  (constructor default, overridable per call) and send it on every `/v1/*`
+  call (`chat`, `stream`, `embeddings`, `models`, `usage`).
+- **`X-Content-Type-Options: nosniff` on all API responses** — set in the
+  existing `_request_context` middleware alongside `X-Request-ID` /
+  `X-RekAI-Version`, closing the gap where the web app got security headers
+  but the API itself didn't.
+- **Favicon** — `apps/web/app/icon.svg`; the app previously shipped no icon at
+  all, so browsers requested a nonexistent `/favicon.ico`. Uses Next.js's
+  built-in `app/icon.svg` convention (auto-linked in `<head>`, no other
+  wiring needed).
+- **Custom error and 404 pages** — `apps/web/app/error.tsx` (client-side error
+  boundary with a "Try again" reset button) and `apps/web/app/not-found.tsx`
+  (styled 404 matching the rest of the app) replace Next.js's generic
+  defaults.
+- **Web security headers** — `apps/web/next.config.js` now sets
+  `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+  `Referrer-Policy: strict-origin-when-cross-origin`, and a `Content-Security-Policy`
+  (`connect-src` includes `NEXT_PUBLIC_API_URL` so API calls aren't blocked).
+  Verified live: all 5 pages load and a real chat round-trip completes with
+  zero CSP violations in the browser console.
+- **Non-root Docker users** — both Dockerfiles now drop root before running
+  the server (`rekai` for the API image, the built-in `node` user for the
+  web image); the web image's `deps` stage also switched from `npm install`
+  to `npm ci` for reproducible builds. Reviewed for correctness (standard,
+  well-documented patterns) but not build-verified in this session — the
+  sandbox's Docker daemon isn't available (`dockerd` fails to start here);
+  `docker compose config` validates cleanly.
+- **Web E2E suite** — `apps/web/e2e/` (Playwright) promotes three flows
+  hand-verified ad-hoc throughout development into committed regression
+  tests: sending a chat message, gateway auth locking out the app until a
+  key is saved in Settings, and the `/admin` runtime key-management UI
+  (wrong key errors, add/revoke). Each spec starts/stops its own API process
+  with the `REKAI_*` env it needs (fixed ports, so specs run serially — see
+  `apps/web/e2e/README.md`). `npm run e2e`.
+- **Time-boxed per-client budget windows** — `REKAI_CLIENT_BUDGET_WINDOW_SECONDS`
+  turns `REKAI_CLIENT_BUDGET_USD` from a lifetime-until-reset cap into a fixed
+  window (e.g. `86400` for daily, `2592000` for 30 days), using the same
+  epoch-aligned `int(now / window)` bucketing `RedisRateLimiter` uses. Unset
+  (default) = today's lifetime-cumulative behavior, unchanged. The 402
+  response gets a new `X-Budget-Reset` header (next window boundary) when a
+  window is configured. Tracked separately from `usage_by_client` and not
+  persisted across restarts — see docs/architecture.md. Closes the last
+  open item from this session's feature-triage list.
+- **`/admin/*` rate limiting** — on by default whenever `REKAI_ADMIN_KEY` is
+  set (`REKAI_ADMIN_RATE_LIMIT_*`, 20 requests/60s), sized and keyed
+  separately from the tenant rate limit (by IP, since there's no per-admin
+  identity). Deliberately checked *before* the admin-key check — the opposite
+  order from the tenant gateway-auth gate — so a wrong-key guess still
+  consumes budget: the threat here is brute-forcing the one shared secret, not
+  fairness between tenants. A firewall/VPN in front of `/admin/*` remains the
+  primary control; this is a backstop.
+- **Web UI for dynamic key management** — `/admin` in the web app wraps the
+  API's `/admin/keys` (add/revoke/list runtime keys, `REKAI_DYNAMIC_KEYS_ENABLED`)
+  in a page instead of curl-only access, with its own admin-key field
+  (local storage, distinct from the gateway/provider keys) and a clear notice
+  when `REKAI_ADMIN_KEY` isn't configured server-side.
+- **`traceparent` forwarded upstream** — RekAI parsed and returned W3C Trace
+  Context, but the trace stopped at its edge: the outbound HTTP call to the
+  actual provider (OpenAI/Anthropic/Gemini/Ollama/custom; chat, streaming, and
+  embeddings) never carried a `traceparent`, so a distributed trace couldn't
+  follow the request into whichever provider served it. Now every provider
+  call attaches a `traceparent` continuing the request's trace with a fresh
+  span id, via an ambient `ContextVar` set by the request middleware — no
+  `trace_id` parameter threading required down through the call stack.
+- **Admin API audit log** — every `/admin/keys` request (add, revoke, list,
+  and unauthorized attempts) is now written to a dedicated `rekai.admin`
+  logger with the action, masked key, and caller IP — the key issuance/
+  revocation operations previously left no record beyond the generic access
+  log line. The raw key is never logged.
+- **`REKAI_PRICING_OVERRIDES`** — override or extend the built-in per-model
+  price table without a code change or redeploy, e.g.
+  `"gpt-4o:2.00:8.00,my-model:0.50:1.50"`. Config-driven (scoped to one
+  `Settings` instance, doesn't mutate shared global state like
+  `pricing.register_price()` does) and read by every cost estimate, budget
+  cap, and the `pricing` field in `/v1/models` — closing the gap where a
+  stale/wrong price, once shipped, needed a code change to fix.
+- **Circuit breaker for repeated 5xx** — a 429 already parked a provider
+  immediately (an explicit "back off" signal); a bare 5xx did not, so a
+  provider stuck returning 500s paid for a full retry-with-backoff cycle on
+  *every* request before falling over to a fallback. `REKAI_CIRCUIT_BREAKER_THRESHOLD`
+  (default 3) now parks a provider the same way after that many *consecutive*
+  5xx failures across separate requests (any success resets the count) —
+  covers the fallback-chain path and the streaming path.
+- **Redis-shared rate limiting** — with `REKAI_REDIS_URL` set, the per-tenant
+  rate limit is enforced with a fixed-window Redis `INCR` counter shared by
+  all workers/nodes, instead of each process keeping its own token bucket
+  (which silently multiplied the effective limit by the worker count). Same
+  headers (`X-RateLimit-*`, `Retry-After`); fails open on a Redis outage so
+  rate limiting degrades before availability does. Verified live with two
+  uvicorn workers: exactly 5 of 10 requests pass at a limit of 5.
+- **Dynamic API key management** (opt-in) — `REKAI_DYNAMIC_KEYS_ENABLED` adds a
+  runtime-managed set of keys on top of the static `REKAI_API_KEYS`, so an
+  operator can onboard or cut off a tenant without a redeploy: `GET/POST
+  /admin/keys` and `DELETE /admin/keys/{key}`, guarded by a separate
+  `REKAI_ADMIN_KEY` (the admin routes aren't registered at all unless it's
+  set). Dynamically-added keys work everywhere a static one does — rate
+  limiting, per-client usage, budget caps. Stored via the existing cache
+  backend (Redis if configured, else process-local).
+  `REKAI_DYNAMIC_KEYS_ENCRYPTION_KEY` (a Fernet key) encrypts that storage at
+  rest, since unlike BYOK these keys are actually persisted server-side; unset
+  (default) stores plaintext as before.
+- **`REKAI_METRICS_REQUIRE_AUTH`** (opt-in) — `/metrics` is open by default
+  (so Prometheus can scrape without a token) even when `REKAI_API_KEYS` gates
+  `/v1/*`, but it now carries a per-client cost breakdown. This flag locks it
+  behind the same Bearer key for operators who consider that sensitive; a
+  no-op when no keys are configured. `/v1/usage` was already gated (it's under
+  `/v1/*`) — this closes the one endpoint that wasn't.
+- **Per-client budget cap** (opt-in) — `REKAI_CLIENT_BUDGET_USD` turns the
+  per-client cost tracked in `usage_by_client` into an enforceable spend cap:
+  once a client's cumulative cost reaches it, further `/v1/*` requests from
+  that client get `402 Payment Required` (`X-Budget-Remaining: 0`), checked
+  before any provider call is made. Unset (default) = no cap.
+  `REKAI_CLIENT_BUDGETS_USD` (e.g. `"sk-a:5.00,sk-b:20.00"`) overrides the cap
+  per API key, falling back to the global default for unlisted keys — needed
+  for a multi-tenant deployment where different clients need different caps.
+- **Per-client usage metrics** — `/v1/usage` and `/metrics` now break down
+  requests, tokens, and cost per client (`usage_by_client` /
+  `rekai_client_*_total{client="…"}`), keyed by the same masked `key:<hash>` id
+  used for per-tenant rate limiting (or the client IP with no gateway auth).
+  Covers chat, streaming, and embeddings, including cached/idempotent-replay
+  responses. The raw key is never stored or logged. `usage_by_client` round-trips
+  through the write-behind metrics store like every other counter — seeded on
+  startup, accumulated live, flushed on shutdown — and is covered by a
+  dedicated persistence test.
+- **Output redaction** (opt-in, OWASP LLM02) —
+  `REKAI_OUTPUT_REDACTION_ENABLED=true` scrubs common secret/API-key patterns
+  (OpenAI/Anthropic/Stripe/GitHub/Slack keys, AWS access key ids, `Bearer`
+  tokens, PEM private-key blocks) from the assistant's reply on non-streamed
+  `/v1/chat`, before it's cached or stored for idempotency replay. Sets
+  `X-Redacted: <pattern,...>` when it fires. A heuristic (not a security
+  boundary); intentionally not applied to `/v1/chat/stream` (see
+  `docs/architecture.md`).
+- **Redis-shared provider cooldown** — when `REKAI_REDIS_URL` is set, a
+  provider's 429 cooldown is written through to and read from Redis (in
+  addition to the local, zero-latency check), so a rate limit discovered by one
+  worker/node is honoured by the others instead of each rediscovering it
+  independently. No Redis configured → unchanged, process-local behaviour.
+- **Prompt-injection guardrail** (opt-in, OWASP LLM01) —
+  `REKAI_GUARDRAILS_ENABLED=true` scans user messages on `/v1/chat[/stream]` for
+  common injection/jailbreak phrasings; `block` (default) rejects with `403`,
+  `flag` adds an `X-Guardrail-Flag` header. A heuristic first layer (not a
+  security boundary) — see arXiv:2504.11168 on evasion. Off by default.
+- **Per-tenant rate limiting** — when gateway auth is on, the rate-limit bucket
+  is keyed by the API key (a non-reversible `key:<hash>` id) instead of the
+  client IP, so one tenant can't exhaust another's budget; the masked id is also
+  attached to the structured access log as `client`. Falls back to IP when
+  unauthenticated.
+- **Gateway authentication** (opt-in) — set `REKAI_API_KEYS` (comma-separated)
+  to require `Authorization: Bearer <key>` on `/v1/*`, compared in constant time
+  (`401` + `WWW-Authenticate: Bearer` otherwise). Checked before rate limiting so
+  unauthenticated traffic can't consume budget; system endpoints (`/health`,
+  `/metrics`) stay open. Distinct from BYOK (the upstream provider key). Empty by
+  default (open).
+- **W3C Trace Context** — RekAI parses an incoming `traceparent`, continues its
+  `trace_id` (emitting a new span id) or starts a fresh trace, returns a
+  `traceparent` response header, and attaches `trace_id` to the structured
+  access log — so it participates in distributed traces in an OpenTelemetry
+  system, dependency-free.
+- **Resilience metrics** — `rekai_retries_total` (transient failures retried in
+  place) and `rekai_cooldowns_total` (providers parked after a 429) are now
+  counted in `/metrics` and `/v1/usage`, and shown on the web usage dashboard,
+  so operators can see the retry/cooldown machinery working.
+- **Semantic cache** (opt-in) — `REKAI_SEMANTIC_CACHE_ENABLED=true` reuses a
+  response when a prior prompt's embedding is within
+  `REKAI_SEMANTIC_CACHE_THRESHOLD` cosine similarity (default 0.85), catching
+  paraphrases that the exact-match cache misses — the *GPT Semantic Cache*
+  approach (arXiv:2411.05276). Entries are bucketed by provider/model/params and
+  held in a bounded process-local store. Costs one embedding call per request,
+  so use a real embeddings model.
+- **Idempotency-Key** — clients can send an `Idempotency-Key` header on
+  `POST /v1/chat` / `/v1/embeddings`; a repeat with the same key returns the
+  stored first response (`Idempotent-Replay: true`) instead of processing again,
+  so a network blip or automatic retry can't double-process. Keyed by the
+  client id (not the body), works with `"cache": false`, TTL
+  `REKAI_IDEMPOTENCY_TTL_SECONDS` (default 24h).
+- **Automatic retry with backoff + jitter** — transient upstream failures
+  (5xx / network timeouts) are now retried in place before falling over, with
+  exponential backoff and full jitter (`REKAI_RETRY_MAX_ATTEMPTS`, default 2;
+  `REKAI_RETRY_BASE_DELAY_SECONDS`, `REKAI_RETRY_MAX_DELAY_SECONDS`). 4xx errors
+  are never retried. Applies to chat and embeddings. (A resilience pattern
+  widely recommended for LLM API clients — retry transient errors with jittered
+  exponential backoff rather than failing or hammering a recovering upstream.)
+- **Upstream rate-limit (429) handling** — a provider 429 is now retried
+  honouring its `Retry-After` (waiting that long when it's within `max_delay`),
+  triggers failover to the next target, and — when ultimately surfaced — its
+  `Retry-After` is **passed through to the client** so the caller's SDK backs
+  off by the amount the provider asked for (previously 429 was terminal and the
+  header was dropped). `ProviderError` gained `retry_after`.
+- **Provider cooldown** — after a 429 a provider is parked for its `Retry-After`
+  (or `REKAI_PROVIDER_COOLDOWN_SECONDS`, default 30s) and routing skips it in
+  favour of a healthy fallback while it cools down, so RekAI stops hammering a
+  rate-limited provider across requests. Toggle with
+  `REKAI_PROVIDER_COOLDOWN_ENABLED`.
+
+### Fixed
+- **Password fields wrapped in `<form>`** — the Settings and Admin pages'
+  password/credential inputs (provider key, gateway key, admin key, add/revoke
+  runtime key) previously used bare `onClick` handlers, which browsers warn
+  about ("password field is not contained in a form") and which break
+  Enter-to-submit and password-manager integration. Each is now inside its own
+  `<form onSubmit>`.
+- **Fail-fast config validation** — enum-like settings (`REKAI_LOG_FORMAT`,
+  `REKAI_GUARDRAILS_ACTION`) are now `Literal`-typed and numeric ones carry
+  bounds (`SEMANTIC_CACHE_THRESHOLD` in [0,1], `RETRY_MAX_ATTEMPTS`/rate limits
+  ≥ 1, TTL/body-size ≥ 0), so a typo or out-of-range value raises a clear error
+  at startup instead of silently falling back to wrong behaviour.
+- **Streaming 429 now records a provider cooldown** — a rate limit seen on the
+  streaming path is now parked like on the non-streaming path, so subsequent
+  requests route around the rate-limited provider (previously only non-streaming
+  429s did this).
+- **Streaming crash on tools conversations** — when a provider didn't report
+  usage, the streaming endpoint estimated tokens over the request messages and
+  crashed mid-stream on a message with `content: null` (valid in a tool
+  round-trip). It now treats null content as empty, so the stream completes with
+  an estimated usage summary.
+- **Cache correctness with tools** — the chat cache key now includes `tools`
+  and `tool_choice`. Previously two requests with identical messages but
+  different tools collided, so a tool-less reply could be served for a tools
+  request (and vice versa).
+- **Rate-limiter memory bound** — the per-client bucket map now prunes idle
+  (fully-refilled) buckets once it passes a soft cap (`max_buckets`, default
+  10k), so a flood of distinct client keys can't grow memory without bound.
+- **Memory cache bound** — `MemoryCache` drops expired entries before growing
+  past `max_entries` (default 10k), instead of only evicting on read.
+- **Web app couldn't use gateway auth at all** — enabling `REKAI_API_KEYS`
+  broke the entire web app (chat, embeddings, and the usage dashboard all got
+  silent or opaque `401`s), because it only ever sent the upstream BYOK
+  provider key (`X-Provider-Key`), never a gateway `Authorization: Bearer`
+  token. Settings now has a separate "Gateway API key" field, stored and sent
+  alongside the provider key on every `/v1/*` call; the usage page also
+  surfaces a clear "set the gateway key" hint on `401`.
+
+### Changed
+- Refreshed the README and architecture docs to reflect the 1.1.0 feature set
+  (all five providers, tool calling, embeddings, model discovery + pricing,
+  rate-limit headers, JSON logging, SDKs).
+
+## [1.1.0] - 2026-06-29
+
+A backward-compatible feature release building on 1.0.0: text embeddings across
+all providers, richer model discovery (types, pricing, filtering), rate-limit
+observability, structured logging, and hardening.
+
+### Added
+- **Per-model pricing in `/v1/models`** — each entry now carries an optional
+  `pricing` (`input_per_1m`/`output_per_1m` USD, or `null` when unknown) from
+  the pricing table, so clients can show cost estimates without hardcoding
+  rates. The web app and JS SDK `ModelInfo` types include it.
+- **Request body size limit** — `/v1/*` requests whose `Content-Length` exceeds
+  `REKAI_MAX_BODY_BYTES` (default 1 MB; 0 disables) are rejected with
+  `413 Payload Too Large` before parsing, protecting the server from oversized
+  payloads. The `413` (and existing `429`) responses are now documented in the
+  OpenAPI schema for the chat/embeddings/stream endpoints.
+- **`X-RekAI-Version` header** — every response advertises the gateway version
+  that served it (exposed via CORS), so clients and proxies can see which
+  version answered.
+- **Root banner endpoint** — `GET /` returns a small JSON service banner
+  (name, version, description, links to `/docs` and `/health`) so hitting the
+  bare API URL is friendly instead of a 404.
+- **Structured JSON logging** — set `REKAI_LOG_FORMAT=json` to emit one JSON
+  object per log line (`ts`, `level`, `logger`, `message`, plus any `extra=`
+  fields). The access log now carries structured `method`/`path`/`status`/
+  `duration_ms`/`request_id` fields, so logs are machine-parseable in
+  production. Defaults to the human-readable text format.
+- **`/v1/models?type=` filter** — fetch only `chat` or only `embedding` models
+  server-side (invalid values are rejected with 422). The web Embeddings page
+  uses it directly instead of filtering client-side.
+- **Rate-limit budget hint in the web chat** — after a request the composer
+  shows a subtle "N / M requests left in the rate-limit window", read from the
+  `X-RateLimit-*` headers via a new `parseRateLimit()` and an `onRateLimit`
+  callback on the chat fetch helpers.
+- **Graceful rate-limit UX in the web chat** — a 429 now shows a clear
+  "Rate limited — retry in Ns." message (from `Retry-After`) instead of a
+  generic failure. Required two fixes so the browser can actually read the
+  response: CORS is now the outermost middleware (so a short-circuit 429 still
+  carries CORS headers) and the custom headers (`Retry-After`, `X-RateLimit-*`,
+  `X-Request-ID`, `X-Response-Time-Ms`) are exposed via
+  `Access-Control-Expose-Headers`. CORS preflight (`OPTIONS`) no longer consumes
+  rate-limit budget. The web fetch helpers share one `errorFromResponse()`.
+- **Rate-limit headers** — every `/v1/*` response now carries
+  `X-RateLimit-Limit` and `X-RateLimit-Remaining`, and rate-limited responses
+  add a standard `Retry-After` (whole seconds until a token frees up, also
+  echoed in the detail). `RateLimiter` gained non-consuming `remaining()` and
+  `retry_after()` peeks.
+- **Container healthchecks & readiness gating** — the web image gained a
+  `HEALTHCHECK` (the API already had one), and Docker Compose now starts `web`
+  only once `api` is `service_healthy` (which itself waits on Redis). A
+  `docker compose up` comes up in dependency order and reports real readiness.
+- **Embeddings** — `POST /v1/embeddings` with provider routing, caching, BYOK,
+  and metrics. Echo returns deterministic vectors (no key); OpenAI(-compatible)
+  calls the real `/embeddings` API. `Provider.embed()` is the extension point.
+  Both SDKs expose `embeddings()` (Python `EmbeddingsResult`, JS returns the
+  parsed object) for client parity with the chat path. **Ollama** embeddings
+  are native via `/api/embed` (keyless, e.g. `nomic-embed-text`) and **Gemini**
+  via `:batchEmbedContents` (e.g. `text-embedding-004`) — vectors now span all
+  cloud providers like chat. Embeddings responses carry `cost_usd` (input-only
+  pricing for `text-embedding-3-*`/`ada-002`; both SDKs surface it). A web
+  **Embeddings** playground (`/embeddings`) embeds one-input-per-line and shows
+  vector dims, cost, and pairwise cosine similarity. `/v1/models` now tags each
+  entry with a `type` (`chat`/`embedding`) and advertises embedding models
+  (`list_embedding_models()`), so the playground offers a real model dropdown
+  routed to the right provider and the chat selector stays chat-only.
+  OpenAI-compatible backends can advertise their own embedding models via
+  `REKAI_CUSTOM_EMBEDDING_MODELS`. Runnable
+  `examples/{python,javascript}/embeddings.{py,mjs}` show a cosine-similarity
+  demo, and `examples/python/semantic_search.py` ranks a corpus against a query
+  (the core of RAG retrieval).
+- **Tool / function calling** — `ChatRequest` accepts OpenAI-style `tools` and
+  `tool_choice` (passed through); the model's `tool_calls` are returned on
+  `ChatResponse`. Messages support `tool_calls`/`tool_call_id`/`name` and
+  optional `content` for full round-trips. (Non-streaming; OpenAI-compatible.)
+  Both SDKs expose `tools`/`tool_choice` and surface `tool_calls`. For
+  streaming, OpenAI tool-call deltas are accumulated and returned in the final
+  summary event. **Anthropic** tools work natively via format translation
+  (OpenAI `tools`/`tool_choice`/`tool_calls` ↔ Anthropic
+  `input_schema`/`tool_use`/`tool_result`). **Gemini** likewise via
+  `functionDeclarations`/`functionCall`/`functionResponse` — uniform tool
+  calling across OpenAI, Anthropic, and Gemini through one API, in both
+  non-streaming and streaming modes. A `examples/python/tools.py` demonstrates a
+  full call → execute → respond round-trip.
+- **Exact provider routing from the web** — the chat UI sends the selected
+  model's provider (from `/v1/models`), so custom and explicitly-chosen
+  providers route correctly instead of falling back to the default.
+- **OpenAI-compatible provider** — set `REKAI_CUSTOM_BASE_URL` to front any
+  OpenAI-compatible API (Groq, Together, OpenRouter, Mistral, vLLM, LM Studio…);
+  reuses the OpenAI implementation incl. accurate streaming usage.
+- **Deploy configs** — a Render Blueprint (`deploy/render.yaml`) provisioning
+  Redis + API + Web, plus a deploy guide. The web `Dockerfile` accepts
+  `NEXT_PUBLIC_API_URL` as a build arg so the API URL is baked correctly.
+- **Regenerate** — re-run the last user turn for a fresh assistant reply,
+  without duplicating messages.
+- **Max tokens control** — the chat Options panel now exposes a `max_tokens`
+  cap (forwarded on both the streaming and non-streaming requests).
+- **Streaming usage/cost** — `POST /v1/chat/stream` now emits a final
+  `{"usage", "cost_usd", "estimated"}` summary event, and streamed requests are
+  counted in `/v1/usage` and `/metrics` (previously only non-streamed were). The
+  web chat shows token/cost on streamed replies.
+- **SDK streaming usage** — the Python (`on_usage`) and JS (`onUsage`) clients
+  now surface the final streaming usage/cost summary via an optional callback.
+- **Accurate streaming usage** — providers gained `stream_events()`; all five
+  (echo, OpenAI via `stream_options`, Anthropic, Gemini, Ollama) report exact
+  token counts during streaming (`estimated: false`), with text estimation as
+  the fallback.
+
+## [1.0.0] - 2026-06-29
+
+First public release — a self-hostable AI router & gateway. Runs with a single
+`docker compose up`, works out of the box via the keyless `echo` provider, and
+exposes one OpenAI-style chat API across five backends with caching, BYOK,
+streaming, fallback, cost estimation, and a built-in web UI.
+
+### Added
+- **Monorepo foundation** — `apps/api` (FastAPI) and `apps/web` (Next.js),
+  Docker Compose, devcontainer, issue/PR templates, and OSS docs
+  (README, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY).
+- **Router** — provider resolution by explicit choice → model-name prefix →
+  configured default.
+- **Provider abstraction** with a registry and five backends: `echo` (keyless),
+  `openai`, `anthropic`, `gemini`, and `ollama`.
+- **Response cache** — Redis with an automatic in-memory fallback and a
+  per-request opt-out; deterministic cache keys.
+- **BYOK** — per-request provider keys via `X-Provider-Key`, never persisted.
+- **Streaming** — `POST /v1/chat/stream` (SSE) with native token streaming for
+  echo, OpenAI, Anthropic, Gemini, and Ollama; safe single-chunk fallback.
+- **Cost estimation** — per-model price table, `cost_usd` on responses, and a
+  `/v1/usage` summary; cumulative cost in `/metrics`.
+- **Fallback / failover** — ordered `(provider, model)` chain retried on
+  upstream (5xx) errors; 4xx client errors are terminal.
+- **Rate limiting** — per-client token bucket on `/v1/*`.
+- **Observability** — structured logging, per-request `X-Request-ID` +
+  `X-Response-Time-Ms` headers with access logging, Prometheus-style
+  `/metrics`, `/v1/usage`, and auto-generated OpenAPI at `/docs`.
+- **Persistent metrics** — write-behind persistence of the usage counters to
+  Redis (when configured) so `/v1/usage` totals survive restarts; in-memory and
+  no-op otherwise.
+- **Web UI** — chat with model selector, streaming toggle, an **Options** panel
+  (system prompt + temperature), a **Stop** button to cancel a stream,
+  conversation persistence across reloads, and cache/provider/token/cost
+  indicators; a live **usage dashboard** at `/usage`; a settings page for BYOK
+  keys.
+- **Examples** — runnable curl, Python (incl. streaming), and JavaScript
+  clients.
+- **Python SDK** — installable `rekai-client` package (`packages/python-sdk`)
+  with `RekAIClient` (`chat`, `stream`, `models`, `usage`, `health`), BYOK,
+  and fallback support.
+- **JavaScript/TypeScript SDK** — zero-dependency `@rekai/client`
+  (`packages/js-sdk`) mirroring the Python client, with TypeScript types and an
+  async-generator `stream()`.
+- **CI** — GitHub Actions for API (ruff, mypy, pytest), web (lint, vitest,
+  build), Python/JS SDK tests, a live-API smoke job, and Docker image builds.
+- **Web unit tests** — vitest coverage for the pure client helpers
+  (`formatCost`, `parseSSEFrame`).
+- **Makefile** — common developer tasks (`make help`).
+- **Smoke test** — `scripts/smoke.sh` exercises the core endpoints of a running
+  instance (health, chat, stream, usage, models, OpenAPI).
+- **pre-commit** — config running ruff (lint + format) and file-hygiene hooks.
+- **.dockerignore** for both apps so image builds exclude local
+  `node_modules`/`.venv`/caches.
+- **Provider readiness** in `/health` (`provider_status`): `ready` vs
+  `byok_only` per provider, surfaced as badges on the web Settings page and as
+  an inline chat hint when the selected model needs a key that isn't set.
+
+### Fixed
+- Web `output: standalone` is now gated behind `NEXT_OUTPUT=standalone` (set by
+  the Dockerfile) so local `next start` works and the app hydrates correctly.
+- SDK CI now runs `ruff format --check` (previously only `ruff check`), and the
+  SDK source was reformatted to match.
+
+[Unreleased]: https://github.com/shizukutanaka/RekAI/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/shizukutanaka/RekAI/compare/v1.3.0...v1.3.1
+[1.3.0]: https://github.com/shizukutanaka/RekAI/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/shizukutanaka/RekAI/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/shizukutanaka/RekAI/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/shizukutanaka/RekAI/releases/tag/v1.0.0
