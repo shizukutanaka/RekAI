@@ -117,6 +117,8 @@ class OpenAIProvider(Provider):
             payload["tools"] = request.tools
         if request.tool_choice is not None:
             payload["tool_choice"] = request.tool_choice
+        if request.parallel_tool_calls is not None:
+            payload["parallel_tool_calls"] = request.parallel_tool_calls
         if request.response_format is not None:
             payload["response_format"] = request.response_format
         if request.web_search_options is not None:
