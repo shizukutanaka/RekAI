@@ -165,6 +165,18 @@ class AnthropicProvider(Provider):
         # new knobs (interleaved, budget caps) should not need a schema bump.
         if request.thinking is not None:
             payload["thinking"] = request.thinking
+        # Same for the remaining real Anthropic request fields — all
+        # Anthropic's own vocabulary, forwarded verbatim when set.
+        if request.context_management is not None:
+            payload["context_management"] = request.context_management
+        if request.container is not None:
+            payload["container"] = request.container
+        if request.inference_geo is not None:
+            payload["inference_geo"] = request.inference_geo
+        if request.speed is not None:
+            payload["speed"] = request.speed
+        if request.diagnostics is not None:
+            payload["diagnostics"] = request.diagnostics
         if request.mcp_servers:
             payload["mcp_servers"] = request.mcp_servers
         # Output config (effort/format) too — Anthropic's own vocabulary.
@@ -181,6 +193,9 @@ class AnthropicProvider(Provider):
             "anthropic-version": current_settings().anthropic_version,
             "content-type": "application/json",
         }
+        # Anthropic takes the user profile as a header, not a body field.
+        if request is not None and request.user_profile_id is not None:
+            headers["anthropic-user-profile-id"] = request.user_profile_id
         # Anthropic's MCP connector is a beta: mcp_servers is rejected without it.
         if request is not None and request.mcp_servers:
             headers["anthropic-beta"] = "mcp-client-2025-11-20"

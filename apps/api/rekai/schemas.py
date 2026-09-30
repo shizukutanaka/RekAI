@@ -114,6 +114,40 @@ class ChatRequest(BaseModel):
         "temperature=1 under thinking, so the compat layer defaults to that "
         "when the caller left temperature unset.",
     )
+    context_management: dict[str, Any] | None = Field(
+        default=None,
+        description="Anthropic's `context_management` — context-editing rules "
+        "(clear old tool uses, clear thinking, compact). Forwarded verbatim "
+        "to Anthropic only; other providers ignore it.",
+    )
+    container: dict[str, Any] | str | None = Field(
+        default=None,
+        description="Anthropic's `container` — a container id (string) or "
+        "config object ({id, skills}) to reuse a code-execution container "
+        "across requests. Forwarded verbatim to Anthropic only.",
+    )
+    inference_geo: str | None = Field(
+        default=None,
+        description="Anthropic's `inference_geo` — data-residency region "
+        "(e.g. 'us'). Forwarded to Anthropic only.",
+    )
+    speed: str | None = Field(
+        default=None,
+        description="Anthropic's `speed` ('standard' | 'fast') — latency "
+        "preference billed differently upstream. Forwarded to Anthropic only.",
+    )
+    diagnostics: dict[str, Any] | None = Field(
+        default=None,
+        description="Anthropic's `diagnostics` — request-level diagnostics "
+        "(e.g. previous response id for prompt-cache divergence reporting). "
+        "Forwarded verbatim to Anthropic only.",
+    )
+    user_profile_id: str | None = Field(
+        default=None,
+        description="Anthropic's `user_profile_id` — the user profile to "
+        "attribute the request to. Sent to Anthropic only, as the "
+        "`anthropic-user-profile-id` header.",
+    )
     output_config: dict[str, Any] | None = Field(
         default=None,
         description="Anthropic's `output_config` — e.g. {'effort': 'medium'} "
@@ -339,6 +373,15 @@ class _AnthropicMessagesBase(BaseModel):
     # Anthropic's extended-thinking config, verbatim ({'type': 'enabled',
     # 'budget_tokens': N}). Declared so it isn't swallowed by extra=allow.
     thinking: dict[str, Any] | None = None
+    # Remaining real Anthropic request fields — verbatim, same
+    # swallow-by-extra=allow hazard. (`fallbacks` is deliberately absent:
+    # RekAI's own extension uses that name with different semantics.)
+    context_management: dict[str, Any] | None = None
+    container: dict[str, Any] | str | None = None
+    inference_geo: str | None = None
+    speed: str | None = None
+    diagnostics: dict[str, Any] | None = None
+    user_profile_id: str | None = None
     # Anthropic's output config, verbatim ({'effort': ...}, {'format': ...}).
     # Same swallow-by-extra=allow hazard.
     output_config: dict[str, Any] | None = None
