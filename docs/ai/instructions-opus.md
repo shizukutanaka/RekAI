@@ -32,10 +32,15 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
   実装時もこの防御を迂回しないこと。
 
 ### 短所 — 既知の構造的制約
-1. **プロバイダ層に `create_app(settings)` が届かない**: providers は module-level
-   `get_settings()` (env 固定・`@lru_cache`) を直接読む。`registry.py` は import 時に
-   設定を読んで custom provider を登録する。テストで env 以外の設定を providers に
-   注入できない。**未解決 (O-1)**。
+1. ~~**プロバイダ層に `create_app(settings)` が届かない**~~ → **解消 (O-1)**:
+   providers は `config.current_settings()` を読む — リクエストスコープの
+   ContextVar で、`_request_context` ミドルウェアと `handle_chat`/
+   `handle_chat_stream`/`handle_embeddings` 入口の両方でバインドされる
+   (HTTP 経路と直接呼出の双方でその Settings が届く)。未バインドの文脈
+   (import 時・テスト直接呼出) では従来どおり env の `get_settings()` に
+   フォールバック。`registry.py` は import 時初期化を廃止し組込みは遅延
+   登録化、custom backend は `create_app` が `configure_custom_provider`
+   で登録/除去する (再呼出で陳腐な custom を残さない)。
 2. **セマンティックキャッシュが単一閾値 + 線形走査** (`semantic_cache.py`)。
    正しさの欠陥 (バケット不足・テナント越え・TTL なし・上限未配線・埋め込み
    コスト未計上・次元不一致で誤ヒット) は解消済み。走査は挿入時に単位ベクトル化
@@ -80,6 +85,15 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
 ## 割当タスク (優先度順)
 
 ### O-1. プロバイダ層の設定 DI 化 (短所 1 の解消)
+> ✅ **完了**: providers の `get_settings()` (env 固定) を全 23 箇所
+> `config.current_settings()` に置換 — リクエストスコープ ContextVar
+> (`tracing.py` の trace id と同じイディオム)。`create_app` は
+> `configure_custom_provider(settings)` で custom backend を登録/除去し、
+> `_request_context` ミドルウェアが Settings をバインド。`handle_chat`/
+> `handle_chat_stream`/`handle_embeddings` も入口でバインドするため直接
+> 呼出 (テスト) でも渡した Settings が届く。registry は組込みを遅延登録化
+> して import 時初期化を排除、公開 API (`get_provider`/`provider_names`/
+> `register_provider`) の形は不変 — テスト移行は不要だった。
 - 目標: `create_app(settings)` の Settings がプロバイダにも届く構造にする。
   案: registry を `create_app` 内で構築してアプリ state に持たせる/providers が
   settings を引数で受ける。**互換性制約**: module-level `metrics`/`cooldowns` 等の
