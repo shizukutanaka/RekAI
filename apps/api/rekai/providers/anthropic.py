@@ -165,6 +165,20 @@ class AnthropicProvider(Provider):
         # new knobs (interleaved, budget caps) should not need a schema bump.
         if request.thinking is not None:
             payload["thinking"] = request.thinking
+        # Same for the remaining real Anthropic request fields — all
+        # Anthropic's own vocabulary, forwarded verbatim when set.
+        if request.context_management is not None:
+            payload["context_management"] = request.context_management
+        if request.container is not None:
+            payload["container"] = request.container
+        if request.inference_geo is not None:
+            payload["inference_geo"] = request.inference_geo
+        if request.speed is not None:
+            payload["speed"] = request.speed
+        if request.diagnostics is not None:
+            payload["diagnostics"] = request.diagnostics
+        if request.mcp_servers:
+            payload["mcp_servers"] = request.mcp_servers
         # Output config (effort/format) too — Anthropic's own vocabulary.
         if request.output_config is not None:
             payload["output_config"] = request.output_config
@@ -172,13 +186,20 @@ class AnthropicProvider(Provider):
             payload["stream"] = True
         return payload
 
-    def _headers(self, key: str) -> dict[str, str]:
-        return {
+    def _headers(self, key: str, request: ChatRequest | None = None) -> dict[str, str]:
+        headers = {
             **trace_headers(),
             "x-api-key": key,
             "anthropic-version": current_settings().anthropic_version,
             "content-type": "application/json",
         }
+        # Anthropic takes the user profile as a header, not a body field.
+        if request is not None and request.user_profile_id is not None:
+            headers["anthropic-user-profile-id"] = request.user_profile_id
+        # Anthropic's MCP connector is a beta: mcp_servers is rejected without it.
+        if request is not None and request.mcp_servers:
+            headers["anthropic-beta"] = "mcp-client-2025-11-20"
+        return headers
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
         settings = current_settings()
@@ -188,7 +209,7 @@ class AnthropicProvider(Provider):
         url = f"{settings.anthropic_base_url.rstrip('/')}/messages"
         try:
             client = self._client(settings.request_timeout_seconds)
-            resp = await client.post(url, json=payload, headers=self._headers(key))
+            resp = await client.post(url, json=payload, headers=self._headers(key, request))
         except httpx.HTTPError as exc:
             raise ProviderError(f"Anthropic request failed: {exc}") from exc
 
@@ -200,6 +221,12 @@ class AnthropicProvider(Provider):
         # content is a list of blocks; concatenate the text blocks.
         content = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
         thinking_blocks = [b for b in blocks if b.get("type") in ("thinking", "redacted_thinking")]
+        # Web-search citations ride on the text blocks; collect them verbatim.
+        # Each citation self-locates via its cited_text, so flattening the
+        # per-block lists keeps the mapping intact.
+        citations = [
+            c for b in blocks if b.get("type") == "text" for c in (b.get("citations") or [])
+        ]
         tool_calls = _extract_tool_calls(blocks)
         # Everything else — server-side tool blocks (server_tool_use,
         # web_search_tool_result, mcp_*, code_execution) and any type RekAI
@@ -249,6 +276,7 @@ class AnthropicProvider(Provider):
             ),
             finish_reason=finish_reason,
             thinking_blocks=thinking_blocks or None,
+            citations=citations or None,
             extra_blocks=extra_blocks or None,
             content_blocks=content_blocks or None,
             extra_fields=_response_extras(data),
@@ -286,7 +314,9 @@ class AnthropicProvider(Provider):
         extra_json: dict[int, str] = {}
         try:
             client = self._client(settings.request_timeout_seconds)
-            async with client.stream("POST", url, json=payload, headers=self._headers(key)) as resp:
+            async with client.stream(
+                "POST", url, json=payload, headers=self._headers(key, request)
+            ) as resp:
                 if resp.status_code >= 400:
                     body = (await resp.aread()).decode()[:200]
                     raise ProviderError(
@@ -350,6 +380,10 @@ class AnthropicProvider(Provider):
                             yield StreamEvent(thinking_delta=delta.get("thinking", ""))
                         elif delta.get("type") == "signature_delta":
                             yield StreamEvent(thinking_signature=delta.get("signature", ""))
+                        elif delta.get("type") == "citations_delta":
+                            citation = delta.get("citation")
+                            if citation:
+                                yield StreamEvent(citation=citation)
                         elif text:
                             yield StreamEvent(delta=text)
                         elif delta.get("type") == "input_json_delta":
@@ -444,9 +478,17 @@ def _parse_anthropic_sse_line(line: str) -> str | None:
 
 def _translate_tools(openai_tools: list[dict]) -> list[dict]:
     """OpenAI ``{"type":"function","function":{name,description,parameters}}``
-    -> Anthropic ``{name, description, input_schema}``."""
+    -> Anthropic ``{name, description, input_schema}``.
+
+    Entries whose ``type`` isn't ``function`` are Anthropic server tools
+    (``web_search_20250305`` etc.) that arrived via the compat layer
+    un-translated — they go back out verbatim.
+    """
     out = []
     for tool in openai_tools:
+        if tool.get("type") not in (None, "function", "custom"):
+            out.append(tool)
+            continue
         fn = tool.get("function", tool)
         out.append(
             {
