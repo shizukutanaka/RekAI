@@ -96,6 +96,7 @@ class EchoProvider(Provider):
         *,
         dimensions: int | None = None,
         encoding_format: str | None = None,
+        user: str | None = None,
     ) -> EmbeddingResult:
         if dimensions is not None and dimensions > _MAX_ECHO_DIM:
             raise ProviderError(

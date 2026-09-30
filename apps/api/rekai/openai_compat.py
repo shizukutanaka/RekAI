@@ -126,6 +126,8 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         tools=tools,
         tool_choice=tool_choice,
         response_format=req.response_format,
+        user=req.user,
+        safety_identifier=req.safety_identifier,
     )
 
 
