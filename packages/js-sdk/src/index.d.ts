@@ -48,6 +48,8 @@ export interface ChatOptions {
    * accepted too; the server normalizes it to a one-element list.
    */
   stop?: string | string[];
+  /** OpenAI's `parallel_tool_calls` — allow several tool calls per turn. */
+  parallelToolCalls?: boolean;
   /** Nucleus sampling, as OpenAI's `top_p`. */
   topP?: number;
   /** Deterministic-sampling seed, as OpenAI's `seed`. */

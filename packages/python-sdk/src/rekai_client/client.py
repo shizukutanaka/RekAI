@@ -217,6 +217,7 @@ def _build_payload(
     fallbacks: list[dict[str, Any]] | None,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: Any | None = None,
+    parallel_tool_calls: bool | None = None,
     response_format: dict[str, Any] | None = None,
     stop: list[str] | str | None = None,
     top_p: float | None = None,
@@ -246,6 +247,8 @@ def _build_payload(
         payload["tools"] = tools
     if tool_choice is not None:
         payload["tool_choice"] = tool_choice
+    if parallel_tool_calls is not None:
+        payload["parallel_tool_calls"] = parallel_tool_calls
     if response_format is not None:
         payload["response_format"] = response_format
     if stop is not None:
@@ -362,6 +365,7 @@ class RekAIClient:
         fallbacks: list[dict[str, Any]] | None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any | None = None,
+        parallel_tool_calls: bool | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         top_p: float | None = None,
@@ -385,6 +389,7 @@ class RekAIClient:
             fallbacks,
             tools,
             tool_choice,
+            parallel_tool_calls,
             response_format,
             stop,
             top_p,
@@ -450,6 +455,7 @@ class RekAIClient:
         fallbacks: list[dict[str, Any]] | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any | None = None,
+        parallel_tool_calls: bool | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         top_p: float | None = None,
@@ -475,6 +481,10 @@ class RekAIClient:
         for abuse detection (OpenAI's ``user``, Anthropic's
         ``metadata.user_id``) — a routing hint, never a cache key.
 
+        ``parallel_tool_calls`` mirrors OpenAI's flag — whether the model may
+        emit several tool calls in one turn — forwarded to providers that
+        support it.
+
         ``top_p``/``seed``/``frequency_penalty``/``presence_penalty``/
         ``logit_bias`` mirror OpenAI's tuning params; providers forward the
         ones they support and ignore the rest.
@@ -494,6 +504,7 @@ class RekAIClient:
             fallbacks,
             tools,
             tool_choice,
+            parallel_tool_calls,
             response_format,
             stop,
             top_p,
@@ -733,6 +744,7 @@ class AsyncRekAIClient:
         fallbacks: list[dict[str, Any]] | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any | None = None,
+        parallel_tool_calls: bool | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         top_p: float | None = None,
@@ -760,6 +772,7 @@ class AsyncRekAIClient:
             fallbacks,
             tools,
             tool_choice,
+            parallel_tool_calls,
             response_format,
             stop,
             top_p,

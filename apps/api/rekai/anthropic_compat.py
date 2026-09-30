@@ -235,6 +235,12 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
         cache=True,
         tools=[_to_openai_tool(t) for t in req.tools] if req.tools else None,
         tool_choice=_to_openai_tool_choice(req.tool_choice) if req.tool_choice else None,
+        # Anthropic puts the parallel-call switch on tool_choice; OpenAI keeps
+        # it on the request. Explicit `false` is Anthropic's default either way
+        # (parallel allowed), so only a True flag maps onto the internal field.
+        parallel_tool_calls=(
+            False if req.tool_choice and req.tool_choice.disable_parallel_tool_use else None
+        ),
         thinking=req.thinking,
         context_management=req.context_management,
         container=req.container,

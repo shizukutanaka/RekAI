@@ -131,6 +131,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `service_tier` on Messages requests (`auto` | `standard_only`) and echoes
   the billed tier in `usage.service_tier` — both directions wired. Gemini and
   Ollama have no equivalent and report null.
+- **`service_tier` reaches Anthropic too.** Anthropic's Messages API takes the
+  same field name with its own vocabulary (`auto` | `standard_only`); the
+  compat layer accepted it via `extra="allow"` and dropped it, and the provider
+  never sent it. Now `POST /v1/messages` (and `count_tokens`) maps it onto the
+  internal request and the Anthropic provider forwards it verbatim — same as
+  the OpenAI-compatible path, whose tiers it already reaches.
+
 - **End-user id forwarded to providers.** The accepted-but-ignored `user`
   field now reaches the provider under its own name — `user` to
   OpenAI-compatible upstreams, `metadata.user_id` to Anthropic — so
@@ -306,6 +313,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged; no behavior change for env-configured deployments.
 
 ### Added
+- **`parallel_tool_calls` is forwarded, not just tolerated.** The flag was
+  accepted on both request schemas (the compat surface via `extra="allow"`)
+  and silently dropped — a caller could not stop a model from emitting
+  several tool calls in one turn. Now typed, forwarded to OpenAI-compatible
+  providers, part of the cache key and semantic bucket, and exposed on both
+  SDKs (`parallelToolCalls` in JS). Anthropic carries the same switch on
+  `tool_choice.disable_parallel_tool_use` — it used to 422 (undeclared field);
+  it now maps onto `parallel_tool_calls` inbound and back outbound, so an
+  Anthropic-SDK caller's flag round-trips to the Anthropic provider.
 - **Per-key model allowlists** (`REKAI_KEY_MODELS`, e.g.
   `"sk-a:gpt-4o*;gpt-4o-mini,sk-b:echo"`). The per-tenant counterpart of
   `REKAI_ALLOWED_PROVIDERS`: each named key gets a glob allowlist (fnmatch),

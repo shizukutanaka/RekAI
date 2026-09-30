@@ -96,10 +96,10 @@ class ChatRequest(BaseModel):
         default=None,
         description="OpenAI's processing tier ('auto' | 'default' | 'flex' | "
         "'priority' | 'scale'): flex trades latency for a large discount, "
-        "priority pays for lower latency. Not enum-validated so newer tiers "
-        "stay forward-compatible; an unsupported tier surfaces as the "
-        "provider's own error. Forwarded to providers that accept it: "
-        "OpenAI-compatible APIs and Anthropic ('auto' | 'standard_only').",
+        "priority pays for lower latency. Anthropic takes the same field name "
+        "with its own vocabulary ('auto' | 'standard_only'). Not enum-validated "
+        "so newer tiers stay forward-compatible; an unsupported tier surfaces "
+        "as the provider's own error.",
     )
     web_search_options: dict | None = Field(
         default=None,
@@ -181,6 +181,12 @@ class ChatRequest(BaseModel):
     tool_choice: Any | None = Field(
         default=None,
         description="Tool choice ('auto' | 'none' | 'required' | {...}), passed through.",
+    )
+    parallel_tool_calls: bool | None = Field(
+        default=None,
+        description="OpenAI's parallel_tool_calls — whether the model may emit "
+        "several tool calls in one turn. Forwarded to providers that support it "
+        "(OpenAI/OpenAI-compatible); ignored by others.",
     )
     response_format: dict[str, Any] | None = Field(
         default=None,
@@ -305,6 +311,7 @@ class ChatCompletionsRequest(BaseModel):
     stream_options: StreamOptions | None = None
     tools: list[dict[str, Any]] | None = None
     tool_choice: Any | None = None
+    parallel_tool_calls: bool | None = None
     response_format: dict[str, Any] | None = None
     user: str | None = None  # forwarded to the provider as its end-user id
     safety_identifier: str | None = None  # OpenAI's newer abuse-detection id
@@ -368,8 +375,10 @@ class AnthropicTool(BaseModel):
 class AnthropicToolChoice(BaseModel):
     type: Literal["auto", "none", "any", "tool"]
     name: str | None = None
-    # disable_parallel_tool_use is Anthropic-specific; the OpenAI-equivalent
-    # flag (parallel_tool_calls) lives on the request, not on tool_choice.
+    # Anthropic carries the parallel-call switch *on* tool_choice; the
+    # OpenAI-equivalent flag (parallel_tool_calls) lives on the request.
+    # Mapped onto ChatRequest.parallel_tool_calls so it round-trips.
+    disable_parallel_tool_use: bool | None = None
 
 
 class AnthropicMetadata(BaseModel):
@@ -394,7 +403,9 @@ class _AnthropicMessagesBase(BaseModel):
     stream: bool = False
     tools: list[AnthropicTool] | None = None
     tool_choice: AnthropicToolChoice | None = None
-    service_tier: str | None = None  # 'auto' | 'standard_only'
+    # Anthropic's processing tier — 'auto' | 'standard_only'. Same field name
+    # as OpenAI's, different vocabulary; forwarded verbatim either way.
+    service_tier: str | None = None
     # Anthropic's MCP connector — remote MCP servers the provider calls
     # itself ({name, url, type:"url", authorization_token?, tool_configuration?}).
     # Forwarded verbatim to Anthropic; requires the mcp-client beta header.
