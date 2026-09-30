@@ -60,7 +60,12 @@ from rekai.schemas import (
 )
 from rekai.security import KeyCipher, mask_key
 from rekai.semantic_cache import semantic_cache
-from rekai.service import handle_chat, handle_chat_stream, handle_embeddings
+from rekai.service import (
+    check_embeddings_dimensions,
+    handle_chat,
+    handle_chat_stream,
+    handle_embeddings,
+)
 
 access_logger = get_logger("rekai.access")
 admin_logger = get_logger("rekai.admin")
@@ -657,12 +662,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if provider is not None:
                     await provider.aclose()
 
+    docs_on = (
+        settings.docs_enabled
+        if settings.docs_enabled is not None
+        else settings.environment != "production"
+    )
+
     app = FastAPI(
         title="RekAI",
         version=__version__,
         description="A lightweight AI router & gateway with provider abstraction, "
         "caching and BYOK.",
         lifespan=lifespan,
+        docs_url="/docs" if docs_on else None,
+        redoc_url="/redoc" if docs_on else None,
+        openapi_url="/openapi.json" if docs_on else None,
     )
 
     cache: CacheBackend = build_cache(settings)
@@ -885,6 +899,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if tracestate:
             response.headers["tracestate"] = tracestate
         response.headers["X-Content-Type-Options"] = "nosniff"
+        # Data-bearing endpoints carry per-client usage, model ACLs and key
+        # listings — keep intermediary/shared caches from persisting or
+        # serving them to another tenant. SSE routes already send their own
+        # Cache-Control, so setdefault leaves it alone.
+        if request.url.path.startswith(("/v1/", "/admin/", "/metrics")):
+            response.headers.setdefault("Cache-Control", "no-store")
         access_logger.info(
             "%s %s -> %s %.1fms id=%s",
             request.method,
@@ -960,7 +980,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             name=settings.app_name,
             version=__version__,
             description="A lightweight AI router & gateway. See /docs for the API.",
-            docs="/docs",
+            docs="/docs" if docs_on else None,
             health="/health",
         )
 
@@ -1295,6 +1315,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         config: Settings = Depends(get_config),
         cache_backend: CacheBackend = Depends(get_cache),
     ) -> EmbeddingsResponse | JSONResponse:
+        # Ahead of any stored-response short circuit — a replayed or cached
+        # entry written before a provider's cap existed must not bypass it.
+        check_embeddings_dimensions(request, config)
         fingerprint: str | None = None
         claimed = False
         client_id = _client_id(http_request)
@@ -1378,12 +1401,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ):
                 if ev.delta is not None:
                     yield f"data: {json.dumps({'delta': ev.delta})}\n\n"
+                elif ev.refusal_delta is not None:
+                    yield f"data: {json.dumps({'refusal': ev.refusal_delta})}\n\n"
+                elif ev.annotations is not None:
+                    yield f"data: {json.dumps({'annotations': ev.annotations})}\n\n"
                 elif ev.thinking_delta is not None:
                     yield f"data: {json.dumps({'thinking_delta': ev.thinking_delta})}\n\n"
                 elif ev.thinking_signature is not None:
                     yield f"data: {json.dumps({'thinking_signature': ev.thinking_signature})}\n\n"
                 elif ev.thinking_block is not None:
                     yield f"data: {json.dumps({'thinking_block': ev.thinking_block})}\n\n"
+                elif ev.extra_block_start is not None:
+                    yield f"data: {json.dumps({'extra_block_start': ev.extra_block_start})}\n\n"
+                elif ev.extra_block_delta is not None:
+                    yield f"data: {json.dumps({'extra_block_delta': ev.extra_block_delta})}\n\n"
+                elif ev.extra_block is not None:
+                    yield f"data: {json.dumps({'extra_block': ev.extra_block})}\n\n"
+                elif ev.extra_fields is not None:
+                    yield f"data: {json.dumps({'extra_fields': ev.extra_fields})}\n\n"
                 elif ev.error is not None:
                     payload = {"error": "provider_error", "detail": str(ev.error)}
                     yield f"data: {json.dumps(payload)}\n\n"
@@ -1400,6 +1435,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         summary["tool_calls"] = s.tool_calls
                     if s.finish_reason:
                         summary["finish_reason"] = s.finish_reason
+                    if s.refusal:
+                        summary["refusal"] = s.refusal
+                    if s.annotations:
+                        summary["annotations"] = s.annotations
                     if s.redacted:
                         summary["redacted"] = s.redacted
                     yield f"data: {json.dumps(summary)}\n\n"
@@ -1518,6 +1557,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ):
                 if ev.delta is not None:
                     yield sse(openai_compat.chunk_delta(chunk_id, created, model, ev.delta))
+                elif ev.refusal_delta is not None:
+                    yield sse(
+                        openai_compat.chunk_refusal(chunk_id, created, model, ev.refusal_delta)
+                    )
+                elif ev.annotations is not None:
+                    yield sse(
+                        openai_compat.chunk_annotations(chunk_id, created, model, ev.annotations)
+                    )
                 elif ev.error is not None:
                     yield sse(openai_compat.openai_error(ev.error.status_code, str(ev.error)))
                     yield "data: [DONE]\n\n"
@@ -1626,10 +1673,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         msg_id = f"msg_{uuid.uuid4().hex[:24]}"
 
         async def event_source():
-            yield anthropic_compat.ev_message_start(msg_id, chat_request.model)
+            # message_start emits lazily so extras arriving on upstream's own
+            # message_start (container, ...) merge into the same skeleton.
+            started = False
             # Content blocks are indexed in order: thinking blocks (0..n, each
             # closed by its signature_delta), then the text block, then tool_use.
-            open_block: str | None = None  # "thinking" | "text"
+            open_block: str | None = None  # "thinking" | "text" | "extra"
             block_index = 0
             finish_reason = "stop"
             usage = None
@@ -1642,6 +1691,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 provider,
                 client_id,
             ):
+                if not started:
+                    yield anthropic_compat.ev_message_start(
+                        msg_id, chat_request.model, ev.extra_fields
+                    )
+                    started = True
+                    if ev.extra_fields is not None:
+                        continue
                 if ev.thinking_delta is not None:
                     if open_block != "thinking":
                         if open_block is not None:
@@ -1671,7 +1727,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     yield anthropic_compat.ev_content_block_stop(block_index)
                     block_index += 1
                     open_block = None
-                elif ev.delta is not None:
+                elif ev.extra_block_start is not None:
+                    # A server-side tool block (or anything unmapped): open it
+                    # verbatim — the block dict came straight from upstream.
+                    if open_block is not None:
+                        yield anthropic_compat.ev_content_block_stop(block_index)
+                        block_index += 1
+                    yield anthropic_compat.ev_content_block_start(block_index, ev.extra_block_start)
+                    open_block = "extra"
+                elif ev.extra_block_delta is not None:
+                    yield anthropic_compat.ev_block_delta(block_index, ev.extra_block_delta)
+                elif ev.extra_block is not None:
+                    # content_block_stop upstream — close the verbatim block.
+                    if open_block == "extra":
+                        yield anthropic_compat.ev_content_block_stop(block_index)
+                        block_index += 1
+                        open_block = None
+                elif ev.delta is not None or ev.refusal_delta is not None:
+                    # Anthropic has no refusal channel — the refusal text is the
+                    # message content (stop_reason already maps to "refusal").
+                    text = ev.delta if ev.delta is not None else ev.refusal_delta
                     if open_block != "text":
                         if open_block is not None:
                             yield anthropic_compat.ev_content_block_stop(block_index)
@@ -1680,7 +1755,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             block_index, {"type": "text", "text": ""}
                         )
                         open_block = "text"
-                    yield anthropic_compat.ev_text_delta(block_index, ev.delta)
+                    yield anthropic_compat.ev_text_delta(block_index, text)
                 elif ev.error is not None:
                     yield anthropic_compat.ev_error(ev.error.status_code, str(ev.error))
                     return

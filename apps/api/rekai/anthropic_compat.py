@@ -53,9 +53,9 @@ def _flatten_system(system: str | list[dict[str, Any]] | None) -> str | None:
 
 def _flatten_content(
     content: str | list[AnthropicContentBlock], role: str
-) -> tuple[str | None, list[dict], list[ChatMessage], list[dict]]:
+) -> tuple[str | None, list[dict], list[ChatMessage], list[dict], list[dict], list[dict]]:
     """Reduce a Messages-API content array to (text, tool_calls, tool_messages,
-    thinking_blocks).
+    thinking_blocks, extra_blocks, content_blocks).
 
     - ``text`` blocks join into the message's plain text.
     - ``tool_use`` blocks on an assistant turn become OpenAI-shaped tool_calls
@@ -66,15 +66,25 @@ def _flatten_content(
     - ``thinking``/``redacted_thinking`` blocks on an assistant turn are kept
       verbatim — Anthropic requires them echoed back in multi-turn thinking
       conversations (the signature proves the text wasn't tampered with).
-    - anything else (image/document blocks) is a readable 400 rather than a
-      silent drop — same rule the OpenAI layer applies to non-text parts.
+    - every other block type on an assistant turn (server_tool_use,
+      web_search_tool_result, mcp_*, code_execution, ...) is kept verbatim in
+      ``extra_blocks`` — Anthropic requires the server-tool trace echoed back
+      in multi-turn context, and unknown types stay forward-compatible.
+    - ``content_blocks`` — the whole ordered array verbatim (assistant turns
+      only): the sequence the caller sent, preserved so an echoed turn
+      replays interleaved text/tool-trace in its original order rather than
+      the flattened reconstruction.
+    - on a user turn anything else (image/document blocks) is a readable 400
+      rather than a silent drop — same rule the OpenAI layer applies to
+      non-text parts.
     """
     if isinstance(content, str):
-        return content, [], [], []
+        return content, [], [], [], [], []
     texts: list[str] = []
     tool_calls: list[dict] = []
     tool_messages: list[ChatMessage] = []
     thinking_blocks: list[dict] = []
+    extra_blocks: list[dict] = []
     for block in content:
         if block.type == "text":
             if block.text is not None:
@@ -85,7 +95,10 @@ def _flatten_content(
                     "'thinking' blocks belong on assistant messages.",
                     status_code=400,
                 )
-            thinking_blocks.append(block.model_dump(exclude_none=True))
+            # exclude_unset: echo back exactly the fields the client sent —
+            # exclude_none would leak pydantic defaults (e.g. is_error:false)
+            # into a block Anthropic replays verbatim.
+            thinking_blocks.append(block.model_dump(exclude_unset=True))
         elif block.type == "tool_use":
             if role != "assistant":
                 raise ProviderError(
@@ -105,6 +118,16 @@ def _flatten_content(
         elif block.type == "tool_result":
             body = block.content
             if isinstance(body, list):
+                # Same rule as the outer layer: a non-text block inside a
+                # tool_result (image, document, …) is a readable 400, not a
+                # silent drop.
+                for b in body:
+                    if isinstance(b, dict) and b.get("type") != "text":
+                        raise ProviderError(
+                            f"Unsupported content block type '{b.get('type')}' "
+                            "inside tool_result; RekAI accepts text blocks.",
+                            status_code=400,
+                        )
                 body = "\n".join(
                     b.get("text", "")
                     for b in body
@@ -115,16 +138,29 @@ def _flatten_content(
                     role="tool",
                     content=body or "",
                     tool_call_id=block.tool_use_id,
+                    is_error=block.is_error,
                 )
             )
+        elif role == "assistant":
+            extra_blocks.append(block.model_dump(exclude_unset=True))
         else:
             raise ProviderError(
                 f"Unsupported content block type '{block.type}'; "
                 "RekAI accepts text, tool_use, tool_result, and (on assistant "
-                "turns) thinking blocks.",
+                "turns) thinking and server-tool blocks.",
                 status_code=400,
             )
-    return "\n".join(texts) if texts else None, tool_calls, tool_messages, thinking_blocks
+    ordered = (
+        [block.model_dump(exclude_unset=True) for block in content] if role == "assistant" else []
+    )
+    return (
+        "\n".join(texts) if texts else None,
+        tool_calls,
+        tool_messages,
+        thinking_blocks,
+        extra_blocks,
+        ordered,
+    )
 
 
 def _to_openai_tool(tool: AnthropicTool) -> dict:
@@ -157,13 +193,15 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
     if system is not None:
         messages.append(ChatMessage(role="system", content=system))
     for m in req.messages:
-        text, tool_calls, tool_msgs, thinking = _flatten_content(m.content, m.role)
+        text, tool_calls, tool_msgs, thinking, extra, ordered = _flatten_content(m.content, m.role)
         messages.append(
             ChatMessage(
                 role=m.role,
                 content=text,
                 tool_calls=tool_calls or None,
                 thinking_blocks=thinking or None,
+                extra_blocks=extra or None,
+                content_blocks=ordered or None,
             )
         )
         messages.extend(tool_msgs)
@@ -187,6 +225,7 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
         tools=[_to_openai_tool(t) for t in req.tools] if req.tools else None,
         tool_choice=_to_openai_tool_choice(req.tool_choice) if req.tool_choice else None,
         thinking=req.thinking,
+        output_config=req.output_config,
     )
 
 
@@ -195,8 +234,16 @@ def _content_blocks(resp: ChatResponse) -> list[dict]:
     # Thinking blocks lead the content, matching Anthropic's response order.
     if resp.thinking_blocks:
         blocks.extend(resp.thinking_blocks)
+    # The server-tool trace (server_tool_use, *_tool_result, mcp_*) sits
+    # between thinking and the answer text, matching upstream order.
+    if resp.extra_blocks:
+        blocks.extend(resp.extra_blocks)
     if resp.content:
         blocks.append({"type": "text", "text": resp.content})
+    elif resp.refusal:
+        # Anthropic carries the refusal text as the (only) text block, paired
+        # with stop_reason "refusal" — fold the upstream refusal field in.
+        blocks.append({"type": "text", "text": resp.refusal})
     for tc in resp.tool_calls or []:
         fn = tc.get("function", {})
         try:
@@ -214,26 +261,49 @@ def _content_blocks(resp: ChatResponse) -> list[dict]:
     return blocks or [{"type": "text", "text": ""}]
 
 
+def _usage_dict(usage: Usage) -> dict[str, int]:
+    """Anthropic's usage shape. `input_tokens` EXCLUDES prompt-cache tokens on
+    the wire — RekAI's `prompt_tokens` includes them — so subtract the cached
+    slices and report them under Anthropic's own key names."""
+    return {
+        "input_tokens": (usage.prompt_tokens - usage.cache_read_tokens - usage.cache_write_tokens),
+        "output_tokens": usage.completion_tokens,
+        "cache_creation_input_tokens": usage.cache_write_tokens,
+        "cache_read_input_tokens": usage.cache_read_tokens,
+    }
+
+
 def to_message(resp: ChatResponse) -> dict:
     """Translate RekAI's ChatResponse into an Anthropic Message object."""
     finish = resp.finish_reason or ("tool_calls" if resp.tool_calls else "stop")
-    return {
+    # Prefer the verbatim upstream content array — interleaved text/tool-trace
+    # keeps its emitted order; the composed copy is the fallback for providers
+    # that never reported ordered blocks.
+    content = resp.content_blocks if resp.content_blocks else _content_blocks(resp)
+    message = {
         "id": f"msg_{resp.id}" if not resp.id.startswith("msg_") else resp.id,
         "type": "message",
         "role": "assistant",
-        "content": _content_blocks(resp),
+        "content": content,
         "model": resp.model,
         "stop_reason": _FINISH_TO_STOP_REASON.get(finish, "end_turn"),
         "stop_sequence": None,
-        "usage": {
-            "input_tokens": resp.usage.prompt_tokens,
-            "output_tokens": resp.usage.completion_tokens,
-        },
+        "usage": _usage_dict(resp.usage),
         # RekAI observability extras — ignored by the SDK, useful to operators.
         "provider": resp.provider,
         "cost_usd": resp.cost_usd,
         "cached": resp.cached,
+        # OpenAI-side annotations (e.g. url_citation) don't translate to
+        # Anthropic's citations schema (it wants cited_text we don't have) —
+        # pass them through as an extra instead of dropping them.
+        **({"annotations": resp.annotations} if resp.annotations else {}),
     }
+    # Message-level fields RekAI doesn't map (container, context_management,
+    # ...) reattach verbatim — setdefault so they can never clobber the
+    # fields the gateway computes (id, model, usage, ...).
+    for key, value in (resp.extra_fields or {}).items():
+        message.setdefault(key, value)
+    return message
 
 
 # --- streaming event builders (the Messages SSE protocol) ------------------
@@ -247,23 +317,22 @@ def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-def ev_message_start(msg_id: str, model: str) -> str:
-    return sse(
-        "message_start",
-        {
-            "type": "message_start",
-            "message": {
-                "id": msg_id,
-                "type": "message",
-                "role": "assistant",
-                "content": [],
-                "model": model,
-                "stop_reason": None,
-                "stop_sequence": None,
-                "usage": {"input_tokens": 0, "output_tokens": 0},
-            },
-        },
-    )
+def ev_message_start(msg_id: str, model: str, extra: dict | None = None) -> str:
+    message: dict = {
+        "id": msg_id,
+        "type": "message",
+        "role": "assistant",
+        "content": [],
+        "model": model,
+        "stop_reason": None,
+        "stop_sequence": None,
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+    }
+    # Message-level extras (container, ...) ride the skeleton verbatim, the
+    # same slots they arrive in upstream's own message_start.
+    for key, value in (extra or {}).items():
+        message.setdefault(key, value)
+    return sse("message_start", {"type": "message_start", "message": message})
 
 
 def ev_content_block_start(index: int, block: dict) -> str:
@@ -306,6 +375,15 @@ def ev_signature_delta(index: int, signature: str) -> str:
     )
 
 
+def ev_block_delta(index: int, delta: dict) -> str:
+    """A verbatim content_block_delta for a block RekAI doesn't interpret —
+    server-tool blocks stream their own delta vocabulary through untouched."""
+    return sse(
+        "content_block_delta",
+        {"type": "content_block_delta", "index": index, "delta": delta},
+    )
+
+
 def ev_input_json_delta(index: int, partial_json: str) -> str:
     return sse(
         "content_block_delta",
@@ -330,10 +408,7 @@ def ev_message_delta(stop_reason: str, usage: Usage | None) -> str:
         # Anthropic only defines output_tokens here, but we also report
         # input_tokens — we could not populate them in message_start (the
         # provider had not answered yet) and the SDK just accumulates the dict.
-        data["usage"] = {
-            "input_tokens": usage.prompt_tokens,
-            "output_tokens": usage.completion_tokens,
-        }
+        data["usage"] = _usage_dict(usage)
     return sse("message_delta", data)
 
 
@@ -409,10 +484,6 @@ def count_tokens(req: AnthropicCountTokensRequest) -> int:
                 parts.append(
                     block.content if isinstance(block.content, str) else json.dumps(block.content)
                 )
-            elif block.type == "thinking":
-                thinking_text = block.model_dump().get("thinking")
-                if thinking_text:
-                    parts.append(thinking_text)
     if req.tools:
         parts.append(json.dumps([t.model_dump() for t in req.tools]))
     return sum(estimate_tokens(p) for p in parts if p) or 1

@@ -21,9 +21,21 @@ class ChatMessage(BaseModel):
     # Anthropic's {"type": "ephemeral"}). Providers that cache automatically
     # (OpenAI) ignore it.
     cache_control: dict[str, Any] | None = None
+    # True when this `role="tool"` message reports a *failed* tool call
+    # (Anthropic `tool_result.is_error`). Surfaces that can't express it
+    # (OpenAI tool messages) drop it — the error text rides in `content`.
+    is_error: bool = False
     # Anthropic thinking/redacted_thinking blocks echoed back in assistant
     # history (verbatim dicts). Providers without the concept drop them.
     thinking_blocks: list[dict[str, Any]] | None = None
+    # Anthropic server-side tool blocks (server_tool_use, tool-result blocks,
+    # mcp_*, ...) echoed back in assistant history, verbatim. Anthropic
+    # requires the tool-trace preserved in multi-turn context; providers
+    # without the concept drop them.
+    extra_blocks: list[dict[str, Any]] | None = None
+    # Ordered verbatim Anthropic content array for an assistant turn —
+    # preserved so a later request echoes the exact upstream sequence.
+    content_blocks: list[dict[str, Any]] | None = None
 
 
 class FallbackTarget(BaseModel):
@@ -70,6 +82,12 @@ class ChatRequest(BaseModel):
         "to Anthropic only; other providers ignore it. Anthropic requires "
         "temperature=1 under thinking, so the compat layer defaults to that "
         "when the caller left temperature unset.",
+    )
+    output_config: dict[str, Any] | None = Field(
+        default=None,
+        description="Anthropic's `output_config` — e.g. {'effort': 'medium'} "
+        "or {'format': {...}} for structured output. Forwarded verbatim to "
+        "Anthropic only; other providers ignore it.",
     )
     include_obfuscation: bool | None = Field(
         default=None,
@@ -164,6 +182,10 @@ class OpenAIChatMessage(BaseModel):
     name: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
+    # True when this `role="tool"` message reports a *failed* tool call
+    # (Anthropic `tool_result.is_error`). Surfaces that can't express it
+    # (OpenAI tool messages) drop it — the error text rides in `content`.
+    is_error: bool = False
 
 
 class StreamOptions(BaseModel):
@@ -219,6 +241,7 @@ class AnthropicContentBlock(BaseModel):
     input: dict[str, Any] | None = None  # tool_use
     tool_use_id: str | None = None  # tool_result
     content: str | list[dict[str, Any]] | None = None  # tool_result body
+    is_error: bool = False  # tool_result: the tool call failed
 
 
 class AnthropicMessage(BaseModel):
@@ -257,6 +280,9 @@ class _AnthropicMessagesBase(BaseModel):
     # Anthropic's extended-thinking config, verbatim ({'type': 'enabled',
     # 'budget_tokens': N}). Declared so it isn't swallowed by extra=allow.
     thinking: dict[str, Any] | None = None
+    # Anthropic's output config, verbatim ({'effort': ...}, {'format': ...}).
+    # Same swallow-by-extra=allow hazard.
+    output_config: dict[str, Any] | None = None
     provider: str | None = None  # RekAI extension: explicit provider override
 
 
@@ -284,6 +310,8 @@ class ChatCompletionMessage(BaseModel):
     role: Literal["assistant"] = "assistant"
     content: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
+    refusal: str | None = None
+    annotations: list[dict[str, Any]] | None = None
 
 
 class ChatCompletionChoice(BaseModel):
@@ -324,6 +352,17 @@ class ChatResponse(BaseModel):
     tool_calls: list[dict[str, Any]] | None = Field(
         default=None, description="Tool calls returned by the model, if any."
     )
+    refusal: str | None = Field(
+        default=None,
+        description="The model's refusal text when it declined (OpenAI "
+        "'message.refusal'); content is empty in that case. Null otherwise.",
+    )
+    annotations: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Citations etc. attached to the answer (OpenAI "
+        "'message.annotations' — e.g. url_citation entries for web search), "
+        "passed through verbatim.",
+    )
     usage: Usage
     cost_usd: float | None = Field(
         default=None,
@@ -351,6 +390,29 @@ class ChatResponse(BaseModel):
         "produced before its answer, verbatim (text + signature). Present only "
         "when thinking was enabled; the /v1/messages surface re-emits them as "
         "content blocks so the caller can echo them back verbatim.",
+    )
+    extra_blocks: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Anthropic server-side tool blocks (server_tool_use, "
+        "web_search_tool_result, mcp_*, code_execution, ...) in upstream order, "
+        "verbatim. Present when server tools ran; /v1/messages re-emits them "
+        "between thinking and the answer text, and callers echo them back on "
+        "the next turn to preserve the tool-trace.",
+    )
+    extra_fields: dict[str, Any] | None = Field(
+        default=None,
+        description="Message-level fields the provider doesn't map (Anthropic's "
+        "container for code execution, context_management edit reports, and "
+        "anything new) — verbatim. The OpenAI surface has no equivalent and "
+        "omits them.",
+    )
+    content_blocks: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="The upstream content array verbatim, in emitted order "
+        "(text, thinking, tool_use and server-tool blocks interleaved). "
+        "Present only when the provider reports ordered blocks — /v1/messages "
+        "re-emits it verbatim and callers echo it for multi-turn continuity. "
+        "The OpenAI surface has no equivalent and omits it.",
     )
     fallback_used: bool = Field(
         default=False, description="True if a fallback served this response, not the primary."
@@ -415,7 +477,9 @@ class ServiceInfo(BaseModel):
     name: str
     version: str
     description: str
-    docs: str
+    # null when docs are disabled (production default) — don't advertise a
+    # route that doesn't exist.
+    docs: str | None
     health: str
 
 
