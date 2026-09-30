@@ -1487,6 +1487,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     yield f"data: {json.dumps({'thinking_signature': ev.thinking_signature})}\n\n"
                 elif ev.thinking_block is not None:
                     yield f"data: {json.dumps({'thinking_block': ev.thinking_block})}\n\n"
+                elif ev.citation is not None:
+                    yield f"data: {json.dumps({'citation': ev.citation})}\n\n"
                 elif ev.extra_block_start is not None:
                     yield f"data: {json.dumps({'extra_block_start': ev.extra_block_start})}\n\n"
                 elif ev.extra_block_delta is not None:
@@ -1840,6 +1842,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         )
                         open_block = "text"
                     yield anthropic_compat.ev_text_delta(block_index, text)
+                elif ev.citation is not None:
+                    # citations_delta rides inside the text block upstream.
+                    if open_block != "text":
+                        if open_block is not None:
+                            yield anthropic_compat.ev_content_block_stop(block_index)
+                            block_index += 1
+                        yield anthropic_compat.ev_content_block_start(
+                            block_index, {"type": "text", "text": ""}
+                        )
+                        open_block = "text"
+                    yield anthropic_compat.ev_citations_delta(block_index, ev.citation)
                 elif ev.error is not None:
                     yield anthropic_compat.ev_error(ev.error.status_code, str(ev.error))
                     return
