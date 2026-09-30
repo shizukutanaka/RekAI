@@ -687,6 +687,13 @@ class UsageSummary(BaseModel):
         description="Per-tenant usage keyed by a masked client id ('key:<hash>' "
         "when gateway auth is on, else the client IP).",
     )
+    usage_by_user: dict[str, dict[str, ClientUsage]] = Field(
+        default_factory=dict,
+        description="Per-end-user usage nested under the owning client "
+        "{client_id: {user: usage}} — populated only for requests that carry "
+        "the OpenAI `user` field. Under gateway auth /v1/usage returns only "
+        "the caller's inner map.",
+    )
 
 
 class HealthResponse(BaseModel):

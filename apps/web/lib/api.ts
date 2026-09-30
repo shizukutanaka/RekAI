@@ -231,6 +231,7 @@ export interface UsageSummary {
   requests_by_provider: Record<string, number>;
   tokens_by_provider: Record<string, number>;
   usage_by_client: Record<string, ClientUsage>;
+  usage_by_user: Record<string, Record<string, ClientUsage>>;
 }
 
 const KEY_STORAGE = "rekai.providerKey";
