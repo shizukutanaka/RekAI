@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from rekai import models
-from rekai.config import get_settings
+from rekai.config import current_settings
 from rekai.logging_config import get_logger
 from rekai.providers.base import (
     FinishReason,
@@ -98,10 +98,10 @@ class AnthropicProvider(Provider):
         return _structured_output_schema(request) is not None
 
     def server_key_configured(self) -> bool:
-        return bool(get_settings().anthropic_api_key)
+        return bool(current_settings().anthropic_api_key)
 
     def _resolve_key(self, api_key: str | None) -> str:
-        key = api_key or get_settings().anthropic_api_key
+        key = api_key or current_settings().anthropic_api_key
         if not key:
             raise ProviderError(
                 "No Anthropic API key. Provide one with the 'X-Provider-Key' header (BYOK) "
@@ -111,7 +111,7 @@ class AnthropicProvider(Provider):
         return key
 
     def _build_payload(self, request: ChatRequest, *, stream: bool) -> dict:
-        settings = get_settings()
+        settings = current_settings()
         # Anthropic takes system prompts as a top-level field, not in `messages`.
         system_parts = [m.content or "" for m in request.messages if m.role == "system"]
         chat_messages = _translate_messages(request.messages)
@@ -126,6 +126,10 @@ class AnthropicProvider(Provider):
         }
         if request.stop:
             payload["stop_sequences"] = request.stop
+        # Anthropic supports top_p but has no seed/frequency/presence/logit_bias
+        # equivalents — those stay RekAI-side rather than erroring upstream.
+        if request.top_p is not None:
+            payload["top_p"] = request.top_p
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
         # Structured output: Anthropic has no `response_format`, but forcing a
@@ -161,6 +165,20 @@ class AnthropicProvider(Provider):
         # new knobs (interleaved, budget caps) should not need a schema bump.
         if request.thinking is not None:
             payload["thinking"] = request.thinking
+        # Same for the remaining real Anthropic request fields — all
+        # Anthropic's own vocabulary, forwarded verbatim when set.
+        if request.context_management is not None:
+            payload["context_management"] = request.context_management
+        if request.container is not None:
+            payload["container"] = request.container
+        if request.inference_geo is not None:
+            payload["inference_geo"] = request.inference_geo
+        if request.speed is not None:
+            payload["speed"] = request.speed
+        if request.diagnostics is not None:
+            payload["diagnostics"] = request.diagnostics
+        if request.mcp_servers:
+            payload["mcp_servers"] = request.mcp_servers
         # Output config (effort/format) too — Anthropic's own vocabulary.
         if request.output_config is not None:
             payload["output_config"] = request.output_config
@@ -168,23 +186,38 @@ class AnthropicProvider(Provider):
             payload["stream"] = True
         return payload
 
-    def _headers(self, key: str) -> dict[str, str]:
-        return {
+    def _headers(self, key: str, request: ChatRequest | None = None) -> dict[str, str]:
+        beta = request.anthropic_beta if request is not None else None
+        headers = {
             **trace_headers(),
             "x-api-key": key,
-            "anthropic-version": get_settings().anthropic_version,
+            "anthropic-version": current_settings().anthropic_version,
+            # Beta-gated features (interleaved thinking, prompt caching scope,
+            # ...) need the caller's `anthropic-beta` flag set to survive the
+            # compat hop — forward it verbatim when present.
+            **({"anthropic-beta": beta} if beta else {}),
             "content-type": "application/json",
         }
+        # Anthropic takes the user profile as a header, not a body field.
+        if request is not None and request.user_profile_id is not None:
+            headers["anthropic-user-profile-id"] = request.user_profile_id
+        # Anthropic's MCP connector is a beta: mcp_servers is rejected without it.
+        if request is not None and request.mcp_servers:
+            flags = [f.strip() for f in (beta or "").split(",") if f.strip()]
+            if "mcp-client-2025-11-20" not in flags:
+                flags.append("mcp-client-2025-11-20")
+            headers["anthropic-beta"] = ",".join(flags)
+        return headers
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
-        settings = get_settings()
+        settings = current_settings()
         key = self._resolve_key(api_key)
         payload = self._build_payload(request, stream=False)
 
         url = f"{settings.anthropic_base_url.rstrip('/')}/messages"
         try:
             client = self._client(settings.request_timeout_seconds)
-            resp = await client.post(url, json=payload, headers=self._headers(key))
+            resp = await client.post(url, json=payload, headers=self._headers(key, request))
         except httpx.HTTPError as exc:
             raise ProviderError(f"Anthropic request failed: {exc}") from exc
 
@@ -196,6 +229,12 @@ class AnthropicProvider(Provider):
         # content is a list of blocks; concatenate the text blocks.
         content = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
         thinking_blocks = [b for b in blocks if b.get("type") in ("thinking", "redacted_thinking")]
+        # Web-search citations ride on the text blocks; collect them verbatim.
+        # Each citation self-locates via its cited_text, so flattening the
+        # per-block lists keeps the mapping intact.
+        citations = [
+            c for b in blocks if b.get("type") == "text" for c in (b.get("citations") or [])
+        ]
         tool_calls = _extract_tool_calls(blocks)
         # Everything else — server-side tool blocks (server_tool_use,
         # web_search_tool_result, mcp_*, code_execution) and any type RekAI
@@ -226,6 +265,14 @@ class AnthropicProvider(Provider):
         finish_reason = _finish_reason(
             data.get("stop_reason"), emulating_json=self._emulating_json(request)
         )
+        # Anthropic sends refusal text as an ordinary text content block, with
+        # stop_reason="refusal" carrying the flag. OpenAI puts it in
+        # `message.refusal` with `content: null` instead — move it there so a
+        # caller checking the documented field finds the text.
+        refusal = None
+        if data.get("stop_reason") == "refusal" and content:
+            refusal, content = content, ""
+            tool_calls = None
         cache_read, cache_write = _cache_tokens(usage)
         # Anthropic reports cached prompt tokens *separately* from input_tokens;
         # fold them in so prompt_tokens stays the true prompt size and the cache
@@ -234,6 +281,7 @@ class AnthropicProvider(Provider):
         completion_tokens = usage.get("output_tokens", 0)
         return ProviderResult(
             content=content,
+            refusal=refusal,
             model=data.get("model", request.model),
             tool_calls=tool_calls,
             usage=Usage(
@@ -245,6 +293,7 @@ class AnthropicProvider(Provider):
             ),
             finish_reason=finish_reason,
             thinking_blocks=thinking_blocks or None,
+            citations=citations or None,
             extra_blocks=extra_blocks or None,
             content_blocks=content_blocks or None,
             extra_fields=_response_extras(data),
@@ -258,7 +307,7 @@ class AnthropicProvider(Provider):
     async def stream_events(
         self, request: ChatRequest, api_key: str | None
     ) -> AsyncIterator[StreamEvent]:
-        settings = get_settings()
+        settings = current_settings()
         key = self._resolve_key(api_key)
         payload = self._build_payload(request, stream=True)
         # When emulating JSON mode the forced tool's input_json_delta fragments
@@ -282,7 +331,9 @@ class AnthropicProvider(Provider):
         extra_json: dict[int, str] = {}
         try:
             client = self._client(settings.request_timeout_seconds)
-            async with client.stream("POST", url, json=payload, headers=self._headers(key)) as resp:
+            async with client.stream(
+                "POST", url, json=payload, headers=self._headers(key, request)
+            ) as resp:
                 if resp.status_code >= 400:
                     body = (await resp.aread()).decode()[:200]
                     raise ProviderError(
@@ -346,6 +397,10 @@ class AnthropicProvider(Provider):
                             yield StreamEvent(thinking_delta=delta.get("thinking", ""))
                         elif delta.get("type") == "signature_delta":
                             yield StreamEvent(thinking_signature=delta.get("signature", ""))
+                        elif delta.get("type") == "citations_delta":
+                            citation = delta.get("citation")
+                            if citation:
+                                yield StreamEvent(citation=citation)
                         elif text:
                             yield StreamEvent(delta=text)
                         elif delta.get("type") == "input_json_delta":
@@ -440,9 +495,17 @@ def _parse_anthropic_sse_line(line: str) -> str | None:
 
 def _translate_tools(openai_tools: list[dict]) -> list[dict]:
     """OpenAI ``{"type":"function","function":{name,description,parameters}}``
-    -> Anthropic ``{name, description, input_schema}``."""
+    -> Anthropic ``{name, description, input_schema}``.
+
+    Entries whose ``type`` isn't ``function`` are Anthropic server tools
+    (``web_search_20250305`` etc.) that arrived via the compat layer
+    un-translated — they go back out verbatim.
+    """
     out = []
     for tool in openai_tools:
+        if tool.get("type") not in (None, "function", "custom"):
+            out.append(tool)
+            continue
         fn = tool.get("function", tool)
         out.append(
             {

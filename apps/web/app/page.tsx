@@ -33,6 +33,7 @@ interface DisplayMessage extends ChatMessage {
   fallbackUsed?: boolean;
   cacheSimilarity?: number | null;
   redacted?: string[] | null;
+  citations?: Record<string, unknown>[] | null;
   extraBlocks?: Record<string, unknown>[];
   contentBlocks?: Record<string, unknown>[];
 }
@@ -228,6 +229,19 @@ export default function ChatPage() {
             (s) => {
               summary = s;
             },
+            (citation) => {
+              setMessages((prev) => {
+                const next = [...prev];
+                const last = next[next.length - 1];
+                if (last?.role === "assistant") {
+                  next[next.length - 1] = {
+                    ...last,
+                    citations: [...(last.citations ?? []), citation],
+                  };
+                }
+                return next;
+              });
+            },
             (block) => {
               ordered.push(block);
               setMessages((prev) => {
@@ -309,6 +323,7 @@ export default function ChatPage() {
             fallbackUsed: res.fallback_used,
             cacheSimilarity: res.cache_similarity,
             redacted: res.redacted,
+            citations: res.citations,
             extraBlocks: res.extra_blocks ?? undefined,
             contentBlocks: res.content_blocks ?? undefined,
           },
@@ -463,6 +478,24 @@ export default function ChatPage() {
           <div key={m.id ?? i} className={`msg ${m.role}`}>
             {m.content}
             {m.streaming && <span className="cursor">▌</span>}
+            {!!m.citations?.length && (
+              <div className="sources">
+                {m.citations.map((c, j) => (
+                  <a
+                    key={j}
+                    href={typeof c.url === "string" ? c.url : undefined}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {typeof c.title === "string"
+                      ? c.title
+                      : typeof c.url === "string"
+                        ? c.url
+                        : "source"}
+                  </a>
+                ))}
+              </div>
+            )}
             {m.role === "assistant" && !m.streaming && (
               <span className="meta">
                 {m.provider}
