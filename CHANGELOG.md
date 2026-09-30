@@ -146,7 +146,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the native SSE stream emits `{"refusal": ...}` events, the OpenAI-compat
   surface reproduces `message.refusal`/`delta.refusal` chunks, and the
   Anthropic-compat surface folds the text into a content block with
-  `stop_reason: "refusal"` (Anthropic's own encoding). Both SDKs expose it
+  `stop_reason: "refusal"` (Anthropic's own encoding). The Anthropic provider
+  makes the reverse translation too: an upstream `stop_reason: "refusal"`
+  moves the refusal text block out of `content` and into `refusal`, matching
+  OpenAI's `content: null` + `message.refusal` shape. Both SDKs expose it
   (`ChatResult.refusal`, `on_refusal`/`onRefusal` stream hooks).
 - **Web-search citations pass through end-to-end.** OpenAI attaches
   `message.annotations` (e.g. `url_citation` entries) when a web-search model

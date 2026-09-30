@@ -197,3 +197,45 @@ async def test_streamed_refusal_split_secret_is_scrubbed() -> None:
     assert streamed.startswith("I won't repeat ")
     assert _SECRET not in (summary.refusal or "")
     assert summary.redacted
+
+
+async def test_anthropic_refusal_stop_reason_moves_text_to_refusal(
+    monkeypatch,
+) -> None:
+    """Anthropic's refusal = stop_reason:'refusal' + a text block. On the OpenAI
+    semantic that maps to refusal=<text>, content empty — the caller checking
+    the documented field must find the text."""
+    import httpx
+
+    from rekai.providers.anthropic import AnthropicProvider
+    from rekai.schemas import ChatMessage, ChatRequest
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {
+                "model": "claude-sonnet-4-6",
+                "content": [{"type": "text", "text": "I can't help with that."}],
+                "stop_reason": "refusal",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def aclose(self) -> None:
+            return None
+
+        async def post(self, url, json=None, headers=None):
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    result = await AnthropicProvider().chat(
+        ChatRequest(model="m", messages=[ChatMessage(role="user", content="x")]),
+        "key",
+    )
+    assert result.finish_reason == "content_filter"
+    assert result.refusal == "I can't help with that."
+    assert result.content == ""
