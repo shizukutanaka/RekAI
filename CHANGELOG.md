@@ -230,6 +230,23 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   production deployments that deliberately served docs keep them by setting
   `REKAI_DOCS_ENABLED=true`.
 
+### Changed
+- **Providers now read the request-scoped `Settings` instead of the env-cached
+  singleton** (roadmap O-1). Provider code called `get_settings()` directly —
+  an `@lru_cache`d snapshot of process env — so `create_app(settings)` could
+  never reach the provider layer and no test could inject a `Settings` it
+  didn't build the process env for. Provider code now calls
+  `rekai.config.current_settings()`, a `ContextVar` bound by the request
+  middleware and by `handle_chat`/`handle_chat_stream`/`handle_embeddings`
+  themselves (the same idiom `rekai/tracing.py` uses for the trace id), with
+  the env singleton as the fallback outside bound contexts. The registry's
+  import-time initialization is gone: the five builtins register lazily, and
+  `create_app` (un)registers the custom OpenAI-compatible backend from the
+  app's `Settings` via `configure_custom_provider` — re-running `create_app`
+  replaces or removes a stale custom provider instead of leaking it. Public
+  registry API (`get_provider`/`provider_names`/`register_provider`) is
+  unchanged; no behavior change for env-configured deployments.
+
 ### Added
 - **OpenAI tuning params are forwarded, not just tolerated.** `top_p`, `seed`,
   `frequency_penalty`, `presence_penalty` and `logit_bias` are now typed on

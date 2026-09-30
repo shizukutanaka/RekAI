@@ -616,6 +616,20 @@ at the point of the outbound call. A `ContextVar` rather than a plain module
 global so concurrent requests can't leak into each other's trace; outside a
 request (e.g. a provider invoked directly in a unit test) it's unset, and no
 `traceparent` header is sent at all rather than a synthetic one.
+
+The same `ContextVar` idiom carries **request-scoped Settings** to the
+provider layer. Provider code reads `rekai.config.current_settings()`, which
+resolves to the `Settings` the `_request_context` middleware bound for the
+request — and the service entry points (`handle_chat`, `handle_chat_stream`,
+`handle_embeddings`) bind it themselves, so a unit test calling
+`handle_chat(..., settings, ...)` directly reaches providers through that
+same `Settings`. Outside any bound context it falls back to the env-cached
+`get_settings()`, preserving the pre-DI behavior for import-time and direct
+calls. This removed the last import-time read: `rekai/providers/registry.py`
+registers the five builtins lazily on first use, and `create_app`
+(un)registers the custom OpenAI-compatible backend via
+`configure_custom_provider(settings)` — so a second `create_app` with
+different settings can't leave a stale custom provider behind.
 `/v1/*` responses also
 carry `X-RateLimit-Limit`/`X-RateLimit-Remaining`, and a 429 adds `Retry-After`
 (seconds until the client's bucket refills a token). CORS is the outermost

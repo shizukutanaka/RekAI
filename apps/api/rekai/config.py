@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar, Token
 from functools import lru_cache
 from typing import Literal
 
@@ -424,3 +425,29 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return a cached Settings instance."""
     return Settings()
+
+
+# The Settings the current request is being served under, so a provider deep in
+# the call stack reads the running app's configuration instead of re-parsing the
+# process env — without threading a settings parameter through every signature
+# from the route handler down. Same ContextVar idiom as the ambient trace id in
+# `rekai/tracing.py`: bound by main.py's request-context middleware (and by the
+# service-layer entry points, so direct ``handle_chat(...)`` calls in tests see
+# the Settings they were passed), and each request gets its own copy, so
+# concurrent requests can't leak into each other's configuration.
+_request_settings: ContextVar[Settings | None] = ContextVar("rekai_request_settings", default=None)
+
+
+def bind_current_settings(settings: Settings) -> Token[Settings | None]:
+    """Bind ``settings`` as the current request's Settings; returns a token for reset."""
+    return _request_settings.set(settings)
+
+
+def reset_current_settings(token: Token[Settings | None]) -> None:
+    _request_settings.reset(token)
+
+
+def current_settings() -> Settings:
+    """The Settings bound to this request, or the env-cached default outside a
+    bound context (import time, a provider invoked directly in a unit test)."""
+    return _request_settings.get() or get_settings()

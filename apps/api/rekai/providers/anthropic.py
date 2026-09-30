@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from rekai import models
-from rekai.config import get_settings
+from rekai.config import current_settings
 from rekai.logging_config import get_logger
 from rekai.providers.base import (
     FinishReason,
@@ -98,10 +98,10 @@ class AnthropicProvider(Provider):
         return _structured_output_schema(request) is not None
 
     def server_key_configured(self) -> bool:
-        return bool(get_settings().anthropic_api_key)
+        return bool(current_settings().anthropic_api_key)
 
     def _resolve_key(self, api_key: str | None) -> str:
-        key = api_key or get_settings().anthropic_api_key
+        key = api_key or current_settings().anthropic_api_key
         if not key:
             raise ProviderError(
                 "No Anthropic API key. Provide one with the 'X-Provider-Key' header (BYOK) "
@@ -111,7 +111,7 @@ class AnthropicProvider(Provider):
         return key
 
     def _build_payload(self, request: ChatRequest, *, stream: bool) -> dict:
-        settings = get_settings()
+        settings = current_settings()
         # Anthropic takes system prompts as a top-level field, not in `messages`.
         system_parts = [m.content or "" for m in request.messages if m.role == "system"]
         chat_messages = _translate_messages(request.messages)
@@ -176,12 +176,12 @@ class AnthropicProvider(Provider):
         return {
             **trace_headers(),
             "x-api-key": key,
-            "anthropic-version": get_settings().anthropic_version,
+            "anthropic-version": current_settings().anthropic_version,
             "content-type": "application/json",
         }
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
-        settings = get_settings()
+        settings = current_settings()
         key = self._resolve_key(api_key)
         payload = self._build_payload(request, stream=False)
 
@@ -262,7 +262,7 @@ class AnthropicProvider(Provider):
     async def stream_events(
         self, request: ChatRequest, api_key: str | None
     ) -> AsyncIterator[StreamEvent]:
-        settings = get_settings()
+        settings = current_settings()
         key = self._resolve_key(api_key)
         payload = self._build_payload(request, stream=True)
         # When emulating JSON mode the forced tool's input_json_delta fragments
