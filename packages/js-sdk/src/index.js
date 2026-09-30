@@ -34,7 +34,8 @@ export class RekAIClient {
   /**
    * @param {string} [baseUrl]
    * @param {{ providerKey?: string, gatewayKey?: string, maxRetries?: number,
-   *           retryBackoff?: number }} [options]
+   *           retryBackoff?: number, maxRetryDelay?: number,
+   *           timeout?: number }} [options]
    */
   constructor(baseUrl = "http://localhost:8000", options = {}) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
@@ -48,6 +49,12 @@ export class RekAIClient {
     // and hands the header to the caller precisely so the caller can decide.
     // Honoring an unbounded value here would undo that.
     this.maxRetryDelay = options.maxRetryDelay ?? 60; // seconds
+    // fetch has no built-in timeout: without one, a hung connection parks
+    // chat() forever. For non-streaming calls this bounds the whole attempt;
+    // for stream() it bounds the wait for headers AND the idle gap between
+    // chunks (a long steady stream is fine; a stalled one is not). Matches
+    // the Python SDK's default of 60s. `0` disables.
+    this.timeout = options.timeout ?? 60; // seconds
   }
 
   /**
@@ -106,7 +113,10 @@ export class RekAIClient {
     for (;;) {
       let res;
       try {
-        res = await fetch(`${this.baseUrl}${path}`, init);
+        res = await fetch(`${this.baseUrl}${path}`, {
+          ...init,
+          signal: this.timeout > 0 ? AbortSignal.timeout(this.timeout * 1000) : init.signal,
+        });
       } catch (err) {
         if (attempt >= this.maxRetries) throw err;
         await sleep(this._retryDelayMs(null, attempt));
@@ -194,44 +204,67 @@ export class RekAIClient {
    * @returns {AsyncGenerator<string>}
    */
   async *stream(model, messages, opts = {}) {
-    const res = await fetch(`${this.baseUrl}/v1/chat/stream`, {
-      method: "POST",
-      headers: this._headers(opts.providerKey, opts.gatewayKey),
-      body: JSON.stringify(this._payload(model, messages, opts)),
-    });
-    await this._raiseForStatus(res);
-    if (!res.body) return;
+    // Idle watchdog: fetch offers no timeout, so a stream that stalls mid-body
+    // (hung upstream, dead socket) would park the caller forever. The timer
+    // re-arms before every read — it bounds the gap between chunks, not the
+    // total stream length, so a slow-but-steady answer is fine.
+    const ctrl = new AbortController();
+    let watchdog;
+    const arm = () => {
+      if (this.timeout <= 0) return;
+      clearTimeout(watchdog);
+      watchdog = setTimeout(
+        () => ctrl.abort(new RekAIError(`stream idle for ${this.timeout}s`)),
+        this.timeout * 1000,
+      );
+      watchdog.unref?.();
+    };
+    arm();
+    let res;
+    try {
+      res = await fetch(`${this.baseUrl}/v1/chat/stream`, {
+        method: "POST",
+        headers: this._headers(opts.providerKey, opts.gatewayKey),
+        body: JSON.stringify(this._payload(model, messages, opts)),
+        signal: ctrl.signal,
+      });
+      await this._raiseForStatus(res);
+      if (!res.body) return;
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+      while (true) {
+        arm();
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
 
-      let sep;
-      while ((sep = buffer.indexOf("\n\n")) !== -1) {
-        const frame = buffer.slice(0, sep);
-        buffer = buffer.slice(sep + 2);
-        const dataLine = frame.split("\n").find((l) => l.startsWith("data:"));
-        if (!dataLine) continue;
-        const payload = dataLine.slice("data:".length).trim();
-        if (payload === "[DONE]") return;
-        let event;
-        try {
-          event = JSON.parse(payload);
-        } catch {
-          continue;
+        let sep;
+        while ((sep = buffer.indexOf("\n\n")) !== -1) {
+          const frame = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          const dataLine = frame.split("\n").find((l) => l.startsWith("data:"));
+          if (!dataLine) continue;
+          const payload = dataLine.slice("data:".length).trim();
+          if (payload === "[DONE]") return;
+          let event;
+          try {
+            event = JSON.parse(payload);
+          } catch {
+            continue;
+          }
+          if (event.delta) yield event.delta;
+          else if (event.usage) {
+            opts.onUsage?.(event);
+            if (event.tool_calls) opts.onToolCalls?.(event.tool_calls);
+          } else if (event.annotations) opts.onAnnotations?.(event.annotations);
+          else if (event.error) throw new RekAIError(event.detail || event.error);
         }
-        if (event.delta) yield event.delta;
-        else if (event.usage) {
-          opts.onUsage?.(event);
-          if (event.tool_calls) opts.onToolCalls?.(event.tool_calls);
-        } else if (event.annotations) opts.onAnnotations?.(event.annotations);
-        else if (event.error) throw new RekAIError(event.detail || event.error);
       }
+    } finally {
+      clearTimeout(watchdog);
     }
   }
 

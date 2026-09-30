@@ -8,6 +8,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **JS SDK request timeout** — `fetch` has no built-in timeout, so a hung
+  connection parked `chat()`/`stream()` forever. A new `timeout` client option
+  (default 60s, matching the Python SDK) bounds each non-streaming request via
+  `AbortSignal` and bounds the idle gap between stream chunks with a per-read
+  watchdog — a slow-but-steady stream is unaffected, a stalled one throws.
+  `timeout: 0` disables. `RekAIClientOptions` in the type declarations also
+  gains the previously-undeclared `maxRetries`/`retryBackoff`/`maxRetryDelay`.
 - **Three pass-through fidelity fixes** — JSON-mode's synthetic `json_response`
   tool now becomes a text block holding the unwrapped answer inside
   `content_blocks` (deleting it left a nonempty array without the answer, and
