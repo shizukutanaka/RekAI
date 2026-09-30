@@ -64,6 +64,12 @@ export interface ChatOptions {
   /** OpenAI's `web_search_options` — hosted web-search config (context size,
    * user location). OpenAI-compatible providers only. */
   webSearchOptions?: Record<string, unknown>;
+  /** The providers' end-user id for abuse detection (OpenAI's `user`,
+   * Anthropic's `metadata.user_id`). A routing hint — never a cache key. */
+  user?: string;
+  /** OpenAI's newer hashed abuse-detection identifier (successor to `user`).
+   * OpenAI-compatible providers only. */
+  safetyIdentifier?: string;
   /** Anthropic extended thinking config, e.g.
    * `{type: "enabled", budget_tokens: 1024}` — forwarded verbatim to Anthropic
    * upstreams. Thinking blocks come back on `ChatResult.thinking_blocks`. */
@@ -115,6 +121,8 @@ export interface ChatResult {
   redacted: string[] | null;
   /** Anthropic thinking/redacted_thinking blocks produced before the answer. */
   thinking_blocks: Record<string, unknown>[] | null;
+  /** Anthropic citations on the answer's text (web-search sources), verbatim. */
+  citations: Record<string, unknown>[] | null;
   /** Anthropic server-side tool blocks (server_tool_use, tool-result blocks, mcp_*). */
   extra_blocks: Record<string, unknown>[] | null;
   /** Message-level fields the provider doesn't map (container, context_management, ...). */
@@ -148,6 +156,9 @@ export interface EmbeddingsOptions {
   /** OpenAI's encoding_format ("float" | "base64"); OpenAI-compatible
    * providers only. */
   encodingFormat?: string;
+  /** OpenAI's end-user id for abuse detection — a routing hint,
+   * never a cache key. */
+  user?: string;
 }
 
 export interface EmbeddingsResult {

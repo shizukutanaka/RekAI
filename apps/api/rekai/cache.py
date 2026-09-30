@@ -38,6 +38,9 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         "presence_penalty": request.presence_penalty,
         "logit_bias": request.logit_bias,
         "service_tier": request.service_tier,
+        # Beta flags change what the provider is asked to do (e.g.
+        # interleaved thinking changes the streamed shape).
+        "anthropic_beta": request.anthropic_beta,
         "messages": [m.model_dump() for m in request.messages],
         "tools": request.tools,
         "tool_choice": request.tool_choice,
@@ -53,6 +56,14 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         "web_search_options": request.web_search_options,
         # Extended thinking changes both the content and its cost.
         "thinking": request.thinking,
+        # Remaining real Anthropic fields — each shapes the answer or its cost.
+        "context_management": request.context_management,
+        "container": request.container,
+        "inference_geo": request.inference_geo,
+        "speed": request.speed,
+        "diagnostics": request.diagnostics,
+        "user_profile_id": request.user_profile_id,
+        "mcp_servers": request.mcp_servers,
         # Output config (effort/format) changes what comes back.
         "output_config": request.output_config,
     }
@@ -89,12 +100,20 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
         "presence_penalty": request.presence_penalty,
         "logit_bias": request.logit_bias,
         "service_tier": request.service_tier,
+        "anthropic_beta": request.anthropic_beta,
         "tools": request.tools,
         "tool_choice": request.tool_choice,
         "response_format": request.response_format,
         "cache_control": request.cache_control,
         "web_search_options": request.web_search_options,
         "thinking": request.thinking,
+        "context_management": request.context_management,
+        "container": request.container,
+        "inference_geo": request.inference_geo,
+        "speed": request.speed,
+        "diagnostics": request.diagnostics,
+        "user_profile_id": request.user_profile_id,
+        "mcp_servers": request.mcp_servers,
         "output_config": request.output_config,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))

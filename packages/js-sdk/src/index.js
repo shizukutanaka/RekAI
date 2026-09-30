@@ -156,6 +156,11 @@ export class RekAIClient {
     if (opts.serviceTier != null) payload.service_tier = opts.serviceTier;
     // OpenAI's hosted web-search config; OpenAI-compatible providers only.
     if (opts.webSearchOptions != null) payload.web_search_options = opts.webSearchOptions;
+    // The providers' end-user id for abuse detection (OpenAI `user`,
+    // Anthropic `metadata.user_id`) — a routing hint, never a cache key.
+    if (opts.user != null) payload.user = opts.user;
+    // OpenAI's newer hashed abuse-detection identifier (successor to `user`).
+    if (opts.safetyIdentifier != null) payload.safety_identifier = opts.safetyIdentifier;
     // Anthropic extended thinking ({type:"enabled",budget_tokens}) — Anthropic
     // upstreams only; thinking blocks come back on ChatResult.thinking_blocks.
     if (opts.thinking != null) payload.thinking = opts.thinking;
@@ -289,6 +294,7 @@ export class RekAIClient {
     // OpenAI embeddings fields; providers without them ignore them.
     if (opts.dimensions != null) payload.dimensions = opts.dimensions;
     if (opts.encodingFormat != null) payload.encoding_format = opts.encodingFormat;
+    if (opts.user != null) payload.user = opts.user;
     const res = await this._send("/v1/embeddings", {
       method: "POST",
       headers: this._headers(opts.providerKey, opts.gatewayKey),

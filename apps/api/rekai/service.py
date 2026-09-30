@@ -87,6 +87,8 @@ class ChatStreamEvent:
     thinking_delta: str | None = None
     thinking_signature: str | None = None
     thinking_block: dict | None = None
+    # A web-search citation arriving inside a text block.
+    citation: dict | None = None
     # A non-standard content block streaming through verbatim: the upstream
     # content_block_start payload, one verbatim delta, or the completed block.
     extra_block_start: dict | None = None
@@ -292,6 +294,22 @@ def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
             new_blocks.append(block)
         if changed:
             updates["thinking_blocks"] = new_blocks
+    if response.citations:
+        # cited_text echoes model-generated text — a secret scrubbed from the
+        # answer must not re-leak through its citation.
+        new_citations: list[dict[str, Any]] = []
+        changed = False
+        for citation in response.citations:
+            text = citation.get("cited_text")
+            if isinstance(text, str):
+                scrubbed, found = guardrails.redact_secrets(text)
+                if found:
+                    citation = {**citation, "cited_text": scrubbed}
+                    hits += found
+                    changed = True
+            new_citations.append(citation)
+        if changed:
+            updates["citations"] = new_citations
     # Server-tool blocks (search results, code-exec output, tool inputs) carry
     # free text too — scrub every string leaf in them, and in the verbatim
     # ordered array, with the same redactor. "signature" keys stay untouched:
@@ -652,6 +670,7 @@ async def _handle_chat(
             fallback_used=is_fallback,
             finish_reason=result.finish_reason,
             thinking_blocks=result.thinking_blocks,
+            citations=result.citations,
             extra_blocks=result.extra_blocks,
             extra_fields=result.extra_fields,
             content_blocks=result.content_blocks,
@@ -743,6 +762,7 @@ async def _handle_chat_stream(
     # when actually enabled.
     redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
     thinking_redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
+    citation_redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
     refusal_redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
     redaction_on = settings.output_redaction_enabled
     # Each open extra block gets incremental redactors per payload field — a
@@ -811,6 +831,18 @@ async def _handle_chat_stream(
                     if tail:
                         yield ChatStreamEvent(thinking_delta=tail)
                 yield ChatStreamEvent(thinking_block=event.thinking_block)
+            if event.citation is not None:
+                # A citation arrives whole — feed and flush in one step keeps
+                # its cited_text on the same secret-scrubbing contract as the
+                # streamed text it quotes.
+                citation = event.citation
+                if citation_redactor is not None and isinstance(citation.get("cited_text"), str):
+                    head = citation_redactor.feed(citation["cited_text"])
+                    citation = {
+                        **citation,
+                        "cited_text": head + citation_redactor.flush(),
+                    }
+                yield ChatStreamEvent(citation=citation)
             if event.extra_block_start is not None:
                 # Flush the text redactor's held-back tail first — a buffered
                 # text delta must not land after the tool block that upstream
@@ -946,6 +978,7 @@ async def _handle_chat_stream(
                         dict.fromkeys(
                             (redactor.hits if redactor is not None else [])
                             + (thinking_redactor.hits if thinking_redactor is not None else [])
+                            + (citation_redactor.hits if citation_redactor is not None else [])
                             + (refusal_redactor.hits if refusal_redactor is not None else [])
                             + extra_hits
                         )
@@ -1040,6 +1073,7 @@ async def _handle_embeddings(
                 api_key,
                 dimensions=request.dimensions,
                 encoding_format=request.encoding_format,
+                user=request.user,
             ),
             attempts=settings.retry_max_attempts,
             base_delay=settings.retry_base_delay_seconds,
