@@ -120,6 +120,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requirement), while an explicit temperature rides as sent. Non-Anthropic
   providers ignore the config and surfaces without the concept (OpenAI chunks)
   drop the blocks. Both SDKs and the web client expose `thinking_blocks`.
+- **`system_fingerprint` and response `service_tier` now round-trip.** OpenAI
+  stamps both on every response — the fingerprint identifies the backend
+  configuration that served the call (the debugging companion to `seed`), and
+  the response-side `service_tier` reports which tier actually handled it when
+  the request said "auto". They were dropped on the floor before; now they ride
+  through `ProviderResult`/`StreamEvent` into the native `ChatResponse`, the
+  native SSE summary, the compat response, and every compat stream chunk after
+  the first provider frame. Anthropic participates too: it accepts
+  `service_tier` on Messages requests (`auto` | `standard_only`) and echoes
+  the billed tier in `usage.service_tier` — both directions wired. Gemini and
+  Ollama have no equivalent and report null.
 - **`service_tier` reaches Anthropic too.** Anthropic's Messages API takes the
   same field name with its own vocabulary (`auto` | `standard_only`); the
   compat layer accepted it via `extra="allow"` and dropped it, and the provider
@@ -330,6 +341,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   embeddings), enforcement is best-effort/process-local like the budget cap,
   and window counters stay out of the persisted snapshot for the same reason
   the budget window does.
+- **Cache-miss singleflight.** N concurrent identical requests that all miss
+  the exact cache no longer all call the provider: the first claims an atomic
+  in-flight sentinel and the rest poll briefly (bounded by 10s and the request
+  deadline) for the stored result — served with `cached: true` — or proceed to
+  the provider themselves when the claim holder fails. Applies to both
+  `/v1/chat` and `/v1/embeddings` (bulk-indexing jobs issue identical
+  embedding calls in bursts). Fail-open; counts absorbed duplicates as
+  `rekai_cache_fills_coalesced_total` (subset of `rekai_cache_hits_total`,
+  also in `/v1/usage` as `cache_fills_coalesced_total`). Verified live: two
+  simultaneous identical requests → one provider call.
 - **`GET /v1/models/{id}`** — the OpenAI-compat "retrieve a model" endpoint
   (`client.models.retrieve("…")` in the OpenAI SDK). Returns the same
   `ModelInfo` the list endpoint reports; unknown ids get a 404 in the OpenAI

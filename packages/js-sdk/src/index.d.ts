@@ -19,6 +19,8 @@ export interface StreamSummary {
   cost_usd: number | null;
   estimated: boolean;
   tool_calls?: Record<string, unknown>[];
+  system_fingerprint?: string | null;
+  service_tier?: string | null;
   /** Which stop sequence ended the turn (Anthropic reports it; OpenAI has
    * no equivalent field, so it's absent for other providers). */
   stop_sequence?: string;
@@ -140,6 +142,10 @@ export interface ChatResult {
   content_blocks: Record<string, unknown>[] | null;
   /** Unix timestamp the gateway produced the response. */
   created: number;
+  /** OpenAI backend fingerprint — which config served the call (with `seed`, a determinism aid). */
+  system_fingerprint?: string | null;
+  /** The service tier that actually handled the call when `service_tier` was "auto". */
+  service_tier?: string | null;
 }
 
 export interface ModelPricing {
@@ -185,6 +191,8 @@ export interface UsageSummary {
   cache_misses_total: number;
   /** Subset of cache_hits_total served by approximate (embedding) match. */
   semantic_cache_hits_total: number;
+  /** Subset of cache_hits_total coalesced onto an in-flight identical request. */
+  cache_fills_coalesced_total: number;
   errors_total: number;
   fallbacks_total: number;
   tokens_total: number;
