@@ -198,6 +198,8 @@ export class RekAIClient {
    * it is called once with the final summary when the server reports it. If the
    * model requested tool calls (carried on that same summary under
    * `tool_calls`), `opts.onToolCalls` is called with just that list.
+   * Refusal text (the model declining) arrives via `opts.onRefusal` and in the
+   * final summary's `refusal` field.
    * @param {string} model
    * @param {string|Array<{role:string,content:string}>} messages
    * @param {object} [opts]
@@ -259,7 +261,8 @@ export class RekAIClient {
           else if (event.usage) {
             opts.onUsage?.(event);
             if (event.tool_calls) opts.onToolCalls?.(event.tool_calls);
-          } else if (event.annotations) opts.onAnnotations?.(event.annotations);
+          } else if (event.refusal) opts.onRefusal?.(event.refusal);
+          else if (event.annotations) opts.onAnnotations?.(event.annotations);
           else if (event.error) throw new RekAIError(event.detail || event.error);
         }
       }

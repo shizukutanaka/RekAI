@@ -225,6 +225,10 @@ def _content_blocks(resp: ChatResponse) -> list[dict]:
         blocks.extend(resp.extra_blocks)
     if resp.content:
         blocks.append({"type": "text", "text": resp.content})
+    elif resp.refusal:
+        # Anthropic carries the refusal text as the (only) text block, paired
+        # with stop_reason "refusal" — fold the upstream refusal field in.
+        blocks.append({"type": "text", "text": resp.refusal})
     for tc in resp.tool_calls or []:
         fn = tc.get("function", {})
         try:

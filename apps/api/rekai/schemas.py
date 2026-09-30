@@ -292,6 +292,7 @@ class ChatCompletionMessage(BaseModel):
     role: Literal["assistant"] = "assistant"
     content: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
+    refusal: str | None = None
     annotations: list[dict[str, Any]] | None = None
 
 
@@ -332,6 +333,11 @@ class ChatResponse(BaseModel):
     content: str
     tool_calls: list[dict[str, Any]] | None = Field(
         default=None, description="Tool calls returned by the model, if any."
+    )
+    refusal: str | None = Field(
+        default=None,
+        description="The model's refusal text when it declined (OpenAI "
+        "'message.refusal'); content is empty in that case. Null otherwise.",
     )
     annotations: list[dict[str, Any]] | None = Field(
         default=None,

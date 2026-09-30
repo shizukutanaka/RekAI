@@ -87,6 +87,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requirement), while an explicit temperature rides as sent. Non-Anthropic
   providers ignore the config and surfaces without the concept (OpenAI chunks)
   drop the blocks. Both SDKs and the web client expose `thinking_blocks`.
+- **Model refusal text is surfaced end-to-end instead of dropped.** OpenAI
+  returns a refusal as `message.refusal` / `delta.refusal` chunks with
+  `content` null; RekAI flattened that to an empty answer. `ProviderResult`,
+  `StreamEvent`, `ChatResponse` and the stream summary now carry `refusal`;
+  the native SSE stream emits `{"refusal": ...}` events, the OpenAI-compat
+  surface reproduces `message.refusal`/`delta.refusal` chunks, and the
+  Anthropic-compat surface folds the text into a content block with
+  `stop_reason: "refusal"` (Anthropic's own encoding). Both SDKs expose it
+  (`ChatResult.refusal`, `on_refusal`/`onRefusal` stream hooks).
 - **Web-search citations pass through end-to-end.** OpenAI attaches
   `message.annotations` (e.g. `url_citation` entries) when a web-search model
   answers; RekAI previously dropped them, so the caller paid for search but

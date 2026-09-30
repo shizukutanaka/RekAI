@@ -54,6 +54,9 @@ class ChatResult:
     #: Secret patterns scrubbed from ``content`` by the output-redaction
     #: guardrail, or None if nothing was redacted.
     redacted: list[str] | None = None
+    #: The model's refusal text when it declined (``content`` stays empty in
+    #: that case); None on a normal answer.
+    refusal: str | None = None
     #: Citations etc. attached to the answer (e.g. web-search ``url_citation``
     #: entries), passed through verbatim; None when the model added none.
     annotations: list[dict[str, Any]] | None = None
@@ -87,6 +90,7 @@ class ChatResult:
             finish_reason=data.get("finish_reason"),
             cache_similarity=data.get("cache_similarity"),
             redacted=data.get("redacted"),
+            refusal=data.get("refusal"),
             annotations=data.get("annotations"),
             thinking_blocks=data.get("thinking_blocks"),
             extra_blocks=data.get("extra_blocks"),
@@ -250,6 +254,8 @@ def _classify_stream_event(event: dict[str, Any]) -> tuple[str, Any]:
         return ("delta", event["delta"])
     if "usage" in event:
         return ("usage", event)
+    if "refusal" in event:
+        return ("refusal", event["refusal"])
     if "annotations" in event:
         return ("annotations", event["annotations"])
     if "error" in event:
@@ -460,6 +466,7 @@ class RekAIClient:
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], None] | None = None,
         on_tool_calls: Callable[[list[dict[str, Any]]], None] | None = None,
+        on_refusal: Callable[[str], None] | None = None,
         on_annotations: Callable[[list[dict[str, Any]]], None] | None = None,
     ) -> Iterator[str]:
         """Yield response text chunks from the streaming endpoint.
@@ -500,6 +507,9 @@ class RekAIClient:
                 kind, value = _classify_stream_event(decoded)
                 if kind == "delta":
                     yield value
+                elif kind == "refusal":
+                    if on_refusal is not None:
+                        on_refusal(value)
                 elif kind == "annotations":
                     if on_annotations is not None:
                         on_annotations(value)
@@ -704,6 +714,7 @@ class AsyncRekAIClient:
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
         on_tool_calls: Callable[[list[dict[str, Any]]], Awaitable[None] | None] | None = None,
+        on_refusal: Callable[[str], Awaitable[None] | None] | None = None,
         on_annotations: Callable[[list[dict[str, Any]]], Awaitable[None] | None] | None = None,
     ) -> AsyncIterator[str]:
         """Yield response text chunks from the streaming endpoint.
@@ -746,6 +757,11 @@ class AsyncRekAIClient:
                 kind, value = _classify_stream_event(decoded)
                 if kind == "delta":
                     yield value
+                elif kind == "refusal":
+                    if on_refusal is not None:
+                        maybe_r = on_refusal(value)
+                        if maybe_r is not None:
+                            await maybe_r
                 elif kind == "annotations":
                     if on_annotations is not None:
                         maybe_a = on_annotations(value)

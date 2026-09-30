@@ -1401,6 +1401,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ):
                 if ev.delta is not None:
                     yield f"data: {json.dumps({'delta': ev.delta})}\n\n"
+                elif ev.refusal_delta is not None:
+                    yield f"data: {json.dumps({'refusal': ev.refusal_delta})}\n\n"
                 elif ev.annotations is not None:
                     yield f"data: {json.dumps({'annotations': ev.annotations})}\n\n"
                 elif ev.thinking_delta is not None:
@@ -1433,6 +1435,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         summary["tool_calls"] = s.tool_calls
                     if s.finish_reason:
                         summary["finish_reason"] = s.finish_reason
+                    if s.refusal:
+                        summary["refusal"] = s.refusal
                     if s.annotations:
                         summary["annotations"] = s.annotations
                     if s.redacted:
@@ -1553,6 +1557,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ):
                 if ev.delta is not None:
                     yield sse(openai_compat.chunk_delta(chunk_id, created, model, ev.delta))
+                elif ev.refusal_delta is not None:
+                    yield sse(
+                        openai_compat.chunk_refusal(chunk_id, created, model, ev.refusal_delta)
+                    )
                 elif ev.annotations is not None:
                     yield sse(
                         openai_compat.chunk_annotations(chunk_id, created, model, ev.annotations)
@@ -1735,7 +1743,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         yield anthropic_compat.ev_content_block_stop(block_index)
                         block_index += 1
                         open_block = None
-                elif ev.delta is not None:
+                elif ev.delta is not None or ev.refusal_delta is not None:
+                    # Anthropic has no refusal channel — the refusal text is the
+                    # message content (stop_reason already maps to "refusal").
+                    text = ev.delta if ev.delta is not None else ev.refusal_delta
                     if open_block != "text":
                         if open_block is not None:
                             yield anthropic_compat.ev_content_block_stop(block_index)
@@ -1744,7 +1755,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             block_index, {"type": "text", "text": ""}
                         )
                         open_block = "text"
-                    yield anthropic_compat.ev_text_delta(block_index, ev.delta)
+                    yield anthropic_compat.ev_text_delta(block_index, text)
                 elif ev.error is not None:
                     yield anthropic_compat.ev_error(ev.error.status_code, str(ev.error))
                     return
