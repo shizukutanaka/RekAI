@@ -330,6 +330,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   embeddings), enforcement is best-effort/process-local like the budget cap,
   and window counters stay out of the persisted snapshot for the same reason
   the budget window does.
+- **`GET /v1/models/{id}`** — the OpenAI-compat "retrieve a model" endpoint
+  (`client.models.retrieve("…")` in the OpenAI SDK). Returns the same
+  `ModelInfo` the list endpoint reports; unknown ids get a 404 in the OpenAI
+  envelope (`type: invalid_request_error`, `code: model_not_found`), matching
+  api.openai.com. `openai_compat.openai_error` gained optional `code` /
+  `error_type` overrides for this.
 - **Input-side secret detection** (`REKAI_INPUT_SECRETS_ENABLED`, opt-in).
   Output redaction already scrubbed secrets the *model* emitted; this runs the
   same pattern set against caller-supplied request text — every message role

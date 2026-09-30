@@ -772,7 +772,9 @@ report `null`. Embeddings responses carry `cost_usd` too (input-only — the
 (`rekai_cost_usd_total`). Prices are approximate and meant for budgeting, not
 billing. `/v1/models` also reports each model's `pricing`
 (`input_per_1m`/`output_per_1m`, or `null` when unknown), so clients can build
-cost UIs without hardcoding rates.
+cost UIs without hardcoding rates. `GET /v1/models/{id}` retrieves a single
+entry (OpenAI-compat `models.retrieve`); unknown ids get a 404 in the OpenAI
+envelope (`type: invalid_request_error`, `code: model_not_found`).
 
 When a provider streams without reporting usage, tokens are **estimated** from
 the text (`estimated: true`). That estimate is script-aware, not a word count:
