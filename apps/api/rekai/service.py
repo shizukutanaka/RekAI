@@ -267,6 +267,11 @@ def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
         if found:
             updates["content"] = scrubbed
             hits += found
+    if response.refusal:
+        scrubbed, found = guardrails.redact_secrets(response.refusal)
+        if found:
+            updates["refusal"] = scrubbed
+            hits += found
     if response.thinking_blocks:
         # Thinking text is model-generated content too — a secret surfaced in
         # reasoning is the same leak as one in the answer.
@@ -695,6 +700,7 @@ async def handle_chat_stream(
     # when actually enabled.
     redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
     thinking_redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
+    refusal_redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
     redaction_on = settings.output_redaction_enabled
     # Each open extra block gets incremental redactors per payload field — a
     # secret split across that block's deltas must still be caught, and each
@@ -724,10 +730,16 @@ async def handle_chat_stream(
                 if emitted:
                     yield ChatStreamEvent(delta=emitted)
             if event.refusal_delta:
-                # Refusal text is model output but not the answer; it skips the
-                # content redactor to keep that streamer's state machine honest.
-                reported_refusal.append(event.refusal_delta)
-                yield ChatStreamEvent(refusal_delta=event.refusal_delta)
+                # Refusal text is model output but not the answer; its own
+                # redactor keeps the holdback independent of the content stream.
+                emitted_r = (
+                    refusal_redactor.feed(event.refusal_delta)
+                    if refusal_redactor is not None
+                    else event.refusal_delta
+                )
+                if emitted_r:
+                    reported_refusal.append(emitted_r)
+                    yield ChatStreamEvent(refusal_delta=emitted_r)
             if event.annotations is not None:
                 reported_annotations.extend(event.annotations)
                 yield ChatStreamEvent(annotations=event.annotations)
@@ -815,6 +827,11 @@ async def handle_chat_stream(
             tail = thinking_redactor.flush()
             if tail:
                 yield ChatStreamEvent(thinking_delta=tail)
+        if refusal_redactor is not None:
+            tail = refusal_redactor.flush()
+            if tail:
+                reported_refusal.append(tail)
+                yield ChatStreamEvent(refusal_delta=tail)
         if extra_redactors:
             # A block left open when the upstream stream ended — release the
             # held-back tails in their last-seen delta shapes.
@@ -885,6 +902,7 @@ async def handle_chat_stream(
                         dict.fromkeys(
                             (redactor.hits if redactor is not None else [])
                             + (thinking_redactor.hits if thinking_redactor is not None else [])
+                            + (refusal_redactor.hits if refusal_redactor is not None else [])
                             + extra_hits
                         )
                     )

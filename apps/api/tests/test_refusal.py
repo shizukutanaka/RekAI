@@ -9,8 +9,13 @@ import json
 import httpx
 
 from rekai import anthropic_compat, openai_compat
+from rekai.cache import NullCache
+from rekai.config import Settings
+from rekai.providers import register_provider
+from rekai.providers.base import Provider, ProviderResult, StreamEvent
 from rekai.providers.openai import OpenAIProvider
 from rekai.schemas import ChatMessage, ChatRequest, ChatResponse, Usage
+from rekai.service import handle_chat, handle_chat_stream
 
 
 def _req() -> ChatRequest:
@@ -125,3 +130,70 @@ def test_openai_stream_chunk_refusal_shape() -> None:
     assert data == {"refusal": "can't"}
     # An SDK sees it byte-for-byte on the wire.
     assert json.loads(json.dumps(chunk))["choices"][0]["delta"]["refusal"] == "can't"
+
+
+_SECRET = "sk-" + "r" * 30
+
+
+class _SecretRefusalProvider(Provider):
+    name = "svc-refusing"
+    requires_key = False
+
+    async def chat(self, request, api_key):
+        return ProviderResult(
+            model="x",
+            content="",
+            refusal=f"I won't repeat {_SECRET}",
+            usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        )
+
+    async def stream_events(self, request, api_key):
+        yield StreamEvent(refusal_delta="I won't repeat sk-")
+        yield StreamEvent(refusal_delta="r" * 30)
+        yield StreamEvent(usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2))
+
+
+def _redacting_settings() -> Settings:
+    return Settings(environment="test", default_provider="echo", output_redaction_enabled=True)
+
+
+async def test_refusal_text_is_secret_scrubbed() -> None:
+    register_provider(_SecretRefusalProvider())
+    resp = await handle_chat(
+        ChatRequest(
+            model="x", provider="svc-refusing", messages=[ChatMessage(role="user", content="hi")]
+        ),
+        None,
+        _redacting_settings(),
+        NullCache(),
+        "client-a",
+    )
+    assert _SECRET not in (resp.refusal or "")
+    assert resp.redacted
+
+
+async def test_streamed_refusal_split_secret_is_scrubbed() -> None:
+    provider = _SecretRefusalProvider()
+    register_provider(provider)
+    events = [
+        e
+        async for e in handle_chat_stream(
+            ChatRequest(
+                model="x",
+                provider="svc-refusing",
+                messages=[ChatMessage(role="user", content="hi")],
+            ),
+            None,
+            _redacting_settings(),
+            NullCache(),
+            "svc-refusing",
+            provider,
+            "client-a",
+        )
+    ]
+    streamed = "".join(e.refusal_delta for e in events if e.refusal_delta)
+    summary = next(e.summary for e in events if e.summary)
+    assert _SECRET not in streamed
+    assert streamed.startswith("I won't repeat ")
+    assert _SECRET not in (summary.refusal or "")
+    assert summary.redacted
