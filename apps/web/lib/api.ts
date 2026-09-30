@@ -32,6 +32,8 @@ export interface ChatResponse {
   finish_reason?: FinishReason;
   cache_similarity?: number | null;
   redacted?: string[] | null;
+  /** The model's refusal text when it declined; `content` is empty then. */
+  refusal?: string | null;
   /** Citations etc. attached to the answer (e.g. web-search url_citation). */
   annotations?: Record<string, unknown>[] | null;
   /** True when a fallback target answered because the primary failed. */
@@ -287,11 +289,13 @@ export function setStoredAdminKey(value: string): void {
 export interface AdminKeyList {
   static: string[];
   dynamic: string[];
+  dynamic_expires_at: Record<string, number>;
 }
 
 export interface AdminKeyActionResponse {
   status: "added" | "revoked";
   key: string;
+  expires_at: number | null;
 }
 
 export async function fetchAdminKeys(adminKey: string): Promise<AdminKeyList> {
@@ -306,11 +310,14 @@ export async function fetchAdminKeys(adminKey: string): Promise<AdminKeyList> {
 export async function addAdminKey(
   adminKey: string,
   key: string,
+  expiresInSeconds?: number,
 ): Promise<AdminKeyActionResponse> {
   const res = await fetch(`${API_URL}/admin/keys`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...gatewayAuthHeaders(adminKey) },
-    body: JSON.stringify({ key }),
+    body: JSON.stringify(
+      expiresInSeconds === undefined ? { key } : { key, expires_in_seconds: expiresInSeconds },
+    ),
   });
   if (!res.ok) throw await errorFromResponse(res);
   return res.json();
@@ -449,6 +456,7 @@ export interface StreamSummary {
   tool_calls?: Record<string, unknown>[];
   finish_reason?: FinishReason;
   redacted?: string[] | null;
+  refusal?: string;
   annotations?: Record<string, unknown>[];
 }
 
