@@ -224,9 +224,13 @@ covers it.
 Two RekAI extensions select a provider (OpenAI's schema has no provider field):
 an optional `provider` body field, or an OpenRouter-style `"<provider>/<model>"`
 model string (split only when the prefix is a *registered* provider, so a custom
-backend's own slash-containing model ids are left intact). Unknown OpenAI tuning
-params are tolerated and ignored; `n > 1` is a 400. It is part of the cache key,
-so a JSON-mode request and a plain one never collide.
+backend's own slash-containing model ids are left intact). `top_p`, `seed`,
+`frequency_penalty`, `presence_penalty` and `logit_bias` are now first-class:
+typed on both request schemas and forwarded — OpenAI-compatible backends take
+all five, Anthropic `top_p`, Gemini `topP`, Ollama `top_p` + `seed` — and they
+participate in the cache key and semantic bucket. Other unknown OpenAI tuning
+params are still tolerated and ignored; `n > 1` is a 400. `response_format` is
+part of the cache key too, so a JSON-mode request and a plain one never collide.
 
 ### Errors on the compatible endpoint
 
@@ -572,6 +576,10 @@ Trace Context**: an incoming `traceparent` is parsed and its `trace_id` is
 continued (RekAI emits a new span id) — or a fresh trace is started — returned as
 a `traceparent` response header and attached to the structured access log as
 `trace_id`, so RekAI slots into an OpenTelemetry-traced system without the SDK.
+Data-bearing endpoints (`/v1/*`, `/admin/*`, `/metrics`) also send
+`Cache-Control: no-store` — they carry per-client usage, model ACLs and key
+listings that a shared/intermediary cache must not persist or serve to
+another tenant. SSE routes keep their own `Cache-Control: no-cache`.
 
 The same `trace_id` is also forwarded to the **upstream provider** — every
 provider's outbound HTTP call (OpenAI, Anthropic, Gemini, Ollama, and any
@@ -608,6 +616,20 @@ at the point of the outbound call. A `ContextVar` rather than a plain module
 global so concurrent requests can't leak into each other's trace; outside a
 request (e.g. a provider invoked directly in a unit test) it's unset, and no
 `traceparent` header is sent at all rather than a synthetic one.
+
+The same `ContextVar` idiom carries **request-scoped Settings** to the
+provider layer. Provider code reads `rekai.config.current_settings()`, which
+resolves to the `Settings` the `_request_context` middleware bound for the
+request — and the service entry points (`handle_chat`, `handle_chat_stream`,
+`handle_embeddings`) bind it themselves, so a unit test calling
+`handle_chat(..., settings, ...)` directly reaches providers through that
+same `Settings`. Outside any bound context it falls back to the env-cached
+`get_settings()`, preserving the pre-DI behavior for import-time and direct
+calls. This removed the last import-time read: `rekai/providers/registry.py`
+registers the five builtins lazily on first use, and `create_app`
+(un)registers the custom OpenAI-compatible backend via
+`configure_custom_provider(settings)` — so a second `create_app` with
+different settings can't leave a stale custom provider behind.
 `/v1/*` responses also
 carry `X-RateLimit-Limit`/`X-RateLimit-Remaining`, and a 429 adds `Retry-After`
 (seconds until the client's bucket refills a token). CORS is the outermost
@@ -773,10 +795,13 @@ There are two ways to override or extend the table:
 
 ## Guardrails
 
-With `REKAI_GUARDRAILS_ENABLED=true`, RekAI scans the **user** messages of a
-chat / chat-stream request for common prompt-injection / jailbreak phrasings
+With `REKAI_GUARDRAILS_ENABLED=true`, RekAI scans the **user** and **tool**
+messages of a chat / chat-stream request for common prompt-injection / jailbreak
+phrasings
 ("ignore previous instructions", "reveal your system prompt", "developer mode
-enabled", …) before calling a provider. `REKAI_GUARDRAILS_ACTION=flag` (default)
+enabled", …) before calling a provider. Tool results are scanned because they
+are external content — the canonical *indirect* injection vector (the payload
+arrives in fetched data, not in the user's own text). `REKAI_GUARDRAILS_ACTION=flag` (default)
 lets the request through with an `X-Guardrail-Flag: <pattern>` header so the
 caller can decide; `block` rejects it with `403 guardrail_blocked`. This is a
 **heuristic first layer** (OWASP LLM01), not a security boundary — obfuscated or
@@ -852,10 +877,13 @@ Two distinct keys are in play. The **gateway** key authenticates the *client to
 RekAI*: set `REKAI_API_KEYS` (comma-separated) and `/v1/*` then requires
 `Authorization: Bearer <key>`, compared in constant time; missing/invalid →
 `401` with `WWW-Authenticate: Bearer`. With no keys configured the gateway is
-open (the default). System endpoints (`/health`, `/metrics`, `/`, `/docs`) stay
+open (the default). System endpoints (`/health`, `/metrics`, `/`) stay
 open for liveness probes and scraping — except `/metrics`, which can
 optionally be locked behind the same Bearer key too (see below), since it
 carries a per-client cost breakdown that scraping doesn't need to be public.
+`/docs`, `/redoc` and `/openapi.json` are served by default but **off in
+`production`** (`REKAI_DOCS_ENABLED` overrides either way): a public Swagger
+UI enumerates the request schema of every route, including `/admin/*`.
 This is separate from **BYOK** below, which is the *upstream provider* key.
 
 ### The one configuration RekAI refuses to serve
