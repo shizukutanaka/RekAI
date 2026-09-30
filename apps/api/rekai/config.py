@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     environment: str = "development"
     log_level: str = "INFO"
 
+    # Whether /docs, /redoc and /openapi.json are served. Unset = automatic:
+    # on in development/test, off in production — a public Swagger UI hands an
+    # attacker the full request schema of every route, including /admin/*.
+    # Set explicitly to override either side (e.g. share docs in a private
+    # prod deployment, or hide them in dev).
+    docs_enabled: bool | None = None
+
     # Gateway auth: comma-separated client API keys. When set, /v1/* requires
     # `Authorization: Bearer <key>`. Empty = open (no client auth).
     api_keys: str = ""

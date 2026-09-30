@@ -283,13 +283,16 @@ def detect_prompt_injection(text: str) -> str | None:
 
 
 def scan_messages(messages: Iterable[_HasRoleContent], enabled: bool) -> str | None:
-    """Scan the user-authored text of a conversation for injection patterns.
+    """Scan attacker-controlled conversation text for injection patterns.
 
     Returns the matched pattern name when ``enabled`` and a match is found, else
-    None. Only user messages are scanned (system/assistant text is the operator's
-    and the model's own output).
+    None. ``user`` and ``tool`` messages are scanned — tool results are external
+    content and the canonical vector for *indirect* prompt injection (OWASP
+    LLM01): a fetched page saying "ignore previous instructions" never passes
+    through the user's own text. System/assistant text is the operator's and the
+    model's own output and is not scanned.
     """
     if not enabled:
         return None
-    text = "\n".join(m.content or "" for m in messages if m.role == "user")
+    text = "\n".join(m.content or "" for m in messages if m.role in ("user", "tool"))
     return detect_prompt_injection(text)

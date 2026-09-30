@@ -40,7 +40,9 @@ from rekai.schemas import (
     AdminKeyList,
     AdminKeyRequest,
     AdminKeyResponse,
+    AnthropicCountTokensRequest,
     AnthropicMessagesRequest,
+    AnthropicTokenCount,
     ChatCompletionsRequest,
     ChatMessage,
     ChatRequest,
@@ -58,7 +60,12 @@ from rekai.schemas import (
 )
 from rekai.security import KeyCipher, mask_key
 from rekai.semantic_cache import semantic_cache
-from rekai.service import handle_chat, handle_chat_stream, handle_embeddings
+from rekai.service import (
+    check_embeddings_dimensions,
+    handle_chat,
+    handle_chat_stream,
+    handle_embeddings,
+)
 
 access_logger = get_logger("rekai.access")
 admin_logger = get_logger("rekai.admin")
@@ -214,7 +221,7 @@ class ConcurrencyLimitMiddleware:
 # the three first-party clients read `detail || error` off their error bodies,
 # so their shape must not change.
 _OPENAI_COMPAT_PATHS = frozenset({"/v1/chat/completions"})
-_ANTHROPIC_COMPAT_PATHS = frozenset({"/v1/messages"})
+_ANTHROPIC_COMPAT_PATHS = frozenset({"/v1/messages", "/v1/messages/count_tokens"})
 
 
 def _validation_message(detail: list) -> tuple[str, str | None]:
@@ -685,6 +692,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             with contextlib.suppress(asyncio.CancelledError):
                 await flush_task
             await metrics_store.save(metrics.snapshot())
+            # Drain provider connection pools so in-flight connections close
+            # politely instead of being severed when the loop ends.
+            for pname in provider_names():
+                provider = get_provider(pname)
+                if provider is not None:
+                    await provider.aclose()
+
+    docs_on = (
+        settings.docs_enabled
+        if settings.docs_enabled is not None
+        else settings.environment != "production"
+    )
 
     app = FastAPI(
         title="RekAI",
@@ -692,6 +711,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         description="A lightweight AI router & gateway with provider abstraction, "
         "caching and BYOK.",
         lifespan=lifespan,
+        docs_url="/docs" if docs_on else None,
+        redoc_url="/redoc" if docs_on else None,
+        openapi_url="/openapi.json" if docs_on else None,
     )
 
     cache: CacheBackend = build_cache(settings)
@@ -784,7 +806,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             token = auth.parse_bearer(request.headers.get("authorization"))
             # Anthropic's SDK authenticates with `x-api-key`, not Authorization:
             # Bearer — on /v1/messages it is the gateway credential.
-            if token is None and request.url.path == "/v1/messages":
+            if token is None and request.url.path in _ANTHROPIC_COMPAT_PATHS:
                 token = request.headers.get("x-api-key")
             if token is None or not auth.key_allowed(token, await _allowed_keys()):
                 metrics.record_error("unauthorized")
@@ -914,6 +936,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if tracestate:
             response.headers["tracestate"] = tracestate
         response.headers["X-Content-Type-Options"] = "nosniff"
+        # Data-bearing endpoints carry per-client usage, model ACLs and key
+        # listings — keep intermediary/shared caches from persisting or
+        # serving them to another tenant. SSE routes already send their own
+        # Cache-Control, so setdefault leaves it alone.
+        if request.url.path.startswith(("/v1/", "/admin/", "/metrics")):
+            response.headers.setdefault("Cache-Control", "no-store")
         access_logger.info(
             "%s %s -> %s %.1fms id=%s",
             request.method,
@@ -989,7 +1017,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             name=settings.app_name,
             version=__version__,
             description="A lightweight AI router & gateway. See /docs for the API.",
-            docs="/docs",
+            docs="/docs" if docs_on else None,
             health="/health",
         )
 
@@ -1329,6 +1357,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         config: Settings = Depends(get_config),
         cache_backend: CacheBackend = Depends(get_cache),
     ) -> EmbeddingsResponse | JSONResponse:
+        # Ahead of any stored-response short circuit — a replayed or cached
+        # entry written before a provider's cap existed must not bypass it.
+        check_embeddings_dimensions(request, config)
         input_texts = [request.input] if isinstance(request.input, str) else request.input
         leaked = _input_secrets_response(input_texts, config, response)
         if leaked is not None:
@@ -1423,6 +1454,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ):
                 if ev.delta is not None:
                     yield f"data: {json.dumps({'delta': ev.delta})}\n\n"
+                elif ev.refusal_delta is not None:
+                    yield f"data: {json.dumps({'refusal': ev.refusal_delta})}\n\n"
+                elif ev.annotations is not None:
+                    yield f"data: {json.dumps({'annotations': ev.annotations})}\n\n"
+                elif ev.thinking_delta is not None:
+                    yield f"data: {json.dumps({'thinking_delta': ev.thinking_delta})}\n\n"
+                elif ev.thinking_signature is not None:
+                    yield f"data: {json.dumps({'thinking_signature': ev.thinking_signature})}\n\n"
+                elif ev.thinking_block is not None:
+                    yield f"data: {json.dumps({'thinking_block': ev.thinking_block})}\n\n"
+                elif ev.extra_block_start is not None:
+                    yield f"data: {json.dumps({'extra_block_start': ev.extra_block_start})}\n\n"
+                elif ev.extra_block_delta is not None:
+                    yield f"data: {json.dumps({'extra_block_delta': ev.extra_block_delta})}\n\n"
+                elif ev.extra_block is not None:
+                    yield f"data: {json.dumps({'extra_block': ev.extra_block})}\n\n"
+                elif ev.extra_fields is not None:
+                    yield f"data: {json.dumps({'extra_fields': ev.extra_fields})}\n\n"
                 elif ev.error is not None:
                     payload = {"error": "provider_error", "detail": str(ev.error)}
                     yield f"data: {json.dumps(payload)}\n\n"
@@ -1439,6 +1488,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         summary["tool_calls"] = s.tool_calls
                     if s.finish_reason:
                         summary["finish_reason"] = s.finish_reason
+                    if s.refusal:
+                        summary["refusal"] = s.refusal
+                    if s.annotations:
+                        summary["annotations"] = s.annotations
                     if s.redacted:
                         summary["redacted"] = s.redacted
                     yield f"data: {json.dumps(summary)}\n\n"
@@ -1560,6 +1613,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ):
                 if ev.delta is not None:
                     yield sse(openai_compat.chunk_delta(chunk_id, created, model, ev.delta))
+                elif ev.refusal_delta is not None:
+                    yield sse(
+                        openai_compat.chunk_refusal(chunk_id, created, model, ev.refusal_delta)
+                    )
+                elif ev.annotations is not None:
+                    yield sse(
+                        openai_compat.chunk_annotations(chunk_id, created, model, ev.annotations)
+                    )
                 elif ev.error is not None:
                     yield sse(openai_compat.openai_error(ev.error.status_code, str(ev.error)))
                     yield "data: [DONE]\n\n"
@@ -1668,8 +1729,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         msg_id = f"msg_{uuid.uuid4().hex[:24]}"
 
         async def event_source():
-            yield anthropic_compat.ev_message_start(msg_id, chat_request.model)
-            text_block_open = False
+            # message_start emits lazily so extras arriving on upstream's own
+            # message_start (container, ...) merge into the same skeleton.
+            started = False
+            # Content blocks are indexed in order: thinking blocks (0..n, each
+            # closed by its signature_delta), then the text block, then tool_use.
+            open_block: str | None = None  # "thinking" | "text" | "extra"
+            block_index = 0
             finish_reason = "stop"
             usage = None
             async for ev in handle_chat_stream(
@@ -1681,27 +1747,87 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 provider,
                 client_id,
             ):
-                if ev.delta is not None:
-                    if not text_block_open:
+                if not started:
+                    yield anthropic_compat.ev_message_start(
+                        msg_id, chat_request.model, ev.extra_fields
+                    )
+                    started = True
+                    if ev.extra_fields is not None:
+                        continue
+                if ev.thinking_delta is not None:
+                    if open_block != "thinking":
+                        if open_block is not None:
+                            yield anthropic_compat.ev_content_block_stop(block_index)
+                            block_index += 1
                         yield anthropic_compat.ev_content_block_start(
-                            0, {"type": "text", "text": ""}
+                            block_index, {"type": "thinking", "thinking": ""}
                         )
-                        text_block_open = True
-                    yield anthropic_compat.ev_text_delta(0, ev.delta)
+                        open_block = "thinking"
+                    yield anthropic_compat.ev_thinking_delta(block_index, ev.thinking_delta)
+                elif ev.thinking_signature is not None:
+                    # The signature_delta closes the thinking block upstream.
+                    if open_block == "thinking":
+                        yield anthropic_compat.ev_signature_delta(
+                            block_index, ev.thinking_signature
+                        )
+                        yield anthropic_compat.ev_content_block_stop(block_index)
+                        block_index += 1
+                        open_block = None
+                elif ev.thinking_block is not None:
+                    # redacted_thinking arrives whole — open and close it in one
+                    # step so its index advances like a normal block's.
+                    if open_block is not None:
+                        yield anthropic_compat.ev_content_block_stop(block_index)
+                        block_index += 1
+                    yield anthropic_compat.ev_content_block_start(block_index, ev.thinking_block)
+                    yield anthropic_compat.ev_content_block_stop(block_index)
+                    block_index += 1
+                    open_block = None
+                elif ev.extra_block_start is not None:
+                    # A server-side tool block (or anything unmapped): open it
+                    # verbatim — the block dict came straight from upstream.
+                    if open_block is not None:
+                        yield anthropic_compat.ev_content_block_stop(block_index)
+                        block_index += 1
+                    yield anthropic_compat.ev_content_block_start(block_index, ev.extra_block_start)
+                    open_block = "extra"
+                elif ev.extra_block_delta is not None:
+                    yield anthropic_compat.ev_block_delta(block_index, ev.extra_block_delta)
+                elif ev.extra_block is not None:
+                    # content_block_stop upstream — close the verbatim block.
+                    if open_block == "extra":
+                        yield anthropic_compat.ev_content_block_stop(block_index)
+                        block_index += 1
+                        open_block = None
+                elif ev.delta is not None or ev.refusal_delta is not None:
+                    # Anthropic has no refusal channel — the refusal text is the
+                    # message content (stop_reason already maps to "refusal").
+                    text = ev.delta if ev.delta is not None else ev.refusal_delta
+                    if open_block != "text":
+                        if open_block is not None:
+                            yield anthropic_compat.ev_content_block_stop(block_index)
+                            block_index += 1
+                        yield anthropic_compat.ev_content_block_start(
+                            block_index, {"type": "text", "text": ""}
+                        )
+                        open_block = "text"
+                    yield anthropic_compat.ev_text_delta(block_index, text)
                 elif ev.error is not None:
                     yield anthropic_compat.ev_error(ev.error.status_code, str(ev.error))
                     return
                 elif ev.summary is not None:
-                    if text_block_open:
-                        yield anthropic_compat.ev_content_block_stop(0)
+                    if open_block is not None:
+                        yield anthropic_compat.ev_content_block_stop(block_index)
+                        block_index += 1
+                        open_block = None
                     s = ev.summary
                     if s.finish_reason:
                         finish_reason = s.finish_reason
-                    next_index = 1 if text_block_open else 0
-                    for i, tc in enumerate(s.tool_calls or []):
+                    for tc in s.tool_calls or []:
                         finish_reason = "tool_calls"
                         fn = tc.get("function", {})
-                        bi = next_index + i
+                        bi = block_index
+                        block_index += 1
                         yield anthropic_compat.ev_content_block_start(
                             bi,
                             {
@@ -1730,6 +1856,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             media_type="text/event-stream",
             headers=stream_headers,
         )
+
+    @app.post(
+        "/v1/messages/count_tokens",
+        response_model=AnthropicTokenCount,
+        tags=["chat"],
+        responses={
+            400: {"model": ErrorResponse},
+            401: {"model": ErrorResponse},
+            413: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            429: {"model": ErrorResponse},
+        },
+    )
+    async def anthropic_count_tokens(request: AnthropicCountTokensRequest):
+        """Anthropic-compatible token counter (``/v1/messages/count_tokens``).
+
+        Anthropic's own endpoint returns an exact tokenizer count; a
+        self-hosted gateway can't reproduce that offline, so this returns the
+        same script-aware estimate the pricing path uses — good enough for
+        pre-flight budget checks, and honest about CJK text. No upstream call,
+        no billing side effects.
+        """
+        return AnthropicTokenCount(input_tokens=anthropic_compat.count_tokens(request))
 
     return app
 
