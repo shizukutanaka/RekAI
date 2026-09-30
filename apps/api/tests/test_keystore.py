@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import time
 
 from rekai.cache import MemoryCache, NullCache
 from rekai.keystore import DynamicKeyStore
@@ -159,3 +161,42 @@ async def test_many_concurrent_adds_all_survive() -> None:
     keys = [f"sk-dyn-{i}" for i in range(6)]
     await asyncio.gather(*(store.add(k) for k in keys))
     assert sorted(await store.list_keys()) == sorted(keys)
+
+
+async def test_key_with_future_expiry_is_listed_and_expired_one_is_not() -> None:
+    store = DynamicKeyStore(MemoryCache())
+    await store.add("sk-live", expires_at=time.time() + 3600)
+    await store.add("sk-dead", expires_at=time.time() - 1)
+    await store.add("sk-forever")
+    assert sorted(await store.list_keys()) == ["sk-forever", "sk-live"]
+
+
+async def test_key_expiries_reports_only_unexpired_keys() -> None:
+    store = DynamicKeyStore(MemoryCache())
+    live_at = time.time() + 60
+    await store.add("sk-live", expires_at=live_at)
+    await store.add("sk-dead", expires_at=time.time() - 1)
+    await store.add("sk-forever")
+    expiries = await store.key_expiries()
+    assert expiries == {"sk-live": live_at, "sk-forever": None}
+
+
+async def test_legacy_list_blob_migrates_to_no_expiry() -> None:
+    """A blob written by a pre-expiry RekAI (a bare JSON key list) must keep
+    working — operators upgrade the binary before touching their key data."""
+    cache = MemoryCache()
+    await cache.set("rekai:api_keys:dynamic", json.dumps(["sk-old"]), ttl=3600)
+    store = DynamicKeyStore(cache)
+    assert await store.list_keys() == ["sk-old"]
+    # And a subsequent write upgrades the blob in place.
+    await store.add("sk-new", expires_at=time.time() + 10)
+    expiries = await store.key_expiries()
+    assert set(expiries) == {"sk-old", "sk-new"}
+    assert expiries["sk-old"] is None
+
+
+async def test_revoke_still_finds_an_expired_key() -> None:
+    store = DynamicKeyStore(MemoryCache())
+    await store.add("sk-dead", expires_at=time.time() - 1)
+    assert await store.revoke("sk-dead") is True
+    assert await store.list_keys() == []
