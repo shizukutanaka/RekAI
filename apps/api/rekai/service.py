@@ -59,6 +59,9 @@ class StreamSummary:
     # OpenAI's response-side identifiers (see ProviderResult).
     system_fingerprint: str | None = None
     service_tier: str | None = None
+    # Which stop sequence ended the turn, when the provider reports one
+    # (Anthropic's `stop_sequence` alongside `stop_reason: "stop_sequence"`).
+    stop_sequence: str | None = None
     # Model refusal text (OpenAI `message.refusal`), streamed in refusal_delta
     # events and reproduced here in full for consumers that only read the summary.
     refusal: str | None = None
@@ -679,6 +682,7 @@ async def _handle_chat(
             finish_reason=result.finish_reason,
             system_fingerprint=result.system_fingerprint,
             service_tier=result.service_tier,
+            stop_sequence=result.stop_sequence,
             thinking_blocks=result.thinking_blocks,
             citations=result.citations,
             extra_blocks=result.extra_blocks,
@@ -762,6 +766,7 @@ async def _handle_chat_stream(
     reported_usage: Usage | None = None
     reported_tool_calls: list[dict] | None = None
     reported_finish_reason: str | None = None
+    reported_stop_sequence: str | None = None
     reported_refusal: list[str] = []
     reported_annotations: list[dict] = []
     errored = False
@@ -921,6 +926,8 @@ async def _handle_chat_stream(
                 reported_tool_calls = event.tool_calls
             if event.finish_reason is not None:
                 reported_finish_reason = event.finish_reason
+            if event.stop_sequence is not None:
+                reported_stop_sequence = event.stop_sequence
         if redactor is not None:
             tail = redactor.flush()
             if tail:
@@ -999,6 +1006,7 @@ async def _handle_chat_stream(
                 finish_reason=reported_finish_reason,
                 system_fingerprint=seen_fingerprint,
                 service_tier=seen_tier,
+                stop_sequence=reported_stop_sequence,
                 refusal="".join(reported_refusal) or None,
                 annotations=reported_annotations or None,
                 redacted=(

@@ -182,6 +182,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the native SSE stream emits `{"refusal": ...}` events, the OpenAI-compat
   surface reproduces `message.refusal`/`delta.refusal` chunks, and the
   Anthropic-compat surface folds the text into a content block with
+  `stop_reason: "refusal"` (Anthropic's own encoding). Both SDKs expose it
+  (`ChatResult.refusal`, `on_refusal`/`onRefusal` stream hooks), and the web
+  chat displays the refusal text in the reply bubble (streamed `{"refusal"}`
+  events ride the normal delta path; the `content_filter` meta note marks it
+  as a decline) instead of a bare empty bubble.
   `stop_reason: "refusal"` (Anthropic's own encoding). The Anthropic provider
   makes the reverse translation too: an upstream `stop_reason: "refusal"`
   moves the refusal text block out of `content` and into `refusal`, matching
@@ -206,6 +211,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
   `cache: false` so you can compare a fresh answer against the cached one.
   It defaults to on; the meta line already marks cache hits.
+- **`stop_sequence` surfaces end-to-end.** Anthropic reports *which* stop
+  sequence ended the turn (alongside `stop_reason: "stop_sequence"`); RekAI
+  used to keep the reason but drop the match, so a caller that sent several
+  sequences couldn't tell which one fired. It now rides `ProviderResult` →
+  `StreamEvent` → `ChatResponse.stop_sequence` and re-emerges on the
+  Anthropic-compat surface (`message.stop_sequence` and the `message_delta`
+  event) and the native stream's terminal summary. Null for providers that
+  don't report one — OpenAI's API has no equivalent field. Both SDKs expose
+  it (`ChatResult.stop_sequence`).
 - `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
   check (`client.messages.count_tokens`) now works against the compat surface.
   Returns a local script-aware estimate (the same heuristic the pricing path

@@ -1517,6 +1517,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         summary["system_fingerprint"] = s.system_fingerprint
                     if s.service_tier is not None:
                         summary["service_tier"] = s.service_tier
+                    if s.stop_sequence:
+                        summary["stop_sequence"] = s.stop_sequence
                     if s.refusal:
                         summary["refusal"] = s.refusal
                     if s.annotations:
@@ -1807,6 +1809,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             open_block: str | None = None  # "thinking" | "text" | "extra"
             block_index = 0
             finish_reason = "stop"
+            stop_sequence = None
             usage = None
             async for ev in handle_chat_stream(
                 chat_request,
@@ -1904,6 +1907,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     s = ev.summary
                     if s.finish_reason:
                         finish_reason = s.finish_reason
+                    if s.stop_sequence:
+                        stop_sequence = s.stop_sequence
                     for tc in s.tool_calls or []:
                         finish_reason = "tool_calls"
                         fn = tc.get("function", {})
@@ -1922,7 +1927,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         yield anthropic_compat.ev_content_block_stop(bi)
                     usage = s.usage
             stop_reason = anthropic_compat._FINISH_TO_STOP_REASON.get(finish_reason, "end_turn")
-            yield anthropic_compat.ev_message_delta(stop_reason, usage)
+            yield anthropic_compat.ev_message_delta(stop_reason, usage, stop_sequence)
             yield anthropic_compat.ev_message_stop()
 
         stream_headers = {
