@@ -377,6 +377,103 @@ def test_count_tokens_errors_in_anthropic_envelope(client: TestClient) -> None:
     assert body["error"]["type"] == "invalid_request_error"
 
 
+def test_count_tokens_includes_tool_use_and_tool_result_blocks(
+    client: TestClient,
+) -> None:
+    # A tool round-trip thread contributes its blocks to the estimate —
+    # name + serialized input for tool_use, content for tool_result.
+    bare = client.post("/v1/messages/count_tokens", json=_payload()).json()
+    rich = client.post(
+        "/v1/messages/count_tokens",
+        json=_payload(
+            messages=[
+                {"role": "user", "content": "what is the time?"},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "Let me check."},
+                        {
+                            "type": "tool_use",
+                            "id": "t1",
+                            "name": "get_time",
+                            "input": {"zone": "UTC"},
+                        },
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "tool_result", "tool_use_id": "t1", "content": "12:00 UTC"}
+                    ],
+                },
+            ]
+        ),
+    ).json()
+    assert rich["input_tokens"] > bare["input_tokens"]
+
+
+def test_error_type_map_covers_the_documented_statuses() -> None:
+    for status, expected in (
+        (401, "authentication_error"),
+        (403, "permission_error"),
+        (400, "invalid_request_error"),
+        (422, "invalid_request_error"),
+        (404, "not_found_error"),
+        (429, "rate_limit_error"),
+        (529, "overloaded_error"),
+        (500, "api_error"),
+    ):
+        assert anthropic_compat._error_obj(status, "x")["type"] == expected
+
+
+def test_assistant_tool_calls_become_tool_use_blocks() -> None:
+    # A stored assistant turn carrying OpenAI-style tool_calls must translate
+    # to Anthropic tool_use blocks (arguments is a JSON string upstream).
+    resp = ChatResponse(
+        id="x",
+        provider="openai",
+        model="gpt-4o",
+        content="checking",
+        created=0,
+        tool_calls=[
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "lookup", "arguments": '{"id": 7}'},
+            }
+        ],
+        usage=Usage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
+    )
+    msg = anthropic_compat.to_message(resp)
+    kinds = [b["type"] for b in msg["content"]]
+    assert "tool_use" in kinds
+    tool_use = next(b for b in msg["content"] if b["type"] == "tool_use")
+    assert tool_use["name"] == "lookup"
+    assert tool_use["input"] == {"id": 7}
+    assert msg["stop_reason"] == "tool_use"
+
+
+def test_malformed_tool_call_arguments_fall_back_to_empty_input() -> None:
+    resp = ChatResponse(
+        id="x",
+        provider="openai",
+        model="gpt-4o",
+        content="",
+        created=0,
+        tool_calls=[
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "lookup", "arguments": "not-json"},
+            }
+        ],
+        usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+    )
+    msg = anthropic_compat.to_message(resp)
+    tool_use = next(b for b in msg["content"] if b["type"] == "tool_use")
+    assert tool_use["input"] == {}
+
+
 # --- anthropic-beta header forwarding ---------------------------------------
 #
 # Anthropic gates features behind the `anthropic-beta` header (interleaved
