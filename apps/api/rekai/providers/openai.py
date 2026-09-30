@@ -155,6 +155,8 @@ class OpenAIProvider(Provider):
         return ProviderResult(
             content=message.get("content") or "",
             model=data.get("model", request.model),
+            system_fingerprint=data.get("system_fingerprint"),
+            service_tier=data.get("service_tier"),
             usage=Usage(
                 prompt_tokens=usage.get("prompt_tokens", 0),
                 completion_tokens=usage.get("completion_tokens", 0),
@@ -290,6 +292,11 @@ def _parse_openai_sse_event(line: str) -> StreamEvent | None:
         chunk = json.loads(data)
     except json.JSONDecodeError:
         return None
+    meta = {}
+    if (fp := chunk.get("system_fingerprint")) is not None:
+        meta["system_fingerprint"] = fp
+    if (tier := chunk.get("service_tier")) is not None:
+        meta["service_tier"] = tier
     choices = chunk.get("choices") or []
     if choices:
         delta_obj = choices[0].get("delta", {})
@@ -306,6 +313,7 @@ def _parse_openai_sse_event(line: str) -> StreamEvent | None:
                 refusal_delta=refusal or None,
                 annotations=annotations or None,
                 finish_reason=reason,
+                **meta,
             )
     usage = chunk.get("usage")
     if usage:
@@ -316,8 +324,13 @@ def _parse_openai_sse_event(line: str) -> StreamEvent | None:
                 total_tokens=usage.get("total_tokens", 0),
                 cache_read_tokens=_cached_prompt_tokens(usage),
                 reasoning_tokens=_reasoning_tokens(usage),
-            )
+            ),
+            **meta,
         )
+    if meta:
+        # Metadata-only chunk (e.g. the role announcement, which OpenAI stamps
+        # with system_fingerprint/service_tier but no delta).
+        return StreamEvent(**meta)
     return None
 
 

@@ -120,6 +120,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requirement), while an explicit temperature rides as sent. Non-Anthropic
   providers ignore the config and surfaces without the concept (OpenAI chunks)
   drop the blocks. Both SDKs and the web client expose `thinking_blocks`.
+- **`system_fingerprint` and response `service_tier` now round-trip.** OpenAI
+  stamps both on every response — the fingerprint identifies the backend
+  configuration that served the call (the debugging companion to `seed`), and
+  the response-side `service_tier` reports which tier actually handled it when
+  the request said "auto". They were dropped on the floor before; now they ride
+  through `ProviderResult`/`StreamEvent` into the native `ChatResponse`, the
+  native SSE summary, the compat response, and every compat stream chunk after
+  the first provider frame. Anthropic participates too: it accepts
+  `service_tier` on Messages requests (`auto` | `standard_only`) and echoes
+  the billed tier in `usage.service_tier` — both directions wired. Gemini and
+  Ollama have no equivalent and report null.
 - **`service_tier` reaches Anthropic too.** Anthropic's Messages API takes the
   same field name with its own vocabulary (`auto` | `standard_only`); the
   compat layer accepted it via `extra="allow"` and dropped it, and the provider

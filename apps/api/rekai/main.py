@@ -1592,6 +1592,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         summary["tool_calls"] = s.tool_calls
                     if s.finish_reason:
                         summary["finish_reason"] = s.finish_reason
+                    if s.system_fingerprint is not None:
+                        summary["system_fingerprint"] = s.system_fingerprint
+                    if s.service_tier is not None:
+                        summary["service_tier"] = s.service_tier
                     if s.stop_sequence:
                         summary["stop_sequence"] = s.stop_sequence
                     if s.refusal:
@@ -1724,6 +1728,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
             yield sse(openai_compat.chunk_first(chunk_id, created, model))
             finish_reason = "stop"
+            seen_fingerprint: str | None = None
+            seen_tier: str | None = None
             async for ev in handle_chat_stream(
                 chat_request,
                 bearer_as_provider,
@@ -1733,8 +1739,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 provider,
                 client_id,
             ):
+                if ev.system_fingerprint is not None:
+                    seen_fingerprint = ev.system_fingerprint
+                if ev.service_tier is not None:
+                    seen_tier = ev.service_tier
                 if ev.delta is not None:
-                    yield sse(openai_compat.chunk_delta(chunk_id, created, model, ev.delta))
+                    yield sse(
+                        openai_compat.chunk_delta(
+                            chunk_id,
+                            created,
+                            model,
+                            ev.delta,
+                            system_fingerprint=seen_fingerprint,
+                            service_tier=seen_tier,
+                        )
+                    )
                 elif ev.refusal_delta is not None:
                     yield sse(
                         openai_compat.chunk_refusal(chunk_id, created, model, ev.refusal_delta)
@@ -1756,13 +1775,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         finish_reason = "tool_calls"
                         yield sse(
                             openai_compat.chunk_tool_calls(
-                                chunk_id, created, model, ev.summary.tool_calls
+                                chunk_id,
+                                created,
+                                model,
+                                ev.summary.tool_calls,
+                                system_fingerprint=seen_fingerprint,
+                                service_tier=seen_tier,
                             )
                         )
-                    yield sse(openai_compat.chunk_finish(chunk_id, created, model, finish_reason))
+                    yield sse(
+                        openai_compat.chunk_finish(
+                            chunk_id,
+                            created,
+                            model,
+                            finish_reason,
+                            system_fingerprint=seen_fingerprint,
+                            service_tier=seen_tier,
+                        )
+                    )
                     if include_usage:
                         yield sse(
-                            openai_compat.chunk_usage(chunk_id, created, model, ev.summary.usage)
+                            openai_compat.chunk_usage(
+                                chunk_id,
+                                created,
+                                model,
+                                ev.summary.usage,
+                                system_fingerprint=seen_fingerprint,
+                                service_tier=seen_tier,
+                            )
                         )
             yield "data: [DONE]\n\n"
 
