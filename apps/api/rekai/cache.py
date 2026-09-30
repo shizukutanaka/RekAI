@@ -30,6 +30,13 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         "temperature": request.temperature,
         "max_tokens": request.max_tokens,
         "stop": request.stop,
+        # Sampling params change the answer too — a `seed=42` reply must not
+        # serve a `seed=1` request.
+        "top_p": request.top_p,
+        "seed": request.seed,
+        "frequency_penalty": request.frequency_penalty,
+        "presence_penalty": request.presence_penalty,
+        "logit_bias": request.logit_bias,
         "service_tier": request.service_tier,
         "messages": [m.model_dump() for m in request.messages],
         "tools": request.tools,
@@ -46,6 +53,8 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         "web_search_options": request.web_search_options,
         # Extended thinking changes both the content and its cost.
         "thinking": request.thinking,
+        # Output config (effort/format) changes what comes back.
+        "output_config": request.output_config,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "rekai:chat:" + hashlib.sha256(raw.encode()).hexdigest()
@@ -74,6 +83,11 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
         "temperature": request.temperature,
         "max_tokens": request.max_tokens,
         "stop": request.stop,
+        "top_p": request.top_p,
+        "seed": request.seed,
+        "frequency_penalty": request.frequency_penalty,
+        "presence_penalty": request.presence_penalty,
+        "logit_bias": request.logit_bias,
         "service_tier": request.service_tier,
         "tools": request.tools,
         "tool_choice": request.tool_choice,
@@ -81,6 +95,7 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
         "cache_control": request.cache_control,
         "web_search_options": request.web_search_options,
         "thinking": request.thinking,
+        "output_config": request.output_config,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode()).hexdigest()

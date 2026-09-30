@@ -54,9 +54,24 @@ class ChatResult:
     #: Secret patterns scrubbed from ``content`` by the output-redaction
     #: guardrail, or None if nothing was redacted.
     redacted: list[str] | None = None
+    #: The model's refusal text when it declined (``content`` stays empty in
+    #: that case); None on a normal answer.
+    refusal: str | None = None
+    #: Citations etc. attached to the answer (e.g. web-search ``url_citation``
+    #: entries), passed through verbatim; None when the model added none.
+    annotations: list[dict[str, Any]] | None = None
     #: Anthropic thinking/redacted_thinking blocks produced before the answer
     #: (extended thinking). Echo them back verbatim on the next turn.
     thinking_blocks: list[dict[str, Any]] | None = None
+    #: Anthropic server-side tool blocks (server_tool_use, tool-result blocks,
+    #: mcp_*), verbatim. Echo them back verbatim on the next turn.
+    extra_blocks: list[dict[str, Any]] | None = None
+    #: Message-level fields the provider doesn't map (container,
+    #: context_management, ...), verbatim.
+    extra_fields: dict[str, Any] | None = None
+    #: The upstream content array verbatim, in emitted order. Echo it back
+    #: verbatim on the next turn.
+    content_blocks: list[dict[str, Any]] | None = None
     #: Unix timestamp the gateway produced the response.
     created: int = 0
 
@@ -75,7 +90,12 @@ class ChatResult:
             finish_reason=data.get("finish_reason"),
             cache_similarity=data.get("cache_similarity"),
             redacted=data.get("redacted"),
+            refusal=data.get("refusal"),
+            annotations=data.get("annotations"),
             thinking_blocks=data.get("thinking_blocks"),
+            extra_blocks=data.get("extra_blocks"),
+            extra_fields=data.get("extra_fields"),
+            content_blocks=data.get("content_blocks"),
             created=data.get("created", 0),
         )
 
@@ -188,6 +208,11 @@ def _build_payload(
     tool_choice: Any | None = None,
     response_format: dict[str, Any] | None = None,
     stop: list[str] | str | None = None,
+    top_p: float | None = None,
+    seed: int | None = None,
+    frequency_penalty: float | None = None,
+    presence_penalty: float | None = None,
+    logit_bias: dict[str, int] | None = None,
     service_tier: str | None = None,
     web_search_options: dict[str, Any] | None = None,
     user: str | None = None,
@@ -214,6 +239,16 @@ def _build_payload(
         payload["response_format"] = response_format
     if stop is not None:
         payload["stop"] = stop
+    if top_p is not None:
+        payload["top_p"] = top_p
+    if seed is not None:
+        payload["seed"] = seed
+    if frequency_penalty is not None:
+        payload["frequency_penalty"] = frequency_penalty
+    if presence_penalty is not None:
+        payload["presence_penalty"] = presence_penalty
+    if logit_bias is not None:
+        payload["logit_bias"] = logit_bias
     if service_tier is not None:
         payload["service_tier"] = service_tier
     if web_search_options is not None:
@@ -240,6 +275,10 @@ def _classify_stream_event(event: dict[str, Any]) -> tuple[str, Any]:
         return ("delta", event["delta"])
     if "usage" in event:
         return ("usage", event)
+    if "refusal" in event:
+        return ("refusal", event["refusal"])
+    if "annotations" in event:
+        return ("annotations", event["annotations"])
     if "error" in event:
         return ("error", event.get("detail") or event["error"])
     return ("skip", None)
@@ -314,6 +353,11 @@ class RekAIClient:
         tool_choice: Any | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
+        top_p: float | None = None,
+        seed: int | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        logit_bias: dict[str, int] | None = None,
         service_tier: str | None = None,
         web_search_options: dict[str, Any] | None = None,
         user: str | None = None,
@@ -332,6 +376,11 @@ class RekAIClient:
             tool_choice,
             response_format,
             stop,
+            top_p,
+            seed,
+            frequency_penalty,
+            presence_penalty,
+            logit_bias,
             service_tier,
             web_search_options,
             user,
@@ -392,6 +441,11 @@ class RekAIClient:
         tool_choice: Any | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
+        top_p: float | None = None,
+        seed: int | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        logit_bias: dict[str, int] | None = None,
         service_tier: str | None = None,
         web_search_options: dict[str, Any] | None = None,
         user: str | None = None,
@@ -410,6 +464,10 @@ class RekAIClient:
         for abuse detection (OpenAI's ``user``, Anthropic's
         ``metadata.user_id``) — a routing hint, never a cache key.
 
+        ``top_p``/``seed``/``frequency_penalty``/``presence_penalty``/
+        ``logit_bias`` mirror OpenAI's tuning params; providers forward the
+        ones they support and ignore the rest.
+
         ``idempotency_key`` is sent as the ``Idempotency-Key`` header so the
         server replays the first response on a retry instead of re-processing.
         When retries are enabled (``max_retries > 0``) and no key is given, one
@@ -427,6 +485,11 @@ class RekAIClient:
             tool_choice,
             response_format,
             stop,
+            top_p,
+            seed,
+            frequency_penalty,
+            presence_penalty,
+            logit_bias,
             service_tier,
             web_search_options,
             user,
@@ -458,6 +521,8 @@ class RekAIClient:
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], None] | None = None,
         on_tool_calls: Callable[[list[dict[str, Any]]], None] | None = None,
+        on_refusal: Callable[[str], None] | None = None,
+        on_annotations: Callable[[list[dict[str, Any]]], None] | None = None,
     ) -> Iterator[str]:
         """Yield response text chunks from the streaming endpoint.
 
@@ -497,6 +562,12 @@ class RekAIClient:
                 kind, value = _classify_stream_event(decoded)
                 if kind == "delta":
                     yield value
+                elif kind == "refusal":
+                    if on_refusal is not None:
+                        on_refusal(value)
+                elif kind == "annotations":
+                    if on_annotations is not None:
+                        on_annotations(value)
                 elif kind == "usage":
                     if on_usage is not None:
                         on_usage(value)
@@ -653,6 +724,11 @@ class AsyncRekAIClient:
         tool_choice: Any | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
+        top_p: float | None = None,
+        seed: int | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        logit_bias: dict[str, int] | None = None,
         service_tier: str | None = None,
         web_search_options: dict[str, Any] | None = None,
         user: str | None = None,
@@ -675,6 +751,11 @@ class AsyncRekAIClient:
             tool_choice,
             response_format,
             stop,
+            top_p,
+            seed,
+            frequency_penalty,
+            presence_penalty,
+            logit_bias,
             service_tier,
             web_search_options,
             user,
@@ -706,6 +787,8 @@ class AsyncRekAIClient:
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
         on_tool_calls: Callable[[list[dict[str, Any]]], Awaitable[None] | None] | None = None,
+        on_refusal: Callable[[str], Awaitable[None] | None] | None = None,
+        on_annotations: Callable[[list[dict[str, Any]]], Awaitable[None] | None] | None = None,
     ) -> AsyncIterator[str]:
         """Yield response text chunks from the streaming endpoint.
 
@@ -747,6 +830,16 @@ class AsyncRekAIClient:
                 kind, value = _classify_stream_event(decoded)
                 if kind == "delta":
                     yield value
+                elif kind == "refusal":
+                    if on_refusal is not None:
+                        maybe_r = on_refusal(value)
+                        if maybe_r is not None:
+                            await maybe_r
+                elif kind == "annotations":
+                    if on_annotations is not None:
+                        maybe_a = on_annotations(value)
+                        if maybe_a is not None:
+                            await maybe_a
                 elif kind == "usage":
                     if on_usage is not None:
                         maybe = on_usage(value)

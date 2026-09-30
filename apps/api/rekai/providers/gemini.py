@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from rekai import models
-from rekai.config import get_settings
+from rekai.config import current_settings
 from rekai.providers.base import (
     EmbeddingResult,
     FinishReason,
@@ -60,10 +60,10 @@ class GeminiProvider(Provider):
     requires_key = True
 
     def server_key_configured(self) -> bool:
-        return bool(get_settings().gemini_api_key)
+        return bool(current_settings().gemini_api_key)
 
     def _resolve_key(self, api_key: str | None) -> str:
-        key = api_key or get_settings().gemini_api_key
+        key = api_key or current_settings().gemini_api_key
         if not key:
             raise ProviderError(
                 "No Gemini API key. Provide one with the 'X-Provider-Key' header (BYOK) "
@@ -86,6 +86,8 @@ class GeminiProvider(Provider):
             payload["generationConfig"]["maxOutputTokens"] = request.max_tokens
         if request.stop:
             payload["generationConfig"]["stopSequences"] = request.stop
+        if request.top_p is not None:
+            payload["generationConfig"]["topP"] = request.top_p
 
         # Best-effort structured output: OpenAI's response_format maps onto
         # Gemini's generationConfig. json_object -> JSON mime type; json_schema
@@ -110,7 +112,7 @@ class GeminiProvider(Provider):
         return payload
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
-        settings = get_settings()
+        settings = current_settings()
         key = self._resolve_key(api_key)
         payload = self._build_payload(request)
         url = f"{settings.gemini_base_url.rstrip('/')}/models/{request.model}:generateContent"
@@ -157,7 +159,7 @@ class GeminiProvider(Provider):
         encoding_format: str | None = None,
         user: str | None = None,
     ) -> EmbeddingResult:
-        settings = get_settings()
+        settings = current_settings()
         key = self._resolve_key(api_key)
         # Gemini wants the fully-qualified model name in each request.
         qualified = model if model.startswith("models/") else f"models/{model}"
@@ -190,7 +192,7 @@ class GeminiProvider(Provider):
     async def stream_events(
         self, request: ChatRequest, api_key: str | None
     ) -> AsyncIterator[StreamEvent]:
-        settings = get_settings()
+        settings = current_settings()
         key = self._resolve_key(api_key)
         payload = self._build_payload(request)
         url = (
