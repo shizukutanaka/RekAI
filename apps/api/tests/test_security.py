@@ -1,5 +1,6 @@
 import logging
 import time
+import types
 
 import pytest
 from fastapi.testclient import TestClient
@@ -690,10 +691,59 @@ def test_admin_add_key_grants_gateway_access() -> None:
         headers={"Authorization": "Bearer sk-admin-1"},
     )
     assert add.status_code == 201
-    assert add.json() == {"status": "added", "key": "sk-r…-key"}
+    assert add.json() == {"status": "added", "key": "sk-r…-key", "expires_at": None}
 
     resp = client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-runtime-key"})
     assert resp.status_code == 200
+
+
+def test_admin_add_key_with_ttl_expires_out_of_auth(monkeypatch) -> None:
+    """expires_in_seconds mints a key that stops working on its own — the
+    LiteLLM-style virtual-key TTL for trial tenants / incident access."""
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        rate_limit_enabled=False,
+        admin_key="sk-admin-1",
+        dynamic_keys_enabled=True,
+    )
+    client = TestClient(create_app(settings))
+    body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+    admin_headers = {"Authorization": "Bearer sk-admin-1"}
+
+    add = client.post(
+        "/admin/keys",
+        json={"key": "sk-temp-tenant-key", "expires_in_seconds": 3600},
+        headers=admin_headers,
+    )
+    assert add.status_code == 201
+    expires_at = add.json()["expires_at"]
+    assert expires_at is not None and expires_at > time.time() + 3500
+
+    # Listed with its expiry timestamp, keyed by the masked form.
+    listed = client.get("/admin/keys", headers=admin_headers).json()
+    assert listed["dynamic"] == ["sk-t…-key"]
+    assert listed["dynamic_expires_at"] == {"sk-t…-key": expires_at}
+
+    assert (
+        client.post(
+            "/v1/chat", json=body, headers={"Authorization": "Bearer sk-temp-tenant-key"}
+        ).status_code
+        == 200
+    )
+
+    # Move the store's clock past expiry — the key no longer authenticates.
+    monkeypatch.setattr("rekai.keystore.time", types.SimpleNamespace(time=lambda: expires_at + 1))
+    assert (
+        client.post(
+            "/v1/chat", json=body, headers={"Authorization": "Bearer sk-temp-tenant-key"}
+        ).status_code
+        == 401
+    )
+    # …and drops out of the admin listing too.
+    listed = client.get("/admin/keys", headers=admin_headers).json()
+    assert listed["dynamic"] == []
+    assert listed["dynamic_expires_at"] == {}
 
 
 def test_admin_revoke_key_removes_gateway_access() -> None:
@@ -717,7 +767,7 @@ def test_admin_revoke_key_removes_gateway_access() -> None:
 
     revoke = client.delete("/admin/keys/sk-runtime-key", headers=admin_headers)
     assert revoke.status_code == 200
-    assert revoke.json() == {"status": "revoked", "key": "sk-r…-key"}
+    assert revoke.json() == {"status": "revoked", "key": "sk-r…-key", "expires_at": None}
 
     assert (
         client.post(

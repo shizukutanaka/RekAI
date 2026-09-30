@@ -26,7 +26,12 @@ from rekai import (
     tracing,
 )
 from rekai.cache import CacheBackend, build_cache
-from rekai.config import Settings, get_settings
+from rekai.config import (
+    Settings,
+    bind_current_settings,
+    get_settings,
+    reset_current_settings,
+)
 from rekai.cooldown import cooldowns
 from rekai.keystore import DynamicKeyStore
 from rekai.logging_config import configure_logging, get_logger
@@ -35,6 +40,7 @@ from rekai.metrics_store import build_metrics_store
 from rekai.pricing import price_for_model
 from rekai.providers import get_provider, provider_names
 from rekai.providers.base import ProviderError
+from rekai.providers.registry import configure_custom_provider
 from rekai.rate_limit import build_rate_limiter
 from rekai.router import resolve_provider, select_provider
 from rekai.schemas import (
@@ -623,6 +629,10 @@ async def _run_chat(
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level, settings.log_format)
+    # The provider registry reads no env at import time; the custom
+    # OpenAI-compatible backend is configured here, from the app's settings
+    # (O-1 — and re-running create_app replaces or removes a stale one).
+    configure_custom_provider(settings)
     # The metrics and semantic-cache singletons predate any Settings instance;
     # apply their per-deployment bounds before either can serve a request.
     metrics.max_tracked_clients = settings.max_tracked_clients
@@ -918,12 +928,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tracestate = tracing.parse_tracestate(request.headers.get("tracestate"))
         trace_token = tracing.set_current_trace_id(trace_id)
         tracestate_token = tracing.set_current_tracestate(tracestate)
+        # Same ambient-context idiom as the trace ids: the app's Settings are
+        # visible to provider code for this request's lifetime (O-1), so e.g.
+        # /v1/providers' readiness checks see this app's configuration.
+        settings_token = bind_current_settings(settings)
         start = time.perf_counter()
         try:
             response = await call_next(request)
         finally:
             tracing.reset_current_trace_id(trace_token)
             tracing.reset_current_tracestate(tracestate_token)
+            reset_current_settings(settings_token)
         elapsed = time.perf_counter() - start
         elapsed_ms = elapsed * 1000
         # The value was already being computed for the header and the log line;
@@ -1210,7 +1225,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return rate_limited
             if not _admin_authorized(request):
                 return _admin_auth_error()
-            dynamic = await key_store.list_keys() if key_store is not None else []
+            expiries = await key_store.key_expiries() if key_store is not None else {}
             admin_logger.info(
                 "admin listed keys ip=%s",
                 _admin_ip(request),
@@ -1218,7 +1233,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             return AdminKeyList(
                 static=[mask_key(k) for k in settings.api_key_list],
-                dynamic=[mask_key(k) for k in dynamic],
+                dynamic=[mask_key(k) for k in expiries],
+                dynamic_expires_at={
+                    mask_key(k): ts for k, ts in expiries.items() if ts is not None
+                },
             )
 
         @app.post("/admin/keys", response_model=AdminKeyResponse, tags=["admin"], status_code=201)
@@ -1230,7 +1248,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return _admin_auth_error()
             if key_store is None:
                 return _dynamic_keys_disabled_error()
-            await key_store.add(payload.key)
+            expires_at = (
+                time.time() + payload.expires_in_seconds
+                if payload.expires_in_seconds is not None
+                else None
+            )
+            await key_store.add(payload.key, expires_at=expires_at)
             masked = mask_key(payload.key)
             admin_logger.info(
                 "admin added key=%s ip=%s",
@@ -1238,7 +1261,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 _admin_ip(request),
                 extra={"admin_action": "add_key", "key": masked, "ip": _admin_ip(request)},
             )
-            return AdminKeyResponse(status="added", key=masked)
+            return AdminKeyResponse(status="added", key=masked, expires_at=expires_at)
 
         @app.delete("/admin/keys/{key}", response_model=AdminKeyResponse, tags=["admin"])
         async def revoke_admin_key(key: str, request: Request):
@@ -1454,6 +1477,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ):
                 if ev.delta is not None:
                     yield f"data: {json.dumps({'delta': ev.delta})}\n\n"
+                elif ev.refusal_delta is not None:
+                    yield f"data: {json.dumps({'refusal': ev.refusal_delta})}\n\n"
                 elif ev.annotations is not None:
                     yield f"data: {json.dumps({'annotations': ev.annotations})}\n\n"
                 elif ev.thinking_delta is not None:
@@ -1486,6 +1511,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         summary["tool_calls"] = s.tool_calls
                     if s.finish_reason:
                         summary["finish_reason"] = s.finish_reason
+                    if s.refusal:
+                        summary["refusal"] = s.refusal
                     if s.annotations:
                         summary["annotations"] = s.annotations
                     if s.redacted:
@@ -1609,6 +1636,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ):
                 if ev.delta is not None:
                     yield sse(openai_compat.chunk_delta(chunk_id, created, model, ev.delta))
+                elif ev.refusal_delta is not None:
+                    yield sse(
+                        openai_compat.chunk_refusal(chunk_id, created, model, ev.refusal_delta)
+                    )
                 elif ev.annotations is not None:
                     yield sse(
                         openai_compat.chunk_annotations(chunk_id, created, model, ev.annotations)
@@ -1794,7 +1825,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         yield anthropic_compat.ev_content_block_stop(block_index)
                         block_index += 1
                         open_block = None
-                elif ev.delta is not None:
+                elif ev.delta is not None or ev.refusal_delta is not None:
+                    # Anthropic has no refusal channel — the refusal text is the
+                    # message content (stop_reason already maps to "refusal").
+                    text = ev.delta if ev.delta is not None else ev.refusal_delta
                     if open_block != "text":
                         if open_block is not None:
                             yield anthropic_compat.ev_content_block_stop(block_index)
@@ -1803,7 +1837,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             block_index, {"type": "text", "text": ""}
                         )
                         open_block = "text"
-                    yield anthropic_compat.ev_text_delta(block_index, ev.delta)
+                    yield anthropic_compat.ev_text_delta(block_index, text)
                 elif ev.error is not None:
                     yield anthropic_compat.ev_error(ev.error.status_code, str(ev.error))
                     return

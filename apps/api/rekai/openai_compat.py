@@ -112,6 +112,11 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         # OpenAI renamed max_tokens -> max_completion_tokens; accept either.
         max_tokens=req.max_tokens or req.max_completion_tokens,
         stop=stop,
+        top_p=req.top_p,
+        seed=req.seed,
+        frequency_penalty=req.frequency_penalty,
+        presence_penalty=req.presence_penalty,
+        logit_bias=req.logit_bias,
         service_tier=req.service_tier,
         web_search_options=req.web_search_options,
         include_obfuscation=(
@@ -137,6 +142,7 @@ def to_chat_completion(resp: ChatResponse) -> ChatCompletionResponse:
                     role="assistant",
                     content=resp.content or None,
                     tool_calls=resp.tool_calls,
+                    refusal=resp.refusal,
                     annotations=resp.annotations,
                 ),
                 # The provider's own reason when it gave one. The fallback
@@ -185,6 +191,13 @@ def chunk_first(chunk_id: str, created: int, model: str) -> dict:
 def chunk_delta(chunk_id: str, created: int, model: str, text: str) -> dict:
     chunk = _chunk_base(chunk_id, created, model)
     chunk["choices"] = [{"index": 0, "delta": {"content": text}, "finish_reason": None}]
+    return chunk
+
+
+def chunk_refusal(chunk_id: str, created: int, model: str, text: str) -> dict:
+    # OpenAI streams refusal text in `delta.refusal`, parallel to content deltas.
+    chunk = _chunk_base(chunk_id, created, model)
+    chunk["choices"] = [{"index": 0, "delta": {"refusal": text}, "finish_reason": None}]
     return chunk
 
 

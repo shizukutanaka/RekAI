@@ -148,6 +148,11 @@ export class RekAIClient {
     if (opts.toolChoice != null) payload.tool_choice = opts.toolChoice;
     if (opts.responseFormat != null) payload.response_format = opts.responseFormat;
     if (opts.stop != null) payload.stop = opts.stop;
+    if (opts.topP != null) payload.top_p = opts.topP;
+    if (opts.seed != null) payload.seed = opts.seed;
+    if (opts.frequencyPenalty != null) payload.frequency_penalty = opts.frequencyPenalty;
+    if (opts.presencePenalty != null) payload.presence_penalty = opts.presencePenalty;
+    if (opts.logitBias != null) payload.logit_bias = opts.logitBias;
     if (opts.serviceTier != null) payload.service_tier = opts.serviceTier;
     // OpenAI's hosted web-search config; OpenAI-compatible providers only.
     if (opts.webSearchOptions != null) payload.web_search_options = opts.webSearchOptions;
@@ -198,6 +203,8 @@ export class RekAIClient {
    * it is called once with the final summary when the server reports it. If the
    * model requested tool calls (carried on that same summary under
    * `tool_calls`), `opts.onToolCalls` is called with just that list.
+   * Refusal text (the model declining) arrives via `opts.onRefusal` and in the
+   * final summary's `refusal` field.
    * @param {string} model
    * @param {string|Array<{role:string,content:string}>} messages
    * @param {object} [opts]
@@ -259,7 +266,8 @@ export class RekAIClient {
           else if (event.usage) {
             opts.onUsage?.(event);
             if (event.tool_calls) opts.onToolCalls?.(event.tool_calls);
-          } else if (event.annotations) opts.onAnnotations?.(event.annotations);
+          } else if (event.refusal) opts.onRefusal?.(event.refusal);
+          else if (event.annotations) opts.onAnnotations?.(event.annotations);
           else if (event.error) throw new RekAIError(event.detail || event.error);
         }
       }
