@@ -213,6 +213,31 @@ button.regenerate {
   white-space: pre-wrap;
 }
 
+/* Web-search citations under an answer — compact pill list. */
+.msg .sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.msg .sources a {
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 2px 8px;
+  text-decoration: none;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msg .sources a:hover {
+  color: var(--text);
+}
+
 .empty {
   color: var(--muted);
   text-align: center;

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, TypeVar
 
@@ -68,10 +69,16 @@ class DynamicKeyStore:
         self._cache = cache
         self._cipher = cipher
 
-    async def list_keys(self) -> list[str]:
+    async def _load(self) -> dict[str, float | None]:
+        """Return ``{key: expires_at_unix_or_None}``, migrating a legacy
+        ``[str, ...]`` blob (written before key expiry existed) to ``{k: None}``.
+        Expired entries are kept in the map here — filtering them is the
+        caller's job — so ``revoke`` can still report "found" on an expired key
+        and a later ``_save`` drops them by simply not re-adding.
+        """
         raw = await self._cache.get(_CACHE_KEY)
         if not raw:
-            return []
+            return {}
         if self._cipher is not None:
             try:
                 raw = self._cipher.decrypt(raw)
@@ -80,9 +87,9 @@ class DynamicKeyStore:
                 # before encryption was turned on — treat as empty rather than
                 # crash every request that checks auth. Warn loudly: this looks
                 # identical to "all dynamic keys were revoked" from the caller's
-                # side, and add()/revoke() calling list_keys() internally means
+                # side, and add()/revoke() calling _load() internally means
                 # the next add() would silently overwrite the undecryptable
-                # blob with a set containing only the new key.
+                # blob with a map containing only the new key.
                 logger.warning(
                     "failed to decrypt dynamic key store — wrong or rotated "
                     "REKAI_DYNAMIC_KEYS_ENCRYPTION_KEY? Treating as empty; "
@@ -90,15 +97,41 @@ class DynamicKeyStore:
                     "fixed (they are not lost, but the next write will "
                     "overwrite them)."
                 )
-                return []
+                return {}
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            return []
-        return [k for k in data if isinstance(k, str)] if isinstance(data, list) else []
+            return {}
+        if isinstance(data, list):  # pre-expiry blob: bare key list
+            return {k: None for k in data if isinstance(k, str)}
+        if isinstance(data, dict):
+            return {
+                k: (v if isinstance(v, int | float) else None)
+                for k, v in data.items()
+                if isinstance(k, str)
+            }
+        return {}
 
-    async def _save(self, keys: set[str]) -> None:
-        payload = json.dumps(sorted(keys))
+    async def list_keys(self) -> list[str]:
+        """Keys that are currently valid — expired entries are excluded."""
+        now = time.time()
+        return [
+            key
+            for key, expires_at in (await self._load()).items()
+            if expires_at is None or expires_at > now
+        ]
+
+    async def key_expiries(self) -> dict[str, float | None]:
+        """Unexpired keys mapped to their expiry unix timestamp (or None)."""
+        now = time.time()
+        return {
+            key: expires_at
+            for key, expires_at in (await self._load()).items()
+            if expires_at is None or expires_at > now
+        }
+
+    async def _save(self, keys: dict[str, float | None]) -> None:
+        payload = json.dumps(keys, sort_keys=True)
         if self._cipher is not None:
             payload = self._cipher.encrypt(payload)
         await self._cache.set(_CACHE_KEY, payload, ttl=_TTL_SECONDS)
@@ -134,20 +167,20 @@ class DynamicKeyStore:
             await asyncio.sleep(_LOCK_RETRY_DELAY_SECONDS)
         return await mutate()
 
-    async def add(self, key: str) -> None:
+    async def add(self, key: str, expires_at: float | None = None) -> None:
         async def _mutate() -> None:
-            keys = set(await self.list_keys())
-            keys.add(key)
+            keys = await self._load()
+            keys[key] = expires_at
             await self._save(keys)
 
         await self._with_lock(_mutate)
 
     async def revoke(self, key: str) -> bool:
         async def _mutate() -> bool:
-            keys = set(await self.list_keys())
+            keys = await self._load()
             if key not in keys:
                 return False
-            keys.discard(key)
+            del keys[key]
             await self._save(keys)
             return True
 

@@ -39,6 +39,7 @@ interface DisplayMessage extends ChatMessage {
   /** Raw blocks kept for echoing back on the next turn — Anthropic requires
    * prior thinking (incl. signatures) in multi-turn thinking conversations. */
   thinkingBlocks?: Record<string, unknown>[] | null;
+  citations?: Record<string, unknown>[] | null;
   extraBlocks?: Record<string, unknown>[];
   contentBlocks?: Record<string, unknown>[];
 }
@@ -272,6 +273,19 @@ export default function ChatPage() {
                 thinkBlocks.push(ev.block);
               }
             },
+            (citation) => {
+              setMessages((prev) => {
+                const next = [...prev];
+                const last = next[next.length - 1];
+                if (last?.role === "assistant") {
+                  next[next.length - 1] = {
+                    ...last,
+                    citations: [...(last.citations ?? []), citation],
+                  };
+                }
+                return next;
+              });
+            },
             (block) => {
               ordered.push(block);
               setMessages((prev) => {
@@ -370,6 +384,7 @@ export default function ChatPage() {
             redacted: res.redacted,
             thinking: thinkingText(res.thinking_blocks) || undefined,
             thinkingBlocks: res.thinking_blocks ?? null,
+            citations: res.citations,
             extraBlocks: res.extra_blocks ?? undefined,
             contentBlocks: res.content_blocks ?? undefined,
           },
@@ -554,6 +569,24 @@ export default function ChatPage() {
             )}
             {m.content}
             {m.streaming && <span className="cursor">▌</span>}
+            {!!m.citations?.length && (
+              <div className="sources">
+                {m.citations.map((c, j) => (
+                  <a
+                    key={j}
+                    href={typeof c.url === "string" ? c.url : undefined}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {typeof c.title === "string"
+                      ? c.title
+                      : typeof c.url === "string"
+                        ? c.url
+                        : "source"}
+                  </a>
+                ))}
+              </div>
+            )}
             {m.role === "assistant" && !m.streaming && (
               <span className="meta">
                 {m.provider}
