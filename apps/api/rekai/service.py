@@ -906,7 +906,7 @@ async def handle_embeddings(
             # return a wrong-length vector until the TTL expires (Redis can
             # carry one across a deploy). Fall through and recompute; the
             # store below overwrites the stale entry.
-            if request.dimensions is None or not vectors or len(vectors[0]) == request.dimensions:
+            if request.dimensions is None or all(len(v) == request.dimensions for v in vectors):
                 metrics.record_cache(hit=True)
                 return EmbeddingsResponse(**{**cached, "cached": True})
         metrics.record_cache(hit=False)
