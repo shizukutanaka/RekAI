@@ -8,6 +8,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **JavaScript streaming example** — `examples/javascript/stream.mjs` mirrors
+  the Python `stream.py` example: the JS side of `examples/` had chat and
+  embeddings but no SSE streaming demo, so the lowest-friction way to see
+  token-by-token output from Node didn't exist.
 - **Five pass-through fidelity fixes** — streamed extra-block deltas now merge
   into the completed `extra_block` (a `text_delta` inside a tool-result block
   reached frames but not the stored block clients echo back); extra-block

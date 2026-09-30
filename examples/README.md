@@ -25,6 +25,7 @@ upstream provider, this one authenticates you to RekAI.
 | `python/embeddings.py`   | Python 3 (stdlib) | `python python/embeddings.py`     |
 | `python/semantic_search.py` | Python 3 (stdlib) | `python python/semantic_search.py "your query"` |
 | `javascript/chat.mjs`    | Node 18+       | `node javascript/chat.mjs`           |
+| `javascript/stream.mjs`  | Node 18+       | `node javascript/stream.mjs`         |
 | `javascript/embeddings.mjs` | Node 18+    | `node javascript/embeddings.mjs`     |
 
 ## Environment variables
