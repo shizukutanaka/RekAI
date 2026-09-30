@@ -326,6 +326,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `rekai_cache_fills_coalesced_total` (subset of `rekai_cache_hits_total`,
   also in `/v1/usage` as `cache_fills_coalesced_total`). Verified live: two
   simultaneous identical requests → one provider call.
+- **`GET /v1/models/{id}`** — the OpenAI-compat "retrieve a model" endpoint
+  (`client.models.retrieve("…")` in the OpenAI SDK). Returns the same
+  `ModelInfo` the list endpoint reports; unknown ids get a 404 in the OpenAI
+  envelope (`type: invalid_request_error`, `code: model_not_found`), matching
+  api.openai.com. `openai_compat.openai_error` gained optional `code` /
+  `error_type` overrides for this.
 - **Input-side secret detection** (`REKAI_INPUT_SECRETS_ENABLED`, opt-in).
   Output redaction already scrubbed secrets the *model* emitted; this runs the
   same pattern set against caller-supplied request text — every message role
