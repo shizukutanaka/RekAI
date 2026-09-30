@@ -96,9 +96,10 @@ class ChatRequest(BaseModel):
         default=None,
         description="OpenAI's processing tier ('auto' | 'default' | 'flex' | "
         "'priority' | 'scale'): flex trades latency for a large discount, "
-        "priority pays for lower latency. Not enum-validated so newer tiers "
-        "stay forward-compatible; an unsupported tier surfaces as the "
-        "provider's own error. Forwarded to OpenAI-compatible providers only.",
+        "priority pays for lower latency. Anthropic takes the same field name "
+        "with its own vocabulary ('auto' | 'standard_only'). Not enum-validated "
+        "so newer tiers stay forward-compatible; an unsupported tier surfaces "
+        "as the provider's own error.",
     )
     web_search_options: dict | None = Field(
         default=None,
@@ -408,6 +409,9 @@ class _AnthropicMessagesBase(BaseModel):
     stream: bool = False
     tools: list[AnthropicTool] | None = None
     tool_choice: AnthropicToolChoice | None = None
+    # Anthropic's processing tier — 'auto' | 'standard_only'. Same field name
+    # as OpenAI's, different vocabulary; forwarded verbatim either way.
+    service_tier: str | None = None
     # Anthropic's MCP connector — remote MCP servers the provider calls
     # itself ({name, url, type:"url", authorization_token?, tool_configuration?}).
     # Forwarded verbatim to Anthropic; requires the mcp-client beta header.
@@ -520,6 +524,12 @@ class ChatResponse(BaseModel):
         "(finished), 'length' (cut off by max_tokens — the answer is INCOMPLETE), "
         "'tool_calls', or 'content_filter'. Null when the provider didn't report "
         "one, which is also how responses cached before this field existed read.",
+    )
+    stop_sequence: str | None = Field(
+        default=None,
+        description="The stop sequence that ended generation, when the provider "
+        "reports one (Anthropic does, alongside stop_reason 'stop_sequence'). "
+        "Null for providers that don't say — OpenAI's API has no equivalent field.",
     )
     cache_similarity: float | None = Field(
         default=None,
