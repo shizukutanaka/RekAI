@@ -30,6 +30,9 @@ export interface ChatResponse {
   cached: boolean;
   created: number;
   finish_reason?: FinishReason;
+  /** Which stop sequence ended the turn (Anthropic reports it; absent on
+   * providers that don't — OpenAI's API has no equivalent field). */
+  stop_sequence?: string | null;
   cache_similarity?: number | null;
   redacted?: string[] | null;
   /** The model's refusal text when it declined; `content` is empty then. */
@@ -459,6 +462,7 @@ export interface StreamSummary {
   estimated: boolean;
   tool_calls?: Record<string, unknown>[];
   finish_reason?: FinishReason;
+  stop_sequence?: string | null;
   redacted?: string[] | null;
   refusal?: string;
   annotations?: Record<string, unknown>[];
