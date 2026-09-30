@@ -141,6 +141,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   says when a pin is safe. Roadmap O-7 (secure-defaults policy) is recorded
   as decided in `docs/ai/instructions-opus.md`; S-9's manifest work is
   complete.
+- **The OpenAPI surface is off in production.** `/docs`, `/redoc` and
+  `/openapi.json` answered unauthenticated on every environment, publishing
+  the request schema of every route — `/admin/*` included — to anyone who can
+  reach the port. `REKAI_ENVIRONMENT=production` now omits them (`/`'s `docs`
+  field reports `null` instead of advertising a dead route), and
+  `REKAI_DOCS_ENABLED=true|false` overrides the default either way. Existing
+  production deployments that deliberately served docs keep them by setting
+  `REKAI_DOCS_ENABLED=true`.
 
 ### Added
 - **`web_search_options` and `stream_options.include_obfuscation` forwarding.**
