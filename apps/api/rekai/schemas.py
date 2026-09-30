@@ -21,6 +21,21 @@ class ChatMessage(BaseModel):
     # Anthropic's {"type": "ephemeral"}). Providers that cache automatically
     # (OpenAI) ignore it.
     cache_control: dict[str, Any] | None = None
+    # True when this `role="tool"` message reports a *failed* tool call
+    # (Anthropic `tool_result.is_error`). Surfaces that can't express it
+    # (OpenAI tool messages) drop it — the error text rides in `content`.
+    is_error: bool = False
+    # Anthropic thinking/redacted_thinking blocks echoed back in assistant
+    # history (verbatim dicts). Providers without the concept drop them.
+    thinking_blocks: list[dict[str, Any]] | None = None
+    # Anthropic server-side tool blocks (server_tool_use, tool-result blocks,
+    # mcp_*, ...) echoed back in assistant history, verbatim. Anthropic
+    # requires the tool-trace preserved in multi-turn context; providers
+    # without the concept drop them.
+    extra_blocks: list[dict[str, Any]] | None = None
+    # Ordered verbatim Anthropic content array for an assistant turn —
+    # preserved so a later request echoes the exact upstream sequence.
+    content_blocks: list[dict[str, Any]] | None = None
 
 
 class FallbackTarget(BaseModel):
@@ -46,6 +61,37 @@ class ChatRequest(BaseModel):
         "every provider under its own name; a provider's own limit (OpenAI "
         "allows 4) surfaces as that provider's error.",
     )
+    top_p: float | None = Field(
+        default=None,
+        gt=0.0,
+        le=1.0,
+        description="Nucleus sampling, as OpenAI's `top_p`. Forwarded to providers that "
+        "support it (OpenAI/OpenAI-compatible, Anthropic, Gemini, Ollama).",
+    )
+    seed: int | None = Field(
+        default=None,
+        description="Deterministic-sampling seed, as OpenAI's `seed`. Forwarded to "
+        "providers that support it (OpenAI/OpenAI-compatible, Ollama).",
+    )
+    frequency_penalty: float | None = Field(
+        default=None,
+        ge=-2.0,
+        le=2.0,
+        description="Token-frequency penalty, as OpenAI's `frequency_penalty`. "
+        "OpenAI/OpenAI-compatible providers only.",
+    )
+    presence_penalty: float | None = Field(
+        default=None,
+        ge=-2.0,
+        le=2.0,
+        description="Token-presence penalty, as OpenAI's `presence_penalty`. "
+        "OpenAI/OpenAI-compatible providers only.",
+    )
+    logit_bias: dict[str, int] | None = Field(
+        default=None,
+        description="Token-id → bias map, as OpenAI's `logit_bias`. "
+        "OpenAI/OpenAI-compatible providers only.",
+    )
     service_tier: str | None = Field(
         default=None,
         description="OpenAI's processing tier ('auto' | 'default' | 'flex' | "
@@ -59,6 +105,20 @@ class ChatRequest(BaseModel):
         description="OpenAI's `web_search_options` — search context size, "
         "user location, etc. for models with hosted web search. Forwarded "
         "verbatim to OpenAI-compatible providers only.",
+    )
+    thinking: dict[str, Any] | None = Field(
+        default=None,
+        description="Anthropic's `thinking` config — e.g. {'type': 'enabled', "
+        "'budget_tokens': 4096} enables extended thinking. Forwarded verbatim "
+        "to Anthropic only; other providers ignore it. Anthropic requires "
+        "temperature=1 under thinking, so the compat layer defaults to that "
+        "when the caller left temperature unset.",
+    )
+    output_config: dict[str, Any] | None = Field(
+        default=None,
+        description="Anthropic's `output_config` — e.g. {'effort': 'medium'} "
+        "or {'format': {...}} for structured output. Forwarded verbatim to "
+        "Anthropic only; other providers ignore it.",
     )
     include_obfuscation: bool | None = Field(
         default=None,
@@ -153,6 +213,10 @@ class OpenAIChatMessage(BaseModel):
     name: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
+    # True when this `role="tool"` message reports a *failed* tool call
+    # (Anthropic `tool_result.is_error`). Surfaces that can't express it
+    # (OpenAI tool messages) drop it — the error text rides in `content`.
+    is_error: bool = False
 
 
 class StreamOptions(BaseModel):
@@ -161,8 +225,8 @@ class StreamOptions(BaseModel):
 
 
 class ChatCompletionsRequest(BaseModel):
-    # Tolerate unknown OpenAI tuning params (frequency_penalty, seed, logit_bias,
-    # ...) rather than 422-ing — matches vLLM/LiteLLM leniency for drop-in use.
+    # Tolerate unknown OpenAI tuning params (top_logprobs, logprobs, ...)
+    # rather than 422-ing — matches vLLM/LiteLLM leniency for drop-in use.
     model_config = ConfigDict(extra="allow")
 
     model: str
@@ -170,6 +234,11 @@ class ChatCompletionsRequest(BaseModel):
     temperature: float | None = None
     max_tokens: int | None = Field(default=None, ge=1)
     max_completion_tokens: int | None = Field(default=None, ge=1)
+    top_p: float | None = Field(default=None, gt=0.0, le=1.0)
+    seed: int | None = None
+    frequency_penalty: float | None = Field(default=None, ge=-2.0, le=2.0)
+    presence_penalty: float | None = Field(default=None, ge=-2.0, le=2.0)
+    logit_bias: dict[str, int] | None = None
     stop: str | list[str] | None = None
     service_tier: str | None = None
     web_search_options: dict[str, Any] | None = None
@@ -208,6 +277,7 @@ class AnthropicContentBlock(BaseModel):
     input: dict[str, Any] | None = None  # tool_use
     tool_use_id: str | None = None  # tool_result
     content: str | list[dict[str, Any]] | None = None  # tool_result body
+    is_error: bool = False  # tool_result: the tool call failed
 
 
 class AnthropicMessage(BaseModel):
@@ -228,15 +298,14 @@ class AnthropicToolChoice(BaseModel):
     # flag (parallel_tool_calls) lives on the request, not on tool_choice.
 
 
-class AnthropicMessagesRequest(BaseModel):
-    """`POST /v1/messages` body. max_tokens is required by Anthropic (unlike
-    OpenAI) and stays required here — an SDK caller always sends it."""
+class _AnthropicMessagesBase(BaseModel):
+    """Fields shared by `/v1/messages` and `/v1/messages/count_tokens` —
+    everything except `max_tokens`, which the counter doesn't require."""
 
     model_config = ConfigDict(extra="allow")
 
     model: str
     messages: list[AnthropicMessage] = Field(..., min_length=1)
-    max_tokens: int = Field(..., ge=1)
     system: str | list[dict[str, Any]] | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=1.0)
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -244,13 +313,41 @@ class AnthropicMessagesRequest(BaseModel):
     stream: bool = False
     tools: list[AnthropicTool] | None = None
     tool_choice: AnthropicToolChoice | None = None
+    # Anthropic's extended-thinking config, verbatim ({'type': 'enabled',
+    # 'budget_tokens': N}). Declared so it isn't swallowed by extra=allow.
+    thinking: dict[str, Any] | None = None
+    # Anthropic's output config, verbatim ({'effort': ...}, {'format': ...}).
+    # Same swallow-by-extra=allow hazard.
+    output_config: dict[str, Any] | None = None
     provider: str | None = None  # RekAI extension: explicit provider override
+
+
+class AnthropicMessagesRequest(_AnthropicMessagesBase):
+    """`POST /v1/messages` body. max_tokens is required by Anthropic (unlike
+    OpenAI) and stays required here — an SDK caller always sends it."""
+
+    max_tokens: int = Field(..., ge=1)
+
+
+class AnthropicCountTokensRequest(_AnthropicMessagesBase):
+    """`POST /v1/messages/count_tokens` body — the Messages shape except
+    ``max_tokens`` is optional (Anthropic's counter doesn't need it)."""
+
+    max_tokens: int | None = Field(default=None, ge=1)
+
+
+class AnthropicTokenCount(BaseModel):
+    """`POST /v1/messages/count_tokens` response — Anthropic's shape."""
+
+    input_tokens: int
 
 
 class ChatCompletionMessage(BaseModel):
     role: Literal["assistant"] = "assistant"
     content: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
+    refusal: str | None = None
+    annotations: list[dict[str, Any]] | None = None
 
 
 class PromptTokensDetails(BaseModel):
@@ -302,6 +399,17 @@ class ChatResponse(BaseModel):
     tool_calls: list[dict[str, Any]] | None = Field(
         default=None, description="Tool calls returned by the model, if any."
     )
+    refusal: str | None = Field(
+        default=None,
+        description="The model's refusal text when it declined (OpenAI "
+        "'message.refusal'); content is empty in that case. Null otherwise.",
+    )
+    annotations: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Citations etc. attached to the answer (OpenAI "
+        "'message.annotations' — e.g. url_citation entries for web search), "
+        "passed through verbatim.",
+    )
     usage: Usage
     cost_usd: float | None = Field(
         default=None,
@@ -322,6 +430,36 @@ class ChatResponse(BaseModel):
         "one. Null on a miss and on an exact cache hit (where the prompt matched "
         "byte-for-byte), so a non-null value is exactly the signal that an "
         "approximate match was used.",
+    )
+    thinking_blocks: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Anthropic thinking/redacted_thinking blocks the model "
+        "produced before its answer, verbatim (text + signature). Present only "
+        "when thinking was enabled; the /v1/messages surface re-emits them as "
+        "content blocks so the caller can echo them back verbatim.",
+    )
+    extra_blocks: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Anthropic server-side tool blocks (server_tool_use, "
+        "web_search_tool_result, mcp_*, code_execution, ...) in upstream order, "
+        "verbatim. Present when server tools ran; /v1/messages re-emits them "
+        "between thinking and the answer text, and callers echo them back on "
+        "the next turn to preserve the tool-trace.",
+    )
+    extra_fields: dict[str, Any] | None = Field(
+        default=None,
+        description="Message-level fields the provider doesn't map (Anthropic's "
+        "container for code execution, context_management edit reports, and "
+        "anything new) — verbatim. The OpenAI surface has no equivalent and "
+        "omits them.",
+    )
+    content_blocks: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="The upstream content array verbatim, in emitted order "
+        "(text, thinking, tool_use and server-tool blocks interleaved). "
+        "Present only when the provider reports ordered blocks — /v1/messages "
+        "re-emits it verbatim and callers echo it for multi-turn continuity. "
+        "The OpenAI surface has no equivalent and omits it.",
     )
     fallback_used: bool = Field(
         default=False, description="True if a fallback served this response, not the primary."
@@ -386,7 +524,9 @@ class ServiceInfo(BaseModel):
     name: str
     version: str
     description: str
-    docs: str
+    # null when docs are disabled (production default) — don't advertise a
+    # route that doesn't exist.
+    docs: str | None
     health: str
 
 
@@ -453,13 +593,23 @@ class ErrorResponse(BaseModel):
 
 class AdminKeyRequest(BaseModel):
     key: str = Field(..., min_length=1, description="The raw API key to add.")
+    expires_in_seconds: int | None = Field(
+        default=None,
+        gt=0,
+        description="Optional TTL for the key, in seconds (e.g. 86400 = 1 day).",
+    )
 
 
 class AdminKeyList(BaseModel):
     static: list[str] = Field(description="Masked REKAI_API_KEYS entries.")
     dynamic: list[str] = Field(description="Masked runtime-added keys.")
+    dynamic_expires_at: dict[str, float] = Field(
+        default_factory=dict,
+        description="Masked dynamic key → expiry unix timestamp (expiring keys only).",
+    )
 
 
 class AdminKeyResponse(BaseModel):
     status: Literal["added", "revoked"]
     key: str
+    expires_at: float | None = None
