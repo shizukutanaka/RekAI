@@ -212,17 +212,18 @@ class AnthropicProvider(Provider):
         if self._emulating_json(request):
             # The caller asked for JSON, not a tool call: unwrap the forced
             # tool_use block's input back into `content` and drop the call, so
-            # the response is shaped like OpenAI's JSON mode. The synthetic
-            # json_response block also leaves the verbatim array — it is
-            # gateway instrumentation, not part of the model's answer, and
-            # echoing it would replay a call the client never made while
-            # duplicating the input already returned as `content`.
-            content = _unwrap_structured_output(blocks) or content
+            # the response is shaped like OpenAI's JSON mode. The verbatim
+            # array keeps the answer too — as a text block where the synthetic
+            # call sat — so a nonempty content_blocks (other blocks beside it)
+            # still carries the JSON, which to_message prefers over `content`.
+            unwrapped = _unwrap_structured_output(blocks)
+            content = unwrapped or content
             tool_calls = None
             content_blocks = [
-                b
+                {"type": "text", "text": unwrapped or ""}
+                if b.get("type") == "tool_use" and b.get("name") == _JSON_TOOL_NAME
+                else b
                 for b in blocks
-                if not (b.get("type") == "tool_use" and b.get("name") == _JSON_TOOL_NAME)
             ]
         usage = data.get("usage", {})
         finish_reason = _finish_reason(

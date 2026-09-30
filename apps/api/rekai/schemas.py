@@ -292,6 +292,7 @@ class ChatCompletionMessage(BaseModel):
     role: Literal["assistant"] = "assistant"
     content: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
+    annotations: list[dict[str, Any]] | None = None
 
 
 class ChatCompletionChoice(BaseModel):
@@ -331,6 +332,12 @@ class ChatResponse(BaseModel):
     content: str
     tool_calls: list[dict[str, Any]] | None = Field(
         default=None, description="Tool calls returned by the model, if any."
+    )
+    annotations: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Citations etc. attached to the answer (OpenAI "
+        "'message.annotations' — e.g. url_citation entries for web search), "
+        "passed through verbatim.",
     )
     usage: Usage
     cost_usd: float | None = Field(
@@ -453,7 +460,9 @@ class ServiceInfo(BaseModel):
     name: str
     version: str
     description: str
-    docs: str
+    # null when docs are disabled (production default) — don't advertise a
+    # route that doesn't exist.
+    docs: str | None
     health: str
 
 
