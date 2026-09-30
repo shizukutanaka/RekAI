@@ -682,3 +682,142 @@ async def test_semantic_cache_skips_extra_blocks_history() -> None:
     assert first.cached is False
     assert second.cached is False
     semantic_cache.clear()
+
+
+async def test_stream_extra_block_delta_merges_into_completed_block() -> None:
+    """Deltas inside an extra block reach the completed extra_block, not just frames."""
+    lines = [
+        _sse(
+            "content_block_start",
+            {"index": 0, "content_block": {"type": "unmapped_future", "data": {}}},
+        ),
+        _sse(
+            "content_block_delta",
+            {"index": 0, "delta": {"type": "text_delta", "text": "tool "}},
+        ),
+        _sse(
+            "content_block_delta",
+            {"index": 0, "delta": {"type": "text_delta", "text": "output"}},
+        ),
+        _sse("content_block_stop", {"index": 0}),
+        _sse("message_delta", {"delta": {"stop_reason": "end_turn"}}),
+    ]
+    events = await _collect(lines)
+    done = [e.extra_block for e in events if e.extra_block]
+    assert done[0]["text"] == "tool output"
+
+
+def test_history_echo_content_blocks_takes_cache_control_on_a_copy() -> None:
+    """Per-message and top-level cache_control mark the verbatim echo's last
+    block — without mutating the caller's ordered array."""
+    ordered = [{"type": "text", "text": "hi"}, dict(_SERVER_USE)]
+    msg = ChatMessage(
+        role="assistant",
+        content="hi",
+        content_blocks=ordered,
+        cache_control={"type": "ephemeral"},
+    )
+    provider = AnthropicProvider()
+    req = ChatRequest(model="claude-sonnet-4-6", messages=[msg])
+    payload = provider._build_payload(req, stream=False)
+    assert payload["messages"][0]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in ordered[-1]
+
+    req2 = ChatRequest(
+        model="claude-sonnet-4-6",
+        messages=[msg],
+        cache_control={"type": "ephemeral", "ttl": "1h"},
+    )
+    payload2 = provider._build_payload(req2, stream=False)
+    assert payload2["messages"][-1]["content"][-1]["cache_control"] == {
+        "type": "ephemeral",
+        "ttl": "1h",
+    }
+    assert "cache_control" not in ordered[-1]
+
+
+def test_json_mode_strips_synthetic_tool_from_content_blocks(monkeypatch) -> None:
+    """The forced json_response tool_use isn't part of the verbatim answer."""
+    blocks = [
+        {
+            "type": "tool_use",
+            "id": "tu_1",
+            "name": "json_response",
+            "input": {"answer": 42},
+        },
+        {"type": "text", "text": ""},
+    ]
+    _FakeClient.data = _resp(blocks)
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeClient)
+    req = ChatRequest(
+        model="claude-sonnet-4-6",
+        messages=[ChatMessage(role="user", content="hi")],
+        response_format={"type": "json_object"},
+    )
+    result = asyncio.run(AnthropicProvider().chat(req, "k"))
+    assert result.content == '{"answer": 42}'
+    assert result.content_blocks == [{"type": "text", "text": ""}]
+
+
+def test_json_mode_keeps_other_blocks_in_content_blocks(monkeypatch) -> None:
+    """Blocks unrelated to the synthetic tool still pass through in JSON mode."""
+    blocks = [
+        {"type": "tool_use", "id": "tu_1", "name": "json_response", "input": {"a": 1}},
+        _SERVER_USE,
+    ]
+    _FakeClient.data = _resp(blocks)
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeClient)
+    req = ChatRequest(
+        model="claude-sonnet-4-6",
+        messages=[ChatMessage(role="user", content="hi")],
+        response_format={"type": "json_object"},
+    )
+    result = asyncio.run(AnthropicProvider().chat(req, "k"))
+    assert result.content_blocks == [_SERVER_USE]
+
+
+async def test_stream_split_secret_in_extra_delta_is_scrubbed() -> None:
+    """A secret straddling two extra-block deltas can't leak in either frame."""
+    secret = "ghp_" + "A" * 36
+    frag1 = '{"key": "ghp_'
+    frag2 = "A" * 36 + '"}'
+
+    class _SplitSecretProvider(Provider):
+        name = "svc-split"
+
+        async def chat(self, request, api_key):
+            raise ProviderError("unused")
+
+        async def stream_events(self, request, api_key):
+            yield StreamEvent(extra_block_start={"type": "server_tool_use", "input": {}})
+            yield StreamEvent(extra_block_delta={"type": "input_json_delta", "partial_json": frag1})
+            yield StreamEvent(extra_block_delta={"type": "input_json_delta", "partial_json": frag2})
+            yield StreamEvent(extra_block={"type": "server_tool_use", "input": {"key": secret}})
+            yield StreamEvent(delta="ok")
+            yield StreamEvent(finish_reason="stop")
+
+        async def embed(self, texts, model, api_key):
+            raise ProviderError("unused")
+
+    provider = _SplitSecretProvider()
+    register_provider(provider)
+    settings = Settings(environment="test", default_provider="echo", output_redaction_enabled=True)
+    events = [
+        e
+        async for e in handle_chat_stream(
+            ChatRequest(model="x", messages=[ChatMessage(role="user", content="hi")]),
+            None,
+            settings,
+            NullCache(),
+            "svc-split",
+            provider,
+            "anon",
+        )
+    ]
+    frames = [e.extra_block_delta for e in events if e.extra_block_delta is not None]
+    emitted = "".join(str(f.get("partial_json", "")) for f in frames)
+    assert secret not in emitted
+    block = [e.extra_block for e in events if e.extra_block is not None][0]
+    assert secret not in json.dumps(block)
+    summary = [e.summary for e in events if e.summary is not None][0]
+    assert summary.redacted
