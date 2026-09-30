@@ -328,6 +328,31 @@ def _scrub_if(value: Any, enabled: bool) -> Any:
     return scrubbed
 
 
+def _scrub_extra_delta(
+    delta: Any, redactor: guardrails.StreamRedactor | None, enabled: bool
+) -> Any:
+    """Scrub one streamed extra-block delta through the block's redactor.
+
+    A secret can straddle deltas (``sk-`` | ``rest``) — per-frame scrubbing
+    misses it, so each delta's payload string feeds the same incremental
+    redactor for the whole block, the contract answer text already uses.
+    ``type`` and ``signature`` stay untouched: the signature is a crypto blob
+    Anthropic verifies verbatim on echo. A non-string payload (a citation
+    dict, say) arrives whole inside a single delta and scrubs per-frame.
+    """
+    if not enabled or not isinstance(delta, dict):
+        return _scrub_if(delta, enabled)
+    out = dict(delta)
+    for key, value in delta.items():
+        if key in ("type", "signature"):
+            continue
+        if isinstance(value, str):
+            out[key] = redactor.feed(value) if redactor is not None else value
+        else:
+            out[key] = _scrub_if(value, enabled)
+    return out
+
+
 def _request_deadline(settings: Settings) -> float | None:
     """A ``time.monotonic()`` stamp bounding the whole request, or None.
 
@@ -631,6 +656,14 @@ async def handle_chat_stream(
     redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
     thinking_redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
     redaction_on = settings.output_redaction_enabled
+    # Each open extra block gets its own incremental redactor — a secret split
+    # across that block's deltas must still be caught. The last delta's
+    # {type, payload key} is remembered so the held-back tail can be released
+    # in the same shape upstream uses, keeping the verbatim frame sequence
+    # lossless for clients reconstructing the block.
+    extra_redactor: guardrails.StreamRedactor | None = None
+    extra_delta_shape: dict[str, str] | None = None
+    extra_hits: list[str] = []
     try:
         async for event in provider.stream_events(request, api_key):
             if event.delta:
@@ -689,11 +722,37 @@ async def handle_chat_stream(
                 yield ChatStreamEvent(
                     extra_block_start=_scrub_if(event.extra_block_start, redaction_on)
                 )
+                # A fresh incremental redactor per block — its deltas are one
+                # logical string chunked across frames.
+                extra_redactor = guardrails.StreamRedactor() if redaction_on else None
+                extra_delta_shape = None
             if event.extra_block_delta is not None:
+                delta = event.extra_block_delta
+                if isinstance(delta, dict):
+                    for k, v in delta.items():
+                        if k not in ("type", "signature") and isinstance(v, str):
+                            extra_delta_shape = {
+                                "type": str(delta.get("type") or ""),
+                                "key": k,
+                            }
+                            break
                 yield ChatStreamEvent(
-                    extra_block_delta=_scrub_if(event.extra_block_delta, redaction_on)
+                    extra_block_delta=_scrub_extra_delta(delta, extra_redactor, redaction_on)
                 )
             if event.extra_block is not None:
+                # Release whatever the redactor still held back, in the shape
+                # of the last delta, before the completed block lands.
+                tail = extra_redactor.flush() if extra_redactor is not None else ""
+                if tail and extra_delta_shape is not None:
+                    yield ChatStreamEvent(
+                        extra_block_delta={
+                            "type": extra_delta_shape["type"],
+                            extra_delta_shape["key"]: tail,
+                        }
+                    )
+                if extra_redactor is not None:
+                    extra_hits.extend(extra_redactor.hits)
+                    extra_redactor = None
                 yield ChatStreamEvent(extra_block=_scrub_if(event.extra_block, redaction_on))
             if event.extra_fields is not None:
                 yield ChatStreamEvent(extra_fields=_scrub_if(event.extra_fields, redaction_on))
@@ -711,6 +770,18 @@ async def handle_chat_stream(
             tail = thinking_redactor.flush()
             if tail:
                 yield ChatStreamEvent(thinking_delta=tail)
+        if extra_redactor is not None:
+            # A block left open when the upstream stream ended — release the
+            # held-back tail in its last-seen delta shape.
+            tail = extra_redactor.flush()
+            if tail and extra_delta_shape is not None:
+                yield ChatStreamEvent(
+                    extra_block_delta={
+                        "type": extra_delta_shape["type"],
+                        extra_delta_shape["key"]: tail,
+                    }
+                )
+            extra_hits.extend(extra_redactor.hits)
     except ProviderError as exc:
         errored = True
         metrics.record_error("provider_error")
@@ -772,6 +843,7 @@ async def handle_chat_stream(
                 redacted=(
                     (redactor.hits if redactor is not None else [])
                     + (thinking_redactor.hits if thinking_redactor is not None else [])
+                    + extra_hits
                 )
                 or None,
             )
