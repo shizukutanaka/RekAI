@@ -19,6 +19,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **JavaScript streaming example** — `examples/javascript/stream.mjs` mirrors
+  the Python `stream.py` example: the JS side of `examples/` had chat and
+  embeddings but no SSE streaming demo, so the lowest-friction way to see
+  token-by-token output from Node didn't exist.
 - **Chat playground: extended thinking** — an Options toggle sends Anthropic's
   `thinking` config (with a budget-tokens field) on the native chat surface,
   and the reply's reasoning shows in a collapsible "Thinking" section —
