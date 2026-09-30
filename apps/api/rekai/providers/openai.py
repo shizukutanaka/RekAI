@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from rekai import models
-from rekai.config import get_settings
+from rekai.config import current_settings
 from rekai.providers.base import (
     EmbeddingResult,
     FinishReason,
@@ -43,10 +43,10 @@ class OpenAIProvider(Provider):
 
     # --- overridable hooks (subclassed for OpenAI-compatible backends) -----
     def _base_url(self) -> str:
-        return get_settings().openai_base_url
+        return current_settings().openai_base_url
 
     def _server_key(self) -> str | None:
-        return get_settings().openai_api_key
+        return current_settings().openai_api_key
 
     def _key_env_hint(self) -> str:
         return "REKAI_OPENAI_API_KEY"
@@ -99,6 +99,16 @@ class OpenAIProvider(Provider):
                 payload["stream_options"]["include_obfuscation"] = request.include_obfuscation
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
+        if request.top_p is not None:
+            payload["top_p"] = request.top_p
+        if request.seed is not None:
+            payload["seed"] = request.seed
+        if request.frequency_penalty is not None:
+            payload["frequency_penalty"] = request.frequency_penalty
+        if request.presence_penalty is not None:
+            payload["presence_penalty"] = request.presence_penalty
+        if request.logit_bias is not None:
+            payload["logit_bias"] = request.logit_bias
         if request.stop:
             payload["stop"] = request.stop
         if request.service_tier is not None:
@@ -107,14 +117,21 @@ class OpenAIProvider(Provider):
             payload["tools"] = request.tools
         if request.tool_choice is not None:
             payload["tool_choice"] = request.tool_choice
+        if request.parallel_tool_calls is not None:
+            payload["parallel_tool_calls"] = request.parallel_tool_calls
         if request.response_format is not None:
             payload["response_format"] = request.response_format
         if request.web_search_options is not None:
             payload["web_search_options"] = request.web_search_options
+        if request.user is not None:
+            # OpenAI's abuse-detection end-user id.
+            payload["user"] = request.user
+        if request.safety_identifier is not None:
+            payload["safety_identifier"] = request.safety_identifier
         return payload
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
-        settings = get_settings()
+        settings = current_settings()
 
         payload = self._build_payload(request, stream=False)
 
@@ -162,7 +179,7 @@ class OpenAIProvider(Provider):
     async def stream_events(
         self, request: ChatRequest, api_key: str | None
     ) -> AsyncIterator[StreamEvent]:
-        settings = get_settings()
+        settings = current_settings()
 
         payload = self._build_payload(request, stream=True)
 
@@ -201,14 +218,17 @@ class OpenAIProvider(Provider):
         *,
         dimensions: int | None = None,
         encoding_format: str | None = None,
+        user: str | None = None,
     ) -> EmbeddingResult:
-        settings = get_settings()
+        settings = current_settings()
         url = f"{self._base_url().rstrip('/')}/embeddings"
         body: dict = {"model": model, "input": inputs}
         if dimensions is not None:
             body["dimensions"] = dimensions
         if encoding_format is not None:
             body["encoding_format"] = encoding_format
+        if user is not None:
+            body["user"] = user
         try:
             client = self._client(settings.request_timeout_seconds)
             resp = await client.post(

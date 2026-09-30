@@ -146,11 +146,22 @@ export class RekAIClient {
     if (opts.fallbacks != null) payload.fallbacks = opts.fallbacks;
     if (opts.tools != null) payload.tools = opts.tools;
     if (opts.toolChoice != null) payload.tool_choice = opts.toolChoice;
+    if (opts.parallelToolCalls != null) payload.parallel_tool_calls = opts.parallelToolCalls;
     if (opts.responseFormat != null) payload.response_format = opts.responseFormat;
     if (opts.stop != null) payload.stop = opts.stop;
+    if (opts.topP != null) payload.top_p = opts.topP;
+    if (opts.seed != null) payload.seed = opts.seed;
+    if (opts.frequencyPenalty != null) payload.frequency_penalty = opts.frequencyPenalty;
+    if (opts.presencePenalty != null) payload.presence_penalty = opts.presencePenalty;
+    if (opts.logitBias != null) payload.logit_bias = opts.logitBias;
     if (opts.serviceTier != null) payload.service_tier = opts.serviceTier;
     // OpenAI's hosted web-search config; OpenAI-compatible providers only.
     if (opts.webSearchOptions != null) payload.web_search_options = opts.webSearchOptions;
+    // The providers' end-user id for abuse detection (OpenAI `user`,
+    // Anthropic `metadata.user_id`) — a routing hint, never a cache key.
+    if (opts.user != null) payload.user = opts.user;
+    // OpenAI's newer hashed abuse-detection identifier (successor to `user`).
+    if (opts.safetyIdentifier != null) payload.safety_identifier = opts.safetyIdentifier;
     // Anthropic extended thinking ({type:"enabled",budget_tokens}) — Anthropic
     // upstreams only; thinking blocks come back on ChatResult.thinking_blocks.
     if (opts.thinking != null) payload.thinking = opts.thinking;
@@ -284,6 +295,7 @@ export class RekAIClient {
     // OpenAI embeddings fields; providers without them ignore them.
     if (opts.dimensions != null) payload.dimensions = opts.dimensions;
     if (opts.encodingFormat != null) payload.encoding_format = opts.encodingFormat;
+    if (opts.user != null) payload.user = opts.user;
     const res = await this._send("/v1/embeddings", {
       method: "POST",
       headers: this._headers(opts.providerKey, opts.gatewayKey),

@@ -112,6 +112,11 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         # OpenAI renamed max_tokens -> max_completion_tokens; accept either.
         max_tokens=req.max_tokens or req.max_completion_tokens,
         stop=stop,
+        top_p=req.top_p,
+        seed=req.seed,
+        frequency_penalty=req.frequency_penalty,
+        presence_penalty=req.presence_penalty,
+        logit_bias=req.logit_bias,
         service_tier=req.service_tier,
         web_search_options=req.web_search_options,
         include_obfuscation=(
@@ -120,7 +125,10 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         cache=True,
         tools=tools,
         tool_choice=tool_choice,
+        parallel_tool_calls=req.parallel_tool_calls,
         response_format=req.response_format,
+        user=req.user,
+        safety_identifier=req.safety_identifier,
     )
 
 
