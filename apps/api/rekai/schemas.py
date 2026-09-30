@@ -181,6 +181,12 @@ class ChatRequest(BaseModel):
         default=None,
         description="Tool choice ('auto' | 'none' | 'required' | {...}), passed through.",
     )
+    parallel_tool_calls: bool | None = Field(
+        default=None,
+        description="OpenAI's parallel_tool_calls — whether the model may emit "
+        "several tool calls in one turn. Forwarded to providers that support it "
+        "(OpenAI/OpenAI-compatible); ignored by others.",
+    )
     response_format: dict[str, Any] | None = Field(
         default=None,
         description="OpenAI-style response_format, e.g. {'type': 'json_object'} or "
@@ -304,6 +310,7 @@ class ChatCompletionsRequest(BaseModel):
     stream_options: StreamOptions | None = None
     tools: list[dict[str, Any]] | None = None
     tool_choice: Any | None = None
+    parallel_tool_calls: bool | None = None
     response_format: dict[str, Any] | None = None
     user: str | None = None  # forwarded to the provider as its end-user id
     safety_identifier: str | None = None  # OpenAI's newer abuse-detection id
@@ -367,8 +374,10 @@ class AnthropicTool(BaseModel):
 class AnthropicToolChoice(BaseModel):
     type: Literal["auto", "none", "any", "tool"]
     name: str | None = None
-    # disable_parallel_tool_use is Anthropic-specific; the OpenAI-equivalent
-    # flag (parallel_tool_calls) lives on the request, not on tool_choice.
+    # Anthropic carries the parallel-call switch *on* tool_choice; the
+    # OpenAI-equivalent flag (parallel_tool_calls) lives on the request.
+    # Mapped onto ChatRequest.parallel_tool_calls so it round-trips.
+    disable_parallel_tool_use: bool | None = None
 
 
 class AnthropicMetadata(BaseModel):

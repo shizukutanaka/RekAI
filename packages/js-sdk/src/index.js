@@ -146,6 +146,7 @@ export class RekAIClient {
     if (opts.fallbacks != null) payload.fallbacks = opts.fallbacks;
     if (opts.tools != null) payload.tools = opts.tools;
     if (opts.toolChoice != null) payload.tool_choice = opts.toolChoice;
+    if (opts.parallelToolCalls != null) payload.parallel_tool_calls = opts.parallelToolCalls;
     if (opts.responseFormat != null) payload.response_format = opts.responseFormat;
     if (opts.stop != null) payload.stop = opts.stop;
     if (opts.topP != null) payload.top_p = opts.topP;
