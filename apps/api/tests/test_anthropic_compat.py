@@ -376,6 +376,25 @@ def test_server_tool_passes_through_verbatim(client: TestClient, monkeypatch) ->
     ]
 
 
+def test_mcp_toolset_without_name_passes_through(client: TestClient, monkeypatch) -> None:
+    # The MCP connector's toolset entry has no `name` — it references a server
+    # by `mcp_server_name` — so it must not be rejected by the tool schema.
+    from rekai.providers.echo import EchoProvider
+
+    captured: dict = {}
+    original = EchoProvider.chat
+
+    async def spy(self, request, api_key):
+        captured["tools"] = request.tools
+        return await original(self, request, api_key)
+
+    monkeypatch.setattr(EchoProvider, "chat", spy)
+    toolset = {"type": "mcp_toolset", "mcp_server_name": "docs"}
+    resp = client.post("/v1/messages", json=_payload(tools=[toolset]))
+    assert resp.status_code == 200
+    assert captured["tools"] == [toolset]
+
+
 async def test_anthropic_provider_reemits_server_tool_verbatim(monkeypatch) -> None:
     import httpx
 
@@ -445,6 +464,7 @@ async def test_mcp_servers_forward_verbatim_to_anthropic(monkeypatch) -> None:
 
         async def post(self, url, json=None, headers=None):
             captured["json"] = json
+            captured["headers"] = headers
             return FakeResponse()
 
     monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
@@ -466,6 +486,7 @@ async def test_mcp_servers_forward_verbatim_to_anthropic(monkeypatch) -> None:
         "key",
     )
     assert captured["json"]["mcp_servers"] == servers
+    assert captured["headers"]["anthropic-beta"] == "mcp-client-2025-11-20"
 
 
 def test_mcp_servers_field_reaches_chat_request(client: TestClient, monkeypatch) -> None:

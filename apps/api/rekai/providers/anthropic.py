@@ -167,13 +167,17 @@ class AnthropicProvider(Provider):
             payload["stream"] = True
         return payload
 
-    def _headers(self, key: str) -> dict[str, str]:
-        return {
+    def _headers(self, key: str, request: ChatRequest | None = None) -> dict[str, str]:
+        headers = {
             **trace_headers(),
             "x-api-key": key,
             "anthropic-version": get_settings().anthropic_version,
             "content-type": "application/json",
         }
+        # Anthropic's MCP connector is a beta: mcp_servers is rejected without it.
+        if request is not None and request.mcp_servers:
+            headers["anthropic-beta"] = "mcp-client-2025-11-20"
+        return headers
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
         settings = get_settings()
@@ -183,7 +187,7 @@ class AnthropicProvider(Provider):
         url = f"{settings.anthropic_base_url.rstrip('/')}/messages"
         try:
             client = self._client(settings.request_timeout_seconds)
-            resp = await client.post(url, json=payload, headers=self._headers(key))
+            resp = await client.post(url, json=payload, headers=self._headers(key, request))
         except httpx.HTTPError as exc:
             raise ProviderError(f"Anthropic request failed: {exc}") from exc
 
@@ -281,7 +285,9 @@ class AnthropicProvider(Provider):
         extra_json: dict[int, str] = {}
         try:
             client = self._client(settings.request_timeout_seconds)
-            async with client.stream("POST", url, json=payload, headers=self._headers(key)) as resp:
+            async with client.stream(
+                "POST", url, json=payload, headers=self._headers(key, request)
+            ) as resp:
                 if resp.status_code >= 400:
                     body = (await resp.aread()).decode()[:200]
                     raise ProviderError(

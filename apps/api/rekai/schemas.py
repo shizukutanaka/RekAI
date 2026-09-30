@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Role = Literal["system", "user", "assistant", "tool"]
 
@@ -247,9 +247,16 @@ class AnthropicTool(BaseModel):
     # code_execution, computer_use, mcp_tool_use, ...) whose extra fields
     # (max_uses, allowed_domains, ...) must pass through verbatim.
     type: str | None = None
-    name: str
+    # Required for client tools; some server tools (mcp_toolset) have none.
+    name: str | None = None
     description: str | None = None
     input_schema: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _client_tool_needs_name(self) -> AnthropicTool:
+        if self.type in (None, "custom") and not self.name:
+            raise ValueError("client tools require a 'name'")
+        return self
 
 
 class AnthropicToolChoice(BaseModel):
