@@ -503,6 +503,20 @@ def test_model_acl_applies_to_embeddings_and_streaming() -> None:
     assert stream.status_code == 403
 
 
+def test_model_acl_applies_to_anthropic_compat_streaming() -> None:
+    client = TestClient(create_app(_acl_settings()))
+    headers = {"Authorization": "Bearer sk-acl"}
+    body = {
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 16,
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+    assert client.post("/v1/messages", json=body, headers=headers).status_code == 403
+    stream = client.post("/v1/messages", json={**body, "stream": True}, headers=headers)
+    assert stream.status_code == 403
+    assert stream.json()["error"]["type"] == "permission_error"
+
+
 def test_client_budget_override_beats_global_default() -> None:
     settings = Settings(
         environment="test",

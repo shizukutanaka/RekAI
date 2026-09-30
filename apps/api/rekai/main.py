@@ -1709,6 +1709,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return anthropic_compat.to_message(result)
 
         # Streaming — Anthropic's typed SSE event sequence.
+        denied = _model_acl_denied(http_request, _acl_models(chat_request))
+        if denied is not None:
+            return denied
         blocked = _guardrail_response(chat_request.messages, config, response)
         if blocked is not None:
             return blocked
