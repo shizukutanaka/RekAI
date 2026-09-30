@@ -116,6 +116,11 @@ class ProviderResult:
     usage: Usage = field(default_factory=Usage)
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    # OpenAI's response-side identifiers: which backend config served the call
+    # (used with `seed` for determinism debugging) and which service tier
+    # actually handled it when the request said "auto". None elsewhere.
+    system_fingerprint: str | None = None
+    service_tier: str | None = None
     # Anthropic reports *which* stop sequence ended the turn (`stop_sequence`
     # alongside `stop_reason: "stop_sequence"`). None for providers that don't
     # say — OpenAI's API has no equivalent field.
@@ -167,6 +172,10 @@ class StreamEvent:
     usage: Usage | None = None
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    # OpenAI puts these on every chunk (including the role announcement, which
+    # carries no delta) — see ProviderResult for what they mean.
+    system_fingerprint: str | None = None
+    service_tier: str | None = None
     stop_sequence: str | None = None
     # OpenAI streams refusal text as `delta.refusal` chunks, separate from
     # `delta.content` — kept apart for the same reason as ProviderResult.

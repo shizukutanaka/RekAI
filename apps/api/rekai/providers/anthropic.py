@@ -134,6 +134,10 @@ class AnthropicProvider(Provider):
         # equivalents — those stay RekAI-side rather than erroring upstream.
         if request.top_p is not None:
             payload["top_p"] = request.top_p
+        # Anthropic accepts service_tier too ('auto' | 'standard_only'); an
+        # unrecognized tier surfaces as Anthropic's own validation error.
+        if request.service_tier is not None:
+            payload["service_tier"] = request.service_tier
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
         # Structured output: Anthropic has no `response_format`, but forcing a
@@ -290,6 +294,7 @@ class AnthropicProvider(Provider):
         # split is a breakdown of it (see pricing.estimate_cost).
         prompt_tokens = usage.get("input_tokens", 0) + cache_read + cache_write
         completion_tokens = usage.get("output_tokens", 0)
+        service_tier = usage.get("service_tier")
         return ProviderResult(
             content=content,
             refusal=refusal,
@@ -303,6 +308,7 @@ class AnthropicProvider(Provider):
                 cache_write_tokens=cache_write,
             ),
             finish_reason=finish_reason,
+            service_tier=service_tier,
             stop_sequence=data.get("stop_sequence"),
             thinking_blocks=thinking_blocks or None,
             citations=citations or None,
@@ -334,6 +340,7 @@ class AnthropicProvider(Provider):
         cache_read = 0
         cache_write = 0
         saw_usage = False
+        service_tier: str | None = None
         stop_sequence: str | None = None
         # tool_use blocks: id/name from content_block_start, args from
         # input_json_delta fragments, keyed by block index.
@@ -448,6 +455,7 @@ class AnthropicProvider(Provider):
                         input_tokens = usage.get("input_tokens", input_tokens)
                         output_tokens = usage.get("output_tokens", output_tokens)
                         cache_read, cache_write = _cache_tokens(usage)
+                        service_tier = usage.get("service_tier") or service_tier
                         saw_usage = True
                     elif etype == "message_delta":
                         usage = event.get("usage", {})
@@ -485,6 +493,7 @@ class AnthropicProvider(Provider):
                     else None
                 ),
                 finish_reason=finish_reason,
+                service_tier=service_tier,
                 stop_sequence=stop_sequence,
             )
 

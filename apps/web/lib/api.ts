@@ -42,6 +42,10 @@ export interface ChatResponse {
   /** True when a fallback target answered because the primary failed. */
   fallback_used?: boolean;
   tool_calls?: Record<string, unknown>[] | null;
+  /** OpenAI backend fingerprint — which config served the call. */
+  system_fingerprint?: string | null;
+  /** The service tier that actually handled the call when `service_tier` was "auto". */
+  service_tier?: string | null;
   /** Anthropic thinking blocks produced before the answer (extended thinking). */
   thinking_blocks?: Record<string, unknown>[] | null;
   /** Anthropic citations on the answer's text (web-search sources). */
@@ -462,6 +466,8 @@ export interface StreamSummary {
   cost_usd: number | null;
   estimated: boolean;
   tool_calls?: Record<string, unknown>[];
+  system_fingerprint?: string | null;
+  service_tier?: string | null;
   finish_reason?: FinishReason;
   stop_sequence?: string | null;
   redacted?: string[] | null;

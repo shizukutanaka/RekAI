@@ -491,6 +491,7 @@ class ChatCompletionResponse(BaseModel):
     choices: list[ChatCompletionChoice]
     usage: CompletionUsage  # flat fields already match; *Details is OpenAI's nesting
     system_fingerprint: str | None = None
+    service_tier: str | None = None  # the tier that actually served
     # RekAI extensions — OpenAI SDKs ignore unknown response fields.
     provider: str | None = None
     cost_usd: float | None = None
@@ -584,6 +585,11 @@ class ChatResponse(BaseModel):
     fallback_used: bool = Field(
         default=False, description="True if a fallback served this response, not the primary."
     )
+    # OpenAI's response-side identifiers: the backend config fingerprint (used
+    # with `seed` for determinism debugging) and the service tier that actually
+    # handled the call when the request said "auto". Null elsewhere.
+    system_fingerprint: str | None = None
+    service_tier: str | None = None
     redacted: list[str] | None = Field(
         default=None,
         description="Names of the secret patterns scrubbed from 'content' by the output "
