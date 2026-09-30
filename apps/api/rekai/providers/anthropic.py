@@ -183,6 +183,9 @@ class AnthropicProvider(Provider):
             payload["diagnostics"] = request.diagnostics
         if request.mcp_servers:
             payload["mcp_servers"] = request.mcp_servers
+        if request.user is not None:
+            # Anthropic's abuse-detection end-user id.
+            payload["metadata"] = {"user_id": request.user}
         # Output config (effort/format) too — Anthropic's own vocabulary.
         if request.output_config is not None:
             payload["output_config"] = request.output_config
