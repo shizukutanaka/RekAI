@@ -366,6 +366,34 @@ def test_stream_invokes_on_usage() -> None:
     assert seen["estimated"] is False
 
 
+def test_stream_summary_with_annotations_still_reaches_on_usage() -> None:
+    # The final summary carries the aggregated annotations next to usage; it
+    # must still be classified as the usage summary.
+    sse = (
+        'data: {"annotations": [{"type": "url_citation"}]}\n\n'
+        'data: {"provider":"echo","model":"echo","usage":{"total_tokens":2},'
+        '"cost_usd":0.0,"estimated":false,"annotations":[{"type":"url_citation"}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=sse)
+
+    client = make_client(handler)
+    seen: dict = {}
+    annotations: list = []
+    list(
+        client.stream(
+            "echo",
+            "hi",
+            on_usage=lambda s: seen.update(s),
+            on_annotations=lambda a: annotations.extend(a),
+        )
+    )
+    assert seen["usage"]["total_tokens"] == 2
+    assert annotations == [{"type": "url_citation"}]
+
+
 def test_stream_invokes_on_tool_calls() -> None:
     sse = (
         'data: {"delta": "Hi"}\n\n'
@@ -866,3 +894,31 @@ def test_a_long_retry_after_returns_the_response_instead_of_sleeping():
     assert resp.status_code == 429
     assert resp.headers["Retry-After"] == "3600"
     assert time.monotonic() - started < 5.0
+
+
+def test_chat_forwards_thinking() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-6",
+                "content": "ok",
+                "usage": {},
+                "cost_usd": None,
+                "cached": False,
+                "fallback_used": False,
+            },
+        )
+
+    client = make_client(handler)
+    client.chat(
+        "claude-sonnet-4-6",
+        [{"role": "user", "content": "hi"}],
+        thinking={"type": "enabled", "budget_tokens": 256},
+    )
+    assert captured["body"]["thinking"] == {"type": "enabled", "budget_tokens": 256}

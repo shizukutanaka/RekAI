@@ -3,6 +3,10 @@ export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
+  /** Anthropic server-tool blocks echoed back verbatim on assistant turns. */
+  extra_blocks?: Record<string, unknown>[];
+  /** Ordered verbatim content array for an assistant turn — replays the exact upstream sequence. */
+  content_blocks?: Record<string, unknown>[];
 }
 
 /**
@@ -28,11 +32,19 @@ export interface ChatResponse {
   finish_reason?: FinishReason;
   cache_similarity?: number | null;
   redacted?: string[] | null;
+  /** Citations etc. attached to the answer (e.g. web-search url_citation). */
+  annotations?: Record<string, unknown>[] | null;
   /** True when a fallback target answered because the primary failed. */
   fallback_used?: boolean;
   tool_calls?: Record<string, unknown>[] | null;
   /** Anthropic thinking blocks produced before the answer (extended thinking). */
   thinking_blocks?: Record<string, unknown>[] | null;
+  /** Anthropic server-side tool blocks (server_tool_use, tool-result blocks, mcp_*). */
+  extra_blocks?: Record<string, unknown>[] | null;
+  /** Message-level fields the provider doesn't map (container, context_management, ...). */
+  extra_fields?: Record<string, unknown> | null;
+  /** The upstream content array verbatim, in emitted order. */
+  content_blocks?: Record<string, unknown>[] | null;
 }
 
 /**
@@ -372,6 +384,7 @@ export async function streamChat(
   onDelta: (text: string) => void,
   signal?: AbortSignal,
   onSummary?: (summary: StreamSummary) => void,
+  onExtraBlock?: (block: Record<string, unknown>) => void,
 ): Promise<void> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -416,6 +429,7 @@ export async function streamChat(
       if (ev.kind === "done") return;
       if (ev.kind === "delta") onDelta(ev.text);
       else if (ev.kind === "summary") onSummary?.(ev.summary);
+      else if (ev.kind === "extra_block") onExtraBlock?.(ev.block);
       else if (ev.kind === "error") throw new Error(ev.message);
     }
   }
@@ -435,11 +449,13 @@ export interface StreamSummary {
   tool_calls?: Record<string, unknown>[];
   finish_reason?: FinishReason;
   redacted?: string[] | null;
+  annotations?: Record<string, unknown>[];
 }
 
 export type SSEEvent =
   | { kind: "delta"; text: string }
   | { kind: "summary"; summary: StreamSummary }
+  | { kind: "extra_block"; block: Record<string, unknown> }
   | { kind: "done" }
   | { kind: "error"; message: string }
   | { kind: "ignore" };
@@ -457,6 +473,8 @@ export function parseSSEFrame(frame: string): SSEEvent {
     const event = JSON.parse(payload);
     if (event.delta) return { kind: "delta", text: event.delta };
     if (event.error) return { kind: "error", message: event.detail || event.error };
+    if (event.extra_block)
+      return { kind: "extra_block", block: event.extra_block };
     if (event.usage) return { kind: "summary", summary: event as StreamSummary };
     return { kind: "ignore" };
   } catch {
