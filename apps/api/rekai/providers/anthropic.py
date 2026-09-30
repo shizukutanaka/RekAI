@@ -161,6 +161,9 @@ class AnthropicProvider(Provider):
         # new knobs (interleaved, budget caps) should not need a schema bump.
         if request.thinking is not None:
             payload["thinking"] = request.thinking
+        # Output config (effort/format) too — Anthropic's own vocabulary.
+        if request.output_config is not None:
+            payload["output_config"] = request.output_config
         if stream:
             payload["stream"] = True
         return payload
@@ -206,17 +209,18 @@ class AnthropicProvider(Provider):
         if self._emulating_json(request):
             # The caller asked for JSON, not a tool call: unwrap the forced
             # tool_use block's input back into `content` and drop the call, so
-            # the response is shaped like OpenAI's JSON mode. The synthetic
-            # json_response block also leaves the verbatim array — it is
-            # gateway instrumentation, not part of the model's answer, and
-            # echoing it would replay a call the client never made while
-            # duplicating the input already returned as `content`.
-            content = _unwrap_structured_output(blocks) or content
+            # the response is shaped like OpenAI's JSON mode. The verbatim
+            # array keeps the answer too — as a text block where the synthetic
+            # call sat — so a nonempty content_blocks (other blocks beside it)
+            # still carries the JSON, which to_message prefers over `content`.
+            unwrapped = _unwrap_structured_output(blocks)
+            content = unwrapped or content
             tool_calls = None
             content_blocks = [
-                b
+                {"type": "text", "text": unwrapped or ""}
+                if b.get("type") == "tool_use" and b.get("name") == _JSON_TOOL_NAME
+                else b
                 for b in blocks
-                if not (b.get("type") == "tool_use" and b.get("name") == _JSON_TOOL_NAME)
             ]
         usage = data.get("usage", {})
         finish_reason = _finish_reason(
@@ -512,18 +516,14 @@ def _translate_messages(messages: list) -> list[dict]:
             continue
         if m.role == "tool":
             # A tool result becomes a user message with a tool_result block.
-            out.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": m.tool_call_id or "",
-                            "content": m.content or "",
-                        }
-                    ],
-                }
-            )
+            block: dict = {
+                "type": "tool_result",
+                "tool_use_id": m.tool_call_id or "",
+                "content": m.content or "",
+            }
+            if m.is_error:
+                block["is_error"] = True
+            out.append({"role": "user", "content": [block]})
         elif m.role == "assistant" and (
             m.tool_calls or m.thinking_blocks or m.extra_blocks or m.content_blocks
         ):

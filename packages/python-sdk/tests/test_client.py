@@ -366,6 +366,63 @@ def test_stream_invokes_on_usage() -> None:
     assert seen["estimated"] is False
 
 
+def test_stream_summary_with_annotations_still_reaches_on_usage() -> None:
+    # The final summary carries the aggregated annotations next to usage; it
+    # must still be classified as the usage summary.
+    sse = (
+        'data: {"annotations": [{"type": "url_citation"}]}\n\n'
+        'data: {"provider":"echo","model":"echo","usage":{"total_tokens":2},'
+        '"cost_usd":0.0,"estimated":false,"annotations":[{"type":"url_citation"}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=sse)
+
+    client = make_client(handler)
+    seen: dict = {}
+    annotations: list = []
+    list(
+        client.stream(
+            "echo",
+            "hi",
+            on_usage=lambda s: seen.update(s),
+            on_annotations=lambda a: annotations.extend(a),
+        )
+    )
+    assert seen["usage"]["total_tokens"] == 2
+    assert annotations == [{"type": "url_citation"}]
+
+
+def test_stream_summary_with_refusal_still_reaches_on_usage() -> None:
+    # The final summary repeats the full refusal text next to usage; it must
+    # still be classified as the usage summary, not as another refusal chunk.
+    sse = (
+        'data: {"refusal": "I can\'t help"}\n\n'
+        'data: {"provider":"echo","model":"echo","usage":{"total_tokens":2},'
+        '"cost_usd":0.0,"estimated":false,"refusal":"I can\'t help"}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=sse)
+
+    client = make_client(handler)
+    seen: dict = {}
+    refusals: list = []
+    list(
+        client.stream(
+            "echo",
+            "hi",
+            on_usage=lambda s: seen.update(s),
+            on_refusal=lambda r: refusals.append(r),
+        )
+    )
+    assert seen["usage"]["total_tokens"] == 2
+    assert seen["refusal"] == "I can't help"
+    assert refusals == ["I can't help"]
+
+
 def test_stream_invokes_on_tool_calls() -> None:
     sse = (
         'data: {"delta": "Hi"}\n\n'
