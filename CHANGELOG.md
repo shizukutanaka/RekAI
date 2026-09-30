@@ -16,6 +16,31 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   layer, sent verbatim upstream, and part of the exact/semantic cache keys.
   Anthropic's `fallbacks` is deliberately not forwarded: RekAI's extension uses
   the same name with different semantics.
+- **JS SDK request timeout** — `fetch` has no built-in timeout, so a hung
+  connection parked `chat()`/`stream()` forever. A new `timeout` client option
+  (default 60s, matching the Python SDK) bounds each non-streaming request via
+  `AbortSignal` and bounds the idle gap between stream chunks with a per-read
+  watchdog — a slow-but-steady stream is unaffected, a stalled one throws.
+  `timeout: 0` disables. `RekAIClientOptions` in the type declarations also
+  gains the previously-undeclared `maxRetries`/`retryBackoff`/`maxRetryDelay`.
+- **Three pass-through fidelity fixes** — JSON-mode's synthetic `json_response`
+  tool now becomes a text block holding the unwrapped answer inside
+  `content_blocks` (deleting it left a nonempty array without the answer, and
+  `to_message` prefers the array, so `/v1/messages` dropped the JSON whenever
+  another block travelled with it); streamed extra-block deltas scrub through
+  one `StreamRedactor` per payload field instead of one per block, so a
+  held-back tail can never re-emerge under another field's key; and secrets
+  scrubbed from `extra_block_start`/`extra_block`/`extra_fields` frames now
+  count in `summary.redacted` (deduplicated against the delta-redactor hits
+  that already reported them).
+- **Embeddings `dimensions` hardening** — a provider-declared
+  `max_embedding_dimensions` (echo: 4096) is enforced before the cache lookup
+  and any idempotent replay, so a stored oversized response can't bypass it;
+  echo also bounds total embedding work (`inputs × dimensions` ≤ 262144
+  floats, since batch size alone could still exhaust a worker), and a cached
+  hit whose stored vector length doesn't match the requested `dimensions`
+  recomputes instead of serving a stale-size entry until its TTL expires
+  (Redis can carry one across a deploy).
 - **Echo provider honors `dimensions`** — `/v1/embeddings` accepted the
   parameter for `model="echo"` but always returned the default 16-dim
   pseudo-embedding, so the only way to see `dimensions` do anything was a
@@ -70,6 +95,22 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requirement), while an explicit temperature rides as sent. Non-Anthropic
   providers ignore the config and surfaces without the concept (OpenAI chunks)
   drop the blocks. Both SDKs and the web client expose `thinking_blocks`.
+- **Web-search citations pass through end-to-end.** OpenAI attaches
+  `message.annotations` (e.g. `url_citation` entries) when a web-search model
+  answers; RekAI previously dropped them, so the caller paid for search but
+  could not see what was cited. `ProviderResult`/`StreamEvent`/`ChatResponse`
+  now carry `annotations` verbatim; the native SSE stream emits
+  `{"annotations": [...]}` events and the summary field, the OpenAI-compat
+  surface reproduces `message.annotations`/`delta.annotations`, and the
+  Anthropic-compat surface passes them as a response extra (Anthropic's own
+  citations schema needs `cited_text` upstreams don't send). Both SDKs expose
+  them (`ChatResult.annotations`, `on_annotations`/`onAnnotations` hooks).
+- **Guardrail scans tool results.** The prompt-injection guardrail now covers
+  `role="tool"` messages on every chat surface (native, OpenAI-, and
+  Anthropic-compat) — tool output is external content and the canonical
+  *indirect* injection vector (OWASP LLM01): a fetched page carrying "ignore
+  previous instructions" never appears in the user's own text. Same flag/block
+  semantics; still opt-in via `REKAI_GUARDRAILS_ENABLED`.
 - **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
   `cache: false` so you can compare a fresh answer against the cached one.
   It defaults to on; the meta line already marks cache hits.
@@ -130,6 +171,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every other call site.
 
 ### Security
+- **`Cache-Control: no-store` on data-bearing endpoints** (`/v1/*`,
+  `/admin/*`, `/metrics`). They serve per-client usage, model ACLs and key
+  listings — an intermediary or shared cache could previously persist and
+  replay them to another tenant. SSE routes keep their own `no-cache`.
 - **The Render blueprint now runs the API in production mode.** `deploy/
   render.yaml` never set `REKAI_ENVIRONMENT`, so the open-proxy guard only
   *warned* on the one deployment shape that is internet-facing by definition —
@@ -149,6 +194,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   says when a pin is safe. Roadmap O-7 (secure-defaults policy) is recorded
   as decided in `docs/ai/instructions-opus.md`; S-9's manifest work is
   complete.
+- **The OpenAPI surface is off in production.** `/docs`, `/redoc` and
+  `/openapi.json` answered unauthenticated on every environment, publishing
+  the request schema of every route — `/admin/*` included — to anyone who can
+  reach the port. `REKAI_ENVIRONMENT=production` now omits them (`/`'s `docs`
+  field reports `null` instead of advertising a dead route), and
+  `REKAI_DOCS_ENABLED=true|false` overrides the default either way. Existing
+  production deployments that deliberately served docs keep them by setting
+  `REKAI_DOCS_ENABLED=true`.
 
 ### Added
 - **`web_search_options` and `stream_options.include_obfuscation` forwarding.**
