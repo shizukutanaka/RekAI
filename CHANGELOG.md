@@ -125,6 +125,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no way to set it. An optional input now sends it (blank = model default);
   the result card already displays the actual vector length, so a provider
   that ignores the hint is visible rather than silent.
+- **`system_fingerprint` and response `service_tier` now round-trip.** OpenAI
+  stamps both on every response — the fingerprint identifies the backend
+  configuration that served the call (the debugging companion to `seed`), and
+  the response-side `service_tier` reports which tier actually handled it when
+  the request said "auto". They were dropped on the floor before; now they ride
+  through `ProviderResult`/`StreamEvent` into the native `ChatResponse`, the
+  native SSE summary, the compat response, and every compat stream chunk after
+  the first provider frame. Anthropic participates too: it accepts
+  `service_tier` on Messages requests (`auto` | `standard_only`) and echoes
+  the billed tier in `usage.service_tier` — both directions wired. Gemini and
+  Ollama have no equivalent and report null.
 - **`service_tier` reaches Anthropic too.** Anthropic's Messages API takes the
   same field name with its own vocabulary (`auto` | `standard_only`); the
   compat layer accepted it via `extra="allow"` and dropped it, and the provider
@@ -176,6 +187,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the native SSE stream emits `{"refusal": ...}` events, the OpenAI-compat
   surface reproduces `message.refusal`/`delta.refusal` chunks, and the
   Anthropic-compat surface folds the text into a content block with
+  `stop_reason: "refusal"` (Anthropic's own encoding). Both SDKs expose it
+  (`ChatResult.refusal`, `on_refusal`/`onRefusal` stream hooks), and the web
+  chat displays the refusal text in the reply bubble (streamed `{"refusal"}`
+  events ride the normal delta path; the `content_filter` meta note marks it
+  as a decline) instead of a bare empty bubble.
   `stop_reason: "refusal"` (Anthropic's own encoding). The Anthropic provider
   makes the reverse translation too: an upstream `stop_reason: "refusal"`
   moves the refusal text block out of `content` and into `refusal`, matching
@@ -200,6 +216,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
   `cache: false` so you can compare a fresh answer against the cached one.
   It defaults to on; the meta line already marks cache hits.
+- **`stop_sequence` surfaces end-to-end.** Anthropic reports *which* stop
+  sequence ended the turn (alongside `stop_reason: "stop_sequence"`); RekAI
+  used to keep the reason but drop the match, so a caller that sent several
+  sequences couldn't tell which one fired. It now rides `ProviderResult` →
+  `StreamEvent` → `ChatResponse.stop_sequence` and re-emerges on the
+  Anthropic-compat surface (`message.stop_sequence` and the `message_delta`
+  event) and the native stream's terminal summary. Null for providers that
+  don't report one — OpenAI's API has no equivalent field. Both SDKs expose
+  it (`ChatResult.stop_sequence`).
 - `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
   check (`client.messages.count_tokens`) now works against the compat surface.
   Returns a local script-aware estimate (the same heuristic the pricing path
@@ -307,6 +332,47 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged; no behavior change for env-configured deployments.
 
 ### Added
+- **`GET /v1/models/{id}`** — the OpenAI-compat "retrieve a model" endpoint
+  (`client.models.retrieve("…")` in the OpenAI SDK). Returns the same
+  `ModelInfo` the list endpoint reports; unknown ids get a 404 in the OpenAI
+  envelope (`type: invalid_request_error`, `code: model_not_found`), matching
+  api.openai.com. `openai_compat.openai_error` gained optional `code` /
+  `error_type` overrides for this.
+- **Input-side secret detection** (`REKAI_INPUT_SECRETS_ENABLED`, opt-in).
+  Output redaction already scrubbed secrets the *model* emitted; this runs the
+  same pattern set against caller-supplied request text — every message role
+  on all three chat surfaces plus embeddings inputs — so a pasted `sk-…` or
+  PEM block doesn't flow to the upstream provider at all. Shares
+  `REKAI_GUARDRAILS_ACTION`: `flag` sets `X-Input-Secrets-Flag`, `block`
+  refuses with 403 `input_secret_detected` before any provider call. The
+  request is never silently mutated. Verified live: flag mode returns the
+  header and lets the request through; block mode returns 403 for chat,
+  stream, completions and embeddings.
+- **Per-end-user usage accounting via the OpenAI `user` field.** The gateway
+  has always accepted `user` on chat/embeddings requests (OpenAI
+  compatibility); it now drives `usage_by_user` in `/v1/usage` and
+  `/admin/usage` — `{client: {user: {requests, tokens, cost_usd}}}` — plus
+  `rekai_user_*_total{client,user}` series in `/metrics` and a "Usage by end
+  user" section on the web usage page. This is the per-end-user spend tracking
+  operators need to bill their own customers. The map is nested under the
+  owning client so tenant scoping slices it without leaking other tenants'
+  end-user ids; the pair cap shares `max_tracked_clients`. Verified live:
+  `POST /v1/chat` with `"user":"u1"` → `/v1/usage` shows u1 under the caller's
+  client; under `REKAI_API_KEYS` sk-b's view does not contain sk-a's users.
+- **`prompt_tokens_details.cached_tokens` on the OpenAI-compat surface.**
+  RekAI's flat `cache_read_tokens` was invisible to OpenAI SDKs, which read the
+  nested field — prompt-cache hits went unreported for drop-in callers. The
+  compat response (and `stream_options.include_usage` chunk) now emits the
+  nested object whenever a provider cache engaged; absent otherwise, matching
+  api.openai.com.
+- **`Authorization: Bearer` doubles as the BYOK key on
+  `/v1/chat/completions`.** When the gateway itself is unauthenticated (no
+  `REKAI_API_KEYS`, dynamic keys off), the SDK's own Bearer token is forwarded
+  to the provider — the OpenRouter convention — so
+  `OpenAI(base_url=rekai, api_key="sk-…")` works with zero extra headers.
+  `X-Provider-Key` still wins when both are sent, and once gateway auth is on
+  Bearer belongs to RekAI (forwarding a tenant's gateway key upstream would
+  leak it).
 - **`parallel_tool_calls` is forwarded, not just tolerated.** The flag was
   accepted on both request schemas (the compat surface via `extra="allow"`)
   and silently dropped — a caller could not stop a model from emitting

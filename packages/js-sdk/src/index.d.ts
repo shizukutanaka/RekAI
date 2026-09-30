@@ -19,6 +19,11 @@ export interface StreamSummary {
   cost_usd: number | null;
   estimated: boolean;
   tool_calls?: Record<string, unknown>[];
+  system_fingerprint?: string | null;
+  service_tier?: string | null;
+  /** Which stop sequence ended the turn (Anthropic reports it; OpenAI has
+   * no equivalent field, so it's absent for other providers). */
+  stop_sequence?: string;
   refusal?: string;
   annotations?: Record<string, unknown>[];
 }
@@ -107,6 +112,10 @@ export interface ChatResult {
    * budget. `null` when the provider didn't report one.
    */
   finish_reason: "stop" | "length" | "tool_calls" | "content_filter" | null;
+  /** Which stop sequence ended the turn, when the provider reports one
+   * (Anthropic's `stop_sequence` alongside `stop_reason: "stop_sequence"`).
+   * Null for providers that don't say — OpenAI's API has no equivalent field. */
+  stop_sequence: string | null;
   /**
    * Cosine similarity to the stored prompt when the semantic cache served this
    * response — i.e. the answer is to a *similar* prompt, not this one. Null on
@@ -133,6 +142,10 @@ export interface ChatResult {
   content_blocks: Record<string, unknown>[] | null;
   /** Unix timestamp the gateway produced the response. */
   created: number;
+  /** OpenAI backend fingerprint — which config served the call (with `seed`, a determinism aid). */
+  system_fingerprint?: string | null;
+  /** The service tier that actually handled the call when `service_tier` was "auto". */
+  service_tier?: string | null;
 }
 
 export interface ModelPricing {
@@ -193,6 +206,11 @@ export interface UsageSummary {
   usage_by_client: Record<
     string,
     { requests: number; tokens: number; cost_usd: number }
+  >;
+  /** Per-end-user volume and spend, nested under the owning client. */
+  usage_by_user: Record<
+    string,
+    Record<string, { requests: number; tokens: number; cost_usd: number }>
   >;
 }
 

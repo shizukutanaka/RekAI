@@ -56,6 +56,12 @@ class StreamSummary:
     estimated: bool
     tool_calls: list[dict] | None = None
     finish_reason: str | None = None
+    # OpenAI's response-side identifiers (see ProviderResult).
+    system_fingerprint: str | None = None
+    service_tier: str | None = None
+    # Which stop sequence ended the turn, when the provider reports one
+    # (Anthropic's `stop_sequence` alongside `stop_reason: "stop_sequence"`).
+    stop_sequence: str | None = None
     # Model refusal text (OpenAI `message.refusal`), streamed in refusal_delta
     # events and reproduced here in full for consumers that only read the summary.
     refusal: str | None = None
@@ -82,6 +88,11 @@ class ChatStreamEvent:
     annotations: list[dict] | None = None
     error: ProviderError | None = None
     summary: StreamSummary | None = None
+    # Provider metadata seen on the stream so far (OpenAI's
+    # system_fingerprint/service_tier): set on whichever event carried it —
+    # may arrive alone on the role-announcement chunk.
+    system_fingerprint: str | None = None
+    service_tier: str | None = None
     # Anthropic extended-thinking pieces — a thinking_delta chunk, the block's
     # closing signature, or a whole redacted_thinking block.
     thinking_delta: str | None = None
@@ -669,6 +680,9 @@ async def _handle_chat(
             cached=False,
             fallback_used=is_fallback,
             finish_reason=result.finish_reason,
+            system_fingerprint=result.system_fingerprint,
+            service_tier=result.service_tier,
+            stop_sequence=result.stop_sequence,
             thinking_blocks=result.thinking_blocks,
             citations=result.citations,
             extra_blocks=result.extra_blocks,
@@ -752,6 +766,7 @@ async def _handle_chat_stream(
     reported_usage: Usage | None = None
     reported_tool_calls: list[dict] | None = None
     reported_finish_reason: str | None = None
+    reported_stop_sequence: str | None = None
     reported_refusal: list[str] = []
     reported_annotations: list[dict] = []
     errored = False
@@ -774,7 +789,13 @@ async def _handle_chat_stream(
     extra_delta_shapes: dict[str, str] = {}
     extra_hits: list[str] = []
     try:
+        seen_fingerprint: str | None = None
+        seen_tier: str | None = None
         async for event in provider.stream_events(request, api_key):
+            if event.system_fingerprint is not None:
+                seen_fingerprint = event.system_fingerprint
+            if event.service_tier is not None:
+                seen_tier = event.service_tier
             if event.delta:
                 if thinking_redactor is not None:
                     tail = thinking_redactor.flush()
@@ -791,7 +812,18 @@ async def _handle_chat_stream(
                 completion.append(event.delta)
                 emitted = redactor.feed(event.delta) if redactor is not None else event.delta
                 if emitted:
-                    yield ChatStreamEvent(delta=emitted)
+                    yield ChatStreamEvent(
+                        delta=emitted,
+                        system_fingerprint=event.system_fingerprint,
+                        service_tier=event.service_tier,
+                    )
+            elif event.system_fingerprint is not None or event.service_tier is not None:
+                # Metadata-only provider event (e.g. the role-announcement
+                # chunk) — forward so transports can stamp it on their frames.
+                yield ChatStreamEvent(
+                    system_fingerprint=event.system_fingerprint,
+                    service_tier=event.service_tier,
+                )
             if event.refusal_delta:
                 # Refusal text is model output but not the answer; its own
                 # redactor keeps the holdback independent of the content stream.
@@ -894,6 +926,8 @@ async def _handle_chat_stream(
                 reported_tool_calls = event.tool_calls
             if event.finish_reason is not None:
                 reported_finish_reason = event.finish_reason
+            if event.stop_sequence is not None:
+                reported_stop_sequence = event.stop_sequence
         if redactor is not None:
             tail = redactor.flush()
             if tail:
@@ -957,6 +991,7 @@ async def _handle_chat_stream(
         metrics.record_tokens(usage.total_tokens, provider_name)
         metrics.record_cost(cost_usd)
         metrics.record_client_usage(client_id, usage.total_tokens, cost_usd)
+        metrics.record_user_usage(client_id, request.user, usage.total_tokens, cost_usd)
         if settings.client_budget_window_seconds is not None:
             metrics.record_client_budget_usage(
                 client_id, cost_usd, settings.client_budget_window_seconds, time.time()
@@ -970,6 +1005,9 @@ async def _handle_chat_stream(
                 estimated=estimated,
                 tool_calls=reported_tool_calls or None,
                 finish_reason=reported_finish_reason,
+                system_fingerprint=seen_fingerprint,
+                service_tier=seen_tier,
+                stop_sequence=reported_stop_sequence,
                 refusal="".join(reported_refusal) or None,
                 annotations=reported_annotations or None,
                 redacted=(

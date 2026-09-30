@@ -382,3 +382,144 @@ def test_native_stream_summary_reports_length() -> None:
         if line.startswith("data: ") and line != "data: [DONE]"
     ]
     assert any(e.get("finish_reason") == "length" for e in events)
+
+
+# --- stop_sequence -----------------------------------------------------------
+# Anthropic's finish signal is a pair: stop_reason "stop_sequence" plus the
+# *matched* sequence in `stop_sequence`. The reason alone normalizes to "stop",
+# which left a caller that sent several sequences unable to tell which one
+# fired — the same accept-then-drop pattern as the reason itself.
+
+
+async def test_anthropic_reports_which_stop_sequence_matched(monkeypatch) -> None:
+    _fake_post(
+        monkeypatch,
+        {
+            "model": "claude-sonnet-4-6",
+            "content": [{"type": "text", "text": "hi"}],
+            "stop_reason": "stop_sequence",
+            "stop_sequence": "END",
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        },
+    )
+    result = await AnthropicProvider().chat(_req("claude-sonnet-4-6"), api_key="k")
+    assert result.stop_sequence == "END"
+
+
+async def test_anthropic_stop_sequence_defaults_to_none(monkeypatch) -> None:
+    _fake_post(
+        monkeypatch,
+        {
+            "model": "claude-sonnet-4-6",
+            "content": [{"type": "text", "text": "hi"}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        },
+    )
+    result = await AnthropicProvider().chat(_req("claude-sonnet-4-6"), api_key="k")
+    assert result.stop_sequence is None
+
+
+async def test_anthropic_streaming_reports_the_matched_sequence(monkeypatch) -> None:
+    _fake_stream(
+        monkeypatch,
+        [
+            'data: {"type":"message_start","message":{"usage":{"input_tokens":5}}}',
+            'data: {"type":"content_block_delta","index":0,'
+            '"delta":{"type":"text_delta","text":"hi"}}',
+            'data: {"type":"message_delta","delta":{"stop_reason":"stop_sequence",'
+            '"stop_sequence":"END"},"usage":{"output_tokens":9}}',
+        ],
+    )
+    seq = None
+    async for ev in AnthropicProvider().stream_events(_req("claude-sonnet-4-6"), api_key="k"):
+        if ev.stop_sequence is not None:
+            seq = ev.stop_sequence
+    assert seq == "END"
+
+
+class StopSequenceProvider(Provider):
+    """A provider that ends on a caller-supplied stop sequence and says which."""
+
+    name = "stopper"
+    requires_key = False
+
+    async def chat(self, request, api_key) -> ProviderResult:
+        return ProviderResult(
+            content="done",
+            model=request.model,
+            usage=Usage(),
+            finish_reason="stop",
+            stop_sequence="END",
+        )
+
+    async def stream_events(self, request, api_key):
+        yield ProviderStreamEvent(delta="done")
+        yield ProviderStreamEvent(usage=Usage(), finish_reason="stop", stop_sequence="END")
+
+    async def list_models(self, api_key):
+        return ["stopper"]
+
+    async def list_embedding_models(self, api_key):
+        return []
+
+
+def _stopper_client() -> TestClient:
+    register_provider(StopSequenceProvider())
+    return TestClient(
+        create_app(
+            Settings(
+                environment="test",
+                default_provider="stopper",
+                rate_limit_enabled=False,
+            )
+        )
+    )
+
+
+def test_native_endpoint_reports_stop_sequence() -> None:
+    body = {"model": "stopper", "messages": [{"role": "user", "content": "hi"}]}
+    assert _stopper_client().post("/v1/chat", json=body).json()["stop_sequence"] == "END"
+
+
+def test_native_stream_summary_reports_stop_sequence() -> None:
+    body = {"model": "stopper", "messages": [{"role": "user", "content": "hi"}]}
+    with _stopper_client().stream("POST", "/v1/chat/stream", json=body) as resp:
+        raw = "".join(resp.iter_text())
+    events = [
+        json.loads(line[len("data: ") :])
+        for line in raw.splitlines()
+        if line.startswith("data: ") and line != "data: [DONE]"
+    ]
+    assert any(e.get("stop_sequence") == "END" for e in events)
+
+
+def test_anthropic_compat_reports_stop_sequence() -> None:
+    """The field's raison d'être: the Anthropic SDK reads message.stop_sequence."""
+    body = {
+        "model": "stopper",
+        "max_tokens": 64,
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+    assert _stopper_client().post("/v1/messages", json=body).json()["stop_sequence"] == "END"
+
+
+def test_anthropic_compat_stream_reports_stop_sequence() -> None:
+    body = {
+        "model": "stopper",
+        "max_tokens": 64,
+        "stream": True,
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+    with _stopper_client().stream("POST", "/v1/messages", json=body) as resp:
+        raw = "".join(resp.iter_text())
+    events = []
+    event = None
+    for line in raw.splitlines():
+        if line.startswith("event:"):
+            event = line[len("event:") :].strip()
+        elif line.startswith("data:") and event is not None:
+            events.append((event, json.loads(line[len("data:") :])))
+            event = None
+    deltas = [data for name, data in events if name == "message_delta"]
+    assert deltas and deltas[0]["delta"]["stop_sequence"] == "END"

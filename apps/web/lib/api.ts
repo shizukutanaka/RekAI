@@ -30,6 +30,9 @@ export interface ChatResponse {
   cached: boolean;
   created: number;
   finish_reason?: FinishReason;
+  /** Which stop sequence ended the turn (Anthropic reports it; absent on
+   * providers that don't — OpenAI's API has no equivalent field). */
+  stop_sequence?: string | null;
   cache_similarity?: number | null;
   redacted?: string[] | null;
   /** The model's refusal text when it declined; `content` is empty then. */
@@ -39,6 +42,10 @@ export interface ChatResponse {
   /** True when a fallback target answered because the primary failed. */
   fallback_used?: boolean;
   tool_calls?: Record<string, unknown>[] | null;
+  /** OpenAI backend fingerprint — which config served the call. */
+  system_fingerprint?: string | null;
+  /** The service tier that actually handled the call when `service_tier` was "auto". */
+  service_tier?: string | null;
   /** Anthropic thinking blocks produced before the answer (extended thinking). */
   thinking_blocks?: Record<string, unknown>[] | null;
   /** Anthropic citations on the answer's text (web-search sources). */
@@ -228,6 +235,7 @@ export interface UsageSummary {
   requests_by_provider: Record<string, number>;
   tokens_by_provider: Record<string, number>;
   usage_by_client: Record<string, ClientUsage>;
+  usage_by_user: Record<string, Record<string, ClientUsage>>;
 }
 
 const KEY_STORAGE = "rekai.providerKey";
@@ -458,7 +466,10 @@ export interface StreamSummary {
   cost_usd: number | null;
   estimated: boolean;
   tool_calls?: Record<string, unknown>[];
+  system_fingerprint?: string | null;
+  service_tier?: string | null;
   finish_reason?: FinishReason;
+  stop_sequence?: string | null;
   redacted?: string[] | null;
   refusal?: string;
   annotations?: Record<string, unknown>[];
@@ -485,6 +496,10 @@ export function parseSSEFrame(frame: string): SSEEvent {
   try {
     const event = JSON.parse(payload);
     if (event.delta) return { kind: "delta", text: event.delta };
+    // A refusal is reply text, not an error — surface it like a delta; the
+    // finish_reason in the summary marks it as a refusal. The summary frame
+    // also carries `refusal`, so it must still parse as a summary.
+    if (event.refusal && !event.usage) return { kind: "delta", text: event.refusal };
     if (event.citation) return { kind: "citation", citation: event.citation };
     if (event.error) return { kind: "error", message: event.detail || event.error };
     if (event.extra_block)
