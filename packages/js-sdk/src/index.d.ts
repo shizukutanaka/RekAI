@@ -117,6 +117,8 @@ export interface ChatResult {
   redacted: string[] | null;
   /** Anthropic thinking/redacted_thinking blocks produced before the answer. */
   thinking_blocks: Record<string, unknown>[] | null;
+  /** Anthropic citations on the answer's text (web-search sources), verbatim. */
+  citations: Record<string, unknown>[] | null;
   /** Anthropic server-side tool blocks (server_tool_use, tool-result blocks, mcp_*). */
   extra_blocks: Record<string, unknown>[] | null;
   /** Message-level fields the provider doesn't map (container, context_management, ...). */

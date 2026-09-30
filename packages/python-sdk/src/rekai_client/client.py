@@ -63,6 +63,8 @@ class ChatResult:
     #: Anthropic thinking/redacted_thinking blocks produced before the answer
     #: (extended thinking). Echo them back verbatim on the next turn.
     thinking_blocks: list[dict[str, Any]] | None = None
+    #: Anthropic citations on the answer's text (web-search sources), verbatim.
+    citations: list[dict[str, Any]] | None = None
     #: Anthropic server-side tool blocks (server_tool_use, tool-result blocks,
     #: mcp_*), verbatim. Echo them back verbatim on the next turn.
     extra_blocks: list[dict[str, Any]] | None = None
@@ -99,6 +101,7 @@ class ChatResult:
             refusal=data.get("refusal"),
             annotations=data.get("annotations"),
             thinking_blocks=data.get("thinking_blocks"),
+            citations=data.get("citations"),
             extra_blocks=data.get("extra_blocks"),
             extra_fields=data.get("extra_fields"),
             content_blocks=data.get("content_blocks"),

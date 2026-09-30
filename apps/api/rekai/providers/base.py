@@ -130,6 +130,10 @@ class ProviderResult:
     # Anthropic extended-thinking blocks (thinking/redacted_thinking), verbatim
     # — text and signature the caller must echo back on the next turn.
     thinking_blocks: list[dict] | None = None
+    # Anthropic citations on the answer's text (web-search sources), verbatim.
+    # Each carries its own cited_text, so a flat list stays faithful even over
+    # the provider's flat-text model.
+    citations: list[dict] | None = None
     # Anthropic server-side tool blocks (server_tool_use, web_search_tool_result,
     # mcp_tool_use/result, code_execution_tool_result, ...) and any block type
     # the provider doesn't map — verbatim, in upstream order. Keeping unknown
@@ -178,6 +182,8 @@ class StreamEvent:
     thinking_delta: str | None = None
     thinking_signature: str | None = None
     thinking_block: dict | None = None
+    # A web-search citation arriving inside a text block (citations_delta).
+    citation: dict | None = None
     # A non-standard content block streaming through verbatim: the upstream
     # content_block_start payload, one verbatim delta, or the completed block
     # at content_block_stop.

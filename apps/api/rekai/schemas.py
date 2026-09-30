@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Role = Literal["system", "user", "assistant", "tool"]
 
@@ -115,6 +115,40 @@ class ChatRequest(BaseModel):
         "temperature=1 under thinking, so the compat layer defaults to that "
         "when the caller left temperature unset.",
     )
+    context_management: dict[str, Any] | None = Field(
+        default=None,
+        description="Anthropic's `context_management` — context-editing rules "
+        "(clear old tool uses, clear thinking, compact). Forwarded verbatim "
+        "to Anthropic only; other providers ignore it.",
+    )
+    container: dict[str, Any] | str | None = Field(
+        default=None,
+        description="Anthropic's `container` — a container id (string) or "
+        "config object ({id, skills}) to reuse a code-execution container "
+        "across requests. Forwarded verbatim to Anthropic only.",
+    )
+    inference_geo: str | None = Field(
+        default=None,
+        description="Anthropic's `inference_geo` — data-residency region "
+        "(e.g. 'us'). Forwarded to Anthropic only.",
+    )
+    speed: str | None = Field(
+        default=None,
+        description="Anthropic's `speed` ('standard' | 'fast') — latency "
+        "preference billed differently upstream. Forwarded to Anthropic only.",
+    )
+    diagnostics: dict[str, Any] | None = Field(
+        default=None,
+        description="Anthropic's `diagnostics` — request-level diagnostics "
+        "(e.g. previous response id for prompt-cache divergence reporting). "
+        "Forwarded verbatim to Anthropic only.",
+    )
+    user_profile_id: str | None = Field(
+        default=None,
+        description="Anthropic's `user_profile_id` — the user profile to "
+        "attribute the request to. Sent to Anthropic only, as the "
+        "`anthropic-user-profile-id` header.",
+    )
     output_config: dict[str, Any] | None = Field(
         default=None,
         description="Anthropic's `output_config` — e.g. {'effort': 'medium'} "
@@ -155,6 +189,11 @@ class ChatRequest(BaseModel):
         "prompt prefixes are billed at a large discount); OpenAI caches "
         "automatically and ignores it. Per-message placement is also supported "
         "via a message's own cache_control.",
+    )
+    mcp_servers: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Anthropic MCP connector servers (forwarded verbatim to "
+        "Anthropic; ignored by other providers).",
     )
 
     @field_validator("stop", mode="before")
@@ -287,9 +326,23 @@ class AnthropicMessage(BaseModel):
 
 
 class AnthropicTool(BaseModel):
-    name: str
+    model_config = ConfigDict(extra="allow")
+
+    # Absent or "custom" -> a client tool (translated to an OpenAI function).
+    # Anything else is an Anthropic server tool (web_search_20250305,
+    # code_execution, computer_use, mcp_tool_use, ...) whose extra fields
+    # (max_uses, allowed_domains, ...) must pass through verbatim.
+    type: str | None = None
+    # Required for client tools; some server tools (mcp_toolset) have none.
+    name: str | None = None
     description: str | None = None
     input_schema: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _client_tool_needs_name(self) -> AnthropicTool:
+        if self.type in (None, "custom") and not self.name:
+            raise ValueError("client tools require a 'name'")
+        return self
 
 
 class AnthropicToolChoice(BaseModel):
@@ -315,9 +368,22 @@ class _AnthropicMessagesBase(BaseModel):
     tools: list[AnthropicTool] | None = None
     tool_choice: AnthropicToolChoice | None = None
     service_tier: str | None = None  # 'auto' | 'standard_only'
+    # Anthropic's MCP connector — remote MCP servers the provider calls
+    # itself ({name, url, type:"url", authorization_token?, tool_configuration?}).
+    # Forwarded verbatim to Anthropic; requires the mcp-client beta header.
+    mcp_servers: list[dict[str, Any]] | None = None
     # Anthropic's extended-thinking config, verbatim ({'type': 'enabled',
     # 'budget_tokens': N}). Declared so it isn't swallowed by extra=allow.
     thinking: dict[str, Any] | None = None
+    # Remaining real Anthropic request fields — verbatim, same
+    # swallow-by-extra=allow hazard. (`fallbacks` is deliberately absent:
+    # RekAI's own extension uses that name with different semantics.)
+    context_management: dict[str, Any] | None = None
+    container: dict[str, Any] | str | None = None
+    inference_geo: str | None = None
+    speed: str | None = None
+    diagnostics: dict[str, Any] | None = None
+    user_profile_id: str | None = None
     # Anthropic's output config, verbatim ({'effort': ...}, {'format': ...}).
     # Same swallow-by-extra=allow hazard.
     output_config: dict[str, Any] | None = None
@@ -429,6 +495,13 @@ class ChatResponse(BaseModel):
         "produced before its answer, verbatim (text + signature). Present only "
         "when thinking was enabled; the /v1/messages surface re-emits them as "
         "content blocks so the caller can echo them back verbatim.",
+    )
+    citations: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Anthropic citations on the answer's text (web-search "
+        "sources), verbatim — each carries its own cited_text. Present only "
+        "when the model cited sources; the /v1/messages surface attaches them "
+        "to the text block they belong to.",
     )
     extra_blocks: list[dict[str, Any]] | None = Field(
         default=None,
@@ -590,13 +663,23 @@ class ErrorResponse(BaseModel):
 
 class AdminKeyRequest(BaseModel):
     key: str = Field(..., min_length=1, description="The raw API key to add.")
+    expires_in_seconds: int | None = Field(
+        default=None,
+        gt=0,
+        description="Optional TTL for the key, in seconds (e.g. 86400 = 1 day).",
+    )
 
 
 class AdminKeyList(BaseModel):
     static: list[str] = Field(description="Masked REKAI_API_KEYS entries.")
     dynamic: list[str] = Field(description="Masked runtime-added keys.")
+    dynamic_expires_at: dict[str, float] = Field(
+        default_factory=dict,
+        description="Masked dynamic key → expiry unix timestamp (expiring keys only).",
+    )
 
 
 class AdminKeyResponse(BaseModel):
     status: Literal["added", "revoked"]
     key: str
+    expires_at: float | None = None
