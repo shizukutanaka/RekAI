@@ -122,6 +122,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every other call site.
 
 ### Security
+- **`Cache-Control: no-store` on data-bearing endpoints** (`/v1/*`,
+  `/admin/*`, `/metrics`). They serve per-client usage, model ACLs and key
+  listings — an intermediary or shared cache could previously persist and
+  replay them to another tenant. SSE routes keep their own `no-cache`.
 - **The Render blueprint now runs the API in production mode.** `deploy/
   render.yaml` never set `REKAI_ENVIRONMENT`, so the open-proxy guard only
   *warned* on the one deployment shape that is internet-facing by definition —

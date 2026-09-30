@@ -894,6 +894,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if tracestate:
             response.headers["tracestate"] = tracestate
         response.headers["X-Content-Type-Options"] = "nosniff"
+        # Data-bearing endpoints carry per-client usage, model ACLs and key
+        # listings — keep intermediary/shared caches from persisting or
+        # serving them to another tenant. SSE routes already send their own
+        # Cache-Control, so setdefault leaves it alone.
+        if request.url.path.startswith(("/v1/", "/admin/", "/metrics")):
+            response.headers.setdefault("Cache-Control", "no-store")
         access_logger.info(
             "%s %s -> %s %.1fms id=%s",
             request.method,

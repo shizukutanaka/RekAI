@@ -572,6 +572,10 @@ Trace Context**: an incoming `traceparent` is parsed and its `trace_id` is
 continued (RekAI emits a new span id) — or a fresh trace is started — returned as
 a `traceparent` response header and attached to the structured access log as
 `trace_id`, so RekAI slots into an OpenTelemetry-traced system without the SDK.
+Data-bearing endpoints (`/v1/*`, `/admin/*`, `/metrics`) also send
+`Cache-Control: no-store` — they carry per-client usage, model ACLs and key
+listings that a shared/intermediary cache must not persist or serve to
+another tenant. SSE routes keep their own `Cache-Control: no-cache`.
 
 The same `trace_id` is also forwarded to the **upstream provider** — every
 provider's outbound HTTP call (OpenAI, Anthropic, Gemini, Ollama, and any
