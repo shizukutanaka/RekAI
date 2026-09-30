@@ -125,6 +125,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no way to set it. An optional input now sends it (blank = model default);
   the result card already displays the actual vector length, so a provider
   that ignores the hint is visible rather than silent.
+- **`anthropic-beta` header forwarding on `POST /v1/messages`.** Anthropic
+  gates features behind beta headers (interleaved thinking, prompt-caching
+  scope, ...); a compat caller's header was dropped, silently disabling the
+  gated feature. It's now forwarded verbatim to Anthropic upstream and keyed
+  into the response cache (beta flags can change the response shape).
 - **`POST /v1/messages` accepts Anthropic server tools verbatim** —
   `web_search_20250305`, `code_execution_*`, `computer_use_*`,
   `mcp_tool_use`, etc. (any tool whose `type` isn't `custom`) are no longer
@@ -151,7 +156,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the native SSE stream emits `{"refusal": ...}` events, the OpenAI-compat
   surface reproduces `message.refusal`/`delta.refusal` chunks, and the
   Anthropic-compat surface folds the text into a content block with
-  `stop_reason: "refusal"` (Anthropic's own encoding). Both SDKs expose it
+  `stop_reason: "refusal"` (Anthropic's own encoding). The Anthropic provider
+  makes the reverse translation too: an upstream `stop_reason: "refusal"`
+  moves the refusal text block out of `content` and into `refusal`, matching
+  OpenAI's `content: null` + `message.refusal` shape. Both SDKs expose it
   (`ChatResult.refusal`, `on_refusal`/`onRefusal` stream hooks).
 - **Web-search citations pass through end-to-end.** OpenAI attaches
   `message.annotations` (e.g. `url_citation` entries) when a web-search model
