@@ -69,6 +69,50 @@ def test_registry_contains_builtin_providers() -> None:
     assert {"echo", "openai", "anthropic", "gemini", "ollama"} <= set(names)
 
 
+async def test_providers_see_the_request_scoped_settings() -> None:
+    # O-1: provider code calls current_settings(), which resolves to the
+    # Settings the service layer bound for this request — not the env-cached
+    # get_settings() singleton. Before the binding existed, a test had no way
+    # to reach a provider with anything but env configuration.
+    from rekai.cache import NullCache
+    from rekai.config import Settings, current_settings
+    from rekai.schemas import ChatMessage, ChatRequest
+    from rekai.service import handle_chat
+
+    class Probe(Provider):
+        name = "settings-probe"
+        requires_key = False
+        seen: Settings | None = None
+
+        async def chat(self, request, api_key) -> ProviderResult:
+            self.seen = current_settings()
+            return ProviderResult(content="ok", model=request.model)
+
+    probe = Probe()
+    register_provider(probe)
+    settings = Settings(environment="test", default_provider="echo", retry_max_attempts=1)
+    resp = await handle_chat(
+        ChatRequest(
+            model="x",
+            provider="settings-probe",
+            messages=[ChatMessage(role="user", content="hi")],
+        ),
+        None,
+        settings,
+        NullCache(),
+    )
+    assert resp.provider == "settings-probe"
+    assert probe.seen is settings
+
+
+def test_providers_fall_back_to_env_settings_outside_a_request() -> None:
+    # Unbound contexts (a provider invoked directly, import time) still read the
+    # env-cached Settings — the pre-O-1 behavior, preserved as the default.
+    from rekai.config import current_settings, get_settings
+
+    assert current_settings() is get_settings()
+
+
 def test_register_custom_provider() -> None:
     class Custom(Provider):
         name = "custom-test"
@@ -114,3 +158,36 @@ async def test_client_rebuilt_when_timeout_changes() -> None:
     rebuilt = provider._client(5.0)
     assert rebuilt is not first
     assert rebuilt.timeout.read == 5.0
+
+
+async def test_aclose_closes_the_pooled_client() -> None:
+    # Shutdown teardown: the pooled client must be closed and the slot cleared
+    # so a later _client() call builds fresh rather than reusing a dead pool.
+    provider = OpenAIProvider()
+    client = provider._client(30.0)
+    await provider.aclose()
+    assert client.is_closed
+    assert provider._http_client is None
+    rebuilt = provider._client(30.0)
+    assert rebuilt is not client and not rebuilt.is_closed
+
+
+async def test_aclose_without_client_is_a_noop() -> None:
+    provider = EchoProvider()
+    await provider.aclose()  # never built a client — must not raise
+    assert provider._http_client is None
+
+
+async def test_lifespan_shutdown_closes_provider_clients() -> None:
+    # The app's lifespan teardown drains every registered provider's pool.
+    from fastapi.testclient import TestClient
+
+    from rekai.config import Settings
+    from rekai.main import create_app
+
+    provider = OpenAIProvider()
+    register_provider(provider)
+    provider._client(30.0)
+    with TestClient(create_app(Settings(environment="test", default_provider="echo"))):
+        pass
+    assert provider._http_client is None
