@@ -266,6 +266,10 @@ def to_message(resp: ChatResponse) -> dict:
         "provider": resp.provider,
         "cost_usd": resp.cost_usd,
         "cached": resp.cached,
+        # OpenAI-side annotations (e.g. url_citation) don't translate to
+        # Anthropic's citations schema (it wants cited_text we don't have) —
+        # pass them through as an extra instead of dropping them.
+        **({"annotations": resp.annotations} if resp.annotations else {}),
     }
     # Message-level fields RekAI doesn't map (container, context_management,
     # ...) reattach verbatim — setdefault so they can never clobber the
