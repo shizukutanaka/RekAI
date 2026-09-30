@@ -39,6 +39,18 @@ before(async () => {
         if (req.headers["x-provider-key"] === "bad") {
           return send(res, 401, { error: "provider_error", detail: "no key" });
         }
+        if (raw.includes("__slow__")) {
+          // Holds the response past a short client timeout to exercise the
+          // AbortSignal path. Long enough to lose a 50ms race, short enough
+          // to win a 1s one.
+          return setTimeout(() => {
+            try {
+              send(res, 200, { provider: "echo", model: "echo", content: "Echo: hi" });
+            } catch {
+              // client already aborted — socket gone, nothing to write
+            }
+          }, 300);
+        }
         return send(res, 200, {
           id: "rekai-1",
           provider: "echo",
@@ -52,6 +64,12 @@ before(async () => {
         });
       }
       if (req.url === "/v1/chat/stream") {
+        if (raw.includes("__stall__")) {
+          // Sends one frame then hangs forever — the stream watchdog's job.
+          res.writeHead(200, { "Content-Type": "text/event-stream" });
+          res.write('data: {"delta": "Hello"}\n\n');
+          return; // never res.end()
+        }
         // Ride tool_calls on the summary event when the request asked for tools.
         const toolCalls = lastRequest.body && lastRequest.body.tools
           ? ',"tool_calls":[{"id":"c1","type":"function",' +
@@ -371,4 +389,51 @@ test("a long Retry-After returns the response instead of sleeping", async () => 
 
   assert.ok(Date.now() - started < 5000, "must not have waited on Retry-After");
   flake = { remaining: 0, status: 503, retryAfter: undefined, keys: [] };
+});
+
+test("chat forwards thinking", async () => {
+  const client = new RekAIClient(baseUrl);
+  await client.chat("claude-sonnet-4-6", [{ role: "user", content: "hi" }], {
+    thinking: { type: "enabled", budget_tokens: 256 },
+  });
+  assert.deepEqual(lastRequest.body.thinking, { type: "enabled", budget_tokens: 256 });
+});
+
+// --- Request timeout ----------------------------------------------------------
+// fetch has no built-in timeout: without `timeout`, a hung connection parked
+// chat()/stream() forever. The Python SDK bounds every call at 60s; this client
+// now does the same (and bounds the idle gap between stream chunks, not total
+// stream length).
+
+test("chat aborts when the server outlasts the timeout", async () => {
+  const client = new RekAIClient(baseUrl, { timeout: 0.05, maxRetries: 0 });
+  const started = Date.now();
+  await assert.rejects(() => client.chat("echo", "__slow__"));
+  assert.ok(Date.now() - started < 3000, "must not wait on the slow response");
+});
+
+test("chat succeeds when the response lands inside the timeout", async () => {
+  const client = new RekAIClient(baseUrl, { timeout: 1 });
+  const result = await client.chat("echo", "__slow__"); // server delays 300ms
+  assert.equal(result.content, "Echo: hi");
+});
+
+test("stream throws when a chunk takes longer than the timeout", async () => {
+  const client = new RekAIClient(baseUrl, { timeout: 0.05 });
+  const started = Date.now();
+  const chunks = [];
+  await assert.rejects(async () => {
+    for await (const c of client.stream("echo", "__stall__")) chunks.push(c);
+  }, (err) => err instanceof RekAIError && /idle/.test(err.message));
+  assert.equal(chunks.join(""), "Hello"); // got the one live frame, then stalled
+  assert.ok(Date.now() - started < 3000, "must not hang on the stalled stream");
+});
+
+test("stream stays open while chunks keep arriving", async () => {
+  // The timeout bounds the gap between chunks, not the whole stream — a
+  // steady stream longer than `timeout` must still complete.
+  const client = new RekAIClient(baseUrl, { timeout: 1 });
+  const chunks = [];
+  for await (const c of client.stream("echo", "hi")) chunks.push(c);
+  assert.equal(chunks.join(""), "Hello world");
 });
