@@ -5,8 +5,8 @@ selects a smaller output vector (cheaper storage, faster similarity) and
 `encoding_format` picks float vs base64 wire encoding. The schema tolerated
 neither (``extra="ignore"``), so a caller asking for a 256-dim embedding
 silently got the full-size one. Gemini maps the same idea to
-``outputDimensionality``; Ollama and echo have no such knobs — the params
-must not reach them.
+``outputDimensionality``; Ollama has no such knob — the params must not reach
+it. Echo honors ``dimensions`` itself so the parameter is exercisable keyless.
 """
 
 from __future__ import annotations
@@ -102,3 +102,15 @@ def test_dimensions_validated_at_schema(client: TestClient) -> None:
     assert resp.status_code == 422
     resp = client.post("/v1/embeddings", json={"model": "echo", "input": "hi", "dimensions": 8})
     assert resp.status_code == 200
+
+
+def test_echo_honors_dimensions(client: TestClient) -> None:
+    # Echo sizes its pseudo-embedding to `dimensions`, so the parameter is
+    # exercisable keyless; absent it stays at the default 16.
+    resp = client.post("/v1/embeddings", json={"model": "echo", "input": "hi", "dimensions": 8})
+    assert resp.status_code == 200
+    assert [len(v) for v in resp.json()["embeddings"]] == [8]
+
+    resp = client.post("/v1/embeddings", json={"model": "echo", "input": "hi"})
+    assert resp.status_code == 200
+    assert [len(v) for v in resp.json()["embeddings"]] == [16]  # unchanged default
