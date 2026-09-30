@@ -18,6 +18,7 @@ export default function AdminPage() {
   const [error, setError] = useState("");
   const [notConfigured, setNotConfigured] = useState(false);
   const [newKey, setNewKey] = useState("");
+  const [newKeyTtl, setNewKeyTtl] = useState("");
   const [revokeKeyValue, setRevokeKeyValue] = useState("");
   const [actionMsg, setActionMsg] = useState("");
   const [busy, setBusy] = useState(false);
@@ -64,9 +65,19 @@ export default function AdminPage() {
     setError("");
     setActionMsg("");
     try {
-      const res = await addAdminKey(adminKey, newKey.trim());
-      setActionMsg(`Added ${res.key}. Keep the raw key somewhere safe — it won't be shown again.`);
+      const ttl = newKeyTtl.trim() === "" ? undefined : Number(newKeyTtl);
+      const res = await addAdminKey(
+        adminKey,
+        newKey.trim(),
+        ttl !== undefined && Number.isFinite(ttl) && ttl > 0 ? ttl : undefined,
+      );
+      setActionMsg(
+        res.expires_at === null
+          ? `Added ${res.key}. Keep the raw key somewhere safe — it won't be shown again.`
+          : `Added ${res.key} (expires ${new Date(res.expires_at * 1000).toLocaleString()}). Keep the raw key somewhere safe — it won't be shown again.`,
+      );
       setNewKey("");
+      setNewKeyTtl("");
       await load(adminKey);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add key");
@@ -158,6 +169,12 @@ export default function AdminPage() {
                 {keys.dynamic.map((k) => (
                   <li key={k}>
                     <span>{k}</span>
+                    {keys.dynamic_expires_at[k] !== undefined && (
+                      <span className="hint">
+                        {" "}
+                        — expires {new Date(keys.dynamic_expires_at[k] * 1000).toLocaleString()}
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -172,6 +189,14 @@ export default function AdminPage() {
                 value={newKey}
                 placeholder="sk-rekai-new-tenant-key"
                 onChange={(e) => setNewKey(e.target.value)}
+              />
+              <input
+                value={newKeyTtl}
+                placeholder="TTL seconds (blank = no expiry)"
+                aria-label="Key TTL in seconds"
+                inputMode="numeric"
+                style={{ maxWidth: 220 }}
+                onChange={(e) => setNewKeyTtl(e.target.value)}
               />
               <button type="submit" disabled={busy || !newKey.trim()}>
                 Add

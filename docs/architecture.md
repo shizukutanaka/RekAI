@@ -1086,9 +1086,18 @@ adds a second, runtime-managed set of keys an operator can add or revoke
 through an admin API instead, e.g. to onboard a new tenant or cut off one
 that's misbehaving without restarting the process:
 
-- `GET /admin/keys` — list static and dynamic keys, masked (`sk-a…b123`).
-- `POST /admin/keys {"key": "..."}` — add a key (`201`).
+- `GET /admin/keys` — list static and dynamic keys, masked (`sk-a…b123`);
+  `dynamic_expires_at` maps each expiring masked key to its unix timestamp.
+- `POST /admin/keys {"key": "...", "expires_in_seconds": N}` — add a key
+  (`201`); the optional TTL mints a key that stops authenticating on its own
+  (trial tenants, incident access — LiteLLM's `expires` equivalent). The
+  response echoes `expires_at`.
 - `DELETE /admin/keys/{key}` — revoke a key (`200`, or `404` if unknown).
+
+An expired key fails auth exactly like a revoked one and drops out of the
+list response; it stays in the store blob until the next write rather than
+being swept lazily. Blobs written by versions before expiry existed (a bare
+key list) are migrated to the `{key: expires_at|null}` form on first write.
 
 The web app's `/admin` page wraps all three in a form instead of curl-only
 access — its own admin-key field (`rekai.adminKey` in `localStorage`, a third
