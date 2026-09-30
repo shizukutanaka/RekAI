@@ -850,6 +850,26 @@ async def handle_chat_stream(
         )
 
 
+def _check_embedding_dimensions(
+    provider_name: str, provider: Provider | None, dimensions: int | None
+) -> None:
+    limit = provider.max_embedding_dimensions if provider is not None else None
+    if limit is not None and dimensions is not None and dimensions > limit:
+        raise ProviderError(
+            f"Provider '{provider_name}' caps embedding dimensions at {limit}.",
+            status_code=400,
+        )
+
+
+def check_embeddings_dimensions(request: EmbeddingsRequest, settings: Settings) -> None:
+    """Apply the provider's declared ``dimensions`` cap ahead of any cache hit
+    or idempotent replay — both return a stored response without calling the
+    provider, so an oversized entry written before the cap existed would
+    otherwise be served verbatim under the new limit."""
+    provider_name = resolve_provider(request.provider, request.model, settings)
+    _check_embedding_dimensions(provider_name, get_provider(provider_name), request.dimensions)
+
+
 async def handle_embeddings(
     request: EmbeddingsRequest,
     api_key: str | None,
@@ -862,6 +882,7 @@ async def handle_embeddings(
     if provider is None:
         raise ProviderError(f"Unknown provider '{provider_name}'.", status_code=400)
     metrics.record_request(provider_name)
+    _check_embedding_dimensions(provider_name, provider, request.dimensions)
 
     inputs = [request.input] if isinstance(request.input, str) else list(request.input)
     if not inputs:
@@ -878,8 +899,16 @@ async def handle_embeddings(
     if use_cache:
         cached_raw = await cache.get(key)
         if cached_raw is not None:
-            metrics.record_cache(hit=True)
-            return EmbeddingsResponse(**{**json.loads(cached_raw), "cached": True})
+            cached = json.loads(cached_raw)
+            vectors = cached.get("embeddings") or []
+            # Entries written before the provider honored this `dimensions`
+            # value hold the old size under the same key — a hit must not
+            # return a wrong-length vector until the TTL expires (Redis can
+            # carry one across a deploy). Fall through and recompute; the
+            # store below overwrites the stale entry.
+            if request.dimensions is None or all(len(v) == request.dimensions for v in vectors):
+                metrics.record_cache(hit=True)
+                return EmbeddingsResponse(**{**cached, "cached": True})
         metrics.record_cache(hit=False)
 
     started = time.perf_counter()
