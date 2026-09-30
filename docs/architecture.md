@@ -274,9 +274,11 @@ SDK appends `v1/messages` itself) works unmodified:
   (string or text-block list) becomes the system message, `tool_use` blocks on
   an assistant turn become OpenAI-shaped `tool_calls`, `tool_result` blocks
   become `role="tool"` messages, and `tool_choice` `{type: auto|none|any|tool}`
-  maps to `auto`/`none`/`required`/named function. Non-text blocks RekAI
-  cannot carry (images, documents, thinking) are a readable 400, never a
-  silent drop. `max_tokens` stays required, as upstream. A RekAI `provider`
+  maps to `auto`/`none`/`required`/named function. `thinking` config and
+  assistant `thinking`/`redacted_thinking` blocks ride verbatim to Anthropic
+  (which requires them echoed back in multi-turn thinking); non-text blocks
+  RekAI cannot carry (images, documents) are a readable 400, never a silent
+  drop. `max_tokens` stays required, as upstream. A RekAI `provider`
   extension field is accepted alongside model-prefix routing.
 - **Responses** translate back to Anthropic's `type: "message"` shape with
   `stop_reason` mapped (`stop`→`end_turn`, `length`→`max_tokens`,
@@ -294,6 +296,13 @@ SDK appends `v1/messages` itself) works unmodified:
   the SDK. Type map: 401 `authentication_error`, 403 `permission_error`,
   400/422 `invalid_request_error`, 429 `rate_limit_error`, 529
   `overloaded_error`, otherwise `api_error`.
+
+`POST /v1/messages/count_tokens` answers the SDK's pre-flight token check
+(`client.messages.count_tokens`) with the same script-aware estimate the
+pricing path uses — Anthropic's own endpoint returns an exact tokenizer
+count, which a self-hosted gateway can't reproduce offline, so the value is
+deliberately an estimate (documented as such); it makes no upstream call and
+has no billing side effects.
 
 ### Why generation stopped
 
@@ -563,6 +572,10 @@ Trace Context**: an incoming `traceparent` is parsed and its `trace_id` is
 continued (RekAI emits a new span id) — or a fresh trace is started — returned as
 a `traceparent` response header and attached to the structured access log as
 `trace_id`, so RekAI slots into an OpenTelemetry-traced system without the SDK.
+Data-bearing endpoints (`/v1/*`, `/admin/*`, `/metrics`) also send
+`Cache-Control: no-store` — they carry per-client usage, model ACLs and key
+listings that a shared/intermediary cache must not persist or serve to
+another tenant. SSE routes keep their own `Cache-Control: no-cache`.
 
 The same `trace_id` is also forwarded to the **upstream provider** — every
 provider's outbound HTTP call (OpenAI, Anthropic, Gemini, Ollama, and any
@@ -764,10 +777,13 @@ There are two ways to override or extend the table:
 
 ## Guardrails
 
-With `REKAI_GUARDRAILS_ENABLED=true`, RekAI scans the **user** messages of a
-chat / chat-stream request for common prompt-injection / jailbreak phrasings
+With `REKAI_GUARDRAILS_ENABLED=true`, RekAI scans the **user** and **tool**
+messages of a chat / chat-stream request for common prompt-injection / jailbreak
+phrasings
 ("ignore previous instructions", "reveal your system prompt", "developer mode
-enabled", …) before calling a provider. `REKAI_GUARDRAILS_ACTION=flag` (default)
+enabled", …) before calling a provider. Tool results are scanned because they
+are external content — the canonical *indirect* injection vector (the payload
+arrives in fetched data, not in the user's own text). `REKAI_GUARDRAILS_ACTION=flag` (default)
 lets the request through with an `X-Guardrail-Flag: <pattern>` header so the
 caller can decide; `block` rejects it with `403 guardrail_blocked`. This is a
 **heuristic first layer** (OWASP LLM01), not a security boundary — obfuscated or
@@ -843,10 +859,13 @@ Two distinct keys are in play. The **gateway** key authenticates the *client to
 RekAI*: set `REKAI_API_KEYS` (comma-separated) and `/v1/*` then requires
 `Authorization: Bearer <key>`, compared in constant time; missing/invalid →
 `401` with `WWW-Authenticate: Bearer`. With no keys configured the gateway is
-open (the default). System endpoints (`/health`, `/metrics`, `/`, `/docs`) stay
+open (the default). System endpoints (`/health`, `/metrics`, `/`) stay
 open for liveness probes and scraping — except `/metrics`, which can
 optionally be locked behind the same Bearer key too (see below), since it
 carries a per-client cost breakdown that scraping doesn't need to be public.
+`/docs`, `/redoc` and `/openapi.json` are served by default but **off in
+`production`** (`REKAI_DOCS_ENABLED` overrides either way): a public Swagger
+UI enumerates the request schema of every route, including `/admin/*`.
 This is separate from **BYOK** below, which is the *upstream provider* key.
 
 ### The one configuration RekAI refuses to serve

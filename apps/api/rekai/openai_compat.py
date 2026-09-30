@@ -20,6 +20,7 @@ from rekai.schemas import (
     ChatMessage,
     ChatRequest,
     ChatResponse,
+    CompletionUsage,
     ContentPart,
     OpenAIChatMessage,
     Usage,
@@ -136,6 +137,7 @@ def to_chat_completion(resp: ChatResponse) -> ChatCompletionResponse:
                     role="assistant",
                     content=resp.content or None,
                     tool_calls=resp.tool_calls,
+                    annotations=resp.annotations,
                 ),
                 # The provider's own reason when it gave one. The fallback
                 # is the old behavior, kept only for responses that predate
@@ -145,7 +147,16 @@ def to_chat_completion(resp: ChatResponse) -> ChatCompletionResponse:
                 finish_reason=resp.finish_reason or ("tool_calls" if resp.tool_calls else "stop"),
             )
         ],
-        usage=resp.usage,
+        # Emit OpenAI's nested completion_tokens_details.reasoning_tokens in
+        # addition to the flat field — SDKs read the nested shape.
+        usage=CompletionUsage(
+            **resp.usage.model_dump(),
+            completion_tokens_details=(
+                {"reasoning_tokens": resp.usage.reasoning_tokens}
+                if resp.usage.reasoning_tokens
+                else None
+            ),
+        ),
         provider=resp.provider,
         cost_usd=resp.cost_usd,
         cached=resp.cached,
@@ -177,6 +188,14 @@ def chunk_delta(chunk_id: str, created: int, model: str, text: str) -> dict:
     return chunk
 
 
+def chunk_annotations(chunk_id: str, created: int, model: str, annotations: list[dict]) -> dict:
+    # OpenAI streams annotations (e.g. web-search url_citations) complete inside
+    # one delta chunk — SDKs append them onto the assembled message.
+    chunk = _chunk_base(chunk_id, created, model)
+    chunk["choices"] = [{"index": 0, "delta": {"annotations": annotations}, "finish_reason": None}]
+    return chunk
+
+
 def chunk_tool_calls(chunk_id: str, created: int, model: str, tool_calls: list[dict]) -> dict:
     # The internal pipeline yields fully-assembled tool calls in one shot; OpenAI
     # streaming requires an index per call, so attach one. A single chunk with
@@ -199,6 +218,8 @@ def chunk_usage(chunk_id: str, created: int, model: str, usage: Usage) -> dict:
     chunk = _chunk_base(chunk_id, created, model)
     chunk["choices"] = []
     chunk["usage"] = usage.model_dump()
+    if usage.reasoning_tokens:
+        chunk["usage"]["completion_tokens_details"] = {"reasoning_tokens": usage.reasoning_tokens}
     return chunk
 
 

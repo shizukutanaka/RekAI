@@ -1,6 +1,10 @@
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
+  /** Anthropic server-side tool blocks echoed back verbatim on assistant turns. */
+  extra_blocks?: Record<string, unknown>[];
+  /** Ordered verbatim content array for an assistant turn — replays the exact upstream sequence. */
+  content_blocks?: Record<string, unknown>[];
 }
 
 export interface FallbackTarget {
@@ -15,6 +19,7 @@ export interface StreamSummary {
   cost_usd: number | null;
   estimated: boolean;
   tool_calls?: Record<string, unknown>[];
+  annotations?: Record<string, unknown>[];
 }
 
 export interface ChatOptions {
@@ -48,14 +53,22 @@ export interface ChatOptions {
   /** OpenAI's `web_search_options` — hosted web-search config (context size,
    * user location). OpenAI-compatible providers only. */
   webSearchOptions?: Record<string, unknown>;
+  /** Anthropic extended thinking config, e.g.
+   * `{type: "enabled", budget_tokens: 1024}` — forwarded verbatim to Anthropic
+   * upstreams. Thinking blocks come back on `ChatResult.thinking_blocks`. */
+  thinking?: Record<string, unknown>;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
+  /** Called with citations etc. (e.g. web-search url_citation entries). */
+  onAnnotations?: (annotations: Record<string, unknown>[]) => void;
 }
 
 export interface Usage {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+  /** Breakdown of completion_tokens spent on reasoning (o-series, Gemini thinking). */
+  reasoning_tokens?: number;
 }
 
 export interface ChatResult {
@@ -81,8 +94,18 @@ export interface ChatResult {
    */
   cache_similarity: number | null;
   fallback_used: boolean;
+  /** Citations etc. attached to the answer (e.g. web-search url_citation). */
+  annotations?: Record<string, unknown>[] | null;
   /** Secret patterns scrubbed from `content` by the output-redaction guardrail. */
   redacted: string[] | null;
+  /** Anthropic thinking/redacted_thinking blocks produced before the answer. */
+  thinking_blocks: Record<string, unknown>[] | null;
+  /** Anthropic server-side tool blocks (server_tool_use, tool-result blocks, mcp_*). */
+  extra_blocks: Record<string, unknown>[] | null;
+  /** Message-level fields the provider doesn't map (container, context_management, ...). */
+  extra_fields: Record<string, unknown> | null;
+  /** The upstream content array verbatim, in emitted order. Echo it back on the next turn. */
+  content_blocks: Record<string, unknown>[] | null;
   /** Unix timestamp the gateway produced the response. */
   created: number;
 }
@@ -155,6 +178,23 @@ export type Messages = string | ChatMessage[];
 export interface RekAIClientOptions {
   providerKey?: string;
   gatewayKey?: string;
+  /**
+   * Automatic retries for transient failures (network errors, 429/502/503/504),
+   * honoring Retry-After. Default 2; set 0 to disable.
+   */
+  maxRetries?: number;
+  /** Seconds between attempts, doubled each retry. Default 0.5. */
+  retryBackoff?: number;
+  /**
+   * Cap (seconds) on honoring a Retry-After. A longer value returns the
+   * response instead of sleeping. Default 60.
+   */
+  maxRetryDelay?: number;
+  /**
+   * Timeout in seconds: bounds each non-streaming request and the idle gap
+   * between stream chunks (not total stream length). Default 60; 0 disables.
+   */
+  timeout?: number;
 }
 
 export class RekAIClient {

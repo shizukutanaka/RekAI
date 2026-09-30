@@ -8,6 +8,7 @@ implementing this small interface and registering it.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
@@ -115,6 +116,27 @@ class ProviderResult:
     usage: Usage = field(default_factory=Usage)
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    # Web-search citations etc. (OpenAI `message.annotations`) — raw dicts,
+    # passed through verbatim so the caller sees what the model cited.
+    annotations: list[dict] | None = None
+    # Anthropic extended-thinking blocks (thinking/redacted_thinking), verbatim
+    # — text and signature the caller must echo back on the next turn.
+    thinking_blocks: list[dict] | None = None
+    # Anthropic server-side tool blocks (server_tool_use, web_search_tool_result,
+    # mcp_tool_use/result, code_execution_tool_result, ...) and any block type
+    # the provider doesn't map — verbatim, in upstream order. Keeping unknown
+    # types verbatim is forward-compatible: new Anthropic blocks pass through
+    # untouched instead of vanishing.
+    extra_blocks: list[dict] | None = None
+    # The upstream content array verbatim — the ordered sequence the provider
+    # actually emitted (text, thinking, tool_use, and extra blocks interleaved
+    # in upstream order). Flattening loses that order, so the verbatim copy
+    # backs the /v1/messages surface and history echo.
+    content_blocks: list[dict] | None = None
+    # Message-level fields the provider doesn't map (container for code
+    # execution, context_management edit reports, ...) — verbatim, so new
+    # upstream fields surface instead of vanishing.
+    extra_fields: dict | None = None
 
 
 @dataclass
@@ -134,6 +156,22 @@ class StreamEvent:
     usage: Usage | None = None
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    # OpenAI streams annotations complete inside one delta chunk.
+    annotations: list[dict] | None = None
+    # Anthropic extended-thinking stream pieces: a thinking_delta text chunk,
+    # the block's closing signature, or a whole redacted_thinking block.
+    thinking_delta: str | None = None
+    thinking_signature: str | None = None
+    thinking_block: dict | None = None
+    # A non-standard content block streaming through verbatim: the upstream
+    # content_block_start payload, one verbatim delta, or the completed block
+    # at content_block_stop.
+    extra_block_start: dict | None = None
+    extra_block_delta: dict | None = None
+    extra_block: dict | None = None
+    # Message-level fields arriving on message_start that the provider
+    # doesn't map (container, context_management, ...), verbatim.
+    extra_fields: dict | None = None
 
 
 class Provider(ABC):
@@ -144,6 +182,12 @@ class Provider(ABC):
 
     #: Whether this provider requires an API key (server-side or BYOK).
     requires_key: bool = True
+
+    #: Largest ``dimensions`` value this provider will embed — enforced before
+    #: the embeddings cache lookup and idempotent replay, since both serve
+    #: stored responses without calling the provider. ``None`` means the
+    #: request value is forwarded verbatim (the contract for real providers).
+    max_embedding_dimensions: int | None = None
 
     def __init__(self) -> None:
         self._http_client: httpx.AsyncClient | None = None
@@ -189,6 +233,25 @@ class Provider(ABC):
             self._http_client_loop = loop
             self._http_client_timeout = timeout
         return self._http_client
+
+    async def aclose(self) -> None:
+        """Close the persistent client, if one was built.
+
+        Providers are process-lifetime singletons, but their connection pools
+        should drain politely on app shutdown rather than be severed when the
+        loop ends. Tolerant by construction: a client whose loop already ended
+        (or a test double without ``aclose``) is dropped without failing the
+        shutdown path.
+        """
+        # Subclasses that skip ``super().__init__()`` (test doubles, minimal
+        # stubs) may not have the attribute at all — teardown must not trip on it.
+        client = getattr(self, "_http_client", None)
+        self._http_client = None
+        self._http_client_loop = None
+        self._http_client_timeout = None
+        if client is not None:
+            with contextlib.suppress(Exception):
+                await client.aclose()
 
     @abstractmethod
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
