@@ -327,6 +327,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged; no behavior change for env-configured deployments.
 
 ### Added
+- **Cache-miss singleflight.** N concurrent identical requests that all miss
+  the exact cache no longer all call the provider: the first claims an atomic
+  in-flight sentinel and the rest poll briefly (bounded by 10s and the request
+  deadline) for the stored result — served with `cached: true` — or proceed to
+  the provider themselves when the claim holder fails. Applies to both
+  `/v1/chat` and `/v1/embeddings` (bulk-indexing jobs issue identical
+  embedding calls in bursts). Fail-open; counts absorbed duplicates as
+  `rekai_cache_fills_coalesced_total` (subset of `rekai_cache_hits_total`,
+  also in `/v1/usage` as `cache_fills_coalesced_total`). Verified live: two
+  simultaneous identical requests → one provider call.
 - **`GET /v1/models/{id}`** — the OpenAI-compat "retrieve a model" endpoint
   (`client.models.retrieve("…")` in the OpenAI SDK). Returns the same
   `ModelInfo` the list endpoint reports; unknown ids get a 404 in the OpenAI

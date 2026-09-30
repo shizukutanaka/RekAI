@@ -226,6 +226,7 @@ export interface UsageSummary {
   cache_hits_total: number;
   cache_misses_total: number;
   semantic_cache_hits_total?: number;
+  cache_fills_coalesced_total?: number;
   errors_total: number;
   fallbacks_total: number;
   retries_total: number;
