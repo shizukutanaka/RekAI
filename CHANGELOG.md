@@ -316,6 +316,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged; no behavior change for env-configured deployments.
 
 ### Added
+- **`Authorization: Bearer` doubles as the BYOK key on
+  `/v1/chat/completions`.** When the gateway itself is unauthenticated (no
+  `REKAI_API_KEYS`, dynamic keys off), the SDK's own Bearer token is forwarded
+  to the provider — the OpenRouter convention — so
+  `OpenAI(base_url=rekai, api_key="sk-…")` works with zero extra headers.
+  `X-Provider-Key` still wins when both are sent, and once gateway auth is on
+  Bearer belongs to RekAI (forwarding a tenant's gateway key upstream would
+  leak it).
 - **`parallel_tool_calls` is forwarded, not just tolerated.** The flag was
   accepted on both request schemas (the compat surface via `extra="allow"`)
   and silently dropped — a caller could not stop a model from emitting
