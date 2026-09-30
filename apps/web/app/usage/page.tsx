@@ -71,6 +71,14 @@ export default function UsagePage() {
     ? Object.entries(usage.usage_by_client ?? {}).sort((a, b) => b[1].requests - a[1].requests)
     : [];
 
+  const users = usage
+    ? Object.entries(usage.usage_by_user ?? {})
+        .flatMap(([client, perUser]) =>
+          Object.entries(perUser).map(([user, u]) => ({ client, user, ...u })),
+        )
+        .sort((a, b) => b.requests - a.requests)
+    : [];
+
   return (
     <div className="page">
       <div className="page-head">
@@ -146,6 +154,35 @@ export default function UsagePage() {
                   <div key={id} className="bar-row client-usage">
                     <span className="bar-label" title={id}>
                       {id}
+                    </span>
+                    <div className="bar-track">
+                      <div
+                        className="bar-fill"
+                        style={{ width: pct(u.requests, usage.requests_total) }}
+                      />
+                    </div>
+                    <span className="bar-count">
+                      {u.requests} req · {u.tokens} tok · ${u.cost_usd.toFixed(4)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {users.length > 0 && (
+            <>
+              <h3 className="section">Usage by end user</h3>
+              <p className="hint">
+                Requests carrying the OpenAI <code>user</code> field, shown under the
+                gateway key that sent them. With gateway auth on this is already scoped
+                to your own key.
+              </p>
+              <div className="bars">
+                {users.map((u) => (
+                  <div key={`${u.client}:${u.user}`} className="bar-row client-usage">
+                    <span className="bar-label" title={`${u.client} / ${u.user}`}>
+                      {u.user}
                     </span>
                     <div className="bar-track">
                       <div

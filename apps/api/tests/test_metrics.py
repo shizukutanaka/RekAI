@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 import rekai.main as main_module
 from rekai.config import Settings
 from rekai.main import create_app
-from rekai.metrics import Metrics
+from rekai.metrics import Metrics, merge_snapshots
 from rekai.metrics_store import NullMetricsStore
 
 
@@ -661,3 +661,129 @@ def test_hard_body_cap_rejection_is_recorded() -> None:
         )
     finally:
         main_module.metrics.seed({})
+
+
+def test_user_usage_tracked_under_owning_client() -> None:
+    m = Metrics()
+    m.record_client_usage("client-a", 10, 0.01)
+    m.record_user_usage("client-a", "user-1", 10, 0.01)
+    m.record_user_usage("client-a", "user-2", 5, None)
+    m.record_user_usage("client-b", "user-1", 3, 0.001)
+    assert m.usage_by_user == {
+        "client-a": {
+            "user-1": {"requests": 1, "tokens": 10, "cost_usd": 0.01},
+            "user-2": {"requests": 1, "tokens": 5, "cost_usd": 0.0},
+        },
+        "client-b": {"user-1": {"requests": 1, "tokens": 3, "cost_usd": 0.001}},
+    }
+
+
+def test_user_usage_ignores_absent_and_empty_user() -> None:
+    m = Metrics()
+    m.record_user_usage("c", None, 10, 0.1)
+    m.record_user_usage("c", "", 10, 0.1)
+    assert m.usage_by_user == {}
+
+
+def test_user_usage_capped_across_all_pairs() -> None:
+    m = Metrics(max_tracked_clients=3)
+    m.record_user_usage("c", "u1", 1, None)
+    m.record_user_usage("c", "u2", 1, None)
+    m.record_user_usage("d", "u3", 1, None)
+    m.record_user_usage("c", "u4", 1, None)  # evicts one of the quiet pairs
+    total = sum(len(u) for u in m.usage_by_user.values())
+    assert total == 3
+
+
+def test_user_usage_in_snapshot_and_seed() -> None:
+    m = Metrics()
+    m.record_user_usage("c", "u", 7, 0.5)
+    m2 = Metrics()
+    m2.seed(m.snapshot())
+    assert m2.usage_by_user == {"c": {"u": {"requests": 1, "tokens": 7, "cost_usd": 0.5}}}
+
+
+def test_merge_snapshots_combines_per_user() -> None:
+    merged = merge_snapshots(
+        [
+            {"usage_by_user": {"c": {"u": {"requests": 1, "tokens": 5, "cost_usd": 0.1}}}},
+            {
+                "usage_by_user": {
+                    "c": {"u": {"requests": 2, "tokens": 6, "cost_usd": 0.2}},
+                    "d": {"v": {"requests": 1, "tokens": 1, "cost_usd": 0.01}},
+                }
+            },
+        ]
+    )
+    assert merged["usage_by_user"]["c"]["u"]["requests"] == 3
+    assert merged["usage_by_user"]["d"]["v"]["tokens"] == 1
+
+
+def test_render_escapes_user_labels() -> None:
+    m = Metrics()
+    m.record_user_usage('c"x', "u\n1", 1, None)
+    out = m.render()
+    assert 'user="u\\n1"' in out
+
+
+def test_chat_user_lands_in_usage_by_user(client: TestClient) -> None:
+    resp = client.post(
+        "/v1/chat",
+        json={
+            "model": "echo",
+            "messages": [{"role": "user", "content": "hi"}],
+            "user": "tenant-end-user-1",
+        },
+    )
+    assert resp.status_code == 200
+    usage = client.get("/v1/usage").json()
+    assert "tenant-end-user-1" in str(usage["usage_by_user"])
+
+
+def test_openai_compat_user_is_forwarded_to_accounting(client: TestClient) -> None:
+    resp = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "echo",
+            "messages": [{"role": "user", "content": "hi"}],
+            "user": "openai-end-user",
+        },
+    )
+    assert resp.status_code == 200
+    usage = client.get("/v1/usage").json()
+    assert "openai-end-user" in str(usage["usage_by_user"])
+
+
+def test_stream_user_is_accounted(client: TestClient) -> None:
+    resp = client.post(
+        "/v1/chat/stream",
+        json={
+            "model": "echo",
+            "messages": [{"role": "user", "content": "hi"}],
+            "user": "stream-user",
+        },
+    )
+    assert resp.status_code == 200
+    usage = client.get("/v1/usage").json()
+    assert "stream-user" in str(usage["usage_by_user"])
+
+
+def test_usage_by_user_scoped_to_caller_under_auth() -> None:
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        rate_limit_enabled=False,
+        api_keys="sk-a,sk-b",
+    )
+    client = TestClient(create_app(settings))
+    body = {
+        "model": "echo",
+        "messages": [{"role": "user", "content": "hi"}],
+        "user": "a-user",
+    }
+    client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-a"})
+    # sk-b's view must not contain sk-a's end user.
+    usage_b = client.get("/v1/usage", headers={"Authorization": "Bearer sk-b"}).json()
+    assert "a-user" not in str(usage_b["usage_by_user"])
+    usage_a = client.get("/v1/usage", headers={"Authorization": "Bearer sk-a"}).json()
+    assert "a-user" in str(usage_a["usage_by_user"])

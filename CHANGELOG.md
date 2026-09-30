@@ -330,6 +330,27 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   embeddings), enforcement is best-effort/process-local like the budget cap,
   and window counters stay out of the persisted snapshot for the same reason
   the budget window does.
+- **Input-side secret detection** (`REKAI_INPUT_SECRETS_ENABLED`, opt-in).
+  Output redaction already scrubbed secrets the *model* emitted; this runs the
+  same pattern set against caller-supplied request text — every message role
+  on all three chat surfaces plus embeddings inputs — so a pasted `sk-…` or
+  PEM block doesn't flow to the upstream provider at all. Shares
+  `REKAI_GUARDRAILS_ACTION`: `flag` sets `X-Input-Secrets-Flag`, `block`
+  refuses with 403 `input_secret_detected` before any provider call. The
+  request is never silently mutated. Verified live: flag mode returns the
+  header and lets the request through; block mode returns 403 for chat,
+  stream, completions and embeddings.
+- **Per-end-user usage accounting via the OpenAI `user` field.** The gateway
+  has always accepted `user` on chat/embeddings requests (OpenAI
+  compatibility); it now drives `usage_by_user` in `/v1/usage` and
+  `/admin/usage` — `{client: {user: {requests, tokens, cost_usd}}}` — plus
+  `rekai_user_*_total{client,user}` series in `/metrics` and a "Usage by end
+  user" section on the web usage page. This is the per-end-user spend tracking
+  operators need to bill their own customers. The map is nested under the
+  owning client so tenant scoping slices it without leaking other tenants'
+  end-user ids; the pair cap shares `max_tracked_clients`. Verified live:
+  `POST /v1/chat` with `"user":"u1"` → `/v1/usage` shows u1 under the caller's
+  client; under `REKAI_API_KEYS` sk-b's view does not contain sk-a's users.
 - **`prompt_tokens_details.cached_tokens` on the OpenAI-compat surface.**
   RekAI's flat `cache_read_tokens` was invisible to OpenAI SDKs, which read the
   nested field — prompt-cache hits went unreported for drop-in callers. The

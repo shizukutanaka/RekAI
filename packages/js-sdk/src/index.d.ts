@@ -201,6 +201,11 @@ export interface UsageSummary {
     string,
     { requests: number; tokens: number; cost_usd: number }
   >;
+  /** Per-end-user volume and spend, nested under the owning client. */
+  usage_by_user: Record<
+    string,
+    Record<string, { requests: number; tokens: number; cost_usd: number }>
+  >;
 }
 
 export class RekAIError extends Error {
