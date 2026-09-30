@@ -99,6 +99,16 @@ class OpenAIProvider(Provider):
                 payload["stream_options"]["include_obfuscation"] = request.include_obfuscation
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
+        if request.top_p is not None:
+            payload["top_p"] = request.top_p
+        if request.seed is not None:
+            payload["seed"] = request.seed
+        if request.frequency_penalty is not None:
+            payload["frequency_penalty"] = request.frequency_penalty
+        if request.presence_penalty is not None:
+            payload["presence_penalty"] = request.presence_penalty
+        if request.logit_bias is not None:
+            payload["logit_bias"] = request.logit_bias
         if request.stop:
             payload["stop"] = request.stop
         if request.service_tier is not None:
@@ -146,8 +156,11 @@ class OpenAIProvider(Provider):
                 # prompt_tokens was served from cache (already included in it,
                 # unlike Anthropic). There is no separate write count.
                 cache_read_tokens=_cached_prompt_tokens(usage),
+                reasoning_tokens=_reasoning_tokens(usage),
             ),
             tool_calls=message.get("tool_calls"),
+            refusal=message.get("refusal"),
+            annotations=message.get("annotations"),
             finish_reason=_finish_reason(data["choices"][0].get("finish_reason")),
         )
 
@@ -244,6 +257,12 @@ def _cached_prompt_tokens(usage: dict) -> int:
     return details.get("cached_tokens", 0) or 0
 
 
+def _reasoning_tokens(usage: dict) -> int:
+    """Reasoning tokens from an OpenAI usage object (0 when absent)."""
+    details = usage.get("completion_tokens_details") or {}
+    return details.get("reasoning_tokens", 0) or 0
+
+
 def _parse_openai_sse_line(line: str) -> str | None:
     """Extract the text delta from one OpenAI SSE line, if present."""
     event = _parse_openai_sse_event(line)
@@ -263,12 +282,21 @@ def _parse_openai_sse_event(line: str) -> StreamEvent | None:
         return None
     choices = chunk.get("choices") or []
     if choices:
-        delta = choices[0].get("delta", {}).get("content")
+        delta_obj = choices[0].get("delta", {})
+        delta = delta_obj.get("content")
+        refusal = delta_obj.get("refusal")
+        annotations = delta_obj.get("annotations")
         reason = _finish_reason(choices[0].get("finish_reason"))
-        if delta or reason:
+        if delta or refusal or annotations or reason:
             # The terminal chunk usually carries a finish_reason and an empty
-            # delta; a provider may also send both at once.
-            return StreamEvent(delta=delta or None, finish_reason=reason)
+            # delta; a provider may also send both at once. Refusal text arrives
+            # in `delta.refusal`, parallel to content.
+            return StreamEvent(
+                delta=delta or None,
+                refusal_delta=refusal or None,
+                annotations=annotations or None,
+                finish_reason=reason,
+            )
     usage = chunk.get("usage")
     if usage:
         return StreamEvent(
@@ -277,6 +305,7 @@ def _parse_openai_sse_event(line: str) -> StreamEvent | None:
                 completion_tokens=usage.get("completion_tokens", 0),
                 total_tokens=usage.get("total_tokens", 0),
                 cache_read_tokens=_cached_prompt_tokens(usage),
+                reasoning_tokens=_reasoning_tokens(usage),
             )
         )
     return None

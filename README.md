@@ -28,7 +28,7 @@ RekAI sits between your application and multiple LLM providers (OpenAI, Anthropi
 - **Guardrails** — optional prompt-injection scanning (`REKAI_GUARDRAILS_ENABLED`, flag-or-block via `REKAI_GUARDRAILS_ACTION`) and output secret redaction (`REKAI_OUTPUT_REDACTION_ENABLED`).
 - **Rate limiting & resilience** — per-client token bucket with `Retry-After` and `X-RateLimit-*` headers; oversized bodies are rejected with 413. A **concurrency cap**, a **request deadline** (`REKAI_REQUEST_DEADLINE_SECONDS` — a wall-clock budget shared by retries and fallbacks), and a **provider cooldown** that parks a repeatedly-failing backend so fallbacks skip it rather than re-timing-out every request.
 - **Observability** — structured text or JSON logging (with OpenTelemetry GenAI semantic-convention attributes — `gen_ai.request.model`, `gen_ai.usage.*` — on chat/embeddings log lines), W3C `traceparent` correlation in and out, per-request `X-Request-ID`/`X-Response-Time-Ms`/`X-RekAI-Version` headers, and a Prometheus-style `/metrics` endpoint.
-- **OpenAPI** — auto-generated docs at `/docs` and a machine-readable schema at `/openapi.json`.
+- **OpenAPI** — auto-generated docs at `/docs` and a machine-readable schema at `/openapi.json` (off in `REKAI_ENVIRONMENT=production`; `REKAI_DOCS_ENABLED` overrides).
 - **SDKs** — official Python (`rekai-client`) and JS/TS (`@rekai/client`) clients.
 - **Chat UI** — a Next.js front-end to try it all in the browser.
 
