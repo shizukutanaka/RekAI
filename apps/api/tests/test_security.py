@@ -1,5 +1,6 @@
 import logging
 import time
+import types
 
 import pytest
 from fastapi.testclient import TestClient
@@ -400,6 +401,123 @@ def test_client_budget_overrides_skips_malformed_entries() -> None:
     assert settings.client_budget_overrides == {"sk-b": 1.0}
 
 
+def test_key_model_allowlists_parses_key_glob_pairs() -> None:
+    settings = Settings(key_models="sk-a:gpt-4o*;echo, sk-b:echo, junk-no-colon, :x")
+    assert settings.key_model_allowlists == {
+        "sk-a": ["gpt-4o*", "echo"],
+        "sk-b": ["echo"],
+    }
+
+
+def test_key_model_allowlists_empty_pattern_list_denies_all() -> None:
+    # "sk-a:" means the operator listed the key but granted nothing —
+    # fail-closed, not silently unrestricted.
+    settings = Settings(key_models="sk-a:")
+    assert settings.key_model_allowlists == {"sk-a": []}
+
+
+def _acl_settings(key_models: str = "sk-acl:echo", api_keys: str = "sk-acl,sk-free") -> Settings:
+    return Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys=api_keys,
+        rate_limit_enabled=False,
+        key_models=key_models,
+    )
+
+
+def test_model_acl_denies_unlisted_model() -> None:
+    client = TestClient(create_app(_acl_settings()))
+    headers = {"Authorization": "Bearer sk-acl"}
+    denied = client.post(
+        "/v1/chat",
+        json={"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]},
+        headers=headers,
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"] == "model_not_allowed"
+    allowed = client.post(
+        "/v1/chat",
+        json={"model": "echo", "messages": [{"role": "user", "content": "hi"}]},
+        headers=headers,
+    )
+    assert allowed.status_code == 200
+
+
+def test_model_acl_denies_models_reached_only_through_fallbacks() -> None:
+    client = TestClient(create_app(_acl_settings()))
+    resp = client.post(
+        "/v1/chat",
+        json={
+            "model": "echo",
+            "messages": [{"role": "user", "content": "hi"}],
+            "fallbacks": [{"provider": "ollama", "model": "llama3"}],
+        },
+        headers={"Authorization": "Bearer sk-acl"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["error"] == "model_not_allowed"
+
+
+def test_model_acl_supports_globs_and_ignores_unlisted_keys() -> None:
+    client = TestClient(create_app(_acl_settings(key_models="sk-acl:echo*,sk-acl")))
+    headers = {"Authorization": "Bearer sk-acl"}
+    ok = client.post(
+        "/v1/chat",
+        json={"model": "echo", "messages": [{"role": "user", "content": "hi"}]},
+        headers=headers,
+    )
+    assert ok.status_code == 200
+    # A key with no entry is unrestricted.
+    free = client.post(
+        "/v1/chat",
+        json={"model": "echo", "messages": [{"role": "user", "content": "hi"}]},
+        headers={"Authorization": "Bearer sk-free"},
+    )
+    assert free.status_code == 200
+
+
+def test_models_endpoint_is_filtered_by_key_acl() -> None:
+    client = TestClient(create_app(_acl_settings()))
+    restricted = client.get("/v1/models", headers={"Authorization": "Bearer sk-acl"})
+    assert restricted.status_code == 200
+    assert {m["id"] for m in restricted.json()["data"]} == {"echo"}
+    unrestricted = client.get("/v1/models", headers={"Authorization": "Bearer sk-free"})
+    assert {m["id"] for m in unrestricted.json()["data"]} != {"echo"}
+
+
+def test_model_acl_applies_to_embeddings_and_streaming() -> None:
+    client = TestClient(create_app(_acl_settings()))
+    headers = {"Authorization": "Bearer sk-acl"}
+    emb = client.post(
+        "/v1/embeddings",
+        json={"model": "text-embedding-3-small", "input": "hi"},
+        headers=headers,
+    )
+    assert emb.status_code == 403
+    assert emb.json()["error"] == "model_not_allowed"
+    stream = client.post(
+        "/v1/chat/stream",
+        json={"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]},
+        headers=headers,
+    )
+    assert stream.status_code == 403
+
+
+def test_model_acl_applies_to_anthropic_compat_streaming() -> None:
+    client = TestClient(create_app(_acl_settings()))
+    headers = {"Authorization": "Bearer sk-acl"}
+    body = {
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 16,
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+    assert client.post("/v1/messages", json=body, headers=headers).status_code == 403
+    stream = client.post("/v1/messages", json={**body, "stream": True}, headers=headers)
+    assert stream.status_code == 403
+    assert stream.json()["error"]["type"] == "permission_error"
+
+
 def test_client_budget_override_beats_global_default() -> None:
     settings = Settings(
         environment="test",
@@ -573,10 +691,59 @@ def test_admin_add_key_grants_gateway_access() -> None:
         headers={"Authorization": "Bearer sk-admin-1"},
     )
     assert add.status_code == 201
-    assert add.json() == {"status": "added", "key": "sk-r…-key"}
+    assert add.json() == {"status": "added", "key": "sk-r…-key", "expires_at": None}
 
     resp = client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-runtime-key"})
     assert resp.status_code == 200
+
+
+def test_admin_add_key_with_ttl_expires_out_of_auth(monkeypatch) -> None:
+    """expires_in_seconds mints a key that stops working on its own — the
+    LiteLLM-style virtual-key TTL for trial tenants / incident access."""
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        rate_limit_enabled=False,
+        admin_key="sk-admin-1",
+        dynamic_keys_enabled=True,
+    )
+    client = TestClient(create_app(settings))
+    body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+    admin_headers = {"Authorization": "Bearer sk-admin-1"}
+
+    add = client.post(
+        "/admin/keys",
+        json={"key": "sk-temp-tenant-key", "expires_in_seconds": 3600},
+        headers=admin_headers,
+    )
+    assert add.status_code == 201
+    expires_at = add.json()["expires_at"]
+    assert expires_at is not None and expires_at > time.time() + 3500
+
+    # Listed with its expiry timestamp, keyed by the masked form.
+    listed = client.get("/admin/keys", headers=admin_headers).json()
+    assert listed["dynamic"] == ["sk-t…-key"]
+    assert listed["dynamic_expires_at"] == {"sk-t…-key": expires_at}
+
+    assert (
+        client.post(
+            "/v1/chat", json=body, headers={"Authorization": "Bearer sk-temp-tenant-key"}
+        ).status_code
+        == 200
+    )
+
+    # Move the store's clock past expiry — the key no longer authenticates.
+    monkeypatch.setattr("rekai.keystore.time", types.SimpleNamespace(time=lambda: expires_at + 1))
+    assert (
+        client.post(
+            "/v1/chat", json=body, headers={"Authorization": "Bearer sk-temp-tenant-key"}
+        ).status_code
+        == 401
+    )
+    # …and drops out of the admin listing too.
+    listed = client.get("/admin/keys", headers=admin_headers).json()
+    assert listed["dynamic"] == []
+    assert listed["dynamic_expires_at"] == {}
 
 
 def test_admin_revoke_key_removes_gateway_access() -> None:
@@ -600,7 +767,7 @@ def test_admin_revoke_key_removes_gateway_access() -> None:
 
     revoke = client.delete("/admin/keys/sk-runtime-key", headers=admin_headers)
     assert revoke.status_code == 200
-    assert revoke.json() == {"status": "revoked", "key": "sk-r…-key"}
+    assert revoke.json() == {"status": "revoked", "key": "sk-r…-key", "expires_at": None}
 
     assert (
         client.post(
