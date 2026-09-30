@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from rekai import models
-from rekai.config import get_settings
+from rekai.config import current_settings
 from rekai.logging_config import get_logger
 from rekai.providers.base import (
     FinishReason,
@@ -98,10 +98,10 @@ class AnthropicProvider(Provider):
         return _structured_output_schema(request) is not None
 
     def server_key_configured(self) -> bool:
-        return bool(get_settings().anthropic_api_key)
+        return bool(current_settings().anthropic_api_key)
 
     def _resolve_key(self, api_key: str | None) -> str:
-        key = api_key or get_settings().anthropic_api_key
+        key = api_key or current_settings().anthropic_api_key
         if not key:
             raise ProviderError(
                 "No Anthropic API key. Provide one with the 'X-Provider-Key' header (BYOK) "
@@ -111,7 +111,7 @@ class AnthropicProvider(Provider):
         return key
 
     def _build_payload(self, request: ChatRequest, *, stream: bool) -> dict:
-        settings = get_settings()
+        settings = current_settings()
         # Anthropic takes system prompts as a top-level field, not in `messages`.
         system_parts = [m.content or "" for m in request.messages if m.role == "system"]
         chat_messages = _translate_messages(request.messages)
@@ -126,6 +126,10 @@ class AnthropicProvider(Provider):
         }
         if request.stop:
             payload["stop_sequences"] = request.stop
+        # Anthropic supports top_p but has no seed/frequency/presence/logit_bias
+        # equivalents — those stay RekAI-side rather than erroring upstream.
+        if request.top_p is not None:
+            payload["top_p"] = request.top_p
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
         # Structured output: Anthropic has no `response_format`, but forcing a
@@ -157,6 +161,13 @@ class AnthropicProvider(Provider):
         # order) so everything before it is cached.
         if request.cache_control and payload["messages"]:
             _apply_cache_control(payload["messages"][-1], request.cache_control)
+        # Extended thinking rides verbatim — its shape is Anthropic's own and
+        # new knobs (interleaved, budget caps) should not need a schema bump.
+        if request.thinking is not None:
+            payload["thinking"] = request.thinking
+        # Output config (effort/format) too — Anthropic's own vocabulary.
+        if request.output_config is not None:
+            payload["output_config"] = request.output_config
         if stream:
             payload["stream"] = True
         return payload
@@ -165,12 +176,12 @@ class AnthropicProvider(Provider):
         return {
             **trace_headers(),
             "x-api-key": key,
-            "anthropic-version": get_settings().anthropic_version,
+            "anthropic-version": current_settings().anthropic_version,
             "content-type": "application/json",
         }
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
-        settings = get_settings()
+        settings = current_settings()
         key = self._resolve_key(api_key)
         payload = self._build_payload(request, stream=False)
 
@@ -188,13 +199,33 @@ class AnthropicProvider(Provider):
         blocks = data.get("content", [])
         # content is a list of blocks; concatenate the text blocks.
         content = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+        thinking_blocks = [b for b in blocks if b.get("type") in ("thinking", "redacted_thinking")]
         tool_calls = _extract_tool_calls(blocks)
+        # Everything else — server-side tool blocks (server_tool_use,
+        # web_search_tool_result, mcp_*, code_execution) and any type RekAI
+        # doesn't map — passes through verbatim so the tool-trace survives.
+        extra_blocks = [
+            b
+            for b in blocks
+            if b.get("type") not in ("text", "thinking", "redacted_thinking", "tool_use")
+        ]
+        content_blocks = blocks
         if self._emulating_json(request):
             # The caller asked for JSON, not a tool call: unwrap the forced
             # tool_use block's input back into `content` and drop the call, so
-            # the response is shaped like OpenAI's JSON mode.
-            content = _unwrap_structured_output(blocks) or content
+            # the response is shaped like OpenAI's JSON mode. The verbatim
+            # array keeps the answer too — as a text block where the synthetic
+            # call sat — so a nonempty content_blocks (other blocks beside it)
+            # still carries the JSON, which to_message prefers over `content`.
+            unwrapped = _unwrap_structured_output(blocks)
+            content = unwrapped or content
             tool_calls = None
+            content_blocks = [
+                {"type": "text", "text": unwrapped or ""}
+                if b.get("type") == "tool_use" and b.get("name") == _JSON_TOOL_NAME
+                else b
+                for b in blocks
+            ]
         usage = data.get("usage", {})
         finish_reason = _finish_reason(
             data.get("stop_reason"), emulating_json=self._emulating_json(request)
@@ -217,6 +248,10 @@ class AnthropicProvider(Provider):
                 cache_write_tokens=cache_write,
             ),
             finish_reason=finish_reason,
+            thinking_blocks=thinking_blocks or None,
+            extra_blocks=extra_blocks or None,
+            content_blocks=content_blocks or None,
+            extra_fields=_response_extras(data),
         )
 
     async def stream(self, request: ChatRequest, api_key: str | None) -> AsyncIterator[str]:
@@ -227,7 +262,7 @@ class AnthropicProvider(Provider):
     async def stream_events(
         self, request: ChatRequest, api_key: str | None
     ) -> AsyncIterator[StreamEvent]:
-        settings = get_settings()
+        settings = current_settings()
         key = self._resolve_key(api_key)
         payload = self._build_payload(request, stream=True)
         # When emulating JSON mode the forced tool's input_json_delta fragments
@@ -245,6 +280,10 @@ class AnthropicProvider(Provider):
         # tool_use blocks: id/name from content_block_start, args from
         # input_json_delta fragments, keyed by block index.
         tool_blocks: dict[int, dict] = {}
+        # Non-standard blocks (server-side tools etc.) ride through verbatim:
+        # start block + accumulated input_json, keyed by block index.
+        extra_blocks: dict[int, dict] = {}
+        extra_json: dict[int, str] = {}
         try:
             client = self._client(settings.request_timeout_seconds)
             async with client.stream("POST", url, json=payload, headers=self._headers(key)) as resp:
@@ -267,7 +306,11 @@ class AnthropicProvider(Provider):
                     etype = event.get("type")
                     if etype == "content_block_start":
                         block = event.get("content_block", {})
-                        if block.get("type") == "tool_use":
+                        # redacted_thinking arrives whole (no deltas) — emit it
+                        # as-is so the caller can echo it back verbatim.
+                        if block.get("type") == "redacted_thinking":
+                            yield StreamEvent(thinking_block=block)
+                        elif block.get("type") == "tool_use":
                             tool_blocks[event.get("index", 0)] = {
                                 "id": block.get("id", ""),
                                 "type": "function",
@@ -276,10 +319,38 @@ class AnthropicProvider(Provider):
                                     "arguments": "",
                                 },
                             }
+                        elif block.get("type") not in ("text", "thinking"):
+                            # server_tool_use, web_search_tool_result, mcp_*,
+                            # code_execution, and anything new: pass through.
+                            idx = event.get("index", 0)
+                            extra_blocks[idx] = dict(block)
+                            extra_json[idx] = ""
+                            yield StreamEvent(extra_block_start=block)
                     elif etype == "content_block_delta":
                         delta = event.get("delta", {})
                         text = delta.get("text")
-                        if text:
+                        if (
+                            event.get("index", 0) in extra_json
+                            and delta.get("type") != "input_json_delta"
+                        ):
+                            # Deltas belonging to a tracked extra block (any
+                            # type — including text_delta inside a tool-result
+                            # block) ride through verbatim, never as answer
+                            # text. They also merge into the stored block so
+                            # the completed `extra_block` event matches what
+                            # upstream emitted, not the start-of-block stub.
+                            idx = event.get("index", 0)
+                            block = extra_blocks[idx]
+                            if delta.get("type") == "text_delta":
+                                block["text"] = block.get("text", "") + (text or "")
+                            elif delta.get("type") == "citations_delta" and delta.get("citation"):
+                                block.setdefault("citations", []).append(delta["citation"])
+                            yield StreamEvent(extra_block_delta=delta)
+                        elif delta.get("type") == "thinking_delta":
+                            yield StreamEvent(thinking_delta=delta.get("thinking", ""))
+                        elif delta.get("type") == "signature_delta":
+                            yield StreamEvent(thinking_signature=delta.get("signature", ""))
+                        elif text:
                             yield StreamEvent(delta=text)
                         elif delta.get("type") == "input_json_delta":
                             fragment = delta.get("partial_json", "")
@@ -290,8 +361,26 @@ class AnthropicProvider(Provider):
                             slot = tool_blocks.get(event.get("index", 0))
                             if slot is not None:
                                 slot["function"]["arguments"] += fragment
+                            elif event.get("index", 0) in extra_json:
+                                extra_json[event.get("index", 0)] += fragment
+                                yield StreamEvent(extra_block_delta=delta)
+                    elif etype == "content_block_stop":
+                        idx = event.get("index", 0)
+                        if idx in extra_blocks:
+                            block = extra_blocks.pop(idx)
+                            raw_input = extra_json.pop(idx)
+                            if raw_input:
+                                try:
+                                    block["input"] = json.loads(raw_input)
+                                except json.JSONDecodeError:
+                                    block["input"] = raw_input
+                            yield StreamEvent(extra_block=block)
                     elif etype == "message_start":
-                        usage = event.get("message", {}).get("usage", {})
+                        msg = event.get("message", {})
+                        extras = _response_extras(msg)
+                        if extras:
+                            yield StreamEvent(extra_fields=extras)
+                        usage = msg.get("usage", {})
                         input_tokens = usage.get("input_tokens", input_tokens)
                         output_tokens = usage.get("output_tokens", output_tokens)
                         cache_read, cache_write = _cache_tokens(usage)
@@ -431,37 +520,58 @@ def _translate_messages(messages: list) -> list[dict]:
             continue
         if m.role == "tool":
             # A tool result becomes a user message with a tool_result block.
-            out.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": m.tool_call_id or "",
-                            "content": m.content or "",
-                        }
-                    ],
-                }
-            )
-        elif m.role == "assistant" and m.tool_calls:
-            blocks: list[dict] = []
-            if m.content:
-                blocks.append({"type": "text", "text": m.content})
-            for tc in m.tool_calls:
-                fn = tc.get("function", {})
-                try:
-                    args = json.loads(fn.get("arguments") or "{}")
-                except json.JSONDecodeError:
-                    args = {}
-                blocks.append(
+            block: dict = {
+                "type": "tool_result",
+                "tool_use_id": m.tool_call_id or "",
+                "content": m.content or "",
+            }
+            if m.is_error:
+                block["is_error"] = True
+            out.append({"role": "user", "content": [block]})
+        elif m.role == "assistant" and (
+            m.tool_calls or m.thinking_blocks or m.extra_blocks or m.content_blocks
+        ):
+            # The verbatim ordered array wins when present — it replays the
+            # exact sequence upstream emitted (interleaved text/tool-trace),
+            # which the flattened thinking→extra→text→tool_use reconstruction
+            # can't reproduce.
+            if m.content_blocks:
+                # Copy the blocks: _apply_cache_control below (or a caller's
+                # own later edit) must not mutate the verbatim history the
+                # client asked to replay unchanged.
+                out.append(
                     {
-                        "type": "tool_use",
-                        "id": tc.get("id", ""),
-                        "name": fn.get("name", ""),
-                        "input": args,
+                        "role": "assistant",
+                        "content": [dict(b) for b in m.content_blocks],
                     }
                 )
-            out.append({"role": "assistant", "content": blocks})
+            else:
+                blocks: list[dict] = []
+                # Thinking blocks must precede every other block in an
+                # assistant turn (Anthropic's contract) — echoed verbatim.
+                if m.thinking_blocks:
+                    blocks.extend(m.thinking_blocks)
+                # Server-tool trace (server_tool_use, tool-result blocks) sits
+                # between thinking and the answer text, matching upstream order.
+                if m.extra_blocks:
+                    blocks.extend(m.extra_blocks)
+                if m.content:
+                    blocks.append({"type": "text", "text": m.content})
+                for tc in m.tool_calls or []:
+                    fn = tc.get("function", {})
+                    try:
+                        args = json.loads(fn.get("arguments") or "{}")
+                    except json.JSONDecodeError:
+                        args = {}
+                    blocks.append(
+                        {
+                            "type": "tool_use",
+                            "id": tc.get("id", ""),
+                            "name": fn.get("name", ""),
+                            "input": args,
+                        }
+                    )
+                out.append({"role": "assistant", "content": blocks})
         else:
             out.append({"role": m.role, "content": m.content or ""})
         _apply_cache_control(out[-1], getattr(m, "cache_control", None))
@@ -479,6 +589,19 @@ def _unwrap_structured_output(blocks: list[dict]) -> str | None:
         if block.get("type") == "tool_use" and block.get("name") == _JSON_TOOL_NAME:
             return json.dumps(block.get("input", {}))
     return None
+
+
+# Message-level keys RekAI maps; anything else rides ``extra_fields`` verbatim.
+_KNOWN_RESPONSE_KEYS = frozenset(
+    {"id", "type", "role", "content", "model", "stop_reason", "stop_sequence", "usage"}
+)
+
+
+def _response_extras(data: dict) -> dict | None:
+    """Message-level fields RekAI doesn't map (container, context_management,
+    and anything new) — verbatim, so they surface instead of vanishing."""
+    extras = {k: v for k, v in data.items() if k not in _KNOWN_RESPONSE_KEYS}
+    return extras or None
 
 
 def _extract_tool_calls(blocks: list[dict]) -> list[dict] | None:
