@@ -242,6 +242,7 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
         diagnostics=req.diagnostics,
         user_profile_id=req.user_profile_id,
         mcp_servers=req.mcp_servers,
+        user=req.metadata.user_id if req.metadata else None,
         output_config=req.output_config,
     )
 
