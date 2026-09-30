@@ -19,6 +19,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Anthropic `output_config` forwarded verbatim** — `POST /v1/messages`
+  accepts `output_config` (e.g. `{"effort": "medium"}` or `{"format": ...}`),
+  Anthropic's lever for response effort and structured output. It previously
+  rode in under `extra="allow"` and was silently dropped; now it reaches the
+  upstream payload and the exact/semantic cache keys. Other providers never
+  receive it.
 - **JS SDK request timeout** — `fetch` has no built-in timeout, so a hung
   connection parked `chat()`/`stream()` forever. A new `timeout` client option
   (default 60s, matching the Python SDK) bounds each non-streaming request via

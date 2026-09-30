@@ -83,6 +83,12 @@ class ChatRequest(BaseModel):
         "temperature=1 under thinking, so the compat layer defaults to that "
         "when the caller left temperature unset.",
     )
+    output_config: dict[str, Any] | None = Field(
+        default=None,
+        description="Anthropic's `output_config` — e.g. {'effort': 'medium'} "
+        "or {'format': {...}} for structured output. Forwarded verbatim to "
+        "Anthropic only; other providers ignore it.",
+    )
     include_obfuscation: bool | None = Field(
         default=None,
         description="OpenAI's `stream_options.include_obfuscation`: asks the "
@@ -274,6 +280,9 @@ class _AnthropicMessagesBase(BaseModel):
     # Anthropic's extended-thinking config, verbatim ({'type': 'enabled',
     # 'budget_tokens': N}). Declared so it isn't swallowed by extra=allow.
     thinking: dict[str, Any] | None = None
+    # Anthropic's output config, verbatim ({'effort': ...}, {'format': ...}).
+    # Same swallow-by-extra=allow hazard.
+    output_config: dict[str, Any] | None = None
     provider: str | None = None  # RekAI extension: explicit provider override
 
 
