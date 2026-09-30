@@ -16,6 +16,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   blocks echo back on later turns so multi-turn thinking conversations keep
   working; the playground sends `temperature: 1` while enabled since that's
   the only value Anthropic accepts under thinking.
+- **Echo provider honors `dimensions`** — `/v1/embeddings` accepted the
+  parameter for `model="echo"` but always returned the default 16-dim
+  pseudo-embedding, so the only way to see `dimensions` do anything was a
+  paid provider key. The demo provider now sizes its vector to the request
+  (`encoding_format` still stays float — the API response is JSON either way).
 - **Five pass-through fidelity fixes** — streamed extra-block deltas now merge
   into the completed `extra_block` (a `text_delta` inside a tool-result block
   reached frames but not the stored block clients echo back); extra-block

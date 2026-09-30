@@ -80,7 +80,9 @@ class EchoProvider(Provider):
     ) -> EmbeddingResult:
         tokens = sum(_count_tokens(t) for t in inputs)
         return EmbeddingResult(
-            embeddings=[_embed_text(t) for t in inputs],
+            # `encoding_format` stays unhonored: the API response is JSON
+            # floats either way, so there is no base64 for echo to emit.
+            embeddings=[_embed_text(t, dimensions or _EMBED_DIM) for t in inputs],
             model=model,
             usage=Usage(prompt_tokens=tokens, total_tokens=tokens),
         )
