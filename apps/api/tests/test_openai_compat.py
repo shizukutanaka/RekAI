@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from rekai.config import Settings
 from rekai.main import create_app
 from rekai.providers import register_provider
-from rekai.providers.base import Provider, ProviderResult
+from rekai.providers.base import Provider, ProviderResult, StreamEvent
 from rekai.schemas import Usage
 
 
@@ -356,6 +356,70 @@ def test_guardrail_block_returns_openai_error() -> None:
     assert resp.status_code == 403
     assert "error" in resp.json()
     assert resp.json()["error"]["message"]
+
+
+# --- prompt_tokens_details ---------------------------------------------------
+
+
+class _CachedProvider(Provider):
+    name = "cachedy"
+    requires_key = False
+
+    async def chat(self, request, api_key):  # type: ignore[no-untyped-def]
+        return ProviderResult(
+            content="cached answer",
+            model=request.model,
+            usage=Usage(
+                prompt_tokens=1000,
+                completion_tokens=5,
+                total_tokens=1005,
+                cache_read_tokens=900,
+            ),
+        )
+
+    async def stream_events(self, request, api_key):  # type: ignore[no-untyped-def]
+        result = await self.chat(request, api_key)
+        yield StreamEvent(delta=result.content)
+        yield StreamEvent(usage=result.usage, finish_reason="stop")
+
+
+def test_prompt_cache_tokens_appear_in_openais_nested_field(client: TestClient) -> None:
+    """OpenAI SDKs read `usage.prompt_tokens_details.cached_tokens`; a flat
+    `cache_read_tokens` extension alone leaves them blind to provider cache
+    hits, which is exactly the number the caller tracks cost savings by."""
+    register_provider(_CachedProvider())
+    resp = client.post(
+        "/v1/chat/completions",
+        json={"model": "cachedy/m", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status_code == 200
+    usage = resp.json()["usage"]
+    assert usage["cache_read_tokens"] == 900
+    assert usage["prompt_tokens_details"] == {"cached_tokens": 900}
+
+
+def test_no_provider_cache_means_no_prompt_tokens_details(client: TestClient) -> None:
+    resp = client.post(
+        "/v1/chat/completions",
+        json={"model": "echo", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.json()["usage"].get("prompt_tokens_details") is None
+
+
+def test_stream_usage_chunk_carries_prompt_tokens_details(client: TestClient) -> None:
+    register_provider(_CachedProvider())
+    resp = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "cachedy/m",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        },
+    )
+    chunks = [json.loads(p) for p in _parse_sse(resp.text) if p != "[DONE]"]
+    usage_chunk = next(c for c in chunks if c.get("usage"))
+    assert usage_chunk["usage"]["prompt_tokens_details"] == {"cached_tokens": 900}
 
 
 # --- Authorization: Bearer doubles as the BYOK key ---------------------------

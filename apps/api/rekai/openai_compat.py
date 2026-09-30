@@ -23,6 +23,7 @@ from rekai.schemas import (
     CompletionUsage,
     ContentPart,
     OpenAIChatMessage,
+    PromptTokensDetails,
     Usage,
 )
 
@@ -156,10 +157,16 @@ def to_chat_completion(resp: ChatResponse) -> ChatCompletionResponse:
                 finish_reason=resp.finish_reason or ("tool_calls" if resp.tool_calls else "stop"),
             )
         ],
-        # Emit OpenAI's nested completion_tokens_details.reasoning_tokens in
-        # addition to the flat field — SDKs read the nested shape.
+        # OpenAI nests both breakdowns — the cached-token count under
+        # prompt_tokens_details, reasoning under completion_tokens_details;
+        # emit each only when the provider reported one, like OpenAI does.
         usage=CompletionUsage(
             **resp.usage.model_dump(),
+            prompt_tokens_details=(
+                PromptTokensDetails(cached_tokens=resp.usage.cache_read_tokens)
+                if resp.usage.cache_read_tokens
+                else None
+            ),
             completion_tokens_details=(
                 {"reasoning_tokens": resp.usage.reasoning_tokens}
                 if resp.usage.reasoning_tokens
@@ -233,9 +240,12 @@ def chunk_usage(chunk_id: str, created: int, model: str, usage: Usage) -> dict:
     # choices array and the usage totals.
     chunk = _chunk_base(chunk_id, created, model)
     chunk["choices"] = []
-    chunk["usage"] = usage.model_dump()
+    body = usage.model_dump()
+    if usage.cache_read_tokens:
+        body["prompt_tokens_details"] = {"cached_tokens": usage.cache_read_tokens}
     if usage.reasoning_tokens:
-        chunk["usage"]["completion_tokens_details"] = {"reasoning_tokens": usage.reasoning_tokens}
+        body["completion_tokens_details"] = {"reasoning_tokens": usage.reasoning_tokens}
+    chunk["usage"] = body
     return chunk
 
 

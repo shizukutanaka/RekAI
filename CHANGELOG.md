@@ -337,6 +337,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   end-user ids; the pair cap shares `max_tracked_clients`. Verified live:
   `POST /v1/chat` with `"user":"u1"` → `/v1/usage` shows u1 under the caller's
   client; under `REKAI_API_KEYS` sk-b's view does not contain sk-a's users.
+- **`prompt_tokens_details.cached_tokens` on the OpenAI-compat surface.**
+  RekAI's flat `cache_read_tokens` was invisible to OpenAI SDKs, which read the
+  nested field — prompt-cache hits went unreported for drop-in callers. The
+  compat response (and `stream_options.include_usage` chunk) now emits the
+  nested object whenever a provider cache engaged; absent otherwise, matching
+  api.openai.com.
 - **`Authorization: Bearer` doubles as the BYOK key on
   `/v1/chat/completions`.** When the gateway itself is unauthenticated (no
   `REKAI_API_KEYS`, dynamic keys off), the SDK's own Bearer token is forwarded
