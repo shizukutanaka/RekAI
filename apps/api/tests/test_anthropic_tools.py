@@ -230,3 +230,104 @@ async def test_anthropic_chat_tool_choice_none_forbids_tool_use(monkeypatch) -> 
     # ... but tool_choice must explicitly forbid using them, not be absent.
     assert "tool_choice" in captured["payload"]
     assert captured["payload"]["tool_choice"] == {"type": "none"}
+
+
+# --- parallel_tool_calls <-> disable_parallel_tool_use -----------------------
+# Anthropic carries the parallel-call switch on tool_choice; OpenAI keeps it on
+# the request body. Both directions must round-trip — a caller that asks for
+# one tool call per turn must not silently get several.
+
+
+def _capture_anthropic(monkeypatch) -> dict:
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {
+                "model": "claude-sonnet-4-6",
+                "content": [{"type": "text", "text": "hi"}],
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def aclose(self) -> None:
+            return None
+
+        async def post(self, url, json, headers):
+            captured["payload"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    return captured
+
+
+async def test_parallel_tool_calls_false_reaches_anthropic_tool_choice(monkeypatch) -> None:
+    captured = _capture_anthropic(monkeypatch)
+    req = ChatRequest(
+        model="claude-sonnet-4-6",
+        messages=[ChatMessage(role="user", content="hi")],
+        tools=[OPENAI_TOOL],
+        tool_choice="auto",
+        parallel_tool_calls=False,
+    )
+    await AnthropicProvider().chat(req, api_key="sk-ant")
+    assert captured["payload"]["tool_choice"] == {
+        "type": "auto",
+        "disable_parallel_tool_use": True,
+    }
+
+
+async def test_parallel_tool_calls_unset_sends_no_flag(monkeypatch) -> None:
+    captured = _capture_anthropic(monkeypatch)
+    req = ChatRequest(
+        model="claude-sonnet-4-6",
+        messages=[ChatMessage(role="user", content="hi")],
+        tools=[OPENAI_TOOL],
+        tool_choice="auto",
+    )
+    await AnthropicProvider().chat(req, api_key="sk-ant")
+    assert captured["payload"]["tool_choice"] == {"type": "auto"}
+
+
+def test_anthropic_disable_parallel_maps_to_internal_flag() -> None:
+    """Anthropic SDK callers send {"type": "auto", "disable_parallel_tool_use":
+    true} — it must survive onto the internal request (and the model used to
+    422 on the undeclared field)."""
+    from rekai.anthropic_compat import to_chat_request
+    from rekai.schemas import AnthropicMessagesRequest
+
+    req = AnthropicMessagesRequest(
+        model="claude-sonnet-4-6",
+        max_tokens=16,
+        messages=[{"role": "user", "content": "hi"}],
+        tool_choice={"type": "auto", "disable_parallel_tool_use": True},
+    )
+    internal = to_chat_request(req)
+    assert internal.tool_choice == "auto"
+    assert internal.parallel_tool_calls is False
+
+
+def test_anthropic_tool_choice_disable_false_stays_unset() -> None:
+    """Explicit `disable_parallel_tool_use: false` is Anthropic's own default —
+    nothing to carry."""
+    from rekai.anthropic_compat import to_chat_request
+    from rekai.schemas import AnthropicMessagesRequest
+
+    req = AnthropicMessagesRequest(
+        model="claude-sonnet-4-6",
+        max_tokens=16,
+        messages=[{"role": "user", "content": "hi"}],
+        tool_choice={"type": "auto", "disable_parallel_tool_use": False},
+    )
+    assert to_chat_request(req).parallel_tool_calls is None
