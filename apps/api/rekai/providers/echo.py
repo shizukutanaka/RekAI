@@ -27,6 +27,12 @@ _EMBED_DIM = 16
 # demo a real provider would have served.
 _MAX_ECHO_DIM = 4096
 
+# The dimension cap alone doesn't bound the batch: a body of short inputs at
+# the maximum dimension still allocates len(inputs) × dimensions floats
+# in-process. Capping the product bounds a request's allocation to ~262K
+# floats — beyond any plausible demo (2048×128 or 64×4096 both fit).
+_MAX_ECHO_FLOATS = 262_144
+
 
 def _count_tokens(text: str) -> int:
     # Deliberately naive — good enough for a demo provider.
@@ -42,6 +48,7 @@ def _embed_text(text: str, dim: int = _EMBED_DIM) -> list[float]:
 class EchoProvider(Provider):
     name = "echo"
     requires_key = False
+    max_embedding_dimensions = _MAX_ECHO_DIM
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
         last_user = next(
@@ -95,11 +102,18 @@ class EchoProvider(Provider):
                 f"echo's pseudo-embeddings cap at {_MAX_ECHO_DIM} dimensions.",
                 status_code=400,
             )
+        dim = dimensions or _EMBED_DIM
+        if len(inputs) * dim > _MAX_ECHO_FLOATS:
+            raise ProviderError(
+                f"echo embeds at most {_MAX_ECHO_FLOATS} floats per request "
+                f"(requested {len(inputs)} inputs × {dim} dimensions).",
+                status_code=400,
+            )
         tokens = sum(_count_tokens(t) for t in inputs)
         return EmbeddingResult(
             # `encoding_format` stays unhonored: the API response is JSON
             # floats either way, so there is no base64 for echo to emit.
-            embeddings=[_embed_text(t, dimensions or _EMBED_DIM) for t in inputs],
+            embeddings=[_embed_text(t, dim) for t in inputs],
             model=model,
             usage=Usage(prompt_tokens=tokens, total_tokens=tokens),
         )

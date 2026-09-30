@@ -8,11 +8,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **Embeddings `dimensions` hardening** — echo caps honored `dimensions` at
-  4096 (it allocates the vector in-process; an unbounded value could exhaust
-  a worker), and a cached hit whose stored vector length doesn't match the
-  requested `dimensions` recomputes instead of serving a stale-size entry
-  until its TTL expires (Redis can carry one across a deploy).
+- **Embeddings `dimensions` hardening** — a provider-declared
+  `max_embedding_dimensions` (echo: 4096) is enforced before the cache lookup
+  and any idempotent replay, so a stored oversized response can't bypass it;
+  echo also bounds total embedding work (`inputs × dimensions` ≤ 262144
+  floats, since batch size alone could still exhaust a worker), and a cached
+  hit whose stored vector length doesn't match the requested `dimensions`
+  recomputes instead of serving a stale-size entry until its TTL expires
+  (Redis can carry one across a deploy).
 - **Echo provider honors `dimensions`** — `/v1/embeddings` accepted the
   parameter for `model="echo"` but always returned the default 16-dim
   pseudo-embedding, so the only way to see `dimensions` do anything was a

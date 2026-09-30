@@ -60,7 +60,12 @@ from rekai.schemas import (
 )
 from rekai.security import KeyCipher, mask_key
 from rekai.semantic_cache import semantic_cache
-from rekai.service import handle_chat, handle_chat_stream, handle_embeddings
+from rekai.service import (
+    check_embeddings_dimensions,
+    handle_chat,
+    handle_chat_stream,
+    handle_embeddings,
+)
 
 access_logger = get_logger("rekai.access")
 admin_logger = get_logger("rekai.admin")
@@ -1295,6 +1300,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         config: Settings = Depends(get_config),
         cache_backend: CacheBackend = Depends(get_cache),
     ) -> EmbeddingsResponse | JSONResponse:
+        # Ahead of any stored-response short circuit — a replayed or cached
+        # entry written before a provider's cap existed must not bypass it.
+        check_embeddings_dimensions(request, config)
         fingerprint: str | None = None
         claimed = False
         client_id = _client_id(http_request)

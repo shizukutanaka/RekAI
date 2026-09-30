@@ -178,6 +178,12 @@ class Provider(ABC):
     #: Whether this provider requires an API key (server-side or BYOK).
     requires_key: bool = True
 
+    #: Largest ``dimensions`` value this provider will embed — enforced before
+    #: the embeddings cache lookup and idempotent replay, since both serve
+    #: stored responses without calling the provider. ``None`` means the
+    #: request value is forwarded verbatim (the contract for real providers).
+    max_embedding_dimensions: int | None = None
+
     def __init__(self) -> None:
         self._http_client: httpx.AsyncClient | None = None
         self._http_client_loop: asyncio.AbstractEventLoop | None = None

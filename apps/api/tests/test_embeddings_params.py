@@ -149,3 +149,43 @@ async def test_stale_cached_vector_with_wrong_length_is_a_miss(settings) -> None
     )
     assert result.cached is False
     assert len(result.embeddings[0]) == 8
+
+
+async def test_echo_batch_float_budget() -> None:
+    # The per-dimension cap alone leaves batch size unbounded: 128 inputs at
+    # the max dimension exceeds the 262K-float per-request budget -> 400, while
+    # half that batch still embeds fine.
+    with pytest.raises(ProviderError) as exc:
+        await EchoProvider().embed(["x"] * 128, "echo", None, dimensions=4096)
+    assert exc.value.status_code == 400
+
+    result = await EchoProvider().embed(["x"] * 64, "echo", None, dimensions=4096)
+    assert len(result.embeddings) == 64
+    assert len(result.embeddings[0]) == 4096
+
+
+async def test_oversized_cached_vector_cannot_bypass_cap(settings) -> None:
+    # A matching-length entry cached before the cap existed (dimensions=5000)
+    # must not be served — the declared cap is enforced before the cache lookup.
+    cache = MemoryCache()
+    key = embedding_cache_key("echo", "echo", ["hi"], dimensions=5000)
+    stale = EmbeddingsResponse(
+        provider="echo",
+        model="echo",
+        embeddings=[[0.0] * 5000],
+        usage=Usage(prompt_tokens=1, total_tokens=1),
+    )
+    await cache.set(key, stale.model_dump_json(), ttl=60)
+
+    with pytest.raises(ProviderError) as exc:
+        await handle_embeddings(
+            EmbeddingsRequest(model="echo", input="hi", dimensions=5000), None, settings, cache
+        )
+    assert exc.value.status_code == 400
+
+
+def test_oversized_request_rejected_before_cache_or_replay(client: TestClient) -> None:
+    # Endpoint-level: the cap fires ahead of cache/idempotency, so an echo
+    # request above 4096 dimensions is a 400 rather than a stored-response hit.
+    resp = client.post("/v1/embeddings", json={"model": "echo", "input": "hi", "dimensions": 5000})
+    assert resp.status_code == 400

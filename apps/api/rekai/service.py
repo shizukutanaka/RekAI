@@ -850,6 +850,26 @@ async def handle_chat_stream(
         )
 
 
+def _check_embedding_dimensions(
+    provider_name: str, provider: Provider | None, dimensions: int | None
+) -> None:
+    limit = provider.max_embedding_dimensions if provider is not None else None
+    if limit is not None and dimensions is not None and dimensions > limit:
+        raise ProviderError(
+            f"Provider '{provider_name}' caps embedding dimensions at {limit}.",
+            status_code=400,
+        )
+
+
+def check_embeddings_dimensions(request: EmbeddingsRequest, settings: Settings) -> None:
+    """Apply the provider's declared ``dimensions`` cap ahead of any cache hit
+    or idempotent replay — both return a stored response without calling the
+    provider, so an oversized entry written before the cap existed would
+    otherwise be served verbatim under the new limit."""
+    provider_name = resolve_provider(request.provider, request.model, settings)
+    _check_embedding_dimensions(provider_name, get_provider(provider_name), request.dimensions)
+
+
 async def handle_embeddings(
     request: EmbeddingsRequest,
     api_key: str | None,
@@ -862,6 +882,7 @@ async def handle_embeddings(
     if provider is None:
         raise ProviderError(f"Unknown provider '{provider_name}'.", status_code=400)
     metrics.record_request(provider_name)
+    _check_embedding_dimensions(provider_name, provider, request.dimensions)
 
     inputs = [request.input] if isinstance(request.input, str) else list(request.input)
     if not inputs:
