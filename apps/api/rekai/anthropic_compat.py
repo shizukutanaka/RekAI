@@ -241,6 +241,7 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
             False if req.tool_choice and req.tool_choice.disable_parallel_tool_use else None
         ),
         thinking=req.thinking,
+        service_tier=req.service_tier,
         context_management=req.context_management,
         container=req.container,
         inference_geo=req.inference_geo,

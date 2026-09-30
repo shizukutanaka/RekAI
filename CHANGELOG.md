@@ -120,6 +120,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requirement), while an explicit temperature rides as sent. Non-Anthropic
   providers ignore the config and surfaces without the concept (OpenAI chunks)
   drop the blocks. Both SDKs and the web client expose `thinking_blocks`.
+- **`service_tier` reaches Anthropic too.** Anthropic's Messages API takes the
+  same field name with its own vocabulary (`auto` | `standard_only`); the
+  compat layer accepted it via `extra="allow"` and dropped it, and the provider
+  never sent it. Now `POST /v1/messages` (and `count_tokens`) maps it onto the
+  internal request and the Anthropic provider forwards it verbatim — same as
+  the OpenAI-compatible path, whose tiers it already reaches.
+
 - **End-user id forwarded to providers.** The accepted-but-ignored `user`
   field now reaches the provider under its own name — `user` to
   OpenAI-compatible upstreams, `metadata.user_id` to Anthropic — so
