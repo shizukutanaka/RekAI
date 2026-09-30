@@ -197,6 +197,50 @@ def test_snapshot_excludes_budget_window_usage() -> None:
     assert "budget_window_usage" not in m.snapshot()
 
 
+def test_record_client_token_usage_accumulates_within_window() -> None:
+    m = Metrics()
+    m.record_client_token_usage("key:aaa", 10, window_seconds=100, now=1000.0)
+    m.record_client_token_usage("key:aaa", 20, window_seconds=100, now=1050.0)
+    assert m.client_window_tokens("key:aaa", window_seconds=100, now=1090.0) == 30
+
+
+def test_record_client_token_usage_resets_on_window_rollover() -> None:
+    m = Metrics()
+    m.record_client_token_usage("key:aaa", 500, window_seconds=100, now=1000.0)
+    assert m.client_window_tokens("key:aaa", window_seconds=100, now=1005.0) == 500
+    m.record_client_token_usage("key:aaa", 100, window_seconds=100, now=1105.0)
+    assert m.client_window_tokens("key:aaa", window_seconds=100, now=1105.0) == 100
+    m2 = Metrics()
+    m2.record_client_token_usage("key:bbb", 500, window_seconds=100, now=1000.0)
+    assert m2.client_window_tokens("key:bbb", window_seconds=100, now=1200.0) == 0
+
+
+def test_client_window_tokens_unset_client_returns_zero() -> None:
+    m = Metrics()
+    assert m.client_window_tokens("key:never-seen", window_seconds=100, now=1000.0) == 0
+    assert m.client_tokens("key:never-seen") == 0
+
+
+def test_record_client_token_usage_tolerates_zero_tokens() -> None:
+    m = Metrics()
+    m.record_client_token_usage("key:ccc", 0, window_seconds=100, now=1000.0)
+    assert m.client_window_tokens("key:ccc", window_seconds=100, now=1000.0) == 0
+
+
+def test_seed_resets_token_window_usage() -> None:
+    m = Metrics()
+    m.record_client_token_usage("key:aaa", 500, window_seconds=100, now=1000.0)
+    m.seed({})
+    assert m.client_window_tokens("key:aaa", window_seconds=100, now=1000.0) == 0
+
+
+def test_client_tokens_reads_lifetime_total() -> None:
+    m = Metrics()
+    m.record_client_usage("key:aaa", tokens=40, cost_usd=None)
+    m.record_client_usage("key:aaa", tokens=60, cost_usd=0.01)
+    assert m.client_tokens("key:aaa") == 100
+
+
 def test_record_client_usage_tolerates_none_cost() -> None:
     m = Metrics()
     m.record_client_usage("key:ccc", tokens=3, cost_usd=None)

@@ -146,6 +146,10 @@ class Metrics:
         # already process-local best-effort across workers even without
         # this feature — see docs/architecture.md).
         self._budget_window_usage: dict[str, tuple[int, float]] = {}
+        # Same shape for the per-client token cap (REKAI_CLIENT_TOKEN_LIMIT_*):
+        # client_id -> (window_index, tokens in that window). Same rationale
+        # for staying out of seed()/snapshot().
+        self._token_window_usage: dict[str, tuple[int, int]] = {}
         # Latency. Without these, "the gateway is slow" and "the upstream is
         # slow" are indistinguishable: request_duration covers the whole hop,
         # provider_duration covers only the call RekAI makes, and the gap
@@ -354,10 +358,51 @@ class Metrics:
                 return 0.0
             return entry[1] if entry[0] == int(now / window_seconds) else 0.0
 
+    def record_client_token_usage(
+        self, client_id: str, tokens: int, window_seconds: int, now: float
+    ) -> None:
+        """Attribute tokens to a client within the current fixed window —
+        the token counterpart of record_client_budget_usage, enforcing
+        REKAI_CLIENT_TOKEN_LIMIT_*."""
+        if not tokens:
+            return
+        with self._lock:
+            window_index = int(now / window_seconds)
+            prev = self._token_window_usage.get(client_id)
+            cap = self.max_tracked_clients
+            if prev is None and cap and len(self._token_window_usage) >= cap:
+                stale = [c for c, (w, _) in self._token_window_usage.items() if w != window_index]
+                for c in stale:
+                    del self._token_window_usage[c]
+                if len(self._token_window_usage) >= cap:
+                    smallest = min(
+                        self._token_window_usage,
+                        key=lambda c: self._token_window_usage[c][1],
+                    )
+                    del self._token_window_usage[smallest]
+            base = prev[1] if prev is not None and prev[0] == window_index else 0
+            self._token_window_usage[client_id] = (window_index, base + tokens)
+
+    def client_window_tokens(self, client_id: str, window_seconds: int, now: float) -> int:
+        """Read a client's token count in the current fixed window (0 if
+        never recorded, including immediately after a rollover)."""
+        with self._lock:
+            entry = self._token_window_usage.get(client_id)
+            if entry is None:
+                return 0
+            return entry[1] if entry[0] == int(now / window_seconds) else 0
+
+    def client_tokens(self, client_id: str) -> int:
+        """Read a client's cumulative token count (0 if never recorded)."""
+        with self._lock:
+            usage = self.usage_by_client.get(client_id)
+            return int(usage["tokens"]) if usage else 0
+
     def seed(self, snapshot: dict) -> None:
         """Set counters from a persisted snapshot (used on startup)."""
         with self._lock:
             self._budget_window_usage = {}
+            self._token_window_usage = {}
             # The breakdowns aren't part of the snapshot (they're /metrics-only,
             # and Prometheus handles resets), so clear them rather than let them
             # outlive the errors_total they break down.

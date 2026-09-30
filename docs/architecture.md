@@ -1102,6 +1102,21 @@ feature, so nothing that worked before regresses. When a window is configured,
 a 402 also carries an `X-Budget-Reset` header (the unix timestamp of the next
 window boundary), so a client knows exactly when it can retry.
 
+`REKAI_CLIENT_TOKEN_LIMIT` (opt-in, unset by default) is the same enforcement
+counted in tokens instead of dollars — once a client's cumulative
+(prompt+completion) tokens reach the cap, further `/v1/*` requests get `429`
+(`token_limit_exceeded`, `X-TokenLimit-Remaining: 0`). The gap it closes is
+real: a USD cap never bites on free/local providers (`ollama`, custom
+self-hosted — `cost_usd` is `0` there by construction), yet a tenant can still
+monopolize upstream throughput, and upstream providers' own limits are
+expressed in tokens-per-minute — `REKAI_CLIENT_TOKEN_LIMIT_WINDOW_SECONDS=60`
+is the direct TPM equivalent. The windowed counter mirrors the budget window
+exactly (epoch-aligned buckets, separate from `usage_by_client`, cleared on
+restart and out of the persisted snapshot); a windowed 429 additionally
+carries `X-TokenLimit-Reset` + `Retry-After` so a client can schedule the
+retry. Lifetime mode reads `usage_by_client`'s token total.
+
+All per-client structures are **bounded**: `REKAI_MAX_TRACKED_CLIENTS`
 `REKAI_KEY_MODELS` (opt-in, unset by default) is the per-tenant counterpart of
 `REKAI_ALLOWED_PROVIDERS`: `"sk-a:gpt-4o*;gpt-4o-mini,sk-b:echo"` gives each
 named key a glob allowlist (fnmatch: `*`, `?`), so tenants can be scoped to
@@ -1117,7 +1132,7 @@ per-key budget overrides don't exist for IPs.
 
 Both per-client structures are **bounded**: `REKAI_MAX_TRACKED_CLIENTS`
 (default 10,000; `0` = unlimited) caps how many distinct client ids are kept in
-`usage_by_client` and the budget-window store. Without gateway auth the client
+`usage_by_client` and the budget/token window stores. Without gateway auth the client
 id is the raw request IP, so an internet-facing deployment would otherwise
 accumulate one entry per IP forever — persisted across restarts via the metrics
 snapshot, no less. At the cap, admitting a new client evicts the tracked client
