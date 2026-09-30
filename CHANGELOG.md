@@ -6,6 +6,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **`POST /v1/messages` no longer counts cached prompt tokens twice.** The
+  Anthropic-compat usage block reported RekAI's all-inclusive `prompt_tokens`
+  as `input_tokens`, but on Anthropic's wire `input_tokens` *excludes* cached
+  tokens — a caller summing the fields saw cache hits counted once in
+  `input_tokens` and would have counted them again in the cache keys had those
+  been emitted. Usage now decomposes back to Anthropic's shape:
+  `input_tokens` = `prompt_tokens - cache_read - cache_write`, plus
+  `cache_read_input_tokens` and `cache_creation_input_tokens` (both always
+  present, matching Anthropic's schema).
+
 ### Added
 
 - **JS SDK request timeout** — `fetch` has no built-in timeout, so a hung
