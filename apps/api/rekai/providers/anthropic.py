@@ -126,6 +126,10 @@ class AnthropicProvider(Provider):
         }
         if request.stop:
             payload["stop_sequences"] = request.stop
+        # Anthropic's own processing tier ('auto' | 'standard_only') — same
+        # field name as OpenAI's, different vocabulary. Forwarded verbatim.
+        if request.service_tier is not None:
+            payload["service_tier"] = request.service_tier
         # Anthropic supports top_p but has no seed/frequency/presence/logit_bias
         # equivalents — those stay RekAI-side rather than erroring upstream.
         if request.top_p is not None:
