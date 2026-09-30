@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from rekai import models
-from rekai.config import get_settings
+from rekai.config import current_settings
 from rekai.providers.base import (
     EmbeddingResult,
     FinishReason,
@@ -43,10 +43,10 @@ class OpenAIProvider(Provider):
 
     # --- overridable hooks (subclassed for OpenAI-compatible backends) -----
     def _base_url(self) -> str:
-        return get_settings().openai_base_url
+        return current_settings().openai_base_url
 
     def _server_key(self) -> str | None:
-        return get_settings().openai_api_key
+        return current_settings().openai_api_key
 
     def _key_env_hint(self) -> str:
         return "REKAI_OPENAI_API_KEY"
@@ -99,6 +99,16 @@ class OpenAIProvider(Provider):
                 payload["stream_options"]["include_obfuscation"] = request.include_obfuscation
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
+        if request.top_p is not None:
+            payload["top_p"] = request.top_p
+        if request.seed is not None:
+            payload["seed"] = request.seed
+        if request.frequency_penalty is not None:
+            payload["frequency_penalty"] = request.frequency_penalty
+        if request.presence_penalty is not None:
+            payload["presence_penalty"] = request.presence_penalty
+        if request.logit_bias is not None:
+            payload["logit_bias"] = request.logit_bias
         if request.stop:
             payload["stop"] = request.stop
         if request.service_tier is not None:
@@ -114,7 +124,7 @@ class OpenAIProvider(Provider):
         return payload
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
-        settings = get_settings()
+        settings = current_settings()
 
         payload = self._build_payload(request, stream=False)
 
@@ -149,6 +159,7 @@ class OpenAIProvider(Provider):
                 reasoning_tokens=_reasoning_tokens(usage),
             ),
             tool_calls=message.get("tool_calls"),
+            refusal=message.get("refusal"),
             annotations=message.get("annotations"),
             finish_reason=_finish_reason(data["choices"][0].get("finish_reason")),
         )
@@ -161,7 +172,7 @@ class OpenAIProvider(Provider):
     async def stream_events(
         self, request: ChatRequest, api_key: str | None
     ) -> AsyncIterator[StreamEvent]:
-        settings = get_settings()
+        settings = current_settings()
 
         payload = self._build_payload(request, stream=True)
 
@@ -201,7 +212,7 @@ class OpenAIProvider(Provider):
         dimensions: int | None = None,
         encoding_format: str | None = None,
     ) -> EmbeddingResult:
-        settings = get_settings()
+        settings = current_settings()
         url = f"{self._base_url().rstrip('/')}/embeddings"
         body: dict = {"model": model, "input": inputs}
         if dimensions is not None:
@@ -273,13 +284,18 @@ def _parse_openai_sse_event(line: str) -> StreamEvent | None:
     if choices:
         delta_obj = choices[0].get("delta", {})
         delta = delta_obj.get("content")
+        refusal = delta_obj.get("refusal")
         annotations = delta_obj.get("annotations")
         reason = _finish_reason(choices[0].get("finish_reason"))
-        if delta or annotations or reason:
+        if delta or refusal or annotations or reason:
             # The terminal chunk usually carries a finish_reason and an empty
-            # delta; a provider may also send both at once.
+            # delta; a provider may also send both at once. Refusal text arrives
+            # in `delta.refusal`, parallel to content.
             return StreamEvent(
-                delta=delta or None, annotations=annotations or None, finish_reason=reason
+                delta=delta or None,
+                refusal_delta=refusal or None,
+                annotations=annotations or None,
+                finish_reason=reason,
             )
     usage = chunk.get("usage")
     if usage:

@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 import httpx
 
 from rekai import models
-from rekai.config import get_settings
+from rekai.config import current_settings
 from rekai.logging_config import get_logger
 from rekai.providers.base import (
     FinishReason,
@@ -98,10 +98,10 @@ class AnthropicProvider(Provider):
         return _structured_output_schema(request) is not None
 
     def server_key_configured(self) -> bool:
-        return bool(get_settings().anthropic_api_key)
+        return bool(current_settings().anthropic_api_key)
 
     def _resolve_key(self, api_key: str | None) -> str:
-        key = api_key or get_settings().anthropic_api_key
+        key = api_key or current_settings().anthropic_api_key
         if not key:
             raise ProviderError(
                 "No Anthropic API key. Provide one with the 'X-Provider-Key' header (BYOK) "
@@ -111,7 +111,7 @@ class AnthropicProvider(Provider):
         return key
 
     def _build_payload(self, request: ChatRequest, *, stream: bool) -> dict:
-        settings = get_settings()
+        settings = current_settings()
         # Anthropic takes system prompts as a top-level field, not in `messages`.
         system_parts = [m.content or "" for m in request.messages if m.role == "system"]
         chat_messages = _translate_messages(request.messages)
@@ -126,6 +126,10 @@ class AnthropicProvider(Provider):
         }
         if request.stop:
             payload["stop_sequences"] = request.stop
+        # Anthropic supports top_p but has no seed/frequency/presence/logit_bias
+        # equivalents — those stay RekAI-side rather than erroring upstream.
+        if request.top_p is not None:
+            payload["top_p"] = request.top_p
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
         # Structured output: Anthropic has no `response_format`, but forcing a
@@ -163,6 +167,9 @@ class AnthropicProvider(Provider):
             payload["thinking"] = request.thinking
         if request.mcp_servers:
             payload["mcp_servers"] = request.mcp_servers
+        # Output config (effort/format) too — Anthropic's own vocabulary.
+        if request.output_config is not None:
+            payload["output_config"] = request.output_config
         if stream:
             payload["stream"] = True
         return payload
@@ -171,7 +178,7 @@ class AnthropicProvider(Provider):
         headers = {
             **trace_headers(),
             "x-api-key": key,
-            "anthropic-version": get_settings().anthropic_version,
+            "anthropic-version": current_settings().anthropic_version,
             "content-type": "application/json",
         }
         # Anthropic's MCP connector is a beta: mcp_servers is rejected without it.
@@ -180,7 +187,7 @@ class AnthropicProvider(Provider):
         return headers
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
-        settings = get_settings()
+        settings = current_settings()
         key = self._resolve_key(api_key)
         payload = self._build_payload(request, stream=False)
 
@@ -261,7 +268,7 @@ class AnthropicProvider(Provider):
     async def stream_events(
         self, request: ChatRequest, api_key: str | None
     ) -> AsyncIterator[StreamEvent]:
-        settings = get_settings()
+        settings = current_settings()
         key = self._resolve_key(api_key)
         payload = self._build_payload(request, stream=True)
         # When emulating JSON mode the forced tool's input_json_delta fragments
@@ -529,18 +536,14 @@ def _translate_messages(messages: list) -> list[dict]:
             continue
         if m.role == "tool":
             # A tool result becomes a user message with a tool_result block.
-            out.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": m.tool_call_id or "",
-                            "content": m.content or "",
-                        }
-                    ],
-                }
-            )
+            block: dict = {
+                "type": "tool_result",
+                "tool_use_id": m.tool_call_id or "",
+                "content": m.content or "",
+            }
+            if m.is_error:
+                block["is_error"] = True
+            out.append({"role": "user", "content": [block]})
         elif m.role == "assistant" and (
             m.tool_calls or m.thinking_blocks or m.extra_blocks or m.content_blocks
         ):
