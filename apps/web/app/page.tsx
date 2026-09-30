@@ -20,6 +20,7 @@ import {
   redactionNote,
   sendChat,
   streamChat,
+  thinkingText,
 } from "@/lib/api";
 
 interface DisplayMessage extends ChatMessage {
@@ -33,6 +34,11 @@ interface DisplayMessage extends ChatMessage {
   fallbackUsed?: boolean;
   cacheSimilarity?: number | null;
   redacted?: string[] | null;
+  /** Flattened thinking text for display (deltas or thinking_blocks). */
+  thinking?: string;
+  /** Raw blocks kept for echoing back on the next turn — Anthropic requires
+   * prior thinking (incl. signatures) in multi-turn thinking conversations. */
+  thinkingBlocks?: Record<string, unknown>[] | null;
   citations?: Record<string, unknown>[] | null;
   extraBlocks?: Record<string, unknown>[];
   contentBlocks?: Record<string, unknown>[];
@@ -75,6 +81,10 @@ export default function ChatPage() {
   // A playground exists to see routing/caching behaviour, so the cache toggle
   // defaults on — turning it off is how you compare a fresh answer to a hit.
   const [cacheEnabled, setCacheEnabled] = useState(true);
+  // Extended thinking only exists on Anthropic upstreams; other providers
+  // ignore the config, so the toggle stays visible regardless of model.
+  const [thinkingEnabled, setThinkingEnabled] = useState(false);
+  const [thinkingBudget, setThinkingBudget] = useState("4096");
   const [showOptions, setShowOptions] = useState(false);
   const [error, setError] = useState("");
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -159,12 +169,14 @@ export default function ChatPage() {
     setError("");
     setLoading(true);
 
-    // Anthropic requires the server-tool trace echoed back in multi-turn
-    // context — the ordered verbatim array replays the exact emitted
-    // sequence, extraBlocks the flattened trace for older replies.
-    const convo = history.map(({ role, content, extraBlocks, contentBlocks }) => ({
+    // Anthropic requires prior thinking blocks AND the server-tool trace
+    // echoed back in multi-turn context: thinking blocks (signature
+    // included), the ordered verbatim content array for the exact emitted
+    // sequence, and extraBlocks for replies that predate it.
+    const convo = history.map(({ role, content, thinkingBlocks, extraBlocks, contentBlocks }) => ({
       role,
       content,
+      ...(thinkingBlocks?.length ? { thinking_blocks: thinkingBlocks } : {}),
       ...(extraBlocks?.length ? { extra_blocks: extraBlocks } : {}),
       ...(contentBlocks?.length ? { content_blocks: contentBlocks } : {}),
     }));
@@ -176,6 +188,14 @@ export default function ChatPage() {
     const gatewayKey = getStoredGatewayKey() || undefined;
     const mt = parseInt(maxTokens, 10);
     const maxTokensNum = Number.isFinite(mt) && mt > 0 ? mt : undefined;
+    const bt = parseInt(thinkingBudget, 10);
+    const thinkingCfg = thinkingEnabled
+      ? { type: "enabled", budget_tokens: Number.isFinite(bt) && bt > 0 ? bt : 4096 }
+      : undefined;
+    // Anthropic rejects any temperature but 1.0 under enabled thinking; the
+    // playground always sends one explicitly, so match Anthropic's rule rather
+    // than ship a guaranteed 400.
+    const temperatureToSend = thinkingCfg ? 1 : temperature;
 
     try {
       if (streaming) {
@@ -187,6 +207,12 @@ export default function ChatPage() {
         const controller = new AbortController();
         abortRef.current = controller;
         let summary: StreamSummary | null = null;
+        // Thinking pieces arrive as separate events; text accumulates for the
+        // bubble and the closing signature + whole redacted blocks are kept so
+        // the assembled blocks can be echoed on the next turn.
+        let thinkText = "";
+        let thinkSig: string | null = null;
+        const thinkBlocks: Record<string, unknown>[] = [];
         // Caught here, not left to the generic catch below: that one drops any
         // assistant bubble still marked streaming, which is exactly the bubble
         // holding whatever text arrived before the failure. A user-initiated
@@ -206,10 +232,11 @@ export default function ChatPage() {
               messages: wire,
               providerKey,
               gatewayKey,
-              temperature,
+              temperature: temperatureToSend,
               maxTokens: maxTokensNum,
               provider: selectedProvider,
               cache: cacheEnabled,
+              thinking: thinkingCfg,
               onRateLimit: setRateLimit,
             },
             (delta) => {
@@ -228,6 +255,23 @@ export default function ChatPage() {
             controller.signal,
             (s) => {
               summary = s;
+            },
+            (ev) => {
+              if (ev.kind === "thinking") {
+                thinkText += ev.text;
+                setMessages((prev) => {
+                  const next = [...prev];
+                  const last = next[next.length - 1];
+                  if (last?.role === "assistant") {
+                    next[next.length - 1] = { ...last, thinking: thinkText };
+                  }
+                  return next;
+                });
+              } else if (ev.kind === "thinking_signature") {
+                thinkSig = ev.signature;
+              } else if (ev.kind === "thinking_block") {
+                thinkBlocks.push(ev.block);
+              }
             },
             (citation) => {
               setMessages((prev) => {
@@ -278,6 +322,18 @@ export default function ChatPage() {
           const last = next[next.length - 1];
           if (last?.role !== "assistant") return next;
           if (streamError && !last.content) return next.slice(0, -1);
+          // Streamed thinking precedes verbatim redacted blocks in Anthropic's
+          // own ordering (visible reasoning first, encrypted blocks after).
+          const assembled = thinkText
+            ? [
+                {
+                  type: "thinking",
+                  thinking: thinkText,
+                  ...(thinkSig ? { signature: thinkSig } : {}),
+                },
+              ]
+            : [];
+          const allBlocks = [...assembled, ...thinkBlocks];
           next[next.length - 1] = {
             ...last,
             streaming: false,
@@ -286,6 +342,8 @@ export default function ChatPage() {
             cost: finalSummary?.cost_usd ?? undefined,
             finishReason: finalSummary?.finish_reason,
             redacted: finalSummary?.redacted,
+            thinking: thinkText || last.thinking,
+            thinkingBlocks: allBlocks.length ? allBlocks : null,
             contentBlocks: ordered.some((b) => b.type !== "text") ? ordered : undefined,
           };
           return next;
@@ -303,10 +361,11 @@ export default function ChatPage() {
           messages: wire,
           providerKey,
           gatewayKey,
-          temperature,
+          temperature: temperatureToSend,
           maxTokens: maxTokensNum,
           provider: selectedProvider,
           cache: cacheEnabled,
+          thinking: thinkingCfg,
           onRateLimit: setRateLimit,
         });
         setMessages([
@@ -325,6 +384,8 @@ export default function ChatPage() {
             fallbackUsed: res.fallback_used,
             cacheSimilarity: res.cache_similarity,
             redacted: res.redacted,
+            thinking: thinkingText(res.thinking_blocks) || undefined,
+            thinkingBlocks: res.thinking_blocks ?? null,
             citations: res.citations,
             extraBlocks: res.extra_blocks ?? undefined,
             contentBlocks: res.content_blocks ?? undefined,
@@ -455,6 +516,30 @@ export default function ChatPage() {
             </label>
           </div>
           <div className="field">
+            <label htmlFor="thinking">
+              <input
+                id="thinking"
+                type="checkbox"
+                checked={thinkingEnabled}
+                onChange={(e) => setThinkingEnabled(e.target.checked)}
+              />{" "}
+              Extended thinking (Anthropic)
+            </label>
+          </div>
+          {thinkingEnabled && (
+            <div className="field">
+              <label htmlFor="tbudget">Thinking budget (tokens)</label>
+              <input
+                id="tbudget"
+                type="number"
+                min={1024}
+                value={thinkingBudget}
+                placeholder="4096"
+                onChange={(e) => setThinkingBudget(e.target.value)}
+              />
+            </div>
+          )}
+          <div className="field">
             <label htmlFor="maxtok">Max tokens</label>
             <input
               id="maxtok"
@@ -478,6 +563,12 @@ export default function ChatPage() {
         )}
         {messages.map((m, i) => (
           <div key={m.id ?? i} className={`msg ${m.role}`}>
+            {m.thinking && (
+              <details className="thinking" open={m.streaming ? true : undefined}>
+                <summary>Thinking</summary>
+                <div className="thinking-text">{m.thinking}</div>
+              </details>
+            )}
             {m.content}
             {m.streaming && <span className="cursor">▌</span>}
             {!!m.citations?.length && (
