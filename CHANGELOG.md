@@ -133,6 +133,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   OpenAI's newer `safety_identifier` (the hashed abuse-detection handle that
   supersedes `user`) forwards to OpenAI-compatible providers the same way and
   is exposed on both SDKs (`safety_identifier=` / `safetyIdentifier`).
+- **`anthropic-beta` header forwarding on `POST /v1/messages`.** Anthropic
+  gates features behind beta headers (interleaved thinking, prompt-caching
+  scope, ...); a compat caller's header was dropped, silently disabling the
+  gated feature. It's now forwarded verbatim to Anthropic upstream and keyed
+  into the response cache (beta flags can change the response shape).
 - **`POST /v1/messages` accepts Anthropic server tools verbatim** —
   `web_search_20250305`, `code_execution_*`, `computer_use_*`,
   `mcp_tool_use`, etc. (any tool whose `type` isn't `custom`) are no longer

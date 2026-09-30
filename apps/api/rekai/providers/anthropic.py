@@ -190,10 +190,15 @@ class AnthropicProvider(Provider):
         return payload
 
     def _headers(self, key: str, request: ChatRequest | None = None) -> dict[str, str]:
+        beta = request.anthropic_beta if request is not None else None
         headers = {
             **trace_headers(),
             "x-api-key": key,
             "anthropic-version": current_settings().anthropic_version,
+            # Beta-gated features (interleaved thinking, prompt caching scope,
+            # ...) need the caller's `anthropic-beta` flag set to survive the
+            # compat hop — forward it verbatim when present.
+            **({"anthropic-beta": beta} if beta else {}),
             "content-type": "application/json",
         }
         # Anthropic takes the user profile as a header, not a body field.
@@ -201,7 +206,10 @@ class AnthropicProvider(Provider):
             headers["anthropic-user-profile-id"] = request.user_profile_id
         # Anthropic's MCP connector is a beta: mcp_servers is rejected without it.
         if request is not None and request.mcp_servers:
-            headers["anthropic-beta"] = "mcp-client-2025-11-20"
+            flags = [f.strip() for f in (beta or "").split(",") if f.strip()]
+            if "mcp-client-2025-11-20" not in flags:
+                flags.append("mcp-client-2025-11-20")
+            headers["anthropic-beta"] = ",".join(flags)
         return headers
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
