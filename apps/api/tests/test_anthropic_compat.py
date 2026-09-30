@@ -377,6 +377,264 @@ def test_count_tokens_errors_in_anthropic_envelope(client: TestClient) -> None:
     assert body["error"]["type"] == "invalid_request_error"
 
 
+# --- anthropic-beta header forwarding ---------------------------------------
+#
+# Anthropic gates features behind the `anthropic-beta` header (interleaved
+# thinking, prompt-caching scope, ...). A compat caller's header must reach
+# the upstream — dropping it silently disables the gated feature.
+
+
+async def test_anthropic_provider_forwards_beta_header(monkeypatch) -> None:
+    import httpx
+
+    from rekai.providers.anthropic import AnthropicProvider
+    from rekai.schemas import ChatMessage, ChatRequest
+
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {
+                "model": "claude-sonnet-4-6",
+                "content": [{"type": "text", "text": "hi"}],
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def aclose(self) -> None:
+            return None
+
+        async def post(self, url, json=None, headers=None):
+            captured["headers"] = headers
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    req = ChatRequest(
+        model="claude-sonnet-4-6",
+        messages=[ChatMessage(role="user", content="hi")],
+        anthropic_beta="context-1m-2025-08-07",
+    )
+    await AnthropicProvider().chat(req, "key")
+    assert captured["headers"]["anthropic-beta"] == "context-1m-2025-08-07"
+
+
+def test_messages_route_forwards_anthropic_beta_header(client: TestClient, monkeypatch) -> None:
+    from rekai.providers.echo import EchoProvider
+
+    captured: dict = {}
+    original = EchoProvider.chat
+
+    async def spy(self, request, api_key):
+        captured["anthropic_beta"] = request.anthropic_beta
+        return await original(self, request, api_key)
+
+    monkeypatch.setattr(EchoProvider, "chat", spy)
+    resp = client.post(
+        "/v1/messages",
+        json=_payload(),
+        headers={"anthropic-beta": "interleaved-thinking-2025-05-14"},
+    )
+    assert resp.status_code == 200
+    assert captured["anthropic_beta"] == "interleaved-thinking-2025-05-14"
+
+
+def test_beta_flags_key_the_cache(client: TestClient, monkeypatch) -> None:
+    from rekai.providers.echo import EchoProvider
+
+    calls = []
+    original = EchoProvider.chat
+
+    async def spy(self, request, api_key):
+        calls.append(request.anthropic_beta)
+        return await original(self, request, api_key)
+
+    monkeypatch.setattr(EchoProvider, "chat", spy)
+    body = _payload()
+    client.post("/v1/messages", json=body, headers={"anthropic-beta": "a"})
+    client.post("/v1/messages", json=body, headers={"anthropic-beta": "a"})
+    client.post("/v1/messages", json=body, headers={"anthropic-beta": "b"})
+    # Two calls: the second "a" hits the cache; "b" is a different beta context.
+    assert calls == ["a", "b"]
+
+
+# --- server tools pass through ----------------------------------------------
+#
+# Anthropic server tools (web_search_20250305, code_execution, computer_use,
+# mcp_tool_use, ...) ask the *provider* to run a capability — they are not
+# client functions. Translating one to an OpenAI function shape would silently
+# rewire it into a client tool upstream and the hosted feature never fires.
+
+
+def test_server_tool_passes_through_verbatim(client: TestClient, monkeypatch) -> None:
+    from rekai.providers.echo import EchoProvider
+
+    captured: dict = {}
+    original = EchoProvider.chat
+
+    async def spy(self, request, api_key):
+        captured["tools"] = request.tools
+        return await original(self, request, api_key)
+
+    monkeypatch.setattr(EchoProvider, "chat", spy)
+    resp = client.post(
+        "/v1/messages",
+        json=_payload(
+            tools=[
+                {
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": 3,
+                    "allowed_domains": ["docs.example.com"],
+                }
+            ]
+        ),
+    )
+    assert resp.status_code == 200
+    assert captured["tools"] == [
+        {
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": 3,
+            "allowed_domains": ["docs.example.com"],
+        }
+    ]
+
+
+def test_mcp_toolset_without_name_passes_through(client: TestClient, monkeypatch) -> None:
+    # The MCP connector's toolset entry has no `name` — it references a server
+    # by `mcp_server_name` — so it must not be rejected by the tool schema.
+    from rekai.providers.echo import EchoProvider
+
+    captured: dict = {}
+    original = EchoProvider.chat
+
+    async def spy(self, request, api_key):
+        captured["tools"] = request.tools
+        return await original(self, request, api_key)
+
+    monkeypatch.setattr(EchoProvider, "chat", spy)
+    toolset = {"type": "mcp_toolset", "mcp_server_name": "docs"}
+    resp = client.post("/v1/messages", json=_payload(tools=[toolset]))
+    assert resp.status_code == 200
+    assert captured["tools"] == [toolset]
+
+
+async def test_anthropic_provider_reemits_server_tool_verbatim(monkeypatch) -> None:
+    import httpx
+
+    from rekai.providers.anthropic import AnthropicProvider
+    from rekai.schemas import ChatMessage, ChatRequest
+
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {
+                "model": "claude-sonnet-4-6",
+                "content": [{"type": "text", "text": "hi"}],
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def aclose(self) -> None:
+            return None
+
+        async def post(self, url, json=None, headers=None):
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    server_tool = {"type": "web_search_20250305", "name": "web_search", "max_uses": 3}
+    await AnthropicProvider().chat(
+        ChatRequest(
+            model="claude-sonnet-4-6",
+            messages=[ChatMessage(role="user", content="hi")],
+            tools=[server_tool],
+        ),
+        "key",
+    )
+    assert server_tool in captured["json"]["tools"]
+
+
+async def test_mcp_servers_forward_verbatim_to_anthropic(monkeypatch) -> None:
+    import httpx
+
+    from rekai.providers.anthropic import AnthropicProvider
+    from rekai.schemas import ChatMessage, ChatRequest
+
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {
+                "model": "claude-sonnet-4-6",
+                "content": [{"type": "text", "text": "hi"}],
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def aclose(self) -> None:
+            return None
+
+        async def post(self, url, json=None, headers=None):
+            captured["json"] = json
+            captured["headers"] = headers
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    servers = [
+        {
+            "type": "url",
+            "name": "docs",
+            "url": "https://mcp.example.com/sse",
+            "authorization_token": "tok",
+            "tool_configuration": {"enabled": True},
+        }
+    ]
+    await AnthropicProvider().chat(
+        ChatRequest(
+            model="claude-sonnet-4-6",
+            messages=[ChatMessage(role="user", content="hi")],
+            mcp_servers=servers,
+        ),
+        "key",
+    )
+    assert captured["json"]["mcp_servers"] == servers
+    assert captured["headers"]["anthropic-beta"] == "mcp-client-2025-11-20"
+
+
+def test_mcp_servers_field_reaches_chat_request(client: TestClient, monkeypatch) -> None:
+    from rekai.providers.echo import EchoProvider
+
+    captured: dict = {}
+    original = EchoProvider.chat
+
+    async def spy(self, request, api_key):
+        captured["mcp_servers"] = request.mcp_servers
+        return await original(self, request, api_key)
+
+    monkeypatch.setattr(EchoProvider, "chat", spy)
+    servers = [{"type": "url", "name": "docs", "url": "https://mcp.example.com/sse"}]
+    resp = client.post("/v1/messages", json=_payload(mcp_servers=servers))
+    assert resp.status_code == 200
+    assert captured["mcp_servers"] == servers
+
+
 # --- tool_result is_error round-trips ---------------------------------------
 
 
@@ -499,3 +757,45 @@ def test_tool_result_nested_non_text_block_is_a_400(client: TestClient) -> None:
     )
     assert resp.status_code == 400
     assert resp.json()["error"]["type"] == "invalid_request_error"
+
+
+async def test_caller_beta_and_mcp_beta_coexist(monkeypatch) -> None:
+    import httpx
+
+    from rekai.providers.anthropic import AnthropicProvider
+    from rekai.schemas import ChatMessage, ChatRequest
+
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {
+                "model": "claude-sonnet-4-6",
+                "content": [{"type": "text", "text": "hi"}],
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def aclose(self) -> None:
+            return None
+
+        async def post(self, url, json=None, headers=None):
+            captured["headers"] = headers
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    await AnthropicProvider().chat(
+        ChatRequest(
+            model="claude-sonnet-4-6",
+            messages=[ChatMessage(role="user", content="hi")],
+            anthropic_beta="context-1m-2025-08-07",
+            mcp_servers=[{"type": "url", "name": "docs", "url": "https://mcp.example.com/sse"}],
+        ),
+        "key",
+    )
+    assert captured["headers"]["anthropic-beta"] == "context-1m-2025-08-07,mcp-client-2025-11-20"
