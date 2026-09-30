@@ -261,6 +261,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   strings pass through. Modern `tools`/`tool_choice` win when both spellings
   arrive.
 
+### Documentation
+- **README feature list caught up to the codebase.** Semantic cache +
+  verification band, per-client budgets (incl. per-key overrides and the
+  rolling window), `Idempotency-Key`, dynamic admin keys, prompt-injection
+  guardrails, output redaction, the concurrency cap, request deadline,
+  provider cooldown, and W3C `traceparent` correlation were all shipped but
+  unlisted.
+
 ### Fixed
 - **Thinking follow-ups.** Output redaction now scrubs thinking text like the
   answer (a secret pondered aloud was shipped verbatim); streamed thinking
