@@ -8,6 +8,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Three pass-through fidelity fixes** — JSON-mode's synthetic `json_response`
+  tool now becomes a text block holding the unwrapped answer inside
+  `content_blocks` (deleting it left a nonempty array without the answer, and
+  `to_message` prefers the array, so `/v1/messages` dropped the JSON whenever
+  another block travelled with it); streamed extra-block deltas scrub through
+  one `StreamRedactor` per payload field instead of one per block, so a
+  held-back tail can never re-emerge under another field's key; and secrets
+  scrubbed from `extra_block_start`/`extra_block`/`extra_fields` frames now
+  count in `summary.redacted` (deduplicated against the delta-redactor hits
+  that already reported them).
 - **Embeddings `dimensions` hardening** — a provider-declared
   `max_embedding_dimensions` (echo: 4096) is enforced before the cache lookup
   and any idempotent replay, so a stored oversized response can't bypass it;
