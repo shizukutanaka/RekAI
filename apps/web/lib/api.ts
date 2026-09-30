@@ -3,6 +3,10 @@ export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
+  /** Anthropic server-tool blocks echoed back verbatim on assistant turns. */
+  extra_blocks?: Record<string, unknown>[];
+  /** Ordered verbatim content array for an assistant turn — replays the exact upstream sequence. */
+  content_blocks?: Record<string, unknown>[];
 }
 
 /**
@@ -31,11 +35,23 @@ export interface ChatResponse {
   stop_sequence?: string | null;
   cache_similarity?: number | null;
   redacted?: string[] | null;
+  /** The model's refusal text when it declined; `content` is empty then. */
+  refusal?: string | null;
+  /** Citations etc. attached to the answer (e.g. web-search url_citation). */
+  annotations?: Record<string, unknown>[] | null;
   /** True when a fallback target answered because the primary failed. */
   fallback_used?: boolean;
   tool_calls?: Record<string, unknown>[] | null;
   /** Anthropic thinking blocks produced before the answer (extended thinking). */
   thinking_blocks?: Record<string, unknown>[] | null;
+  /** Anthropic citations on the answer's text (web-search sources). */
+  citations?: Record<string, unknown>[] | null;
+  /** Anthropic server-side tool blocks (server_tool_use, tool-result blocks, mcp_*). */
+  extra_blocks?: Record<string, unknown>[] | null;
+  /** Message-level fields the provider doesn't map (container, context_management, ...). */
+  extra_fields?: Record<string, unknown> | null;
+  /** The upstream content array verbatim, in emitted order. */
+  content_blocks?: Record<string, unknown>[] | null;
 }
 
 /**
@@ -278,11 +294,13 @@ export function setStoredAdminKey(value: string): void {
 export interface AdminKeyList {
   static: string[];
   dynamic: string[];
+  dynamic_expires_at: Record<string, number>;
 }
 
 export interface AdminKeyActionResponse {
   status: "added" | "revoked";
   key: string;
+  expires_at: number | null;
 }
 
 export async function fetchAdminKeys(adminKey: string): Promise<AdminKeyList> {
@@ -297,11 +315,14 @@ export async function fetchAdminKeys(adminKey: string): Promise<AdminKeyList> {
 export async function addAdminKey(
   adminKey: string,
   key: string,
+  expiresInSeconds?: number,
 ): Promise<AdminKeyActionResponse> {
   const res = await fetch(`${API_URL}/admin/keys`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...gatewayAuthHeaders(adminKey) },
-    body: JSON.stringify({ key }),
+    body: JSON.stringify(
+      expiresInSeconds === undefined ? { key } : { key, expires_in_seconds: expiresInSeconds },
+    ),
   });
   if (!res.ok) throw await errorFromResponse(res);
   return res.json();
@@ -375,6 +396,8 @@ export async function streamChat(
   onDelta: (text: string) => void,
   signal?: AbortSignal,
   onSummary?: (summary: StreamSummary) => void,
+  onCitation?: (citation: Record<string, unknown>) => void,
+  onExtraBlock?: (block: Record<string, unknown>) => void,
 ): Promise<void> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -418,7 +441,9 @@ export async function streamChat(
       const ev = parseSSEFrame(frame);
       if (ev.kind === "done") return;
       if (ev.kind === "delta") onDelta(ev.text);
+      else if (ev.kind === "citation") onCitation?.(ev.citation);
       else if (ev.kind === "summary") onSummary?.(ev.summary);
+      else if (ev.kind === "extra_block") onExtraBlock?.(ev.block);
       else if (ev.kind === "error") throw new Error(ev.message);
     }
   }
@@ -439,11 +464,15 @@ export interface StreamSummary {
   finish_reason?: FinishReason;
   stop_sequence?: string | null;
   redacted?: string[] | null;
+  refusal?: string;
+  annotations?: Record<string, unknown>[];
 }
 
 export type SSEEvent =
   | { kind: "delta"; text: string }
+  | { kind: "citation"; citation: Record<string, unknown> }
   | { kind: "summary"; summary: StreamSummary }
+  | { kind: "extra_block"; block: Record<string, unknown> }
   | { kind: "done" }
   | { kind: "error"; message: string }
   | { kind: "ignore" };
@@ -460,7 +489,10 @@ export function parseSSEFrame(frame: string): SSEEvent {
   try {
     const event = JSON.parse(payload);
     if (event.delta) return { kind: "delta", text: event.delta };
+    if (event.citation) return { kind: "citation", citation: event.citation };
     if (event.error) return { kind: "error", message: event.detail || event.error };
+    if (event.extra_block)
+      return { kind: "extra_block", block: event.extra_block };
     if (event.usage) return { kind: "summary", summary: event as StreamSummary };
     return { kind: "ignore" };
   } catch {
