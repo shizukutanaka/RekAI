@@ -24,6 +24,14 @@ class ChatMessage(BaseModel):
     # Anthropic thinking/redacted_thinking blocks echoed back in assistant
     # history (verbatim dicts). Providers without the concept drop them.
     thinking_blocks: list[dict[str, Any]] | None = None
+    # Anthropic server-side tool blocks (server_tool_use, tool-result blocks,
+    # mcp_*, ...) echoed back in assistant history, verbatim. Anthropic
+    # requires the tool-trace preserved in multi-turn context; providers
+    # without the concept drop them.
+    extra_blocks: list[dict[str, Any]] | None = None
+    # Ordered verbatim Anthropic content array for an assistant turn —
+    # preserved so a later request echoes the exact upstream sequence.
+    content_blocks: list[dict[str, Any]] | None = None
 
 
 class FallbackTarget(BaseModel):
@@ -359,6 +367,29 @@ class ChatResponse(BaseModel):
         "when thinking was enabled; the /v1/messages surface re-emits them as "
         "content blocks so the caller can echo them back verbatim.",
     )
+    extra_blocks: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Anthropic server-side tool blocks (server_tool_use, "
+        "web_search_tool_result, mcp_*, code_execution, ...) in upstream order, "
+        "verbatim. Present when server tools ran; /v1/messages re-emits them "
+        "between thinking and the answer text, and callers echo them back on "
+        "the next turn to preserve the tool-trace.",
+    )
+    extra_fields: dict[str, Any] | None = Field(
+        default=None,
+        description="Message-level fields the provider doesn't map (Anthropic's "
+        "container for code execution, context_management edit reports, and "
+        "anything new) — verbatim. The OpenAI surface has no equivalent and "
+        "omits them.",
+    )
+    content_blocks: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="The upstream content array verbatim, in emitted order "
+        "(text, thinking, tool_use and server-tool blocks interleaved). "
+        "Present only when the provider reports ordered blocks — /v1/messages "
+        "re-emits it verbatim and callers echo it for multi-turn continuity. "
+        "The OpenAI surface has no equivalent and omits it.",
+    )
     fallback_used: bool = Field(
         default=False, description="True if a fallback served this response, not the primary."
     )
@@ -422,7 +453,9 @@ class ServiceInfo(BaseModel):
     name: str
     version: str
     description: str
-    docs: str
+    # null when docs are disabled (production default) — don't advertise a
+    # route that doesn't exist.
+    docs: str | None
     health: str
 
 

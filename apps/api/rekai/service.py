@@ -79,6 +79,14 @@ class ChatStreamEvent:
     thinking_delta: str | None = None
     thinking_signature: str | None = None
     thinking_block: dict | None = None
+    # A non-standard content block streaming through verbatim: the upstream
+    # content_block_start payload, one verbatim delta, or the completed block.
+    extra_block_start: dict | None = None
+    extra_block_delta: dict | None = None
+    extra_block: dict | None = None
+    # Message-level fields arriving on message_start that the provider
+    # doesn't map (container, context_management, ...), verbatim.
+    extra_fields: dict | None = None
 
 
 def _chat_factory(
@@ -271,10 +279,81 @@ def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
             new_blocks.append(block)
         if changed:
             updates["thinking_blocks"] = new_blocks
+    # Server-tool blocks (search results, code-exec output, tool inputs) carry
+    # free text too — scrub every string leaf in them, and in the verbatim
+    # ordered array, with the same redactor. "signature" keys stay untouched:
+    # they are crypto blobs whose integrity Anthropic verifies on echo, not
+    # human-readable text.
+    if response.extra_blocks:
+        scrubbed_blocks, found = _scrub_block_strings(response.extra_blocks)
+        if found:
+            updates["extra_blocks"] = scrubbed_blocks
+            hits += found
+    if response.content_blocks:
+        scrubbed_blocks, found = _scrub_block_strings(response.content_blocks)
+        if found:
+            updates["content_blocks"] = scrubbed_blocks
+            hits += found
     if not hits:
         return response
-    updates["redacted"] = hits
+    updates["redacted"] = list(dict.fromkeys(hits))
     return response.model_copy(update=updates)
+
+
+def _scrub_block_strings(value: Any) -> tuple[Any, list[str]]:
+    """Recursively redact secrets from every string leaf inside a block.
+
+    ``signature`` keys are skipped: they are integrity blobs Anthropic
+    verifies verbatim, never model text."""
+    hits: list[str] = []
+
+    def walk(node: Any) -> Any:
+        if isinstance(node, dict):
+            return {k: (v if k == "signature" else walk(v)) for k, v in node.items()}
+        if isinstance(node, list):
+            return [walk(v) for v in node]
+        if isinstance(node, str):
+            scrubbed, found = guardrails.redact_secrets(node)
+            if found:
+                hits.extend(found)
+            return scrubbed
+        return node
+
+    return walk(value), hits
+
+
+def _scrub_if(value: Any, enabled: bool) -> Any:
+    """Verbatim pass-through, or the recursively secret-scrubbed copy when
+    output redaction is on."""
+    if not enabled:
+        return value
+    scrubbed, _ = _scrub_block_strings(value)
+    return scrubbed
+
+
+def _scrub_extra_delta(
+    delta: Any, redactor: guardrails.StreamRedactor | None, enabled: bool
+) -> Any:
+    """Scrub one streamed extra-block delta through the block's redactor.
+
+    A secret can straddle deltas (``sk-`` | ``rest``) — per-frame scrubbing
+    misses it, so each delta's payload string feeds the same incremental
+    redactor for the whole block, the contract answer text already uses.
+    ``type`` and ``signature`` stay untouched: the signature is a crypto blob
+    Anthropic verifies verbatim on echo. A non-string payload (a citation
+    dict, say) arrives whole inside a single delta and scrubs per-frame.
+    """
+    if not enabled or not isinstance(delta, dict):
+        return _scrub_if(delta, enabled)
+    out = dict(delta)
+    for key, value in delta.items():
+        if key in ("type", "signature"):
+            continue
+        if isinstance(value, str):
+            out[key] = redactor.feed(value) if redactor is not None else value
+        else:
+            out[key] = _scrub_if(value, enabled)
+    return out
 
 
 def _request_deadline(settings: Settings) -> float | None:
@@ -306,13 +385,15 @@ async def handle_chat(
     # Semantic cache (its own in-memory store): reuse a response for a paraphrase
     # of an earlier prompt. Respects the per-request opt-out, independent of the
     # content-cache backend.
-    # Assistant thinking blocks carry signed prior reasoning; the semantic
-    # index keys on plain message text, so two requests differing only in
-    # thinking history would collide. Skip semantic caching for them.
+    # Assistant thinking/server-tool blocks carry prior context the plain-text
+    # embedding never sees; two requests differing only in those blocks would
+    # collide on the same cached answer. Skip semantic caching for them.
     sem_enabled = (
         settings.semantic_cache_enabled
         and request.cache
-        and not any(m.thinking_blocks for m in request.messages)
+        and not any(
+            m.thinking_blocks or m.extra_blocks or m.content_blocks for m in request.messages
+        )
     )
     sem_bucket = ""
     sem_embedding: list[float] | None = None
@@ -509,6 +590,9 @@ async def handle_chat(
             fallback_used=is_fallback,
             finish_reason=result.finish_reason,
             thinking_blocks=result.thinking_blocks,
+            extra_blocks=result.extra_blocks,
+            extra_fields=result.extra_fields,
+            content_blocks=result.content_blocks,
             created=int(time.time()),
         )
         # Redact before *any* store below sees the content (see _redact).
@@ -576,6 +660,15 @@ async def handle_chat_stream(
     # when actually enabled.
     redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
     thinking_redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
+    redaction_on = settings.output_redaction_enabled
+    # Each open extra block gets its own incremental redactor — a secret split
+    # across that block's deltas must still be caught. The last delta's
+    # {type, payload key} is remembered so the held-back tail can be released
+    # in the same shape upstream uses, keeping the verbatim frame sequence
+    # lossless for clients reconstructing the block.
+    extra_redactor: guardrails.StreamRedactor | None = None
+    extra_delta_shape: dict[str, str] | None = None
+    extra_hits: list[str] = []
     try:
         async for event in provider.stream_events(request, api_key):
             if event.delta:
@@ -623,6 +716,54 @@ async def handle_chat_stream(
                     if tail:
                         yield ChatStreamEvent(thinking_delta=tail)
                 yield ChatStreamEvent(thinking_block=event.thinking_block)
+            if event.extra_block_start is not None:
+                # Flush the text redactor's held-back tail first — a buffered
+                # text delta must not land after the tool block that upstream
+                # emitted after it (answer order would invert).
+                if redactor is not None:
+                    tail = redactor.flush()
+                    if tail:
+                        yield ChatStreamEvent(delta=tail)
+                # Server-side tool blocks (and anything unmapped) pass through
+                # verbatim — but their free text (search results, tool inputs)
+                # still gets the same secret scrub as the answer.
+                yield ChatStreamEvent(
+                    extra_block_start=_scrub_if(event.extra_block_start, redaction_on)
+                )
+                # A fresh incremental redactor per block — its deltas are one
+                # logical string chunked across frames.
+                extra_redactor = guardrails.StreamRedactor() if redaction_on else None
+                extra_delta_shape = None
+            if event.extra_block_delta is not None:
+                delta = event.extra_block_delta
+                if isinstance(delta, dict):
+                    for k, v in delta.items():
+                        if k not in ("type", "signature") and isinstance(v, str):
+                            extra_delta_shape = {
+                                "type": str(delta.get("type") or ""),
+                                "key": k,
+                            }
+                            break
+                yield ChatStreamEvent(
+                    extra_block_delta=_scrub_extra_delta(delta, extra_redactor, redaction_on)
+                )
+            if event.extra_block is not None:
+                # Release whatever the redactor still held back, in the shape
+                # of the last delta, before the completed block lands.
+                tail = extra_redactor.flush() if extra_redactor is not None else ""
+                if tail and extra_delta_shape is not None:
+                    yield ChatStreamEvent(
+                        extra_block_delta={
+                            "type": extra_delta_shape["type"],
+                            extra_delta_shape["key"]: tail,
+                        }
+                    )
+                if extra_redactor is not None:
+                    extra_hits.extend(extra_redactor.hits)
+                    extra_redactor = None
+                yield ChatStreamEvent(extra_block=_scrub_if(event.extra_block, redaction_on))
+            if event.extra_fields is not None:
+                yield ChatStreamEvent(extra_fields=_scrub_if(event.extra_fields, redaction_on))
             if event.usage is not None:
                 reported_usage = event.usage
             if event.tool_calls is not None:
@@ -637,6 +778,18 @@ async def handle_chat_stream(
             tail = thinking_redactor.flush()
             if tail:
                 yield ChatStreamEvent(thinking_delta=tail)
+        if extra_redactor is not None:
+            # A block left open when the upstream stream ended — release the
+            # held-back tail in its last-seen delta shape.
+            tail = extra_redactor.flush()
+            if tail and extra_delta_shape is not None:
+                yield ChatStreamEvent(
+                    extra_block_delta={
+                        "type": extra_delta_shape["type"],
+                        extra_delta_shape["key"]: tail,
+                    }
+                )
+            extra_hits.extend(extra_redactor.hits)
     except ProviderError as exc:
         errored = True
         metrics.record_error("provider_error")
@@ -699,10 +852,31 @@ async def handle_chat_stream(
                 redacted=(
                     (redactor.hits if redactor is not None else [])
                     + (thinking_redactor.hits if thinking_redactor is not None else [])
+                    + extra_hits
                 )
                 or None,
             )
         )
+
+
+def _check_embedding_dimensions(
+    provider_name: str, provider: Provider | None, dimensions: int | None
+) -> None:
+    limit = provider.max_embedding_dimensions if provider is not None else None
+    if limit is not None and dimensions is not None and dimensions > limit:
+        raise ProviderError(
+            f"Provider '{provider_name}' caps embedding dimensions at {limit}.",
+            status_code=400,
+        )
+
+
+def check_embeddings_dimensions(request: EmbeddingsRequest, settings: Settings) -> None:
+    """Apply the provider's declared ``dimensions`` cap ahead of any cache hit
+    or idempotent replay — both return a stored response without calling the
+    provider, so an oversized entry written before the cap existed would
+    otherwise be served verbatim under the new limit."""
+    provider_name = resolve_provider(request.provider, request.model, settings)
+    _check_embedding_dimensions(provider_name, get_provider(provider_name), request.dimensions)
 
 
 async def handle_embeddings(
@@ -717,6 +891,7 @@ async def handle_embeddings(
     if provider is None:
         raise ProviderError(f"Unknown provider '{provider_name}'.", status_code=400)
     metrics.record_request(provider_name)
+    _check_embedding_dimensions(provider_name, provider, request.dimensions)
 
     inputs = [request.input] if isinstance(request.input, str) else list(request.input)
     if not inputs:
@@ -733,8 +908,16 @@ async def handle_embeddings(
     if use_cache:
         cached_raw = await cache.get(key)
         if cached_raw is not None:
-            metrics.record_cache(hit=True)
-            return EmbeddingsResponse(**{**json.loads(cached_raw), "cached": True})
+            cached = json.loads(cached_raw)
+            vectors = cached.get("embeddings") or []
+            # Entries written before the provider honored this `dimensions`
+            # value hold the old size under the same key — a hit must not
+            # return a wrong-length vector until the TTL expires (Redis can
+            # carry one across a deploy). Fall through and recompute; the
+            # store below overwrites the stale entry.
+            if request.dimensions is None or all(len(v) == request.dimensions for v in vectors):
+                metrics.record_cache(hit=True)
+                return EmbeddingsResponse(**{**cached, "cached": True})
         metrics.record_cache(hit=False)
 
     started = time.perf_counter()
