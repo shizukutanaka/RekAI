@@ -98,6 +98,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requirement), while an explicit temperature rides as sent. Non-Anthropic
   providers ignore the config and surfaces without the concept (OpenAI chunks)
   drop the blocks. Both SDKs and the web client expose `thinking_blocks`.
+- **`tool_result.is_error` round-trips through the compat layer** — a failed
+  tool call on `POST /v1/messages` used to flatten into an indistinguishable
+  tool message, so the model couldn't tell failure from success. The flag now
+  rides on `ChatMessage.is_error` and the Anthropic provider re-emits
+  `is_error: true` upstream; surfaces without the concept (OpenAI tool
+  messages) drop the flag and keep the error text in `content`. Non-text
+  blocks nested inside a `tool_result`'s content (images, documents) now
+  fail as a readable 400 like top-level blocks instead of silently
+  dropping.
 - **Model refusal text is surfaced end-to-end instead of dropped.** OpenAI
   returns a refusal as `message.refusal` / `delta.refusal` chunks with
   `content` null; RekAI flattened that to an empty answer. `ProviderResult`,

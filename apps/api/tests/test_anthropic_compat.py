@@ -375,3 +375,127 @@ def test_count_tokens_errors_in_anthropic_envelope(client: TestClient) -> None:
     body = resp.json()
     assert body["type"] == "error"
     assert body["error"]["type"] == "invalid_request_error"
+
+
+# --- tool_result is_error round-trips ---------------------------------------
+
+
+def test_tool_result_is_error_reaches_provider(client: TestClient, monkeypatch) -> None:
+    from rekai.providers.echo import EchoProvider
+
+    captured: dict = {}
+    original = EchoProvider.chat
+
+    async def spy(self, request, api_key):
+        captured["messages"] = request.messages
+        return await original(self, request, api_key)
+
+    monkeypatch.setattr(EchoProvider, "chat", spy)
+    resp = client.post(
+        "/v1/messages",
+        json=_payload(
+            messages=[
+                {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "t1", "name": "f", "input": {}}],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t1",
+                            "content": "boom",
+                            "is_error": True,
+                        }
+                    ],
+                },
+            ]
+        ),
+    )
+    assert resp.status_code == 200
+    tool_msg = next(m for m in captured["messages"] if m.role == "tool")
+    assert tool_msg.is_error is True
+
+
+async def test_anthropic_provider_emits_is_error(monkeypatch) -> None:
+    import httpx
+
+    from rekai.providers.anthropic import AnthropicProvider
+    from rekai.schemas import ChatMessage, ChatRequest
+
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {
+                "model": "claude-sonnet-4-6",
+                "content": [{"type": "text", "text": "hi"}],
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def aclose(self) -> None:
+            return None
+
+        async def post(self, url, json=None, headers=None):
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    await AnthropicProvider().chat(
+        ChatRequest(
+            model="claude-sonnet-4-6",
+            messages=[
+                ChatMessage(role="user", content="run it"),
+                ChatMessage(role="tool", content="boom", tool_call_id="t1", is_error=True),
+            ],
+        ),
+        "key",
+    )
+    block = captured["json"]["messages"][-1]["content"][0]
+    assert block == {
+        "type": "tool_result",
+        "tool_use_id": "t1",
+        "content": "boom",
+        "is_error": True,
+    }
+
+
+def test_tool_result_nested_non_text_block_is_a_400(client: TestClient) -> None:
+    """An image block nested inside a tool_result used to drop silently —
+    the outer layer's readable-400 rule didn't reach it."""
+    resp = client.post(
+        "/v1/messages",
+        json=_payload(
+            messages=[
+                {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "t1", "name": "f", "input": {}}],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t1",
+                            "content": [
+                                {"type": "text", "text": "see attached"},
+                                {
+                                    "type": "image",
+                                    "source": {"type": "base64", "data": "…"},
+                                },
+                            ],
+                        }
+                    ],
+                },
+            ]
+        ),
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["type"] == "invalid_request_error"

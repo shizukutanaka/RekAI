@@ -95,7 +95,10 @@ def _flatten_content(
                     "'thinking' blocks belong on assistant messages.",
                     status_code=400,
                 )
-            thinking_blocks.append(block.model_dump(exclude_none=True))
+            # exclude_unset: echo back exactly the fields the client sent —
+            # exclude_none would leak pydantic defaults (e.g. is_error:false)
+            # into a block Anthropic replays verbatim.
+            thinking_blocks.append(block.model_dump(exclude_unset=True))
         elif block.type == "tool_use":
             if role != "assistant":
                 raise ProviderError(
@@ -115,6 +118,16 @@ def _flatten_content(
         elif block.type == "tool_result":
             body = block.content
             if isinstance(body, list):
+                # Same rule as the outer layer: a non-text block inside a
+                # tool_result (image, document, …) is a readable 400, not a
+                # silent drop.
+                for b in body:
+                    if isinstance(b, dict) and b.get("type") != "text":
+                        raise ProviderError(
+                            f"Unsupported content block type '{b.get('type')}' "
+                            "inside tool_result; RekAI accepts text blocks.",
+                            status_code=400,
+                        )
                 body = "\n".join(
                     b.get("text", "")
                     for b in body
@@ -125,10 +138,11 @@ def _flatten_content(
                     role="tool",
                     content=body or "",
                     tool_call_id=block.tool_use_id,
+                    is_error=block.is_error,
                 )
             )
         elif role == "assistant":
-            extra_blocks.append(block.model_dump(exclude_none=True))
+            extra_blocks.append(block.model_dump(exclude_unset=True))
         else:
             raise ProviderError(
                 f"Unsupported content block type '{block.type}'; "
@@ -137,7 +151,7 @@ def _flatten_content(
                 status_code=400,
             )
     ordered = (
-        [block.model_dump(exclude_none=True) for block in content] if role == "assistant" else []
+        [block.model_dump(exclude_unset=True) for block in content] if role == "assistant" else []
     )
     return (
         "\n".join(texts) if texts else None,
