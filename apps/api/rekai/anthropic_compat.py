@@ -95,7 +95,10 @@ def _flatten_content(
                     "'thinking' blocks belong on assistant messages.",
                     status_code=400,
                 )
-            thinking_blocks.append(block.model_dump(exclude_none=True))
+            # exclude_unset: echo back exactly the fields the client sent —
+            # exclude_none would leak pydantic defaults (e.g. is_error:false)
+            # into a block Anthropic replays verbatim.
+            thinking_blocks.append(block.model_dump(exclude_unset=True))
         elif block.type == "tool_use":
             if role != "assistant":
                 raise ProviderError(
@@ -115,6 +118,16 @@ def _flatten_content(
         elif block.type == "tool_result":
             body = block.content
             if isinstance(body, list):
+                # Same rule as the outer layer: a non-text block inside a
+                # tool_result (image, document, …) is a readable 400, not a
+                # silent drop.
+                for b in body:
+                    if isinstance(b, dict) and b.get("type") != "text":
+                        raise ProviderError(
+                            f"Unsupported content block type '{b.get('type')}' "
+                            "inside tool_result; RekAI accepts text blocks.",
+                            status_code=400,
+                        )
                 body = "\n".join(
                     b.get("text", "")
                     for b in body
@@ -125,10 +138,11 @@ def _flatten_content(
                     role="tool",
                     content=body or "",
                     tool_call_id=block.tool_use_id,
+                    is_error=block.is_error,
                 )
             )
         elif role == "assistant":
-            extra_blocks.append(block.model_dump(exclude_none=True))
+            extra_blocks.append(block.model_dump(exclude_unset=True))
         else:
             raise ProviderError(
                 f"Unsupported content block type '{block.type}'; "
@@ -137,7 +151,7 @@ def _flatten_content(
                 status_code=400,
             )
     ordered = (
-        [block.model_dump(exclude_none=True) for block in content] if role == "assistant" else []
+        [block.model_dump(exclude_unset=True) for block in content] if role == "assistant" else []
     )
     return (
         "\n".join(texts) if texts else None,
@@ -211,6 +225,7 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
         tools=[_to_openai_tool(t) for t in req.tools] if req.tools else None,
         tool_choice=_to_openai_tool_choice(req.tool_choice) if req.tool_choice else None,
         thinking=req.thinking,
+        output_config=req.output_config,
     )
 
 
@@ -225,6 +240,10 @@ def _content_blocks(resp: ChatResponse) -> list[dict]:
         blocks.extend(resp.extra_blocks)
     if resp.content:
         blocks.append({"type": "text", "text": resp.content})
+    elif resp.refusal:
+        # Anthropic carries the refusal text as the (only) text block, paired
+        # with stop_reason "refusal" — fold the upstream refusal field in.
+        blocks.append({"type": "text", "text": resp.refusal})
     for tc in resp.tool_calls or []:
         fn = tc.get("function", {})
         try:
@@ -242,6 +261,18 @@ def _content_blocks(resp: ChatResponse) -> list[dict]:
     return blocks or [{"type": "text", "text": ""}]
 
 
+def _usage_dict(usage: Usage) -> dict[str, int]:
+    """Anthropic's usage shape. `input_tokens` EXCLUDES prompt-cache tokens on
+    the wire — RekAI's `prompt_tokens` includes them — so subtract the cached
+    slices and report them under Anthropic's own key names."""
+    return {
+        "input_tokens": (usage.prompt_tokens - usage.cache_read_tokens - usage.cache_write_tokens),
+        "output_tokens": usage.completion_tokens,
+        "cache_creation_input_tokens": usage.cache_write_tokens,
+        "cache_read_input_tokens": usage.cache_read_tokens,
+    }
+
+
 def to_message(resp: ChatResponse) -> dict:
     """Translate RekAI's ChatResponse into an Anthropic Message object."""
     finish = resp.finish_reason or ("tool_calls" if resp.tool_calls else "stop")
@@ -257,14 +288,15 @@ def to_message(resp: ChatResponse) -> dict:
         "model": resp.model,
         "stop_reason": _FINISH_TO_STOP_REASON.get(finish, "end_turn"),
         "stop_sequence": None,
-        "usage": {
-            "input_tokens": resp.usage.prompt_tokens,
-            "output_tokens": resp.usage.completion_tokens,
-        },
+        "usage": _usage_dict(resp.usage),
         # RekAI observability extras — ignored by the SDK, useful to operators.
         "provider": resp.provider,
         "cost_usd": resp.cost_usd,
         "cached": resp.cached,
+        # OpenAI-side annotations (e.g. url_citation) don't translate to
+        # Anthropic's citations schema (it wants cited_text we don't have) —
+        # pass them through as an extra instead of dropping them.
+        **({"annotations": resp.annotations} if resp.annotations else {}),
     }
     # Message-level fields RekAI doesn't map (container, context_management,
     # ...) reattach verbatim — setdefault so they can never clobber the
@@ -376,10 +408,7 @@ def ev_message_delta(stop_reason: str, usage: Usage | None) -> str:
         # Anthropic only defines output_tokens here, but we also report
         # input_tokens — we could not populate them in message_start (the
         # provider had not answered yet) and the SDK just accumulates the dict.
-        data["usage"] = {
-            "input_tokens": usage.prompt_tokens,
-            "output_tokens": usage.completion_tokens,
-        }
+        data["usage"] = _usage_dict(usage)
     return sse("message_delta", data)
 
 

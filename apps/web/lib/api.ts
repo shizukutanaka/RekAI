@@ -32,6 +32,10 @@ export interface ChatResponse {
   finish_reason?: FinishReason;
   cache_similarity?: number | null;
   redacted?: string[] | null;
+  /** The model's refusal text when it declined; `content` is empty then. */
+  refusal?: string | null;
+  /** Citations etc. attached to the answer (e.g. web-search url_citation). */
+  annotations?: Record<string, unknown>[] | null;
   /** True when a fallback target answered because the primary failed. */
   fallback_used?: boolean;
   tool_calls?: Record<string, unknown>[] | null;
@@ -447,6 +451,8 @@ export interface StreamSummary {
   tool_calls?: Record<string, unknown>[];
   finish_reason?: FinishReason;
   redacted?: string[] | null;
+  refusal?: string;
+  annotations?: Record<string, unknown>[];
 }
 
 export type SSEEvent =

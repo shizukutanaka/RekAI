@@ -99,6 +99,26 @@ def test_nosniff_header(client: TestClient) -> None:
     assert resp.headers["X-Content-Type-Options"] == "nosniff"
 
 
+def test_data_endpoints_are_no_store(client: TestClient) -> None:
+    # Per-client data must not be persisted by intermediary caches.
+    for path in ("/v1/models", "/metrics"):
+        resp = client.get(path)
+        assert resp.headers["Cache-Control"] == "no-store", path
+    # Non-data endpoints are left alone.
+    resp = client.get("/health")
+    assert "Cache-Control" not in resp.headers
+
+
+def test_stream_endpoints_keep_their_own_cache_control(client: TestClient) -> None:
+    resp = client.post(
+        "/v1/chat/stream",
+        json={"model": "echo", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status_code == 200
+    # The SSE route sets no-cache itself; the middleware must not overwrite it.
+    assert resp.headers["Cache-Control"] == "no-cache"
+
+
 def test_request_id_propagated(client: TestClient) -> None:
     resp = client.get("/health", headers={"X-Request-ID": "my-trace-123"})
     assert resp.headers["X-Request-ID"] == "my-trace-123"
