@@ -126,6 +126,10 @@ class AnthropicProvider(Provider):
         }
         if request.stop:
             payload["stop_sequences"] = request.stop
+        # Anthropic's own processing tier ('auto' | 'standard_only') — same
+        # field name as OpenAI's, different vocabulary. Forwarded verbatim.
+        if request.service_tier is not None:
+            payload["service_tier"] = request.service_tier
         # Anthropic supports top_p but has no seed/frequency/presence/logit_bias
         # equivalents — those stay RekAI-side rather than erroring upstream.
         if request.top_p is not None:
@@ -155,6 +159,10 @@ class AnthropicProvider(Provider):
             payload["tools"] = _translate_tools(request.tools)
             choice = _translate_tool_choice(request.tool_choice)
             if choice is not None:
+                # OpenAI's request-level parallel_tool_calls=False is
+                # Anthropic's tool_choice.disable_parallel_tool_use.
+                if request.parallel_tool_calls is False:
+                    choice["disable_parallel_tool_use"] = True
                 payload["tool_choice"] = choice
         # A top-level cache_control marks the end of the cacheable prefix. Place
         # it on the last message block (after tools/system in Anthropic's render
