@@ -116,6 +116,10 @@ class ProviderResult:
     usage: Usage = field(default_factory=Usage)
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    # Anthropic reports *which* stop sequence ended the turn (`stop_sequence`
+    # alongside `stop_reason: "stop_sequence"`). None for providers that don't
+    # say — OpenAI's API has no equivalent field.
+    stop_sequence: str | None = None
     # The model's refusal text (OpenAI `message.refusal`) — kept out of
     # ``content``, which stays "" on a refusal so "no answer" stays honest.
     refusal: str | None = None
@@ -163,6 +167,7 @@ class StreamEvent:
     usage: Usage | None = None
     tool_calls: list[dict] | None = None
     finish_reason: FinishReason | None = None
+    stop_sequence: str | None = None
     # OpenAI streams refusal text as `delta.refusal` chunks, separate from
     # `delta.content` — kept apart for the same reason as ProviderResult.
     refusal_delta: str | None = None
@@ -308,12 +313,15 @@ class Provider(ABC):
         *,
         dimensions: int | None = None,
         encoding_format: str | None = None,
+        user: str | None = None,
     ) -> EmbeddingResult:
         """Embed one or more texts. Providers that support embeddings override this.
 
         ``dimensions``/``encoding_format`` are OpenAI's request fields —
         providers without them ignore them (and a provider that understands a
-        different name maps it, e.g. Gemini's ``outputDimensionality``)."""
+        different name maps it, e.g. Gemini's ``outputDimensionality``).
+        ``user`` is OpenAI's end-user id for abuse detection — ignored by
+        providers with no such field."""
         raise ProviderError(f"{self.name} does not support embeddings.", status_code=400)
 
     async def list_models(self, api_key: str | None) -> list[str]:

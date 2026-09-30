@@ -19,6 +19,9 @@ export interface StreamSummary {
   cost_usd: number | null;
   estimated: boolean;
   tool_calls?: Record<string, unknown>[];
+  /** Which stop sequence ended the turn (Anthropic reports it; OpenAI has
+   * no equivalent field, so it's absent for other providers). */
+  stop_sequence?: string;
   refusal?: string;
   annotations?: Record<string, unknown>[];
 }
@@ -46,6 +49,8 @@ export interface ChatOptions {
    * accepted too; the server normalizes it to a one-element list.
    */
   stop?: string | string[];
+  /** OpenAI's `parallel_tool_calls` — allow several tool calls per turn. */
+  parallelToolCalls?: boolean;
   /** Nucleus sampling, as OpenAI's `top_p`. */
   topP?: number;
   /** Deterministic-sampling seed, as OpenAI's `seed`. */
@@ -64,6 +69,12 @@ export interface ChatOptions {
   /** OpenAI's `web_search_options` — hosted web-search config (context size,
    * user location). OpenAI-compatible providers only. */
   webSearchOptions?: Record<string, unknown>;
+  /** The providers' end-user id for abuse detection (OpenAI's `user`,
+   * Anthropic's `metadata.user_id`). A routing hint — never a cache key. */
+  user?: string;
+  /** OpenAI's newer hashed abuse-detection identifier (successor to `user`).
+   * OpenAI-compatible providers only. */
+  safetyIdentifier?: string;
   /** Anthropic extended thinking config, e.g.
    * `{type: "enabled", budget_tokens: 1024}` — forwarded verbatim to Anthropic
    * upstreams. Thinking blocks come back on `ChatResult.thinking_blocks`. */
@@ -99,6 +110,10 @@ export interface ChatResult {
    * budget. `null` when the provider didn't report one.
    */
   finish_reason: "stop" | "length" | "tool_calls" | "content_filter" | null;
+  /** Which stop sequence ended the turn, when the provider reports one
+   * (Anthropic's `stop_sequence` alongside `stop_reason: "stop_sequence"`).
+   * Null for providers that don't say — OpenAI's API has no equivalent field. */
+  stop_sequence: string | null;
   /**
    * Cosine similarity to the stored prompt when the semantic cache served this
    * response — i.e. the answer is to a *similar* prompt, not this one. Null on
@@ -150,6 +165,9 @@ export interface EmbeddingsOptions {
   /** OpenAI's encoding_format ("float" | "base64"); OpenAI-compatible
    * providers only. */
   encodingFormat?: string;
+  /** OpenAI's end-user id for abuse detection — a routing hint,
+   * never a cache key. */
+  user?: string;
 }
 
 export interface EmbeddingsResult {

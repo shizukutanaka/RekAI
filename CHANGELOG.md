@@ -128,6 +128,26 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requirement), while an explicit temperature rides as sent. Non-Anthropic
   providers ignore the config and surfaces without the concept (OpenAI chunks)
   drop the blocks. Both SDKs and the web client expose `thinking_blocks`.
+- **`service_tier` reaches Anthropic too.** Anthropic's Messages API takes the
+  same field name with its own vocabulary (`auto` | `standard_only`); the
+  compat layer accepted it via `extra="allow"` and dropped it, and the provider
+  never sent it. Now `POST /v1/messages` (and `count_tokens`) maps it onto the
+  internal request and the Anthropic provider forwards it verbatim — same as
+  the OpenAI-compatible path, whose tiers it already reaches.
+
+- **End-user id forwarded to providers.** The accepted-but-ignored `user`
+  field now reaches the provider under its own name — `user` to
+  OpenAI-compatible upstreams, `metadata.user_id` to Anthropic — so
+  provider-side abuse detection sees the caller's end-user id. On the
+  Anthropic-compat surface, `metadata.user_id` maps to it (and now parses
+  instead of being dropped by `extra="allow"`). `POST /v1/embeddings` accepts
+  and forwards it the same way (OpenAI's embeddings API takes `user` too).
+  It's a routing/billing hint, not a response-shaping field, so it does not
+  join the cache key. Gemini and Ollama have no such field and don't receive
+  it. Both SDKs expose it (`user=` on `chat()` / `user` in `ChatOptions`).
+  OpenAI's newer `safety_identifier` (the hashed abuse-detection handle that
+  supersedes `user`) forwards to OpenAI-compatible providers the same way and
+  is exposed on both SDKs (`safety_identifier=` / `safetyIdentifier`).
 - **`anthropic-beta` header forwarding on `POST /v1/messages`.** Anthropic
   gates features behind beta headers (interleaved thinking, prompt-caching
   scope, ...); a compat caller's header was dropped, silently disabling the
@@ -159,6 +179,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the native SSE stream emits `{"refusal": ...}` events, the OpenAI-compat
   surface reproduces `message.refusal`/`delta.refusal` chunks, and the
   Anthropic-compat surface folds the text into a content block with
+  `stop_reason: "refusal"` (Anthropic's own encoding). Both SDKs expose it
+  (`ChatResult.refusal`, `on_refusal`/`onRefusal` stream hooks), and the web
+  chat displays the refusal text in the reply bubble (streamed `{"refusal"}`
+  events ride the normal delta path; the `content_filter` meta note marks it
+  as a decline) instead of a bare empty bubble.
   `stop_reason: "refusal"` (Anthropic's own encoding). The Anthropic provider
   makes the reverse translation too: an upstream `stop_reason: "refusal"`
   moves the refusal text block out of `content` and into `refusal`, matching
@@ -183,6 +208,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
   `cache: false` so you can compare a fresh answer against the cached one.
   It defaults to on; the meta line already marks cache hits.
+- **`stop_sequence` surfaces end-to-end.** Anthropic reports *which* stop
+  sequence ended the turn (alongside `stop_reason: "stop_sequence"`); RekAI
+  used to keep the reason but drop the match, so a caller that sent several
+  sequences couldn't tell which one fired. It now rides `ProviderResult` →
+  `StreamEvent` → `ChatResponse.stop_sequence` and re-emerges on the
+  Anthropic-compat surface (`message.stop_sequence` and the `message_delta`
+  event) and the native stream's terminal summary. Null for providers that
+  don't report one — OpenAI's API has no equivalent field. Both SDKs expose
+  it (`ChatResult.stop_sequence`).
 - `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
   check (`client.messages.count_tokens`) now works against the compat surface.
   Returns a local script-aware estimate (the same heuristic the pricing path
@@ -290,6 +324,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged; no behavior change for env-configured deployments.
 
 ### Added
+- **`parallel_tool_calls` is forwarded, not just tolerated.** The flag was
+  accepted on both request schemas (the compat surface via `extra="allow"`)
+  and silently dropped — a caller could not stop a model from emitting
+  several tool calls in one turn. Now typed, forwarded to OpenAI-compatible
+  providers, part of the cache key and semantic bucket, and exposed on both
+  SDKs (`parallelToolCalls` in JS). Anthropic carries the same switch on
+  `tool_choice.disable_parallel_tool_use` — it used to 422 (undeclared field);
+  it now maps onto `parallel_tool_calls` inbound and back outbound, so an
+  Anthropic-SDK caller's flag round-trips to the Anthropic provider.
 - **Per-key model allowlists** (`REKAI_KEY_MODELS`, e.g.
   `"sk-a:gpt-4o*;gpt-4o-mini,sk-b:echo"`). The per-tenant counterpart of
   `REKAI_ALLOWED_PROVIDERS`: each named key gets a glob allowlist (fnmatch),

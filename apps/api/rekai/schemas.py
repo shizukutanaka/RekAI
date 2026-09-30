@@ -96,9 +96,10 @@ class ChatRequest(BaseModel):
         default=None,
         description="OpenAI's processing tier ('auto' | 'default' | 'flex' | "
         "'priority' | 'scale'): flex trades latency for a large discount, "
-        "priority pays for lower latency. Not enum-validated so newer tiers "
-        "stay forward-compatible; an unsupported tier surfaces as the "
-        "provider's own error. Forwarded to OpenAI-compatible providers only.",
+        "priority pays for lower latency. Anthropic takes the same field name "
+        "with its own vocabulary ('auto' | 'standard_only'). Not enum-validated "
+        "so newer tiers stay forward-compatible; an unsupported tier surfaces "
+        "as the provider's own error.",
     )
     web_search_options: dict | None = Field(
         default=None,
@@ -181,6 +182,12 @@ class ChatRequest(BaseModel):
         default=None,
         description="Tool choice ('auto' | 'none' | 'required' | {...}), passed through.",
     )
+    parallel_tool_calls: bool | None = Field(
+        default=None,
+        description="OpenAI's parallel_tool_calls — whether the model may emit "
+        "several tool calls in one turn. Forwarded to providers that support it "
+        "(OpenAI/OpenAI-compatible); ignored by others.",
+    )
     response_format: dict[str, Any] | None = Field(
         default=None,
         description="OpenAI-style response_format, e.g. {'type': 'json_object'} or "
@@ -200,6 +207,18 @@ class ChatRequest(BaseModel):
         default=None,
         description="Anthropic MCP connector servers (forwarded verbatim to "
         "Anthropic; ignored by other providers).",
+    )
+    user: str | None = Field(
+        default=None,
+        description="End-user id for upstream abuse detection — OpenAI's "
+        "`user`, Anthropic's `metadata.user_id`. Forwarded to providers that "
+        "take one; a routing hint only, so it does not join the cache key.",
+    )
+    safety_identifier: str | None = Field(
+        default=None,
+        description="OpenAI's newer abuse-detection identifier (hashed "
+        "end-user handle) — the successor to `user` on OpenAI-compatible "
+        "providers. Forwarded verbatim; ignored elsewhere.",
     )
 
     @field_validator("stop", mode="before")
@@ -292,8 +311,10 @@ class ChatCompletionsRequest(BaseModel):
     stream_options: StreamOptions | None = None
     tools: list[dict[str, Any]] | None = None
     tool_choice: Any | None = None
+    parallel_tool_calls: bool | None = None
     response_format: dict[str, Any] | None = None
-    user: str | None = None  # accepted, ignored
+    user: str | None = None  # forwarded to the provider as its end-user id
+    safety_identifier: str | None = None  # OpenAI's newer abuse-detection id
     n: int | None = None  # 400 if n > 1 (RekAI returns a single choice)
     provider: str | None = None  # RekAI extension: explicit provider override
     # OpenAI's pre-tools function-calling API (deprecated since 0613 but still
@@ -354,8 +375,17 @@ class AnthropicTool(BaseModel):
 class AnthropicToolChoice(BaseModel):
     type: Literal["auto", "none", "any", "tool"]
     name: str | None = None
-    # disable_parallel_tool_use is Anthropic-specific; the OpenAI-equivalent
-    # flag (parallel_tool_calls) lives on the request, not on tool_choice.
+    # Anthropic carries the parallel-call switch *on* tool_choice; the
+    # OpenAI-equivalent flag (parallel_tool_calls) lives on the request.
+    # Mapped onto ChatRequest.parallel_tool_calls so it round-trips.
+    disable_parallel_tool_use: bool | None = None
+
+
+class AnthropicMetadata(BaseModel):
+    """Messages-API ``metadata`` object — Anthropic defines only ``user_id``,
+    an abuse-detection end-user id (the counterpart of OpenAI's ``user``)."""
+
+    user_id: str | None = None
 
 
 class _AnthropicMessagesBase(BaseModel):
@@ -373,10 +403,14 @@ class _AnthropicMessagesBase(BaseModel):
     stream: bool = False
     tools: list[AnthropicTool] | None = None
     tool_choice: AnthropicToolChoice | None = None
+    # Anthropic's processing tier — 'auto' | 'standard_only'. Same field name
+    # as OpenAI's, different vocabulary; forwarded verbatim either way.
+    service_tier: str | None = None
     # Anthropic's MCP connector — remote MCP servers the provider calls
     # itself ({name, url, type:"url", authorization_token?, tool_configuration?}).
     # Forwarded verbatim to Anthropic; requires the mcp-client beta header.
     mcp_servers: list[dict[str, Any]] | None = None
+    metadata: AnthropicMetadata | None = None
     # Anthropic's extended-thinking config, verbatim ({'type': 'enabled',
     # 'budget_tokens': N}). Declared so it isn't swallowed by extra=allow.
     thinking: dict[str, Any] | None = None
@@ -485,6 +519,12 @@ class ChatResponse(BaseModel):
         "'tool_calls', or 'content_filter'. Null when the provider didn't report "
         "one, which is also how responses cached before this field existed read.",
     )
+    stop_sequence: str | None = Field(
+        default=None,
+        description="The stop sequence that ended generation, when the provider "
+        "reports one (Anthropic does, alongside stop_reason 'stop_sequence'). "
+        "Null for providers that don't say — OpenAI's API has no equivalent field.",
+    )
     cache_similarity: float | None = Field(
         default=None,
         description="Cosine similarity to the stored prompt when the semantic cache "
@@ -561,6 +601,12 @@ class EmbeddingsRequest(BaseModel):
         description="OpenAI's `encoding_format` ('float' | 'base64'). "
         "Forwarded to OpenAI-compatible providers only; note the API's own "
         "response stays JSON floats either way.",
+    )
+    user: str | None = Field(
+        default=None,
+        description="OpenAI's end-user id for abuse detection. Forwarded to "
+        "OpenAI-compatible providers only; a routing hint, so it does not join "
+        "the cache key.",
     )
 
 

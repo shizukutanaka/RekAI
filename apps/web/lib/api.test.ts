@@ -142,6 +142,23 @@ describe("errorFromResponse", () => {
 
 describe("parseSSEFrame", () => {
   it("parses a delta event", () => {
+    // Refusal chunks carry reply text (content is empty on a refusal), so
+    // they surface through the same delta path.
+    expect(parseSSEFrame('data: {"refusal": "I cannot help"}')).toEqual({
+      kind: "delta",
+      text: "I cannot help",
+    });
+    const refusalSummary = {
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      cost_usd: null,
+      estimated: false,
+      finish_reason: "content_filter",
+      refusal: "I cannot help",
+    };
+    expect(parseSSEFrame(`data: ${JSON.stringify(refusalSummary)}`)).toEqual({
+      kind: "summary",
+      summary: refusalSummary,
+    });
     expect(parseSSEFrame('data: {"delta": "Hello"}')).toEqual({
       kind: "delta",
       text: "Hello",
