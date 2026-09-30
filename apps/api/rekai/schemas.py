@@ -463,6 +463,24 @@ class ChatCompletionMessage(BaseModel):
     annotations: list[dict[str, Any]] | None = None
 
 
+class PromptTokensDetails(BaseModel):
+    """OpenAI's `usage.prompt_tokens_details` — where its SDKs look for
+    prompt-cache hits. RekAI reports the same numbers flat as
+    ``cache_read_tokens`` / ``cache_write_tokens``; the nested copy exists so
+    ``usage.prompt_tokens_details.cached_tokens`` resolves on the compat
+    surface exactly as it does against api.openai.com."""
+
+    cached_tokens: int = 0
+
+
+class CompletionUsage(Usage):
+    # OpenAI reports the cached-token and reasoning-token breakdowns nested
+    # under prompt_tokens_details / completion_tokens_details — internal Usage
+    # keeps them flat; the compat surface re-nests for SDK parity.
+    prompt_tokens_details: PromptTokensDetails | None = None
+    completion_tokens_details: dict | None = None
+
+
 class ChatCompletionChoice(BaseModel):
     index: int = 0
     message: ChatCompletionMessage
@@ -471,20 +489,13 @@ class ChatCompletionChoice(BaseModel):
     finish_reason: Literal["stop", "length", "tool_calls", "content_filter"] = "stop"
 
 
-class CompletionUsage(Usage):
-    # OpenAI reports the reasoning-token breakdown nested under
-    # `completion_tokens_details` — internal Usage keeps it flat, the compat
-    # surface re-nests it for SDK parity.
-    completion_tokens_details: dict | None = None
-
-
 class ChatCompletionResponse(BaseModel):
     id: str
     object: Literal["chat.completion"] = "chat.completion"
     created: int
     model: str
     choices: list[ChatCompletionChoice]
-    usage: CompletionUsage  # field names already match OpenAI's
+    usage: CompletionUsage  # flat fields already match; *Details is OpenAI's nesting
     system_fingerprint: str | None = None
     # RekAI extensions — OpenAI SDKs ignore unknown response fields.
     provider: str | None = None
@@ -524,6 +535,12 @@ class ChatResponse(BaseModel):
         "(finished), 'length' (cut off by max_tokens — the answer is INCOMPLETE), "
         "'tool_calls', or 'content_filter'. Null when the provider didn't report "
         "one, which is also how responses cached before this field existed read.",
+    )
+    stop_sequence: str | None = Field(
+        default=None,
+        description="The stop sequence that ended generation, when the provider "
+        "reports one (Anthropic does, alongside stop_reason 'stop_sequence'). "
+        "Null for providers that don't say — OpenAI's API has no equivalent field.",
     )
     cache_similarity: float | None = Field(
         default=None,

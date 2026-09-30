@@ -340,6 +340,15 @@ that doesn't, and how responses cached before this field existed read. The
 OpenAI-compatible endpoint falls back to the old derivation in that case, so it
 always emits one of the documented values.
 
+Anthropic's stop signal is a *pair*: `stop_reason: "stop_sequence"` plus the
+matched string in `stop_sequence`. A caller that sends several stop sequences
+needs both halves to know which one fired, so the matched string rides along
+end-to-end — `ProviderResult`/`StreamEvent.stop_sequence`, the `stop_sequence`
+field on `ChatResponse` and the stream summary, `message.stop_sequence` /
+`message_delta.delta.stop_sequence` on `/v1/messages`, and both SDKs. OpenAI's
+API has no equivalent field, so the compat surface omits it rather than
+inventing one.
+
 The field reaches every consumer, which is the part that makes it useful: both
 SDKs expose it, and the chat UI turns it into a note on the message's metadata
 line — `truncated — raise max tokens` for `length`, `stopped by the provider's
@@ -856,6 +865,18 @@ carries the longest run its pattern can plausibly span, so a stray `sk-` in
 prose costs a few hundred characters of delay while a PEM block gets the
 kilobytes it needs.
 
+### Input-side secret detection
+
+`REKAI_INPUT_SECRETS_ENABLED=true` runs the same pattern set the other way —
+against the **request**, not the response. A user pasting `sk-…` into a chat
+prompt otherwise ships that key to the upstream provider. It scans every
+message role on `/v1/chat`, `/v1/chat/stream` and `/v1/chat/completions` plus
+embeddings inputs on `/v1/embeddings`, shares `REKAI_GUARDRAILS_ACTION`
+(`flag` → `X-Input-Secrets-Flag` header, `block` → 403 `input_secret_detected`
+before any provider call), and never rewrites the request — a secret in a
+prompt is usually an accident, so it is refused or signalled, not silently
+mutated. Off by default.
+
 The buffered region is deliberately kept **raw**. Scrubbing it on every delta
 looks tempting and is wrong: the patterns end in `{20,}`, so a half-arrived key
 matches at its minimum length, gets replaced, and the *rest of the key* then
@@ -1014,7 +1035,7 @@ no tenants to separate and nothing is withheld anywhere.
 ### Per-end-user usage
 
 Requests may carry the OpenAI `user` field — an end-user id within the calling
-tenant's own system. RekAI never forwards it to a provider; it powers
+tenant's own system. Besides being forwarded upstream for abuse detection, it powers
 `usage_by_user` (`{client: {user: {requests, tokens, cost_usd}}}`) and the
 `rekai_user_requests_total`/`rekai_user_tokens_total`/`rekai_user_cost_usd_total`
 series labelled `{client, user}`. This is the per-end-user spend tracking
@@ -1191,6 +1212,14 @@ Provider keys arrive per request via the `X-Provider-Key` header. They are
 passed straight to the provider call and never logged, cached, or persisted. A
 server-side default key (e.g. `REKAI_OPENAI_API_KEY`) is used only when no BYOK
 header is present.
+
+On the OpenAI-compatible route specifically, the caller's
+`Authorization: Bearer` doubles as the provider key when the gateway itself is
+unauthenticated (no `REKAI_API_KEYS`, dynamic keys off) — the OpenRouter
+convention, which makes `OpenAI(base_url=rekai, api_key="sk-…")` a working
+drop-in BYOK setup with no custom headers. Once gateway auth is configured,
+`Authorization` belongs to RekAI and BYOK stays on `X-Provider-Key`; forwarding
+a tenant's gateway key upstream would leak it.
 
 ### Readiness
 

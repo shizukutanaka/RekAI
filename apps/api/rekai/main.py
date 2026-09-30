@@ -413,6 +413,38 @@ def _guardrail_response(
     return None
 
 
+def _message_texts(messages: list[ChatMessage]) -> list[str]:
+    """Caller-supplied message text — every role, since any of it is forwarded
+    verbatim to the upstream provider."""
+    return [m.content for m in messages if m.content]
+
+
+def _input_secrets_response(
+    texts: list[str], settings: Settings, response: Response
+) -> JSONResponse | None:
+    """Flag or refuse a request carrying a credential in its caller text.
+
+    Runs the same detection set as output redaction against the request side:
+    a user pasting ``sk-…`` into a chat prompt otherwise ships that key to the
+    provider. Honors ``guardrails_action`` — flag sets ``X-Input-Secrets-Flag``,
+    block returns 403 before any provider call."""
+    hits = guardrails.scan_texts_for_secrets(texts, settings.input_secrets_enabled)
+    if not hits:
+        return None
+    if settings.guardrails_action == "block":
+        metrics.record_error("input_secret_detected")
+        return JSONResponse(
+            status_code=403,
+            content=ErrorResponse(
+                error="input_secret_detected",
+                detail="Request appears to contain a credential "
+                f"({', '.join(hits)}). Remove it and retry.",
+            ).model_dump(),
+        )
+    response.headers["X-Input-Secrets-Flag"] = ",".join(hits)
+    return None
+
+
 def _idempotency_error(status_code: int, detail: str) -> JSONResponse:
     """A 409/422 for an Idempotency-Key that conflicts with an existing record."""
     metrics.record_error("idempotency_error")
@@ -580,6 +612,9 @@ async def _run_chat(
     blocked = _guardrail_response(request.messages, settings, response)
     if blocked is not None:
         return blocked
+    leaked = _input_secrets_response(_message_texts(request.messages), settings, response)
+    if leaked is not None:
+        return leaked
     fingerprint: str | None = None
     claimed = False
     client_id = _client_id(http_request)
@@ -1395,6 +1430,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Ahead of any stored-response short circuit — a replayed or cached
         # entry written before a provider's cap existed must not bypass it.
         check_embeddings_dimensions(request, config)
+        input_texts = [request.input] if isinstance(request.input, str) else request.input
+        leaked = _input_secrets_response(input_texts, config, response)
+        if leaked is not None:
+            return leaked
         fingerprint: str | None = None
         claimed = False
         client_id = _client_id(http_request)
@@ -1476,6 +1515,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         blocked = _guardrail_response(request.messages, config, response)
         if blocked is not None:
             return blocked
+        leaked = _input_secrets_response(_message_texts(request.messages), config, response)
+        if leaked is not None:
+            return leaked
         guardrail_flag = response.headers.get("X-Guardrail-Flag")
         client_id = _client_id(http_request)
         provider_name, provider = select_provider(request, config)
@@ -1524,6 +1566,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         summary["tool_calls"] = s.tool_calls
                     if s.finish_reason:
                         summary["finish_reason"] = s.finish_reason
+                    if s.stop_sequence:
+                        summary["stop_sequence"] = s.stop_sequence
                     if s.refusal:
                         summary["refusal"] = s.refusal
                     if s.annotations:
@@ -1581,7 +1625,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tuning params are tolerated and ignored. ``Idempotency-Key`` is honored
         on the non-streaming path only — ``stream: true`` does not accept it,
         same as ``/v1/chat/stream``; see docs/architecture.md.
+
+        BYOK note: when the gateway itself requires no client key (no
+        ``REKAI_API_KEYS`` and dynamic keys off), the SDK's own
+        ``Authorization: Bearer`` is forwarded as the provider key — the
+        OpenRouter convention — so ``OpenAI(base_url=rekai, api_key="sk-…")``
+        just works. Once gateway auth is on, ``Authorization`` is spoken for
+        and BYOK goes through ``X-Provider-Key`` as usual.
         """
+        auth_on = bool(config.api_key_list) or config.dynamic_keys_enabled
+        bearer_as_provider = (
+            x_provider_key
+            if x_provider_key is not None or auth_on
+            else auth.parse_bearer(http_request.headers.get("authorization"))
+        )
         # This route does not wrap its own errors in the OpenAI envelope:
         # OpenAICompatErrorMiddleware translates every error on this path,
         # including the ones raised below and the ones the middlewares above
@@ -1603,7 +1660,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 chat_request,
                 http_request,
                 response,
-                x_provider_key,
+                bearer_as_provider,
                 idempotency_key,
                 config,
                 cache_backend,
@@ -1621,6 +1678,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         blocked = _guardrail_response(chat_request.messages, config, response)
         if blocked is not None:
             return blocked
+        leaked = _input_secrets_response(_message_texts(chat_request.messages), config, response)
+        if leaked is not None:
+            return leaked
         guardrail_flag = response.headers.get("X-Guardrail-Flag")
         client_id = _client_id(http_request)
         provider_name, provider = select_provider(chat_request, config)
@@ -1640,7 +1700,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             finish_reason = "stop"
             async for ev in handle_chat_stream(
                 chat_request,
-                x_provider_key,
+                bearer_as_provider,
                 config,
                 cache_backend,
                 provider_name,
@@ -1778,6 +1838,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             open_block: str | None = None  # "thinking" | "text" | "extra"
             block_index = 0
             finish_reason = "stop"
+            stop_sequence = None
             usage = None
             async for ev in handle_chat_stream(
                 chat_request,
@@ -1875,6 +1936,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     s = ev.summary
                     if s.finish_reason:
                         finish_reason = s.finish_reason
+                    if s.stop_sequence:
+                        stop_sequence = s.stop_sequence
                     for tc in s.tool_calls or []:
                         finish_reason = "tool_calls"
                         fn = tc.get("function", {})
@@ -1893,7 +1956,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         yield anthropic_compat.ev_content_block_stop(bi)
                     usage = s.usage
             stop_reason = anthropic_compat._FINISH_TO_STOP_REASON.get(finish_reason, "end_turn")
-            yield anthropic_compat.ev_message_delta(stop_reason, usage)
+            yield anthropic_compat.ev_message_delta(stop_reason, usage, stop_sequence)
             yield anthropic_compat.ev_message_stop()
 
         stream_headers = {
