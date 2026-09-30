@@ -137,6 +137,7 @@ def to_chat_completion(resp: ChatResponse) -> ChatCompletionResponse:
                     role="assistant",
                     content=resp.content or None,
                     tool_calls=resp.tool_calls,
+                    annotations=resp.annotations,
                 ),
                 # The provider's own reason when it gave one. The fallback
                 # is the old behavior, kept only for responses that predate
@@ -184,6 +185,14 @@ def chunk_first(chunk_id: str, created: int, model: str) -> dict:
 def chunk_delta(chunk_id: str, created: int, model: str, text: str) -> dict:
     chunk = _chunk_base(chunk_id, created, model)
     chunk["choices"] = [{"index": 0, "delta": {"content": text}, "finish_reason": None}]
+    return chunk
+
+
+def chunk_annotations(chunk_id: str, created: int, model: str, annotations: list[dict]) -> dict:
+    # OpenAI streams annotations (e.g. web-search url_citations) complete inside
+    # one delta chunk — SDKs append them onto the assembled message.
+    chunk = _chunk_base(chunk_id, created, model)
+    chunk["choices"] = [{"index": 0, "delta": {"annotations": annotations}, "finish_reason": None}]
     return chunk
 
 

@@ -93,6 +93,7 @@ const client = new RekAIClient("http://localhost:8000", {
   maxRetries: 2,       // default; set 0 to disable
   retryBackoff: 0.5,   // seconds, doubled each attempt
   maxRetryDelay: 60,   // seconds; a longer Retry-After is handed back, not slept on
+  timeout: 60,         // seconds; bounds each request + stream idle gap (0 disables)
 });
 ```
 

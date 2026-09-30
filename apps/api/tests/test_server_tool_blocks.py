@@ -682,3 +682,289 @@ async def test_semantic_cache_skips_extra_blocks_history() -> None:
     assert first.cached is False
     assert second.cached is False
     semantic_cache.clear()
+
+
+async def test_stream_extra_block_delta_merges_into_completed_block() -> None:
+    """Deltas inside an extra block reach the completed extra_block, not just frames."""
+    lines = [
+        _sse(
+            "content_block_start",
+            {"index": 0, "content_block": {"type": "unmapped_future", "data": {}}},
+        ),
+        _sse(
+            "content_block_delta",
+            {"index": 0, "delta": {"type": "text_delta", "text": "tool "}},
+        ),
+        _sse(
+            "content_block_delta",
+            {"index": 0, "delta": {"type": "text_delta", "text": "output"}},
+        ),
+        _sse("content_block_stop", {"index": 0}),
+        _sse("message_delta", {"delta": {"stop_reason": "end_turn"}}),
+    ]
+    events = await _collect(lines)
+    done = [e.extra_block for e in events if e.extra_block]
+    assert done[0]["text"] == "tool output"
+
+
+def test_history_echo_content_blocks_takes_cache_control_on_a_copy() -> None:
+    """Per-message and top-level cache_control mark the verbatim echo's last
+    block — without mutating the caller's ordered array."""
+    ordered = [{"type": "text", "text": "hi"}, dict(_SERVER_USE)]
+    msg = ChatMessage(
+        role="assistant",
+        content="hi",
+        content_blocks=ordered,
+        cache_control={"type": "ephemeral"},
+    )
+    provider = AnthropicProvider()
+    req = ChatRequest(model="claude-sonnet-4-6", messages=[msg])
+    payload = provider._build_payload(req, stream=False)
+    assert payload["messages"][0]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in ordered[-1]
+
+    req2 = ChatRequest(
+        model="claude-sonnet-4-6",
+        messages=[msg],
+        cache_control={"type": "ephemeral", "ttl": "1h"},
+    )
+    payload2 = provider._build_payload(req2, stream=False)
+    assert payload2["messages"][-1]["content"][-1]["cache_control"] == {
+        "type": "ephemeral",
+        "ttl": "1h",
+    }
+    assert "cache_control" not in ordered[-1]
+
+
+def test_json_mode_turns_synthetic_tool_into_a_text_block(monkeypatch) -> None:
+    """The forced json_response call stays in the verbatim array as answer
+    text at its original position — dropping it would lose the JSON whenever
+    another block travels with it (to_message prefers content_blocks)."""
+    blocks = [
+        {
+            "type": "tool_use",
+            "id": "tu_1",
+            "name": "json_response",
+            "input": {"answer": 42},
+        },
+        {"type": "text", "text": ""},
+    ]
+    _FakeClient.data = _resp(blocks)
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeClient)
+    req = ChatRequest(
+        model="claude-sonnet-4-6",
+        messages=[ChatMessage(role="user", content="hi")],
+        response_format={"type": "json_object"},
+    )
+    result = asyncio.run(AnthropicProvider().chat(req, "k"))
+    assert result.content == '{"answer": 42}'
+    assert result.content_blocks == [
+        {"type": "text", "text": '{"answer": 42}'},
+        {"type": "text", "text": ""},
+    ]
+
+
+def test_json_mode_keeps_other_blocks_in_content_blocks(monkeypatch) -> None:
+    """Blocks unrelated to the synthetic tool still pass through in JSON mode,
+    beside the answer text it becomes."""
+    blocks = [
+        {"type": "tool_use", "id": "tu_1", "name": "json_response", "input": {"a": 1}},
+        _SERVER_USE,
+    ]
+    _FakeClient.data = _resp(blocks)
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeClient)
+    req = ChatRequest(
+        model="claude-sonnet-4-6",
+        messages=[ChatMessage(role="user", content="hi")],
+        response_format={"type": "json_object"},
+    )
+    result = asyncio.run(AnthropicProvider().chat(req, "k"))
+    assert result.content_blocks == [{"type": "text", "text": '{"a": 1}'}, _SERVER_USE]
+
+
+def test_json_mode_message_keeps_answer_beside_other_blocks(monkeypatch) -> None:
+    """The /v1/messages surface must carry the JSON answer AND the other
+    blocks — to_message prefers content_blocks, so the answer has to live
+    inside the array, not only in `content`."""
+    from rekai.schemas import ChatResponse
+
+    blocks = [
+        {"type": "tool_use", "id": "tu_1", "name": "json_response", "input": {"a": 1}},
+        _SERVER_USE,
+    ]
+    _FakeClient.data = _resp(blocks)
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeClient)
+    req = ChatRequest(
+        model="claude-sonnet-4-6",
+        messages=[ChatMessage(role="user", content="hi")],
+        response_format={"type": "json_object"},
+    )
+    result = asyncio.run(AnthropicProvider().chat(req, "k"))
+    resp = ChatResponse(
+        id="x",
+        provider="anthropic",
+        model=result.model,
+        content=result.content,
+        usage=result.usage,
+        created=0,
+        content_blocks=result.content_blocks,
+    )
+    msg = to_message(resp)
+    types = [b["type"] for b in msg["content"]]
+    assert types == ["text", "server_tool_use"]
+    assert msg["content"][0]["text"] == '{"a": 1}'
+
+
+async def test_stream_split_secret_in_extra_delta_is_scrubbed() -> None:
+    """A secret straddling two extra-block deltas can't leak in either frame."""
+    secret = "ghp_" + "A" * 36
+    frag1 = '{"key": "ghp_'
+    frag2 = "A" * 36 + '"}'
+
+    class _SplitSecretProvider(Provider):
+        name = "svc-split"
+
+        async def chat(self, request, api_key):
+            raise ProviderError("unused")
+
+        async def stream_events(self, request, api_key):
+            yield StreamEvent(extra_block_start={"type": "server_tool_use", "input": {}})
+            yield StreamEvent(extra_block_delta={"type": "input_json_delta", "partial_json": frag1})
+            yield StreamEvent(extra_block_delta={"type": "input_json_delta", "partial_json": frag2})
+            yield StreamEvent(extra_block={"type": "server_tool_use", "input": {"key": secret}})
+            yield StreamEvent(delta="ok")
+            yield StreamEvent(finish_reason="stop")
+
+        async def embed(self, texts, model, api_key):
+            raise ProviderError("unused")
+
+    provider = _SplitSecretProvider()
+    register_provider(provider)
+    settings = Settings(environment="test", default_provider="echo", output_redaction_enabled=True)
+    events = [
+        e
+        async for e in handle_chat_stream(
+            ChatRequest(model="x", messages=[ChatMessage(role="user", content="hi")]),
+            None,
+            settings,
+            NullCache(),
+            "svc-split",
+            provider,
+            "anon",
+        )
+    ]
+    frames = [e.extra_block_delta for e in events if e.extra_block_delta is not None]
+    emitted = "".join(str(f.get("partial_json", "")) for f in frames)
+    assert secret not in emitted
+    block = [e.extra_block for e in events if e.extra_block is not None][0]
+    assert secret not in json.dumps(block)
+    summary = [e.summary for e in events if e.summary is not None][0]
+    # hit recorded once even though the delta redactor and the completed-block
+    # scrub both caught the same secret
+    assert summary.redacted == ["github_token"]
+
+
+async def test_stream_multi_field_delta_keeps_fields_separate() -> None:
+    """A delta with two string payloads feeds separate per-field redactors —
+    buffered text must never emerge under the other field's key."""
+    secret = "ghp_" + "A" * 36
+
+    class _MultiFieldProvider(Provider):
+        name = "svc-multifield"
+
+        async def chat(self, request, api_key):
+            raise ProviderError("unused")
+
+        async def stream_events(self, request, api_key):
+            yield StreamEvent(extra_block_start={"type": "future_block"})
+            yield StreamEvent(
+                extra_block_delta={
+                    "type": "future_delta",
+                    "first": "abcdefghij",
+                    "second": "XYZ",
+                }
+            )
+            yield StreamEvent(extra_block_delta={"type": "future_delta", "first": "tail" + secret})
+            yield StreamEvent(
+                extra_block={
+                    "type": "future_block",
+                    "first": "abcdefghij" + "tail" + secret,
+                    "second": "XYZ",
+                }
+            )
+            yield StreamEvent(delta="ok")
+            yield StreamEvent(finish_reason="stop")
+
+        async def embed(self, texts, model, api_key):
+            raise ProviderError("unused")
+
+    provider = _MultiFieldProvider()
+    register_provider(provider)
+    settings = Settings(environment="test", default_provider="echo", output_redaction_enabled=True)
+    events = [
+        e
+        async for e in handle_chat_stream(
+            ChatRequest(model="x", messages=[ChatMessage(role="user", content="hi")]),
+            None,
+            settings,
+            NullCache(),
+            "svc-multifield",
+            provider,
+            "anon",
+        )
+    ]
+    frames = [e.extra_block_delta for e in events if e.extra_block_delta is not None]
+    first = "".join(str(f.get("first", "")) for f in frames)
+    second = "".join(str(f.get("second", "")) for f in frames)
+    # `first` reconstructs minus its redacted secret; `second` stays untouched —
+    # no cross-field contamination either direction.
+    assert first == "abcdefghij" + "tail" + "[REDACTED:github_token]"
+    assert second == "XYZ"
+
+
+async def test_stream_secret_in_extra_block_is_reported() -> None:
+    """A secret scrubbed from a completed block (or its start frame) still
+    lands in summary.redacted — the scrub happened, so say so."""
+    secret = "ghp_" + "A" * 36
+    secret_block = {
+        "type": "web_search_tool_result",
+        "tool_use_id": "srvtoolu_1",
+        "content": [{"type": "web_search_result", "title": "leaked " + secret}],
+    }
+
+    class _BlockSecretProvider(Provider):
+        name = "svc-blocksecret"
+
+        async def chat(self, request, api_key):
+            raise ProviderError("unused")
+
+        async def stream_events(self, request, api_key):
+            yield StreamEvent(extra_block_start=dict(secret_block))
+            yield StreamEvent(extra_block=dict(secret_block))
+            yield StreamEvent(delta="ok")
+            yield StreamEvent(finish_reason="stop")
+
+        async def embed(self, texts, model, api_key):
+            raise ProviderError("unused")
+
+    provider = _BlockSecretProvider()
+    register_provider(provider)
+    settings = Settings(environment="test", default_provider="echo", output_redaction_enabled=True)
+    events = [
+        e
+        async for e in handle_chat_stream(
+            ChatRequest(model="x", messages=[ChatMessage(role="user", content="hi")]),
+            None,
+            settings,
+            NullCache(),
+            "svc-blocksecret",
+            provider,
+            "anon",
+        )
+    ]
+    start = [e.extra_block_start for e in events if e.extra_block_start is not None][0]
+    block = [e.extra_block for e in events if e.extra_block is not None][0]
+    assert secret not in json.dumps(start)
+    assert secret not in json.dumps(block)
+    summary = [e.summary for e in events if e.summary is not None][0]
+    assert summary.redacted == ["github_token"]
