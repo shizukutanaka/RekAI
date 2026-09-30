@@ -63,6 +63,8 @@ class ChatResult:
     #: Anthropic thinking/redacted_thinking blocks produced before the answer
     #: (extended thinking). Echo them back verbatim on the next turn.
     thinking_blocks: list[dict[str, Any]] | None = None
+    #: Anthropic citations on the answer's text (web-search sources), verbatim.
+    citations: list[dict[str, Any]] | None = None
     #: Anthropic server-side tool blocks (server_tool_use, tool-result blocks,
     #: mcp_*), verbatim. Echo them back verbatim on the next turn.
     extra_blocks: list[dict[str, Any]] | None = None
@@ -93,6 +95,7 @@ class ChatResult:
             refusal=data.get("refusal"),
             annotations=data.get("annotations"),
             thinking_blocks=data.get("thinking_blocks"),
+            citations=data.get("citations"),
             extra_blocks=data.get("extra_blocks"),
             extra_fields=data.get("extra_fields"),
             content_blocks=data.get("content_blocks"),
@@ -208,6 +211,11 @@ def _build_payload(
     tool_choice: Any | None = None,
     response_format: dict[str, Any] | None = None,
     stop: list[str] | str | None = None,
+    top_p: float | None = None,
+    seed: int | None = None,
+    frequency_penalty: float | None = None,
+    presence_penalty: float | None = None,
+    logit_bias: dict[str, int] | None = None,
     service_tier: str | None = None,
     web_search_options: dict[str, Any] | None = None,
     thinking: dict[str, Any] | None = None,
@@ -232,6 +240,16 @@ def _build_payload(
         payload["response_format"] = response_format
     if stop is not None:
         payload["stop"] = stop
+    if top_p is not None:
+        payload["top_p"] = top_p
+    if seed is not None:
+        payload["seed"] = seed
+    if frequency_penalty is not None:
+        payload["frequency_penalty"] = frequency_penalty
+    if presence_penalty is not None:
+        payload["presence_penalty"] = presence_penalty
+    if logit_bias is not None:
+        payload["logit_bias"] = logit_bias
     if service_tier is not None:
         payload["service_tier"] = service_tier
     if web_search_options is not None:
@@ -332,6 +350,11 @@ class RekAIClient:
         tool_choice: Any | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
+        top_p: float | None = None,
+        seed: int | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        logit_bias: dict[str, int] | None = None,
         service_tier: str | None = None,
         web_search_options: dict[str, Any] | None = None,
         thinking: dict[str, Any] | None = None,
@@ -348,6 +371,11 @@ class RekAIClient:
             tool_choice,
             response_format,
             stop,
+            top_p,
+            seed,
+            frequency_penalty,
+            presence_penalty,
+            logit_bias,
             service_tier,
             web_search_options,
             thinking,
@@ -406,6 +434,11 @@ class RekAIClient:
         tool_choice: Any | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
+        top_p: float | None = None,
+        seed: int | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        logit_bias: dict[str, int] | None = None,
         service_tier: str | None = None,
         web_search_options: dict[str, Any] | None = None,
         thinking: dict[str, Any] | None = None,
@@ -419,6 +452,10 @@ class RekAIClient:
         ``stop`` (a bare string is fine; the server normalizes it to a list).
         ``service_tier`` ('auto' | 'flex' | 'priority' | …) reaches
         OpenAI-compatible providers only.
+
+        ``top_p``/``seed``/``frequency_penalty``/``presence_penalty``/
+        ``logit_bias`` mirror OpenAI's tuning params; providers forward the
+        ones they support and ignore the rest.
 
         ``idempotency_key`` is sent as the ``Idempotency-Key`` header so the
         server replays the first response on a retry instead of re-processing.
@@ -437,6 +474,11 @@ class RekAIClient:
             tool_choice,
             response_format,
             stop,
+            top_p,
+            seed,
+            frequency_penalty,
+            presence_penalty,
+            logit_bias,
             service_tier,
             web_search_options,
             thinking,
@@ -665,6 +707,11 @@ class AsyncRekAIClient:
         tool_choice: Any | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
+        top_p: float | None = None,
+        seed: int | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        logit_bias: dict[str, int] | None = None,
         service_tier: str | None = None,
         web_search_options: dict[str, Any] | None = None,
         thinking: dict[str, Any] | None = None,
@@ -685,6 +732,11 @@ class AsyncRekAIClient:
             tool_choice,
             response_format,
             stop,
+            top_p,
+            seed,
+            frequency_penalty,
+            presence_penalty,
+            logit_bias,
             service_tier,
             web_search_options,
             thinking,

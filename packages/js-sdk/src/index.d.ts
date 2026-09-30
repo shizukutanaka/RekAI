@@ -46,6 +46,16 @@ export interface ChatOptions {
    * accepted too; the server normalizes it to a one-element list.
    */
   stop?: string | string[];
+  /** Nucleus sampling, as OpenAI's `top_p`. */
+  topP?: number;
+  /** Deterministic-sampling seed, as OpenAI's `seed`. */
+  seed?: number;
+  /** Token-frequency penalty (-2..2), as OpenAI's `frequency_penalty`. */
+  frequencyPenalty?: number;
+  /** Token-presence penalty (-2..2), as OpenAI's `presence_penalty`. */
+  presencePenalty?: number;
+  /** Token-id → bias map, as OpenAI's `logit_bias`. */
+  logitBias?: Record<string, number>;
   /**
    * OpenAI's processing tier ('auto' | 'default' | 'flex' | 'priority' |
    * 'scale'). Forwarded to OpenAI-compatible providers only.
@@ -105,6 +115,8 @@ export interface ChatResult {
   redacted: string[] | null;
   /** Anthropic thinking/redacted_thinking blocks produced before the answer. */
   thinking_blocks: Record<string, unknown>[] | null;
+  /** Anthropic citations on the answer's text (web-search sources), verbatim. */
+  citations: Record<string, unknown>[] | null;
   /** Anthropic server-side tool blocks (server_tool_use, tool-result blocks, mcp_*). */
   extra_blocks: Record<string, unknown>[] | null;
   /** Message-level fields the provider doesn't map (container, context_management, ...). */

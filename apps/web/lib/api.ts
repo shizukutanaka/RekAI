@@ -41,6 +41,8 @@ export interface ChatResponse {
   tool_calls?: Record<string, unknown>[] | null;
   /** Anthropic thinking blocks produced before the answer (extended thinking). */
   thinking_blocks?: Record<string, unknown>[] | null;
+  /** Anthropic citations on the answer's text (web-search sources). */
+  citations?: Record<string, unknown>[] | null;
   /** Anthropic server-side tool blocks (server_tool_use, tool-result blocks, mcp_*). */
   extra_blocks?: Record<string, unknown>[] | null;
   /** Message-level fields the provider doesn't map (container, context_management, ...). */
@@ -289,11 +291,13 @@ export function setStoredAdminKey(value: string): void {
 export interface AdminKeyList {
   static: string[];
   dynamic: string[];
+  dynamic_expires_at: Record<string, number>;
 }
 
 export interface AdminKeyActionResponse {
   status: "added" | "revoked";
   key: string;
+  expires_at: number | null;
 }
 
 export async function fetchAdminKeys(adminKey: string): Promise<AdminKeyList> {
@@ -308,11 +312,14 @@ export async function fetchAdminKeys(adminKey: string): Promise<AdminKeyList> {
 export async function addAdminKey(
   adminKey: string,
   key: string,
+  expiresInSeconds?: number,
 ): Promise<AdminKeyActionResponse> {
   const res = await fetch(`${API_URL}/admin/keys`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...gatewayAuthHeaders(adminKey) },
-    body: JSON.stringify({ key }),
+    body: JSON.stringify(
+      expiresInSeconds === undefined ? { key } : { key, expires_in_seconds: expiresInSeconds },
+    ),
   });
   if (!res.ok) throw await errorFromResponse(res);
   return res.json();
@@ -386,6 +393,7 @@ export async function streamChat(
   onDelta: (text: string) => void,
   signal?: AbortSignal,
   onSummary?: (summary: StreamSummary) => void,
+  onCitation?: (citation: Record<string, unknown>) => void,
   onExtraBlock?: (block: Record<string, unknown>) => void,
 ): Promise<void> {
   const headers: Record<string, string> = {
@@ -430,6 +438,7 @@ export async function streamChat(
       const ev = parseSSEFrame(frame);
       if (ev.kind === "done") return;
       if (ev.kind === "delta") onDelta(ev.text);
+      else if (ev.kind === "citation") onCitation?.(ev.citation);
       else if (ev.kind === "summary") onSummary?.(ev.summary);
       else if (ev.kind === "extra_block") onExtraBlock?.(ev.block);
       else if (ev.kind === "error") throw new Error(ev.message);
@@ -457,6 +466,7 @@ export interface StreamSummary {
 
 export type SSEEvent =
   | { kind: "delta"; text: string }
+  | { kind: "citation"; citation: Record<string, unknown> }
   | { kind: "summary"; summary: StreamSummary }
   | { kind: "extra_block"; block: Record<string, unknown> }
   | { kind: "done" }
@@ -475,6 +485,7 @@ export function parseSSEFrame(frame: string): SSEEvent {
   try {
     const event = JSON.parse(payload);
     if (event.delta) return { kind: "delta", text: event.delta };
+    if (event.citation) return { kind: "citation", citation: event.citation };
     if (event.error) return { kind: "error", message: event.detail || event.error };
     if (event.extra_block)
       return { kind: "extra_block", block: event.extra_block };
