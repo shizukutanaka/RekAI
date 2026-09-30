@@ -6,6 +6,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **`POST /v1/messages` no longer counts cached prompt tokens twice.** The
+  Anthropic-compat usage block reported RekAI's all-inclusive `prompt_tokens`
+  as `input_tokens`, but on Anthropic's wire `input_tokens` *excludes* cached
+  tokens — a caller summing the fields saw cache hits counted once in
+  `input_tokens` and would have counted them again in the cache keys had those
+  been emitted. Usage now decomposes back to Anthropic's shape:
+  `input_tokens` = `prompt_tokens - cache_read - cache_write`, plus
+  `cache_read_input_tokens` and `cache_creation_input_tokens` (both always
+  present, matching Anthropic's schema).
+
 ### Added
 
 - **JS SDK request timeout** — `fetch` has no built-in timeout, so a hung
@@ -96,6 +107,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   blocks nested inside a `tool_result`'s content (images, documents) now
   fail as a readable 400 like top-level blocks instead of silently
   dropping.
+- **Model refusal text is surfaced end-to-end instead of dropped.** OpenAI
+  returns a refusal as `message.refusal` / `delta.refusal` chunks with
+  `content` null; RekAI flattened that to an empty answer. `ProviderResult`,
+  `StreamEvent`, `ChatResponse` and the stream summary now carry `refusal`;
+  the native SSE stream emits `{"refusal": ...}` events, the OpenAI-compat
+  surface reproduces `message.refusal`/`delta.refusal` chunks, and the
+  Anthropic-compat surface folds the text into a content block with
+  `stop_reason: "refusal"` (Anthropic's own encoding). Both SDKs expose it
+  (`ChatResult.refusal`, `on_refusal`/`onRefusal` stream hooks).
 - **Web-search citations pass through end-to-end.** OpenAI attaches
   `message.annotations` (e.g. `url_citation` entries) when a web-search model
   answers; RekAI previously dropped them, so the caller paid for search but

@@ -19,6 +19,7 @@ export interface StreamSummary {
   cost_usd: number | null;
   estimated: boolean;
   tool_calls?: Record<string, unknown>[];
+  refusal?: string;
   annotations?: Record<string, unknown>[];
 }
 
@@ -59,6 +60,8 @@ export interface ChatOptions {
   thinking?: Record<string, unknown>;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
+  /** Called with each refusal-text chunk when the model declines. */
+  onRefusal?: (text: string) => void;
   /** Called with citations etc. (e.g. web-search url_citation entries). */
   onAnnotations?: (annotations: Record<string, unknown>[]) => void;
 }
@@ -94,6 +97,8 @@ export interface ChatResult {
    */
   cache_similarity: number | null;
   fallback_used: boolean;
+  /** The model's refusal text when it declined; `content` is empty then. */
+  refusal: string | null;
   /** Citations etc. attached to the answer (e.g. web-search url_citation). */
   annotations?: Record<string, unknown>[] | null;
   /** Secret patterns scrubbed from `content` by the output-redaction guardrail. */

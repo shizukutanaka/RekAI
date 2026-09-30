@@ -52,6 +52,9 @@ class StreamSummary:
     estimated: bool
     tool_calls: list[dict] | None = None
     finish_reason: str | None = None
+    # Model refusal text (OpenAI `message.refusal`), streamed in refusal_delta
+    # events and reproduced here in full for consumers that only read the summary.
+    refusal: str | None = None
     # Web-search citations etc. (OpenAI `message.annotations`), verbatim dicts.
     annotations: list[dict] | None = None
     # Secret patterns scrubbed from the streamed text. Reported here rather
@@ -71,6 +74,7 @@ class ChatStreamEvent:
     """
 
     delta: str | None = None
+    refusal_delta: str | None = None
     annotations: list[dict] | None = None
     error: ProviderError | None = None
     summary: StreamSummary | None = None
@@ -262,6 +266,11 @@ def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
         scrubbed, found = guardrails.redact_secrets(response.content)
         if found:
             updates["content"] = scrubbed
+            hits += found
+    if response.refusal:
+        scrubbed, found = guardrails.redact_secrets(response.refusal)
+        if found:
+            updates["refusal"] = scrubbed
             hits += found
     if response.thinking_blocks:
         # Thinking text is model-generated content too — a secret surfaced in
@@ -612,6 +621,7 @@ async def handle_chat(
             model=result.model,
             content=result.content,
             tool_calls=result.tool_calls,
+            refusal=result.refusal,
             annotations=result.annotations,
             usage=usage,
             cost_usd=cost_usd,
@@ -680,6 +690,7 @@ async def handle_chat_stream(
     reported_usage: Usage | None = None
     reported_tool_calls: list[dict] | None = None
     reported_finish_reason: str | None = None
+    reported_refusal: list[str] = []
     reported_annotations: list[dict] = []
     errored = False
     started = time.perf_counter()
@@ -689,6 +700,7 @@ async def handle_chat_stream(
     # when actually enabled.
     redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
     thinking_redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
+    refusal_redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
     redaction_on = settings.output_redaction_enabled
     # Each open extra block gets incremental redactors per payload field — a
     # secret split across that block's deltas must still be caught, and each
@@ -717,6 +729,17 @@ async def handle_chat_stream(
                 emitted = redactor.feed(event.delta) if redactor is not None else event.delta
                 if emitted:
                     yield ChatStreamEvent(delta=emitted)
+            if event.refusal_delta:
+                # Refusal text is model output but not the answer; its own
+                # redactor keeps the holdback independent of the content stream.
+                emitted_r = (
+                    refusal_redactor.feed(event.refusal_delta)
+                    if refusal_redactor is not None
+                    else event.refusal_delta
+                )
+                if emitted_r:
+                    reported_refusal.append(emitted_r)
+                    yield ChatStreamEvent(refusal_delta=emitted_r)
             if event.annotations is not None:
                 reported_annotations.extend(event.annotations)
                 yield ChatStreamEvent(annotations=event.annotations)
@@ -804,6 +827,11 @@ async def handle_chat_stream(
             tail = thinking_redactor.flush()
             if tail:
                 yield ChatStreamEvent(thinking_delta=tail)
+        if refusal_redactor is not None:
+            tail = refusal_redactor.flush()
+            if tail:
+                reported_refusal.append(tail)
+                yield ChatStreamEvent(refusal_delta=tail)
         if extra_redactors:
             # A block left open when the upstream stream ended — release the
             # held-back tails in their last-seen delta shapes.
@@ -867,12 +895,14 @@ async def handle_chat_stream(
                 estimated=estimated,
                 tool_calls=reported_tool_calls or None,
                 finish_reason=reported_finish_reason,
+                refusal="".join(reported_refusal) or None,
                 annotations=reported_annotations or None,
                 redacted=(
                     list(
                         dict.fromkeys(
                             (redactor.hits if redactor is not None else [])
                             + (thinking_redactor.hits if thinking_redactor is not None else [])
+                            + (refusal_redactor.hits if refusal_redactor is not None else [])
                             + extra_hits
                         )
                     )
