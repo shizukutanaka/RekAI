@@ -30,6 +30,9 @@ export interface ChatResponse {
   cached: boolean;
   created: number;
   finish_reason?: FinishReason;
+  /** Which stop sequence ended the turn (Anthropic reports it; absent on
+   * providers that don't — OpenAI's API has no equivalent field). */
+  stop_sequence?: string | null;
   cache_similarity?: number | null;
   redacted?: string[] | null;
   /** The model's refusal text when it declined; `content` is empty then. */
@@ -459,6 +462,7 @@ export interface StreamSummary {
   estimated: boolean;
   tool_calls?: Record<string, unknown>[];
   finish_reason?: FinishReason;
+  stop_sequence?: string | null;
   redacted?: string[] | null;
   refusal?: string;
   annotations?: Record<string, unknown>[];
@@ -485,6 +489,10 @@ export function parseSSEFrame(frame: string): SSEEvent {
   try {
     const event = JSON.parse(payload);
     if (event.delta) return { kind: "delta", text: event.delta };
+    // A refusal is reply text, not an error — surface it like a delta; the
+    // finish_reason in the summary marks it as a refusal. The summary frame
+    // also carries `refusal`, so it must still parse as a summary.
+    if (event.refusal && !event.usage) return { kind: "delta", text: event.refusal };
     if (event.citation) return { kind: "citation", citation: event.citation };
     if (event.error) return { kind: "error", message: event.detail || event.error };
     if (event.extra_block)
