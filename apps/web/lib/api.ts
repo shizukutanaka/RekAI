@@ -560,6 +560,7 @@ export async function sendEmbeddings(params: {
   providerKey?: string;
   gatewayKey?: string;
   provider?: string;
+  dimensions?: number;
 }): Promise<EmbeddingsResponse> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -574,6 +575,7 @@ export async function sendEmbeddings(params: {
       model: params.model,
       input: params.input,
       ...(params.provider ? { provider: params.provider } : {}),
+      ...(params.dimensions ? { dimensions: params.dimensions } : {}),
     }),
   });
 

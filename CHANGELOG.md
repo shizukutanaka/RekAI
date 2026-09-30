@@ -128,6 +128,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requirement), while an explicit temperature rides as sent. Non-Anthropic
   providers ignore the config and surfaces without the concept (OpenAI chunks)
   drop the blocks. Both SDKs and the web client expose `thinking_blocks`.
+- **Embeddings page exposes `dimensions`** — the backend has honoured
+  `dimensions` since it was wired through to providers, but the UI offered
+  no way to set it. An optional input now sends it (blank = model default);
+  the result card already displays the actual vector length, so a provider
+  that ignores the hint is visible rather than silent.
 - **`system_fingerprint` and response `service_tier` now round-trip.** OpenAI
   stamps both on every response — the fingerprint identifies the backend
   configuration that served the call (the debugging companion to `seed`), and
