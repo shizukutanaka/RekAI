@@ -777,10 +777,13 @@ There are two ways to override or extend the table:
 
 ## Guardrails
 
-With `REKAI_GUARDRAILS_ENABLED=true`, RekAI scans the **user** messages of a
-chat / chat-stream request for common prompt-injection / jailbreak phrasings
+With `REKAI_GUARDRAILS_ENABLED=true`, RekAI scans the **user** and **tool**
+messages of a chat / chat-stream request for common prompt-injection / jailbreak
+phrasings
 ("ignore previous instructions", "reveal your system prompt", "developer mode
-enabled", …) before calling a provider. `REKAI_GUARDRAILS_ACTION=flag` (default)
+enabled", …) before calling a provider. Tool results are scanned because they
+are external content — the canonical *indirect* injection vector (the payload
+arrives in fetched data, not in the user's own text). `REKAI_GUARDRAILS_ACTION=flag` (default)
 lets the request through with an `X-Guardrail-Flag: <pattern>` header so the
 caller can decide; `block` rejects it with `403 guardrail_blocked`. This is a
 **heuristic first layer** (OWASP LLM01), not a security boundary — obfuscated or
