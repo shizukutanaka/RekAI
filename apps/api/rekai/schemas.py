@@ -106,6 +106,13 @@ class ChatRequest(BaseModel):
         "user location, etc. for models with hosted web search. Forwarded "
         "verbatim to OpenAI-compatible providers only.",
     )
+    anthropic_beta: str | None = Field(
+        default=None,
+        description="Anthropic `anthropic-beta` header value (comma-joined "
+        "beta flags). Set by the Anthropic-compat route from the incoming "
+        "header; forwarded upstream so beta-gated features work. In the "
+        "cache key — beta flags can change the response.",
+    )
     thinking: dict[str, Any] | None = Field(
         default=None,
         description="Anthropic's `thinking` config — e.g. {'type': 'enabled', "

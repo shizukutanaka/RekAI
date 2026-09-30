@@ -38,6 +38,9 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         "presence_penalty": request.presence_penalty,
         "logit_bias": request.logit_bias,
         "service_tier": request.service_tier,
+        # Beta flags change what the provider is asked to do (e.g.
+        # interleaved thinking changes the streamed shape).
+        "anthropic_beta": request.anthropic_beta,
         "messages": [m.model_dump() for m in request.messages],
         "tools": request.tools,
         "tool_choice": request.tool_choice,
@@ -97,6 +100,7 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
         "presence_penalty": request.presence_penalty,
         "logit_bias": request.logit_bias,
         "service_tier": request.service_tier,
+        "anthropic_beta": request.anthropic_beta,
         "tools": request.tools,
         "tool_choice": request.tool_choice,
         "response_format": request.response_format,
