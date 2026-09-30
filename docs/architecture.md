@@ -340,6 +340,15 @@ that doesn't, and how responses cached before this field existed read. The
 OpenAI-compatible endpoint falls back to the old derivation in that case, so it
 always emits one of the documented values.
 
+Anthropic's stop signal is a *pair*: `stop_reason: "stop_sequence"` plus the
+matched string in `stop_sequence`. A caller that sends several stop sequences
+needs both halves to know which one fired, so the matched string rides along
+end-to-end — `ProviderResult`/`StreamEvent.stop_sequence`, the `stop_sequence`
+field on `ChatResponse` and the stream summary, `message.stop_sequence` /
+`message_delta.delta.stop_sequence` on `/v1/messages`, and both SDKs. OpenAI's
+API has no equivalent field, so the compat surface omits it rather than
+inventing one.
+
 The field reaches every consumer, which is the part that makes it useful: both
 SDKs expose it, and the chat UI turns it into a note on the message's metadata
 line — `truncated — raise max tokens` for `length`, `stopped by the provider's
@@ -1188,6 +1197,14 @@ Provider keys arrive per request via the `X-Provider-Key` header. They are
 passed straight to the provider call and never logged, cached, or persisted. A
 server-side default key (e.g. `REKAI_OPENAI_API_KEY`) is used only when no BYOK
 header is present.
+
+On the OpenAI-compatible route specifically, the caller's
+`Authorization: Bearer` doubles as the provider key when the gateway itself is
+unauthenticated (no `REKAI_API_KEYS`, dynamic keys off) — the OpenRouter
+convention, which makes `OpenAI(base_url=rekai, api_key="sk-…")` a working
+drop-in BYOK setup with no custom headers. Once gateway auth is configured,
+`Authorization` belongs to RekAI and BYOK stays on `X-Provider-Key`; forwarding
+a tenant's gateway key upstream would leak it.
 
 ### Readiness
 

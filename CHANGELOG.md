@@ -120,6 +120,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requirement), while an explicit temperature rides as sent. Non-Anthropic
   providers ignore the config and surfaces without the concept (OpenAI chunks)
   drop the blocks. Both SDKs and the web client expose `thinking_blocks`.
+- **`service_tier` reaches Anthropic too.** Anthropic's Messages API takes the
+  same field name with its own vocabulary (`auto` | `standard_only`); the
+  compat layer accepted it via `extra="allow"` and dropped it, and the provider
+  never sent it. Now `POST /v1/messages` (and `count_tokens`) maps it onto the
+  internal request and the Anthropic provider forwards it verbatim — same as
+  the OpenAI-compatible path, whose tiers it already reaches.
+
 - **End-user id forwarded to providers.** The accepted-but-ignored `user`
   field now reaches the provider under its own name — `user` to
   OpenAI-compatible upstreams, `metadata.user_id` to Anthropic — so
@@ -164,6 +171,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the native SSE stream emits `{"refusal": ...}` events, the OpenAI-compat
   surface reproduces `message.refusal`/`delta.refusal` chunks, and the
   Anthropic-compat surface folds the text into a content block with
+  `stop_reason: "refusal"` (Anthropic's own encoding). Both SDKs expose it
+  (`ChatResult.refusal`, `on_refusal`/`onRefusal` stream hooks), and the web
+  chat displays the refusal text in the reply bubble (streamed `{"refusal"}`
+  events ride the normal delta path; the `content_filter` meta note marks it
+  as a decline) instead of a bare empty bubble.
   `stop_reason: "refusal"` (Anthropic's own encoding). The Anthropic provider
   makes the reverse translation too: an upstream `stop_reason: "refusal"`
   moves the refusal text block out of `content` and into `refusal`, matching
@@ -188,6 +200,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Chat playground cache toggle** — an "Allow cached answers" checkbox sends
   `cache: false` so you can compare a fresh answer against the cached one.
   It defaults to on; the meta line already marks cache hits.
+- **`stop_sequence` surfaces end-to-end.** Anthropic reports *which* stop
+  sequence ended the turn (alongside `stop_reason: "stop_sequence"`); RekAI
+  used to keep the reason but drop the match, so a caller that sent several
+  sequences couldn't tell which one fired. It now rides `ProviderResult` →
+  `StreamEvent` → `ChatResponse.stop_sequence` and re-emerges on the
+  Anthropic-compat surface (`message.stop_sequence` and the `message_delta`
+  event) and the native stream's terminal summary. Null for providers that
+  don't report one — OpenAI's API has no equivalent field. Both SDKs expose
+  it (`ChatResult.stop_sequence`).
 - `POST /v1/messages/count_tokens` — the Anthropic SDK's pre-flight token
   check (`client.messages.count_tokens`) now works against the compat surface.
   Returns a local script-aware estimate (the same heuristic the pricing path
@@ -305,6 +326,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `rekai_cache_fills_coalesced_total` (subset of `rekai_cache_hits_total`,
   also in `/v1/usage` as `cache_fills_coalesced_total`). Verified live: two
   simultaneous identical requests → one provider call.
+- **`Authorization: Bearer` doubles as the BYOK key on
+  `/v1/chat/completions`.** When the gateway itself is unauthenticated (no
+  `REKAI_API_KEYS`, dynamic keys off), the SDK's own Bearer token is forwarded
+  to the provider — the OpenRouter convention — so
+  `OpenAI(base_url=rekai, api_key="sk-…")` works with zero extra headers.
+  `X-Provider-Key` still wins when both are sent, and once gateway auth is on
+  Bearer belongs to RekAI (forwarding a tenant's gateway key upstream would
+  leak it).
 - **`parallel_tool_calls` is forwarded, not just tolerated.** The flag was
   accepted on both request schemas (the compat surface via `extra="allow"`)
   and silently dropped — a caller could not stop a model from emitting
