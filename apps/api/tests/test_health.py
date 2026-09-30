@@ -2,6 +2,9 @@ import time
 
 from fastapi.testclient import TestClient
 
+from rekai.config import Settings
+from rekai.main import create_app
+
 
 def test_root_banner(client: TestClient) -> None:
     resp = client.get("/")
@@ -45,6 +48,36 @@ def test_openapi_schema(client: TestClient) -> None:
     schema = resp.json()
     assert "/v1/chat" in schema["paths"]
     assert schema["info"]["title"] == "RekAI"
+
+
+def _prod_client(**kw):
+    kw.setdefault("environment", "production")
+    kw.setdefault("default_provider", "echo")
+    # The open-proxy guard refuses production startup without a provider key
+    # only when a server-side key is configured — echo needs none.
+    return TestClient(create_app(Settings(**kw)), raise_server_exceptions=False)
+
+
+def test_docs_are_off_in_production() -> None:
+    """A public Swagger UI hands an attacker the schema of every route,
+    /admin/* included — so production drops the whole OpenAPI surface."""
+    c = _prod_client()
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert c.get(path).status_code == 404, path
+    assert c.get("/").json()["docs"] is None
+
+
+def test_docs_enabled_overrides_the_production_default() -> None:
+    c = _prod_client(docs_enabled=True)
+    assert c.get("/openapi.json").status_code == 200
+    assert c.get("/").json()["docs"] == "/docs"
+
+
+def test_docs_enabled_false_hides_them_in_development(client: TestClient) -> None:
+    # `client` runs the test environment where docs default on.
+    assert client.get("/openapi.json").status_code == 200
+    c = _prod_client(environment="test", docs_enabled=False)
+    assert c.get("/openapi.json").status_code == 404
 
 
 def test_openapi_documents_error_responses(client: TestClient) -> None:
