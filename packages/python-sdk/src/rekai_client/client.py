@@ -236,10 +236,10 @@ def _classify_stream_event(event: dict[str, Any]) -> tuple[str, Any]:
     """Map one decoded SSE event to ``(kind, value)`` for the stream loops."""
     if "delta" in event:
         return ("delta", event["delta"])
-    if "annotations" in event:
-        return ("annotations", event["annotations"])
     if "usage" in event:
         return ("usage", event)
+    if "annotations" in event:
+        return ("annotations", event["annotations"])
     if "error" in event:
         return ("error", event.get("detail") or event["error"])
     return ("skip", None)
