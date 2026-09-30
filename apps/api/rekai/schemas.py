@@ -195,12 +195,6 @@ class ChatRequest(BaseModel):
         "that support it (OpenAI/OpenAI-compatible natively, Gemini best-effort); "
         "ignored by others.",
     )
-    user: str | None = Field(
-        default=None,
-        description="End-user identifier (OpenAI's `user`). Not sent to the "
-        "provider; used only for RekAI's per-user usage accounting "
-        "(usage_by_user in /v1/usage).",
-    )
     cache_control: dict[str, Any] | None = Field(
         default=None,
         description="Provider-native prompt-cache breakpoint applied to the last "
@@ -605,11 +599,6 @@ class EmbeddingsRequest(BaseModel):
     input: str | list[str] = Field(..., description="A string or list of strings to embed.")
     provider: str | None = Field(default=None, description="Force a provider (else routed).")
     cache: bool = Field(default=True)
-    user: str | None = Field(
-        default=None,
-        description="End-user identifier for per-user usage accounting "
-        "(usage_by_user in /v1/usage). Not sent to the provider.",
-    )
     dimensions: int | None = Field(
         default=None,
         ge=1,

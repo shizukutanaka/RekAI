@@ -1035,7 +1035,7 @@ no tenants to separate and nothing is withheld anywhere.
 ### Per-end-user usage
 
 Requests may carry the OpenAI `user` field — an end-user id within the calling
-tenant's own system. RekAI never forwards it to a provider; it powers
+tenant's own system. Besides being forwarded upstream for abuse detection, it powers
 `usage_by_user` (`{client: {user: {requests, tokens, cost_usd}}}`) and the
 `rekai_user_requests_total`/`rekai_user_tokens_total`/`rekai_user_cost_usd_total`
 series labelled `{client, user}`. This is the per-end-user spend tracking
