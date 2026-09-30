@@ -19,6 +19,22 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Remaining Anthropic request fields forwarded verbatim** — `context_management`
+  (context editing), `container` (code-execution reuse), `inference_geo` (data
+  residency), `speed` (fast/standard), `diagnostics` (prompt-cache divergence),
+  and `user_profile_id` all rode in under `extra="allow"` and were silently
+  dropped. Each is now declared on `/v1/messages`, mapped through the compat
+  layer, sent verbatim upstream, and part of the exact/semantic cache keys.
+  Anthropic's `fallbacks` is deliberately not forwarded: RekAI's extension uses
+  the same name with different semantics.
+- **Anthropic web-search citations end-to-end** — `citations` on upstream text
+  blocks ride the response (`ChatResponse.citations`, verbatim), stream
+  `citations_delta` events reach both the `/v1/messages` typed SSE and the
+  RekAI-native stream, and the compat response reattaches them to the text
+  block they cite. `cited_text` gets the same secret redaction as answer text
+  (both paths), since it echoes model-generated content. Both SDKs and the
+  web playground (Sources pills under replies) expose them. Surfaces without
+  the concept omit them honestly.
 - **Anthropic `output_config` forwarded verbatim** — `POST /v1/messages`
   accepts `output_config` (e.g. `{"effort": "medium"}` or `{"format": ...}`),
   Anthropic's lever for response effort and structured output. It previously
@@ -117,6 +133,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   OpenAI's newer `safety_identifier` (the hashed abuse-detection handle that
   supersedes `user`) forwards to OpenAI-compatible providers the same way and
   is exposed on both SDKs (`safety_identifier=` / `safetyIdentifier`).
+- **`POST /v1/messages` accepts Anthropic server tools verbatim** —
+  `web_search_20250305`, `code_execution_*`, `computer_use_*`,
+  `mcp_tool_use`, etc. (any tool whose `type` isn't `custom`) are no longer
+  re-shaped into OpenAI client functions, which had silently rewired them into
+  ordinary tools upstream so the hosted capability never ran. Server tools
+  keep every field (`max_uses`, `allowed_domains`, ...) through to the
+  Anthropic payload; a non-Anthropic upstream surfaces a readable provider
+  error instead of a silent miswire. The top-level `mcp_servers` field
+  (Anthropic's MCP connector) likewise forwards verbatim instead of being
+  dropped.
 - **`tool_result.is_error` round-trips through the compat layer** — a failed
   tool call on `POST /v1/messages` used to flatten into an indistinguishable
   tool message, so the model couldn't tell failure from success. The flag now
@@ -133,7 +159,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the native SSE stream emits `{"refusal": ...}` events, the OpenAI-compat
   surface reproduces `message.refusal`/`delta.refusal` chunks, and the
   Anthropic-compat surface folds the text into a content block with
-  `stop_reason: "refusal"` (Anthropic's own encoding). Both SDKs expose it
+  `stop_reason: "refusal"` (Anthropic's own encoding). The Anthropic provider
+  makes the reverse translation too: an upstream `stop_reason: "refusal"`
+  moves the refusal text block out of `content` and into `refusal`, matching
+  OpenAI's `content: null` + `message.refusal` shape. Both SDKs expose it
   (`ChatResult.refusal`, `on_refusal`/`onRefusal` stream hooks).
 - **Web-search citations pass through end-to-end.** OpenAI attaches
   `message.annotations` (e.g. `url_citation` entries) when a web-search model

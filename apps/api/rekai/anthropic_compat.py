@@ -164,7 +164,16 @@ def _flatten_content(
 
 
 def _to_openai_tool(tool: AnthropicTool) -> dict:
-    """Anthropic tool -> the OpenAI function shape providers already speak."""
+    """Anthropic tool -> the OpenAI function shape providers already speak.
+
+    Server tools (``web_search_20250305``, ``code_execution_*``,
+    ``computer_use_*``, ``mcp_tool_use``, ...) aren't client functions — they
+    ask the *provider* to run a capability. They pass through verbatim so the
+    Anthropic provider re-emits them unchanged; a non-Anthropic upstream gets
+    a readable provider error rather than a silently rewired client tool.
+    """
+    if tool.type not in (None, "custom"):
+        return tool.model_dump(exclude_none=True, exclude_defaults=True)
     return {
         "type": "function",
         "function": {
@@ -226,6 +235,13 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
         tools=[_to_openai_tool(t) for t in req.tools] if req.tools else None,
         tool_choice=_to_openai_tool_choice(req.tool_choice) if req.tool_choice else None,
         thinking=req.thinking,
+        context_management=req.context_management,
+        container=req.container,
+        inference_geo=req.inference_geo,
+        speed=req.speed,
+        diagnostics=req.diagnostics,
+        user_profile_id=req.user_profile_id,
+        mcp_servers=req.mcp_servers,
         user=req.metadata.user_id if req.metadata else None,
         output_config=req.output_config,
     )
@@ -241,7 +257,13 @@ def _content_blocks(resp: ChatResponse) -> list[dict]:
     if resp.extra_blocks:
         blocks.extend(resp.extra_blocks)
     if resp.content:
-        blocks.append({"type": "text", "text": resp.content})
+        text_block: dict[str, Any] = {"type": "text", "text": resp.content}
+        # Anthropic hangs citations on the text block they cite, and each one
+        # self-locates via cited_text — so attaching the flat list preserves
+        # the upstream shape.
+        if resp.citations:
+            text_block["citations"] = resp.citations
+        blocks.append(text_block)
     elif resp.refusal:
         # Anthropic carries the refusal text as the (only) text block, paired
         # with stop_reason "refusal" — fold the upstream refusal field in.
@@ -362,6 +384,17 @@ def ev_thinking_delta(index: int, thinking: str) -> str:
             "type": "content_block_delta",
             "index": index,
             "delta": {"type": "thinking_delta", "thinking": thinking},
+        },
+    )
+
+
+def ev_citations_delta(index: int, citation: dict) -> str:
+    return sse(
+        "content_block_delta",
+        {
+            "type": "content_block_delta",
+            "index": index,
+            "delta": {"type": "citations_delta", "citation": citation},
         },
     )
 
