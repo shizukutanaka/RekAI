@@ -121,6 +121,11 @@ class OpenAIProvider(Provider):
             payload["response_format"] = request.response_format
         if request.web_search_options is not None:
             payload["web_search_options"] = request.web_search_options
+        if request.user is not None:
+            # OpenAI's abuse-detection end-user id.
+            payload["user"] = request.user
+        if request.safety_identifier is not None:
+            payload["safety_identifier"] = request.safety_identifier
         return payload
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
@@ -213,6 +218,7 @@ class OpenAIProvider(Provider):
         *,
         dimensions: int | None = None,
         encoding_format: str | None = None,
+        user: str | None = None,
     ) -> EmbeddingResult:
         settings = current_settings()
         url = f"{self._base_url().rstrip('/')}/embeddings"
@@ -221,6 +227,8 @@ class OpenAIProvider(Provider):
             body["dimensions"] = dimensions
         if encoding_format is not None:
             body["encoding_format"] = encoding_format
+        if user is not None:
+            body["user"] = user
         try:
             client = self._client(settings.request_timeout_seconds)
             resp = await client.post(

@@ -226,6 +226,8 @@ def _build_payload(
     logit_bias: dict[str, int] | None = None,
     service_tier: str | None = None,
     web_search_options: dict[str, Any] | None = None,
+    user: str | None = None,
+    safety_identifier: str | None = None,
     thinking: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -262,6 +264,10 @@ def _build_payload(
         payload["service_tier"] = service_tier
     if web_search_options is not None:
         payload["web_search_options"] = web_search_options
+    if user is not None:
+        payload["user"] = user
+    if safety_identifier is not None:
+        payload["safety_identifier"] = safety_identifier
     if thinking is not None:
         payload["thinking"] = thinking
     return payload
@@ -365,6 +371,8 @@ class RekAIClient:
         logit_bias: dict[str, int] | None = None,
         service_tier: str | None = None,
         web_search_options: dict[str, Any] | None = None,
+        user: str | None = None,
+        safety_identifier: str | None = None,
         thinking: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
@@ -386,6 +394,8 @@ class RekAIClient:
             logit_bias,
             service_tier,
             web_search_options,
+            user,
+            safety_identifier,
             thinking,
         )
 
@@ -449,6 +459,8 @@ class RekAIClient:
         logit_bias: dict[str, int] | None = None,
         service_tier: str | None = None,
         web_search_options: dict[str, Any] | None = None,
+        user: str | None = None,
+        safety_identifier: str | None = None,
         thinking: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
@@ -459,7 +471,9 @@ class RekAIClient:
         ``stop`` is one or more sequences that end generation, as OpenAI's
         ``stop`` (a bare string is fine; the server normalizes it to a list).
         ``service_tier`` ('auto' | 'flex' | 'priority' | …) reaches
-        OpenAI-compatible providers only.
+        OpenAI-compatible providers only. ``user`` is the providers' end-user id
+        for abuse detection (OpenAI's ``user``, Anthropic's
+        ``metadata.user_id``) — a routing hint, never a cache key.
 
         ``top_p``/``seed``/``frequency_penalty``/``presence_penalty``/
         ``logit_bias`` mirror OpenAI's tuning params; providers forward the
@@ -489,6 +503,8 @@ class RekAIClient:
             logit_bias,
             service_tier,
             web_search_options,
+            user,
+            safety_identifier,
             thinking,
         )
         headers = _build_headers(
@@ -583,11 +599,13 @@ class RekAIClient:
         gateway_key: str | None = None,
         dimensions: int | None = None,
         encoding_format: str | None = None,
+        user: str | None = None,
     ) -> EmbeddingsResult:
         """Create embeddings for a string or list of strings.
 
         ``dimensions``/``encoding_format`` map to OpenAI's embeddings fields
-        (supported providers only)."""
+        (supported providers only). ``user`` is the same end-user id as on
+        ``chat()`` — a routing hint, never a cache key."""
         payload: dict[str, Any] = {"model": model, "input": input, "cache": cache}
         if provider is not None:
             payload["provider"] = provider
@@ -595,6 +613,8 @@ class RekAIClient:
             payload["dimensions"] = dimensions
         if encoding_format is not None:
             payload["encoding_format"] = encoding_format
+        if user is not None:
+            payload["user"] = user
         resp = self._send(
             "POST", "/v1/embeddings", json=payload, headers=self._headers(provider_key, gateway_key)
         )
@@ -722,6 +742,8 @@ class AsyncRekAIClient:
         logit_bias: dict[str, int] | None = None,
         service_tier: str | None = None,
         web_search_options: dict[str, Any] | None = None,
+        user: str | None = None,
+        safety_identifier: str | None = None,
         thinking: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
@@ -747,6 +769,8 @@ class AsyncRekAIClient:
             logit_bias,
             service_tier,
             web_search_options,
+            user,
+            safety_identifier,
             thinking,
         )
         headers = _build_headers(
@@ -851,11 +875,13 @@ class AsyncRekAIClient:
         gateway_key: str | None = None,
         dimensions: int | None = None,
         encoding_format: str | None = None,
+        user: str | None = None,
     ) -> EmbeddingsResult:
         """Create embeddings for a string or list of strings.
 
         ``dimensions``/``encoding_format`` map to OpenAI's embeddings fields
-        (supported providers only)."""
+        (supported providers only). ``user`` is the same end-user id as on
+        ``chat()`` — a routing hint, never a cache key."""
         payload: dict[str, Any] = {"model": model, "input": input, "cache": cache}
         if provider is not None:
             payload["provider"] = provider
@@ -863,6 +889,8 @@ class AsyncRekAIClient:
             payload["dimensions"] = dimensions
         if encoding_format is not None:
             payload["encoding_format"] = encoding_format
+        if user is not None:
+            payload["user"] = user
         resp = await self._send(
             "POST", "/v1/embeddings", json=payload, headers=self._headers(provider_key, gateway_key)
         )

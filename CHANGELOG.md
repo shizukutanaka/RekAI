@@ -131,6 +131,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `service_tier` on Messages requests (`auto` | `standard_only`) and echoes
   the billed tier in `usage.service_tier` — both directions wired. Gemini and
   Ollama have no equivalent and report null.
+- **End-user id forwarded to providers.** The accepted-but-ignored `user`
+  field now reaches the provider under its own name — `user` to
+  OpenAI-compatible upstreams, `metadata.user_id` to Anthropic — so
+  provider-side abuse detection sees the caller's end-user id. On the
+  Anthropic-compat surface, `metadata.user_id` maps to it (and now parses
+  instead of being dropped by `extra="allow"`). `POST /v1/embeddings` accepts
+  and forwards it the same way (OpenAI's embeddings API takes `user` too).
+  It's a routing/billing hint, not a response-shaping field, so it does not
+  join the cache key. Gemini and Ollama have no such field and don't receive
+  it. Both SDKs expose it (`user=` on `chat()` / `user` in `ChatOptions`).
+  OpenAI's newer `safety_identifier` (the hashed abuse-detection handle that
+  supersedes `user`) forwards to OpenAI-compatible providers the same way and
+  is exposed on both SDKs (`safety_identifier=` / `safetyIdentifier`).
 - **`anthropic-beta` header forwarding on `POST /v1/messages`.** Anthropic
   gates features behind beta headers (interleaved thinking, prompt-caching
   scope, ...); a compat caller's header was dropped, silently disabling the
