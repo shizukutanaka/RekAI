@@ -413,6 +413,38 @@ def _guardrail_response(
     return None
 
 
+def _message_texts(messages: list[ChatMessage]) -> list[str]:
+    """Caller-supplied message text — every role, since any of it is forwarded
+    verbatim to the upstream provider."""
+    return [m.content for m in messages if m.content]
+
+
+def _input_secrets_response(
+    texts: list[str], settings: Settings, response: Response
+) -> JSONResponse | None:
+    """Flag or refuse a request carrying a credential in its caller text.
+
+    Runs the same detection set as output redaction against the request side:
+    a user pasting ``sk-…`` into a chat prompt otherwise ships that key to the
+    provider. Honors ``guardrails_action`` — flag sets ``X-Input-Secrets-Flag``,
+    block returns 403 before any provider call."""
+    hits = guardrails.scan_texts_for_secrets(texts, settings.input_secrets_enabled)
+    if not hits:
+        return None
+    if settings.guardrails_action == "block":
+        metrics.record_error("input_secret_detected")
+        return JSONResponse(
+            status_code=403,
+            content=ErrorResponse(
+                error="input_secret_detected",
+                detail="Request appears to contain a credential "
+                f"({', '.join(hits)}). Remove it and retry.",
+            ).model_dump(),
+        )
+    response.headers["X-Input-Secrets-Flag"] = ",".join(hits)
+    return None
+
+
 def _idempotency_error(status_code: int, detail: str) -> JSONResponse:
     """A 409/422 for an Idempotency-Key that conflicts with an existing record."""
     metrics.record_error("idempotency_error")
@@ -529,6 +561,7 @@ def _record_client_usage(
     result: _HasUsageAndCost,
     settings: Settings,
     operation: str = "chat",
+    user: str | None = None,
 ) -> None:
     """Attribute a chat/embeddings response's tokens and cost to the requesting
     client (the masked API-key id, or the client IP with no gateway auth).
@@ -543,6 +576,7 @@ def _record_client_usage(
     current window's bucket used by the budget-cap check."""
     client_id = _client_id(http_request)
     metrics.record_client_usage(client_id, result.usage.total_tokens, result.cost_usd)
+    metrics.record_user_usage(client_id, user, result.usage.total_tokens, result.cost_usd)
     if settings.client_budget_window_seconds is not None:
         metrics.record_client_budget_usage(
             client_id, result.cost_usd, settings.client_budget_window_seconds, time.time()
@@ -578,6 +612,9 @@ async def _run_chat(
     blocked = _guardrail_response(request.messages, settings, response)
     if blocked is not None:
         return blocked
+    leaked = _input_secrets_response(_message_texts(request.messages), settings, response)
+    if leaked is not None:
+        return leaked
     fingerprint: str | None = None
     claimed = False
     client_id = _client_id(http_request)
@@ -597,7 +634,7 @@ async def _run_chat(
         if outcome.kind == "replay" and outcome.response is not None:
             response.headers["Idempotent-Replay"] = "true"
             replayed = _redact_output(ChatResponse(**outcome.response), settings, response)
-            _record_client_usage(http_request, replayed, settings)
+            _record_client_usage(http_request, replayed, settings, user=request.user)
             return replayed
         claimed = True  # we hold the in-progress sentinel
     try:
@@ -613,7 +650,7 @@ async def _run_chat(
         # Disclose that this answer is to a *similar* prompt, not this one —
         # otherwise a semantic hit is indistinguishable from an exact one.
         response.headers["X-Cache-Similarity"] = f"{result.cache_similarity:.4f}"
-    _record_client_usage(http_request, result, settings)
+    _record_client_usage(http_request, result, settings, user=request.user)
     if idempotency_key and fingerprint is not None:
         await idempotency.complete(
             cache_backend,
@@ -1121,7 +1158,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # tenants to separate and the full map is the local operator's own.
             client_id = _client_id(http_request)
             own = snapshot.get("usage_by_client", {}).get(client_id)
-            snapshot = {**snapshot, "usage_by_client": {client_id: own} if own else {}}
+            own_users = snapshot.get("usage_by_user", {}).get(client_id)
+            snapshot = {
+                **snapshot,
+                "usage_by_client": {client_id: own} if own else {},
+                "usage_by_user": {client_id: own_users} if own_users else {},
+            }
         return UsageSummary(**snapshot)
 
     # --- admin: runtime key management (only registered when configured) --
@@ -1414,6 +1456,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Ahead of any stored-response short circuit — a replayed or cached
         # entry written before a provider's cap existed must not bypass it.
         check_embeddings_dimensions(request, config)
+        input_texts = [request.input] if isinstance(request.input, str) else request.input
+        leaked = _input_secrets_response(input_texts, config, response)
+        if leaked is not None:
+            return leaked
         fingerprint: str | None = None
         claimed = False
         client_id = _client_id(http_request)
@@ -1436,7 +1482,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if outcome.kind == "replay" and outcome.response is not None:
                 response.headers["Idempotent-Replay"] = "true"
                 replayed = EmbeddingsResponse(**outcome.response)
-                _record_client_usage(http_request, replayed, config, operation="embeddings")
+                _record_client_usage(
+                    http_request, replayed, config, operation="embeddings", user=request.user
+                )
                 return replayed
             claimed = True
         try:
@@ -1445,7 +1493,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if claimed:
                 await idempotency.release(cache_backend, client_id, idempotency_key)  # type: ignore[arg-type]
             raise
-        _record_client_usage(http_request, result, config, operation="embeddings")
+        _record_client_usage(
+            http_request, result, config, operation="embeddings", user=request.user
+        )
         if idempotency_key and fingerprint is not None:
             await idempotency.complete(
                 cache_backend,
@@ -1491,6 +1541,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         blocked = _guardrail_response(request.messages, config, response)
         if blocked is not None:
             return blocked
+        leaked = _input_secrets_response(_message_texts(request.messages), config, response)
+        if leaked is not None:
+            return leaked
         guardrail_flag = response.headers.get("X-Guardrail-Flag")
         client_id = _client_id(http_request)
         provider_name, provider = select_provider(request, config)
@@ -1651,6 +1704,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         blocked = _guardrail_response(chat_request.messages, config, response)
         if blocked is not None:
             return blocked
+        leaked = _input_secrets_response(_message_texts(chat_request.messages), config, response)
+        if leaked is not None:
+            return leaked
         guardrail_flag = response.headers.get("X-Guardrail-Flag")
         client_id = _client_id(http_request)
         provider_name, provider = select_provider(chat_request, config)
