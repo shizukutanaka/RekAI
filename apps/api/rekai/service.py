@@ -771,10 +771,10 @@ async def handle_chat_stream(
                 # streamed text it quotes.
                 citation = event.citation
                 if citation_redactor is not None and isinstance(citation.get("cited_text"), str):
-                    citation_redactor.feed(citation["cited_text"])
+                    head = citation_redactor.feed(citation["cited_text"])
                     citation = {
                         **citation,
-                        "cited_text": citation_redactor.flush(),
+                        "cited_text": head + citation_redactor.flush(),
                     }
                 yield ChatStreamEvent(citation=citation)
             if event.extra_block_start is not None:

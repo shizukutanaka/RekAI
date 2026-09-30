@@ -201,6 +201,43 @@ async def test_stream_citation_cited_text_is_scrubbed() -> None:
     assert "[REDACTED:openai_api_key]" in citation["cited_text"]
 
 
+class _LongCitingProvider(_CitingProvider):
+    name = "svc-long-citing"
+
+    async def stream_events(self, request, api_key):
+        yield StreamEvent(citation={**_CITATION, "cited_text": _LONG_CITED})
+        yield StreamEvent(
+            usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            finish_reason="stop",
+        )
+
+
+_LONG_CITED = "A long quoted passage from the cited page. " * 10
+
+
+async def test_stream_citation_long_cited_text_survives_redaction() -> None:
+    provider = _LongCitingProvider()
+    register_provider(provider)
+    events = [
+        e
+        async for e in handle_chat_stream(
+            ChatRequest(
+                model="x",
+                provider="svc-long-citing",
+                messages=[ChatMessage(role="user", content="hi")],
+            ),
+            None,
+            Settings(environment="test", default_provider="echo", output_redaction_enabled=True),
+            NullCache(),
+            "svc-long-citing",
+            provider,
+            "client-a",
+        )
+    ]
+    citation = next(e.citation for e in events if e.citation is not None)
+    assert citation["cited_text"] == _LONG_CITED
+
+
 # --- /v1/messages stream -----------------------------------------------------
 
 
