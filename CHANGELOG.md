@@ -248,6 +248,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged; no behavior change for env-configured deployments.
 
 ### Added
+- **Per-key model allowlists** (`REKAI_KEY_MODELS`, e.g.
+  `"sk-a:gpt-4o*;gpt-4o-mini,sk-b:echo"`). The per-tenant counterpart of
+  `REKAI_ALLOWED_PROVIDERS`: each named key gets a glob allowlist (fnmatch),
+  so tenants can be scoped to the models their tier pays for — previously any
+  valid key could call any configured provider/model. A key with no entry is
+  unrestricted; `key:` with no patterns can call nothing (fail-closed). The
+  check covers `request.model` AND every `fallbacks[].model` — the fallback
+  chain is otherwise a straight path around the allowlist — and runs on all
+  four call surfaces (`/v1/chat`, `/v1/chat/stream`, `/v1/chat/completions`
+  both modes, `/v1/embeddings`). `GET /v1/models` is also filtered to what
+  the caller's key may use. Denied requests return 403 `model_not_allowed`.
 - **Expiring dynamic API keys**: `POST /admin/keys` accepts
   `expires_in_seconds` and echoes `expires_at`; `GET /admin/keys` returns
   `dynamic_expires_at` (masked key → unix timestamp), and the `/admin` page
