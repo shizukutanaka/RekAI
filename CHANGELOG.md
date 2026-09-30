@@ -104,6 +104,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requirement), while an explicit temperature rides as sent. Non-Anthropic
   providers ignore the config and surfaces without the concept (OpenAI chunks)
   drop the blocks. Both SDKs and the web client expose `thinking_blocks`.
+- **`POST /v1/messages` accepts Anthropic server tools verbatim** —
+  `web_search_20250305`, `code_execution_*`, `computer_use_*`,
+  `mcp_tool_use`, etc. (any tool whose `type` isn't `custom`) are no longer
+  re-shaped into OpenAI client functions, which had silently rewired them into
+  ordinary tools upstream so the hosted capability never ran. Server tools
+  keep every field (`max_uses`, `allowed_domains`, ...) through to the
+  Anthropic payload; a non-Anthropic upstream surfaces a readable provider
+  error instead of a silent miswire. The top-level `mcp_servers` field
+  (Anthropic's MCP connector) likewise forwards verbatim instead of being
+  dropped.
 - **`tool_result.is_error` round-trips through the compat layer** — a failed
   tool call on `POST /v1/messages` used to flatten into an indistinguishable
   tool message, so the model couldn't tell failure from success. The flag now

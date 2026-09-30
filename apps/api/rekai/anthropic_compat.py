@@ -164,7 +164,16 @@ def _flatten_content(
 
 
 def _to_openai_tool(tool: AnthropicTool) -> dict:
-    """Anthropic tool -> the OpenAI function shape providers already speak."""
+    """Anthropic tool -> the OpenAI function shape providers already speak.
+
+    Server tools (``web_search_20250305``, ``code_execution_*``,
+    ``computer_use_*``, ``mcp_tool_use``, ...) aren't client functions — they
+    ask the *provider* to run a capability. They pass through verbatim so the
+    Anthropic provider re-emits them unchanged; a non-Anthropic upstream gets
+    a readable provider error rather than a silently rewired client tool.
+    """
+    if tool.type not in (None, "custom"):
+        return tool.model_dump(exclude_none=True, exclude_defaults=True)
     return {
         "type": "function",
         "function": {
@@ -226,6 +235,7 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
         tools=[_to_openai_tool(t) for t in req.tools] if req.tools else None,
         tool_choice=_to_openai_tool_choice(req.tool_choice) if req.tool_choice else None,
         thinking=req.thinking,
+        mcp_servers=req.mcp_servers,
         output_config=req.output_config,
     )
 

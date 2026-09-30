@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Role = Literal["system", "user", "assistant", "tool"]
 
@@ -155,6 +155,11 @@ class ChatRequest(BaseModel):
         "automatically and ignores it. Per-message placement is also supported "
         "via a message's own cache_control.",
     )
+    mcp_servers: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Anthropic MCP connector servers (forwarded verbatim to "
+        "Anthropic; ignored by other providers).",
+    )
 
     @field_validator("stop", mode="before")
     @classmethod
@@ -286,9 +291,23 @@ class AnthropicMessage(BaseModel):
 
 
 class AnthropicTool(BaseModel):
-    name: str
+    model_config = ConfigDict(extra="allow")
+
+    # Absent or "custom" -> a client tool (translated to an OpenAI function).
+    # Anything else is an Anthropic server tool (web_search_20250305,
+    # code_execution, computer_use, mcp_tool_use, ...) whose extra fields
+    # (max_uses, allowed_domains, ...) must pass through verbatim.
+    type: str | None = None
+    # Required for client tools; some server tools (mcp_toolset) have none.
+    name: str | None = None
     description: str | None = None
     input_schema: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _client_tool_needs_name(self) -> AnthropicTool:
+        if self.type in (None, "custom") and not self.name:
+            raise ValueError("client tools require a 'name'")
+        return self
 
 
 class AnthropicToolChoice(BaseModel):
@@ -313,6 +332,10 @@ class _AnthropicMessagesBase(BaseModel):
     stream: bool = False
     tools: list[AnthropicTool] | None = None
     tool_choice: AnthropicToolChoice | None = None
+    # Anthropic's MCP connector — remote MCP servers the provider calls
+    # itself ({name, url, type:"url", authorization_token?, tool_configuration?}).
+    # Forwarded verbatim to Anthropic; requires the mcp-client beta header.
+    mcp_servers: list[dict[str, Any]] | None = None
     # Anthropic's extended-thinking config, verbatim ({'type': 'enabled',
     # 'budget_tokens': N}). Declared so it isn't swallowed by extra=allow.
     thinking: dict[str, Any] | None = None
