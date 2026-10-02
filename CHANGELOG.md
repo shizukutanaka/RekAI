@@ -19,6 +19,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **In-flight request gauges** — `rekai_in_flight_requests` and
+  `rekai_in_flight_requests_peak` in `/metrics`, mirrored from the
+  concurrency middleware (active when `REKAI_MAX_CONCURRENT_REQUESTS` is
+  set). Until now saturation was invisible to a scrape until
+  `errors_by_kind{kind="concurrency_limit"}` started firing 429s — the peak
+  series keeps the high-water mark a 15–60s scrape interval would miss.
+  Per-process and instantaneous, like the histograms: not seeded or merged,
+  Prometheus sums across workers.
 - **JavaScript streaming example** — `examples/javascript/stream.mjs` mirrors
   the Python `stream.py` example: the JS side of `examples/` had chat and
   embeddings but no SSE streaming demo, so the lowest-friction way to see

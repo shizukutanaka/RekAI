@@ -787,3 +787,13 @@ def test_usage_by_user_scoped_to_caller_under_auth() -> None:
     assert "a-user" not in str(usage_b["usage_by_user"])
     usage_a = client.get("/v1/usage", headers={"Authorization": "Bearer sk-a"}).json()
     assert "a-user" in str(usage_a["usage_by_user"])
+
+
+def test_in_flight_gauge_and_peak() -> None:
+    m = Metrics()
+    m.note_in_flight(3)
+    m.note_in_flight(7)
+    m.note_in_flight(2)
+    out = m.render()
+    assert "rekai_in_flight_requests 2" in out
+    assert "rekai_in_flight_requests_peak 7" in out
