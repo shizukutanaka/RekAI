@@ -787,3 +787,63 @@ def test_usage_by_user_scoped_to_caller_under_auth() -> None:
     assert "a-user" not in str(usage_b["usage_by_user"])
     usage_a = client.get("/v1/usage", headers={"Authorization": "Bearer sk-a"}).json()
     assert "a-user" in str(usage_a["usage_by_user"])
+
+
+def test_model_usage_accumulates_per_model() -> None:
+    m = Metrics()
+    m.record_model_usage("gpt-x", 10, 0.01)
+    m.record_model_usage("gpt-x", 5, 0.02)
+    m.record_model_usage("claude-y", 3, None)
+    assert m.usage_by_model == {
+        "gpt-x": {"requests": 2, "tokens": 15, "cost_usd": 0.03},
+        "claude-y": {"requests": 1, "tokens": 3, "cost_usd": 0.0},
+    }
+
+
+def test_usage_by_model_capped_evicts_quietest() -> None:
+    m = Metrics(max_tracked_clients=3)
+    # "hot" gets 3 calls; "warm" 2; "one-off" 1 — a distinct minimum to evict.
+    for _ in range(3):
+        m.record_model_usage("hot", 1, None)
+    for _ in range(2):
+        m.record_model_usage("warm", 1, None)
+    m.record_model_usage("one-off", 1, None)
+    assert len(m.usage_by_model) == 3
+    m.record_model_usage("newcomer", 1, None)
+    assert len(m.usage_by_model) == 3
+    assert "one-off" not in m.usage_by_model
+    assert "hot" in m.usage_by_model and "warm" in m.usage_by_model
+
+
+def test_model_usage_in_snapshot_seed_and_merge() -> None:
+    m = Metrics()
+    m.record_model_usage("m1", 7, 0.5)
+    m2 = Metrics()
+    m2.seed(m.snapshot())
+    assert m2.usage_by_model == {"m1": {"requests": 1, "tokens": 7, "cost_usd": 0.5}}
+    merged = merge_snapshots(
+        [
+            {"usage_by_model": {"a": {"requests": 1, "tokens": 5, "cost_usd": 0.1}}},
+            {"usage_by_model": {"a": {"requests": 2, "tokens": 6, "cost_usd": 0.2}}},
+        ]
+    )
+    assert merged["usage_by_model"]["a"] == {"requests": 3, "tokens": 11, "cost_usd": 0.3}
+
+
+def test_render_emits_model_series_with_escaped_labels() -> None:
+    m = Metrics()
+    m.record_model_usage('m"x', 10, 0.25)
+    out = m.render()
+    assert 'rekai_model_requests_total{model="m\\"x"} 1' in out
+    assert 'rekai_model_tokens_total{model="m\\"x"} 10' in out
+    assert 'rekai_model_cost_usd_total{model="m\\"x"} 0.25' in out
+
+
+def test_chat_lands_in_usage_by_model(client: TestClient) -> None:
+    resp = client.post(
+        "/v1/chat",
+        json={"model": "echo", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status_code == 200
+    usage = client.get("/v1/usage").json()
+    assert usage["usage_by_model"]["echo"]["requests"] >= 1
