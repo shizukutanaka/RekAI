@@ -138,6 +138,13 @@ export function formatCost(cost: number | null | undefined): string {
   return `$${cost.toFixed(2)}`;
 }
 
+/** Format a model's per-1M-token price pair, or "unpriced" when not listed. */
+export function formatPricing(pricing: ModelPricing | null | undefined): string {
+  if (!pricing) return "unpriced";
+  if (!pricing.output_per_1m) return `$${pricing.input_per_1m} in / 1M`;
+  return `$${pricing.input_per_1m} in · $${pricing.output_per_1m} out / 1M`;
+}
+
 export interface RateLimitInfo {
   limit: number | null;
   remaining: number | null;
