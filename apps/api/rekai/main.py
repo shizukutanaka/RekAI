@@ -61,6 +61,8 @@ from rekai.schemas import (
     ModelInfo,
     ModelPricing,
     ModelsResponse,
+    ModerationRequest,
+    ModerationResponse,
     ServiceInfo,
     Usage,
     UsageSummary,
@@ -72,6 +74,7 @@ from rekai.service import (
     handle_chat,
     handle_chat_stream,
     handle_embeddings,
+    handle_moderation,
 )
 
 access_logger = get_logger("rekai.access")
@@ -419,6 +422,20 @@ def _message_texts(messages: list[ChatMessage]) -> list[str]:
     return [m.content for m in messages if m.content]
 
 
+def _moderation_texts(input: str | list[str] | list[dict]) -> list[str]:
+    """Caller-supplied moderation text — strings as given, `text` parts
+    extracted from OpenAI's content-part form (image parts carry no text)."""
+    if isinstance(input, str):
+        return [input]
+    texts = []
+    for item in input:
+        if isinstance(item, str):
+            texts.append(item)
+        elif isinstance(item, dict) and isinstance(item.get("text"), str):
+            texts.append(item["text"])
+    return texts
+
+
 def _input_secrets_response(
     texts: list[str], settings: Settings, response: Response
 ) -> JSONResponse | None:
@@ -480,7 +497,7 @@ def _model_acl_denied(http_request: Request, models: list[str]) -> JSONResponse 
     return None
 
 
-def _acl_models(request: ChatRequest | EmbeddingsRequest) -> list[str]:
+def _acl_models(request: ChatRequest | EmbeddingsRequest | ModerationRequest) -> list[str]:
     """Every model the request could route to: its own plus per-fallback
     overrides (a fallback without an explicit model inherits request.model)."""
     models = [request.model]
@@ -1545,6 +1562,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 config.idempotency_ttl_seconds,
             )
         return result
+
+    @app.post(
+        "/v1/moderations",
+        response_model=ModerationResponse,
+        tags=["moderations"],
+        responses={
+            400: {"model": ErrorResponse},
+            401: {"model": ErrorResponse},
+            403: {"model": ErrorResponse},
+            413: {"model": ErrorResponse},
+            422: {"model": ErrorResponse},
+            429: {"model": ErrorResponse},
+            502: {"model": ErrorResponse},
+        },
+    )
+    async def moderations(
+        response: Response,
+        request: ModerationRequest,
+        http_request: Request,
+        x_provider_key: str | None = Header(default=None, alias="X-Provider-Key"),
+        config: Settings = Depends(get_config),
+    ) -> ModerationResponse | JSONResponse:
+        denied = _model_acl_denied(http_request, _acl_models(request))
+        if denied is not None:
+            return denied
+        leaked = _input_secrets_response(_moderation_texts(request.input), config, response)
+        if leaked is not None:
+            return leaked
+        return await handle_moderation(request, x_provider_key, config)
 
     @app.post(
         "/v1/chat/stream",

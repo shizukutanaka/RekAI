@@ -4,6 +4,7 @@ from rekai_client.client import (
     AsyncRekAIClient,
     ChatResult,
     EmbeddingsResult,
+    ModerationResult,
     RekAIClient,
     RekAIError,
 )
@@ -15,4 +16,5 @@ __all__ = [
     "RekAIError",
     "ChatResult",
     "EmbeddingsResult",
+    "ModerationResult",
 ]

@@ -32,6 +32,8 @@ from rekai.schemas import (
     ChatResponse,
     EmbeddingsRequest,
     EmbeddingsResponse,
+    ModerationRequest,
+    ModerationResponse,
     Usage,
 )
 from rekai.semantic_cache import semantic_cache
@@ -1225,3 +1227,48 @@ async def _handle_embeddings(
         await cache.delete(inflight_key)
     logger.info("embeddings ok provider=%s model=%s n=%s", provider_name, result.model, len(inputs))
     return response
+
+
+async def handle_moderation(
+    request: ModerationRequest,
+    api_key: str | None,
+    settings: Settings,
+) -> ModerationResponse:
+    # Same request-scoped Settings binding as handle_chat/handle_embeddings.
+    token = bind_current_settings(settings)
+    try:
+        return await _handle_moderation(request, api_key, settings)
+    finally:
+        reset_current_settings(token)
+
+
+async def _handle_moderation(
+    request: ModerationRequest,
+    api_key: str | None,
+    settings: Settings,
+) -> ModerationResponse:
+    provider_name = resolve_provider(request.provider, request.model, settings)
+    ensure_allowed(provider_name, settings)
+    provider = get_provider(provider_name)
+    if provider is None:
+        raise ProviderError(f"Unknown provider '{provider_name}'.", status_code=400)
+    metrics.record_request(provider_name)
+    started = time.perf_counter()
+    result = await call_with_retry(
+        lambda: provider.moderate(request.input, request.model, api_key),
+        attempts=settings.retry_max_attempts,
+        base_delay=settings.retry_base_delay_seconds,
+        max_delay=settings.retry_max_delay_seconds,
+        on_retry=metrics.record_retry,
+        deadline=_request_deadline(settings),
+    )
+    metrics.observe_provider_duration(provider_name, "moderation", time.perf_counter() - started)
+    logger.info(
+        "moderation ok provider=%s model=%s n=%s",
+        provider_name,
+        result.model,
+        len(result.results),
+    )
+    return ModerationResponse(
+        provider=provider_name, model=result.model, id=result.id, results=result.results
+    )
