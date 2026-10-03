@@ -19,6 +19,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Models page** — a `/models` browser in the web app: every advertised model
+  grouped by its routing provider, with type (chat/embedding) and per-1M-token
+  pricing from `GET /v1/models`. Until now the catalogue was only visible via
+  model dropdowns filtered per playground; there was no way to see all of it —
+  or which models are unpriced — without curling the endpoint.
 - **JavaScript streaming example** — `examples/javascript/stream.mjs` mirrors
   the Python `stream.py` example: the JS side of `examples/` had chat and
   embeddings but no SSE streaming demo, so the lowest-friction way to see
