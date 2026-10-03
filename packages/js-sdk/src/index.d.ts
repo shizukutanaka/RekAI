@@ -231,6 +231,11 @@ export interface UsageSummary {
     string,
     Record<string, { requests: number; tokens: number; cost_usd: number }>
   >;
+  /** Per-model volume and spend — the model-grained view of the provider series (fleet-wide). */
+  usage_by_model: Record<
+    string,
+    { requests: number; tokens: number; cost_usd: number }
+  >;
 }
 
 export class RekAIError extends Error {

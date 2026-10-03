@@ -732,6 +732,14 @@ class UsageSummary(BaseModel):
         "the OpenAI `user` field. Under gateway auth /v1/usage returns only "
         "the caller's inner map.",
     )
+    usage_by_model: dict[str, ClientUsage] = Field(
+        default_factory=dict,
+        description="Per-model usage {model: usage} — the model-grained view "
+        "of the provider series: one provider serves many differently-priced "
+        "models, so provider buckets alone can't attribute spend. Fleet-wide "
+        "(not tenant-filtered — model names carry no tenant data), bounded to "
+        "the busiest REKAI_MAX_TRACKED_CLIENTS entries.",
+    )
 
 
 class HealthResponse(BaseModel):

@@ -32,6 +32,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   moderation endpoint answer 400. Errors leave in OpenAI's
   `{"error": {message, type, param, code}}` envelope like
   `/v1/chat/completions`. `moderations()` lands on both SDKs.
+- **Per-model usage attribution** — `usage_by_model` in `/v1/usage` plus
+  `rekai_model_{requests,tokens,cost_usd}_total` series in `/metrics`. The
+  provider-level series can't attribute spend when one provider serves many
+  differently-priced models (one OpenAI key fronting gpt-4o and gpt-4o-mini);
+  the model-grained map records requests/tokens/cost per upstream model name
+  at every call site that records provider cost — chat, streaming,
+  embeddings, and the semantic cache's internal embed/verify calls, since
+  they consume model tokens too. Bounded by `REKAI_MAX_TRACKED_CLIENTS` like
+  the other caller-keyed maps (model names are caller-supplied — aliases,
+  BYOK deployments); at the cap the quietest entry is evicted. Fleet-level,
+  not tenant-filtered — model names carry no tenant identity.
 - **JavaScript streaming example** — `examples/javascript/stream.mjs` mirrors
   the Python `stream.py` example: the JS side of `examples/` had chat and
   embeddings but no SSE streaming demo, so the lowest-friction way to see
