@@ -69,6 +69,11 @@ check "embeddings (echo) return vectors" bash -c \
      -d '{\"model\":\"echo\",\"input\":\"hello\"}' \
    | jq -e '(.embeddings | length) > 0 and (.embeddings[0] | length) > 0' >/dev/null"
 
+check "moderations (echo) returns results" bash -c \
+  "curl -fsS '$BASE_URL/v1/moderations' $AUTH_ARG -H 'Content-Type: application/json' \
+     -d '{\"input\":\"hello\"}' \
+   | jq -e '(.results | length) > 0 and (.results[0].flagged == false)' >/dev/null"
+
 check "usage exposes counters" bash -c \
   "curl -fsS '$BASE_URL/v1/usage' $AUTH_ARG | jq -e 'has(\"requests_total\")' >/dev/null"
 
