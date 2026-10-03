@@ -19,6 +19,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Usage page "Usage by model" section** — the per-model breakdown added to
+  `/v1/usage` now renders in the web app's Usage page (requests / tokens /
+  cost per model, sorted by requests), between the provider bars and the
+  per-client section.
 - **`POST /v1/moderations`** — OpenAI-compatible moderation pass-through, the
   last absent OpenAI surface. `input` accepts a string, a list of strings, or
   a list of content parts (OpenAI's text/image input shape) and is forwarded

@@ -255,10 +255,12 @@ propagate to `_provider_error_handler` is what keeps an upstream 429's
 `Retry-After` header and its `errors_total` metric — a hand-written `except`
 in the route silently dropped both.
 
-The envelope is scoped to this one path. `/v1/chat`, `/v1/chat/stream`,
-`/v1/embeddings`, `/v1/moderations` and `/v1/usage` are RekAI's own API and
-keep the flat `{"error": "<kind>", "detail": "<message>"}` shape that the web
-app and both SDKs parse (`body.detail || body.error`).
+`/v1/moderations` answers errors in the same OpenAI envelope (it sits in
+`_OPENAI_COMPAT_PATHS`), though its success body is RekAI's flat
+`{provider, model, id, results}`. `/v1/chat`, `/v1/chat/stream`,
+`/v1/embeddings` and `/v1/usage` are RekAI's own API and keep the flat
+`{"error": "<kind>", "detail": "<message>"}` shape that the web app and both
+SDKs parse (`body.detail || body.error`).
 
 One divergence remains, deliberately: a schema-invalid body is FastAPI's **422**,
 where OpenAI's API uses 400, so `except openai.BadRequestError` does not catch
@@ -1048,6 +1050,17 @@ operator who wants the *whole* endpoint behind the key still sets
 either way, same fallback as `/v1/*`). With no gateway auth configured there are
 no tenants to separate and nothing is withheld anywhere.
 
+`/v1/usage` and `/metrics` also break down requests, tokens, and cost **per
+model** (`usage_by_model` / `rekai_model_*_total{model="…"}`), keyed by the
+upstream-reported model name at every call site that records provider cost —
+chat, streaming, embeddings, and the semantic cache's internal calls. This is
+the granularity the provider series can't give when one provider serves many
+differently-priced models (one OpenAI key fronting gpt-4o and gpt-4o-mini).
+Model names are fleet-level operational data with no tenant identity, so the
+series is emitted unconditionally like the provider series; the map is bounded
+by `REKAI_MAX_TRACKED_CLIENTS` (model names are caller-supplied — aliases, BYOK
+deployment names) and evicts its quietest entry at the cap.
+
 ### Per-end-user usage
 
 Requests may carry the OpenAI `user` field — an end-user id within the calling
@@ -1301,7 +1314,8 @@ and `model` defaults to `omni-moderation-latest`, which routes to openai by
 name like the other OpenAI families. The response keeps the flat
 `{provider, model, id, results}` envelope with the upstream result entries
 untouched (flagged/categories/scores differ between moderation versions), so
-there is no cost field or usage accounting. No cache, failover, or
+there is no cost field — the call lands in `usage_by_model` as a request with
+zero tokens/cost since moderation usage is not reported. No cache, failover, or
 idempotency: the call is cheap and side-effect-free, and a cached verdict
 could be wrong after a model upgrade. Providers opt in by overriding
 `moderate()` — OpenAI and OpenAI-compatible backends POST to
