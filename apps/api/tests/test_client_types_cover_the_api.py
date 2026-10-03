@@ -66,6 +66,13 @@ def embeddings(client: TestClient) -> dict:
 
 
 @pytest.fixture(scope="module")
+def moderations(client: TestClient) -> dict:
+    resp = client.post("/v1/moderations", json={"input": "a", "provider": "echo"})
+    assert resp.status_code == 200
+    return resp.json()
+
+
+@pytest.fixture(scope="module")
 def usage(client: TestClient) -> dict:
     return client.get("/v1/usage").json()
 
@@ -116,6 +123,14 @@ def test_web_embeddings_response_is_complete(embeddings: dict) -> None:
     )
 
 
+def test_web_moderations_response_is_complete(moderations: dict) -> None:
+    _assert_covers(
+        _ts_fields(_WEB, "ModerationsResponse"),
+        moderations,
+        "the web app's ModerationsResponse",
+    )
+
+
 def test_web_usage_summary_is_complete(usage: dict) -> None:
     _assert_covers(_ts_fields(_WEB, "UsageSummary"), usage, "the web app's UsageSummary")
 
@@ -137,6 +152,14 @@ def test_js_sdk_embeddings_result_is_complete(embeddings: dict) -> None:
     )
 
 
+def test_js_sdk_moderation_result_is_complete(moderations: dict) -> None:
+    _assert_covers(
+        _ts_fields(_JS_SDK, "ModerationResult"),
+        moderations,
+        "the JS SDK's ModerationResult",
+    )
+
+
 def test_js_sdk_usage_summary_is_complete(usage: dict) -> None:
     _assert_covers(_ts_fields(_JS_SDK, "UsageSummary"), usage, "the JS SDK's UsageSummary")
 
@@ -155,4 +178,12 @@ def test_python_sdk_embeddings_result_is_complete(embeddings: dict) -> None:
         _dataclass_fields(_PY_SDK, "EmbeddingsResult"),
         embeddings,
         "the Python SDK's EmbeddingsResult",
+    )
+
+
+def test_python_sdk_moderation_result_is_complete(moderations: dict) -> None:
+    _assert_covers(
+        _dataclass_fields(_PY_SDK, "ModerationResult"),
+        moderations,
+        "the Python SDK's ModerationResult",
     )

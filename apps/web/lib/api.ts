@@ -593,6 +593,48 @@ export async function sendEmbeddings(params: {
   return res.json();
 }
 
+export interface ModerationResultEntry {
+  flagged: boolean;
+  categories: Record<string, boolean>;
+  category_scores: Record<string, number>;
+}
+
+export interface ModerationsResponse {
+  provider: string;
+  model: string;
+  id: string | null;
+  results: ModerationResultEntry[];
+}
+
+export async function sendModerations(params: {
+  input: string[];
+  model?: string;
+  provider?: string;
+  providerKey?: string;
+  gatewayKey?: string;
+}): Promise<ModerationsResponse> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...gatewayAuthHeaders(params.gatewayKey),
+  };
+  if (params.providerKey) headers["X-Provider-Key"] = params.providerKey;
+
+  const res = await fetch(`${API_URL}/v1/moderations`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      input: params.input,
+      ...(params.model ? { model: params.model } : {}),
+      ...(params.provider ? { provider: params.provider } : {}),
+    }),
+  });
+
+  if (!res.ok) {
+    throw await errorFromResponse(res);
+  }
+  return res.json();
+}
+
 /** Cosine similarity of two equal-length vectors. Pure, for unit testing. */
 export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length || a.length === 0) return 0;

@@ -19,6 +19,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Moderations playground** — a `/moderations` page in the web app: textarea
+  inputs screened through `POST /v1/moderations` (one per line) with per-input
+  flagged badges, matched categories, and top category scores. `echo` provider
+  runs it offline; `sendModerations` lands in the web API client, and the
+  client-types contract test now covers the moderation response on all three
+  first-party clients.
 - **`POST /v1/moderations`** — OpenAI-compatible moderation pass-through, the
   last absent OpenAI surface. `input` accepts a string, a list of strings, or
   a list of content parts (OpenAI's text/image input shape) and is forwarded

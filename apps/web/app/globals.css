@@ -480,3 +480,8 @@ button.stop:hover {
   background: #3a341f;
   color: #e0c97e;
 }
+
+.badge.flagged {
+  background: #3a1f1f;
+  color: #e08a7e;
+}
