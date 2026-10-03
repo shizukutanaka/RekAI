@@ -1592,7 +1592,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         leaked = _input_secrets_response(_moderation_texts(request.input), config, response)
         if leaked is not None:
             return leaked
-        return await handle_moderation(request, x_provider_key, config)
+        result = await handle_moderation(request, x_provider_key, config)
+        # Moderation reports no usage, so attribute the request itself (zero
+        # tokens/cost) — same accounting the model-level series already does.
+        metrics.record_client_usage(_client_id(http_request), 0, 0.0)
+        return result
 
     @app.post(
         "/v1/chat/stream",

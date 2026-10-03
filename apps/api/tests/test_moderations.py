@@ -109,6 +109,7 @@ async def test_moderation_reaches_openai_verbatim(monkeypatch) -> None:
 
 def test_moderations_route_surfaces_upstream_result(client: TestClient, monkeypatch) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    before = client.get("/v1/usage").json()
     resp = client.post(
         "/v1/moderations",
         json={"input": "x", "provider": "openai", "model": "m1"},
@@ -119,9 +120,14 @@ def test_moderations_route_surfaces_upstream_result(client: TestClient, monkeypa
     assert body["provider"] == "openai"
     assert body["id"] == "modr-upstream"
     assert body["results"][0]["categories"] == {"harassment": True}
-    # A moderation call counts toward usage_by_model as a request (no tokens).
+    # A moderation call counts toward usage_by_model and usage_by_client as a
+    # request (no tokens).
     usage = client.get("/v1/usage").json()
     assert usage["usage_by_model"]["omni-moderation-latest"]["requests"] >= 1
+    total_client_requests = sum(u["requests"] for u in usage["usage_by_client"].values())
+    assert (
+        total_client_requests == sum(u["requests"] for u in before["usage_by_client"].values()) + 1
+    )
 
 
 def test_input_secrets_scan_moderation_input() -> None:
