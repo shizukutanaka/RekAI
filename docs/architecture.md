@@ -1048,6 +1048,17 @@ operator who wants the *whole* endpoint behind the key still sets
 either way, same fallback as `/v1/*`). With no gateway auth configured there are
 no tenants to separate and nothing is withheld anywhere.
 
+`/v1/usage` and `/metrics` also break down requests, tokens, and cost **per
+model** (`usage_by_model` / `rekai_model_*_total{model="…"}`), keyed by the
+upstream-reported model name at every call site that records provider cost —
+chat, streaming, embeddings, and the semantic cache's internal calls. This is
+the granularity the provider series can't give when one provider serves many
+differently-priced models (one OpenAI key fronting gpt-4o and gpt-4o-mini).
+Model names are fleet-level operational data with no tenant identity, so the
+series is emitted unconditionally like the provider series; the map is bounded
+by `REKAI_MAX_TRACKED_CLIENTS` (model names are caller-supplied — aliases, BYOK
+deployment names) and evicts its quietest entry at the cap.
+
 ### Per-end-user usage
 
 Requests may carry the OpenAI `user` field — an end-user id within the calling

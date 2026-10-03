@@ -19,6 +19,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Usage page "Usage by model" section** — the per-model breakdown added to
+  `/v1/usage` now renders in the web app's Usage page (requests / tokens /
+  cost per model, sorted by requests), between the provider bars and the
+  per-client section.
 - **Models page** — a `/models` browser in the web app: every advertised model
   grouped by its routing provider, with type (chat/embedding) and per-1M-token
   pricing from `GET /v1/models`. Until now the catalogue was only visible via

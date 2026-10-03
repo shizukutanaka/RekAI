@@ -67,6 +67,10 @@ export default function UsagePage() {
     ? Object.entries(usage.requests_by_provider).sort((a, b) => b[1] - a[1])
     : [];
 
+  const models = usage
+    ? Object.entries(usage.usage_by_model ?? {}).sort((a, b) => b[1].requests - a[1].requests)
+    : [];
+
   const clients = usage
     ? Object.entries(usage.usage_by_client ?? {}).sort((a, b) => b[1].requests - a[1].requests)
     : [];
@@ -131,6 +135,30 @@ export default function UsagePage() {
                   </div>
                   <span className="bar-count">
                     {count} req · {(usage.tokens_by_provider?.[name] ?? 0).toLocaleString()} tok
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <h3 className="section">Usage by model</h3>
+          {models.length === 0 ? (
+            <p className="hint">No requests yet.</p>
+          ) : (
+            <div className="bars">
+              {models.map(([model, u]) => (
+                <div key={model} className="bar-row client-usage">
+                  <span className="bar-label" title={model}>
+                    {model}
+                  </span>
+                  <div className="bar-track">
+                    <div
+                      className="bar-fill"
+                      style={{ width: pct(u.requests, usage.requests_total) }}
+                    />
+                  </div>
+                  <span className="bar-count">
+                    {u.requests} req · {u.tokens} tok · ${u.cost_usd.toFixed(4)}
                   </span>
                 </div>
               ))}
