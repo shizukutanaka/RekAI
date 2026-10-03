@@ -306,6 +306,31 @@ export class RekAIClient {
   }
 
   /**
+   * Classify input against safety categories (providers with a moderation
+   * endpoint — OpenAI's /v1/moderations; echo returns a deterministic stub).
+   * `model` defaults to OpenAI's own default (omni-moderation-latest).
+   * @param {string|string[]|object[]} input
+   * @param {object} [opts]
+   * @param {string} [opts.model]
+   * @param {string} [opts.provider]
+   * @param {string} [opts.providerKey]
+   * @param {string} [opts.gatewayKey]
+   * @returns {Promise<object>}
+   */
+  async moderations(input, opts = {}) {
+    const payload = { input };
+    if (opts.model != null) payload.model = opts.model;
+    if (opts.provider != null) payload.provider = opts.provider;
+    const res = await this._send("/v1/moderations", {
+      method: "POST",
+      headers: this._headers(opts.providerKey, opts.gatewayKey),
+      body: JSON.stringify(payload),
+    });
+    await this._raiseForStatus(res);
+    return res.json();
+  }
+
+  /**
    * @param {{ gatewayKey?: string }} [opts]
    * @returns {Promise<Array<{id:string,provider:string}>>}
    */

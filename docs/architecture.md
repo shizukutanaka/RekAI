@@ -255,7 +255,9 @@ propagate to `_provider_error_handler` is what keeps an upstream 429's
 `Retry-After` header and its `errors_total` metric — a hand-written `except`
 in the route silently dropped both.
 
-The envelope is scoped to this one path. `/v1/chat`, `/v1/chat/stream`,
+`/v1/moderations` answers errors in the same OpenAI envelope (it sits in
+`_OPENAI_COMPAT_PATHS`), though its success body is RekAI's flat
+`{provider, model, id, results}`. `/v1/chat`, `/v1/chat/stream`,
 `/v1/embeddings` and `/v1/usage` are RekAI's own API and keep the flat
 `{"error": "<kind>", "detail": "<message>"}` shape that the web app and both
 SDKs parse (`body.detail || body.error`).
@@ -1302,6 +1304,23 @@ overriding `embed()`. `/v1/models` tags every entry with a `type`
 (`chat` or `embedding`) and lists embedding models alongside chat ones —
 providers advertise them via `list_embedding_models()`, so clients (and the web
 **Embeddings** page) can discover and route to the right one.
+
+## Moderation
+
+`POST /v1/moderations` is the same pass-through shape minus the cache: route →
+`provider.moderate()`. `input` is forwarded verbatim — a string, a list of
+strings, or a list of content parts (OpenAI's text/image moderation input) —
+and `model` defaults to `omni-moderation-latest`, which routes to openai by
+name like the other OpenAI families. The response keeps the flat
+`{provider, model, id, results}` envelope with the upstream result entries
+untouched (flagged/categories/scores differ between moderation versions), so
+there is no cost field — the call lands in `usage_by_model` as a request with
+zero tokens/cost since moderation usage is not reported. No cache, failover, or
+idempotency: the call is cheap and side-effect-free, and a cached verdict
+could be wrong after a model upgrade. Providers opt in by overriding
+`moderate()` — OpenAI and OpenAI-compatible backends POST to
+`{base}/moderations`; echo returns a deterministic `modr-echo-<sha>` stub.
+Providers without a moderation endpoint answer 400.
 
 ## Adding a provider
 

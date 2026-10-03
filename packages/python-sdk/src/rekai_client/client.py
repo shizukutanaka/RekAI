@@ -139,6 +139,27 @@ class EmbeddingsResult:
         )
 
 
+@dataclass
+class ModerationResult:
+    """A moderation response."""
+
+    provider: str
+    model: str
+    id: str | None
+    # Verbatim upstream result entries (flagged, categories, scores) — the
+    # category sets differ between moderation model versions.
+    results: list[dict[str, Any]]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ModerationResult:
+        return cls(
+            provider=data["provider"],
+            model=data["model"],
+            id=data.get("id"),
+            results=data.get("results", []),
+        )
+
+
 def _normalize(messages: Messages) -> list[Message]:
     if isinstance(messages, str):
         return [{"role": "user", "content": messages}]
@@ -637,6 +658,33 @@ class RekAIClient:
         self._raise_for_status(resp)
         return EmbeddingsResult.from_dict(resp.json())
 
+    def moderations(
+        self,
+        input: str | list[str] | list[dict[str, Any]],
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+        provider_key: str | None = None,
+        gateway_key: str | None = None,
+    ) -> ModerationResult:
+        """Classify input against safety categories (providers with a
+        moderation endpoint — OpenAI's ``/v1/moderations``; echo returns a
+        deterministic stub). ``model`` defaults to OpenAI's own default
+        (omni-moderation-latest)."""
+        payload: dict[str, Any] = {"input": input}
+        if model is not None:
+            payload["model"] = model
+        if provider is not None:
+            payload["provider"] = provider
+        resp = self._send(
+            "POST",
+            "/v1/moderations",
+            json=payload,
+            headers=self._headers(provider_key, gateway_key),
+        )
+        self._raise_for_status(resp)
+        return ModerationResult.from_dict(resp.json())
+
     def models(self, *, gateway_key: str | None = None) -> list[dict[str, str]]:
         resp = self._send("GET", "/v1/models", headers=self._headers(None, gateway_key))
         self._raise_for_status(resp)
@@ -914,6 +962,30 @@ class AsyncRekAIClient:
         )
         self._raise_for_status(resp)
         return EmbeddingsResult.from_dict(resp.json())
+
+    async def moderations(
+        self,
+        input: str | list[str] | list[dict[str, Any]],
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+        provider_key: str | None = None,
+        gateway_key: str | None = None,
+    ) -> ModerationResult:
+        """Async twin of :meth:`RekAIClient.moderations`."""
+        payload: dict[str, Any] = {"input": input}
+        if model is not None:
+            payload["model"] = model
+        if provider is not None:
+            payload["provider"] = provider
+        resp = await self._send(
+            "POST",
+            "/v1/moderations",
+            json=payload,
+            headers=self._headers(provider_key, gateway_key),
+        )
+        self._raise_for_status(resp)
+        return ModerationResult.from_dict(resp.json())
 
     async def models(self, *, gateway_key: str | None = None) -> list[dict[str, str]]:
         resp = await self._send("GET", "/v1/models", headers=self._headers(None, gateway_key))

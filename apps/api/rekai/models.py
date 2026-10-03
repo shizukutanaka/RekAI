@@ -85,6 +85,9 @@ PROVIDER_PREFIXES: tuple[tuple[str, str], ...] = (
     ("gpt-", "openai"),
     ("o1", "openai"),
     ("o3", "openai"),
+    # OpenAI's moderation models (omni-moderation-latest) — routed by name so
+    # /v1/moderations works on any default-provider deployment.
+    ("omni-moderation", "openai"),
     ("claude", "anthropic"),
     ("gemini", "gemini"),
     # Gemini's embedding model is named `text-embedding-004`, which collides

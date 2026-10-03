@@ -60,6 +60,12 @@ def test_openai_embedding_family_still_routes_to_openai() -> None:
     assert models.provider_for_prefix("text-embedding-ada-002") == "openai"
 
 
+def test_omni_moderation_family_routes_to_openai() -> None:
+    # The default moderation model is an OpenAI family — name-based routing
+    # sends it there regardless of the deployment's default provider.
+    assert models.provider_for_prefix("omni-moderation-latest") == "openai"
+
+
 def test_advertised_models_groups_by_provider_and_kind() -> None:
     assert models.advertised_models("openai", "chat")[0].startswith("gpt-")
     assert models.advertised_models("gemini", "chat") == [

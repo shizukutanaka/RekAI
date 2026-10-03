@@ -185,6 +185,23 @@ export interface EmbeddingsResult {
   cached: boolean;
 }
 
+export interface ModerationOptions {
+  /** Defaults to OpenAI's own default (omni-moderation-latest). */
+  model?: string;
+  provider?: string;
+  providerKey?: string;
+  gatewayKey?: string;
+}
+
+export interface ModerationResult {
+  provider: string;
+  model: string;
+  id: string | null;
+  /** Verbatim upstream result entries (flagged, categories, scores) — the
+   * category sets differ between moderation model versions. */
+  results: Array<Record<string, unknown>>;
+}
+
 export interface UsageSummary {
   requests_total: number;
   cache_hits_total: number;
@@ -262,6 +279,10 @@ export class RekAIClient {
     input: string | string[],
     opts?: EmbeddingsOptions,
   ): Promise<EmbeddingsResult>;
+  moderations(
+    input: string | string[] | Array<Record<string, unknown>>,
+    opts?: ModerationOptions,
+  ): Promise<ModerationResult>;
   models(opts?: { gatewayKey?: string }): Promise<ModelInfo[]>;
   usage(opts?: { gatewayKey?: string }): Promise<UsageSummary>;
   health(): Promise<Record<string, unknown>>;

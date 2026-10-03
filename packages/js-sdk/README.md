@@ -62,6 +62,10 @@ await client.chat("gpt-4o-mini", "Return JSON with a 'city' field for Tokyo.", {
 const emb = await client.embeddings("echo", ["hello", "world"]);
 console.log(emb.embeddings.length, emb.usage.total_tokens, emb.cached);
 
+// Moderation (OpenAI's /v1/moderations shape; echo returns a stub)
+const mod = await client.moderations(["hello", "world"], { provider: "echo" });
+console.log(mod.results[0].flagged); // false
+
 // Introspection
 await client.models();   // [{ id, provider }, ...]
 await client.usage();    // aggregate counters
