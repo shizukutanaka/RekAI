@@ -183,3 +183,26 @@ async def test_rejection_body_shape(path: str) -> None:
         assert set(resp.json()) == {"error", "detail"}
         provider.release.set()
         await asyncio.wait_for(first, timeout=2)
+
+
+async def test_in_flight_gauge_reflects_occupancy() -> None:
+    # The concurrency middleware mirrors its count into metrics so /metrics
+    # shows saturation before the first 429: mid-request the gauge reads 1,
+    # afterwards it returns to 0 while the peak keeps the high-water mark.
+    provider = BlockingProvider()
+    register_provider(provider)
+    app = create_app(_settings())
+
+    async with _client(app) as client:
+        first = asyncio.create_task(client.post("/v1/chat", json=_BODY))
+        await asyncio.wait_for(provider.started.wait(), timeout=2)
+
+        during = await client.get("/metrics")
+        assert "rekai_in_flight_requests 1" in during.text
+
+        provider.release.set()
+        assert (await asyncio.wait_for(first, timeout=2)).status_code == 200
+
+        after = await client.get("/metrics")
+        assert "rekai_in_flight_requests 0" in after.text
+        assert "rekai_in_flight_requests_peak 1" in after.text

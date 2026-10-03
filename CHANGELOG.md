@@ -24,6 +24,27 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pricing from `GET /v1/models`. Until now the catalogue was only visible via
   model dropdowns filtered per playground; there was no way to see all of it —
   or which models are unpriced — without curling the endpoint.
+
+- **In-flight request gauges** — `rekai_in_flight_requests` and
+  `rekai_in_flight_requests_peak` in `/metrics`, mirrored from the
+  concurrency middleware (active when `REKAI_MAX_CONCURRENT_REQUESTS` is
+  set). Until now saturation was invisible to a scrape until
+  `errors_by_kind{kind="concurrency_limit"}` started firing 429s — the peak
+  series keeps the high-water mark a 15–60s scrape interval would miss.
+  Per-process and instantaneous, like the histograms: not seeded or merged,
+  Prometheus sums across workers.
+- **Per-model usage attribution** — `usage_by_model` in `/v1/usage` plus
+  `rekai_model_{requests,tokens,cost_usd}_total` series in `/metrics`. The
+  provider-level series can't attribute spend when one provider serves many
+  differently-priced models (one OpenAI key fronting gpt-4o and gpt-4o-mini);
+  the model-grained map records requests/tokens/cost per upstream model name
+  at every call site that records provider cost — chat, streaming,
+  embeddings, and the semantic cache's internal embed/verify calls, since
+  they consume model tokens too. Bounded by `REKAI_MAX_TRACKED_CLIENTS` like
+  the other caller-keyed maps (model names are caller-supplied — aliases,
+  BYOK deployments); at the cap the quietest entry is evicted. Fleet-level,
+  not tenant-filtered — model names carry no tenant identity.
+
 - **JavaScript streaming example** — `examples/javascript/stream.mjs` mirrors
   the Python `stream.py` example: the JS side of `examples/` had chat and
   embeddings but no SSE streaming demo, so the lowest-friction way to see

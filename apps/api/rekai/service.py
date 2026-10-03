@@ -189,9 +189,11 @@ async def _semantic_embed(request: ChatRequest, settings: Settings) -> list[floa
         return None  # embeddings unavailable -> just skip the semantic cache
     metrics.observe_provider_duration(provider_name, "embed", time.perf_counter() - started)
     metrics.record_tokens(result.usage.total_tokens, provider_name)
-    metrics.record_cost(
-        estimate_cost(provider_name, result.model, result.usage, settings.pricing_override_dict)
+    embed_cost = estimate_cost(
+        provider_name, result.model, result.usage, settings.pricing_override_dict
     )
+    metrics.record_cost(embed_cost)
+    metrics.record_model_usage(result.model, result.usage.total_tokens, embed_cost)
     return result.embeddings[0] if result.embeddings else None
 
 
@@ -259,9 +261,9 @@ async def _verify_semantic_hit(
     )
     usage = result.usage or Usage()
     metrics.record_tokens(usage.total_tokens, provider_name)
-    metrics.record_cost(
-        estimate_cost(provider_name, result.model, usage, settings.pricing_override_dict)
-    )
+    verify_cost = estimate_cost(provider_name, result.model, usage, settings.pricing_override_dict)
+    metrics.record_cost(verify_cost)
+    metrics.record_model_usage(result.model, usage.total_tokens, verify_cost)
     return (result.content or "").strip().lower().startswith("yes")
 
 
@@ -732,6 +734,7 @@ async def _handle_chat(
         )
         metrics.record_tokens(usage.total_tokens, attempt.provider_name)
         metrics.record_cost(cost_usd)
+        metrics.record_model_usage(result.model, usage.total_tokens, cost_usd)
 
         response = ChatResponse(
             id=f"rekai-{uuid.uuid4().hex[:24]}",
@@ -1058,6 +1061,7 @@ async def _handle_chat_stream(
         )
         metrics.record_tokens(usage.total_tokens, provider_name)
         metrics.record_cost(cost_usd)
+        metrics.record_model_usage(request.model, usage.total_tokens, cost_usd)
         metrics.record_client_usage(client_id, usage.total_tokens, cost_usd)
         metrics.record_user_usage(client_id, request.user, usage.total_tokens, cost_usd)
         if settings.client_budget_window_seconds is not None:
@@ -1211,6 +1215,7 @@ async def _handle_embeddings(
         provider_name, result.model, result.usage, settings.pricing_override_dict
     )
     metrics.record_cost(cost_usd)
+    metrics.record_model_usage(result.model, result.usage.total_tokens, cost_usd)
     response = EmbeddingsResponse(
         provider=provider_name,
         model=result.model,
