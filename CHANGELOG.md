@@ -29,7 +29,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   untouched. Routed through the shared pipeline — provider resolution, model
   ACL, BYOK (`X-Provider-Key`), in-place retries, input-secret scanning — with
   a deterministic echo stub (`modr-echo-<sha>`); providers without a
-  moderation endpoint answer 400. `moderations()` lands on both SDKs.
+  moderation endpoint answer 400. Errors leave in OpenAI's
+  `{"error": {message, type, param, code}}` envelope like
+  `/v1/chat/completions`. `moderations()` lands on both SDKs.
 - **JavaScript streaming example** — `examples/javascript/stream.mjs` mirrors
   the Python `stream.py` example: the JS side of `examples/` had chat and
   embeddings but no SSE streaming demo, so the lowest-friction way to see

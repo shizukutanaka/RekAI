@@ -226,11 +226,11 @@ class ConcurrencyLimitMiddleware:
 
 
 # Paths a provider SDK talks to that RekAI promises to serve *in that SDK's own
-# error envelope*. /v1/chat/completions answers as OpenAI; /v1/messages answers
-# as Anthropic. /v1/chat, /v1/embeddings and /v1/usage are RekAI's own API, and
-# the three first-party clients read `detail || error` off their error bodies,
-# so their shape must not change.
-_OPENAI_COMPAT_PATHS = frozenset({"/v1/chat/completions"})
+# error envelope*. /v1/chat/completions and /v1/moderations answer as OpenAI;
+# /v1/messages answers as Anthropic. /v1/chat, /v1/embeddings and /v1/usage are
+# RekAI's own API, and the three first-party clients read `detail || error` off
+# their error bodies, so their shape must not change.
+_OPENAI_COMPAT_PATHS = frozenset({"/v1/chat/completions", "/v1/moderations"})
 _ANTHROPIC_COMPAT_PATHS = frozenset({"/v1/messages", "/v1/messages/count_tokens"})
 
 

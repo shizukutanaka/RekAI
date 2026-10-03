@@ -85,7 +85,16 @@ async def test_echo_moderate_deterministic() -> None:
 def test_moderations_unsupported_provider(client: TestClient) -> None:
     resp = client.post("/v1/moderations", json={"input": "x", "provider": "anthropic"})
     assert resp.status_code == 400
-    assert "does not support moderation" in resp.json()["detail"]
+    # OpenAI-compat surface: errors arrive in OpenAI's envelope, not `detail`.
+    assert "does not support moderation" in resp.json()["error"]["message"]
+
+
+def test_moderations_validation_error_uses_openai_envelope(client: TestClient) -> None:
+    resp = client.post("/v1/moderations", json={})
+    assert resp.status_code == 422
+    error = resp.json()["error"]
+    assert "input" in error["message"]
+    assert error["param"] == "input"
 
 
 async def test_moderation_reaches_openai_verbatim(monkeypatch) -> None:
@@ -129,7 +138,7 @@ def test_input_secrets_scan_moderation_input() -> None:
     )
     resp = guarded.post("/v1/moderations", json={"input": SECRET})
     assert resp.status_code == 403
-    assert resp.json()["error"] == "input_secret_detected"
+    assert "credential" in resp.json()["error"]["message"]
     # ...and inside a content-part list too.
     resp = guarded.post("/v1/moderations", json={"input": [{"type": "text", "text": SECRET}]})
     assert resp.status_code == 403
