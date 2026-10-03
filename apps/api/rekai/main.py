@@ -216,10 +216,12 @@ class ConcurrencyLimitMiddleware:
             return
 
         self._in_flight += 1
+        metrics.note_in_flight(self._in_flight)
         try:
             await self.app(scope, receive, send)
         finally:
             self._in_flight -= 1
+            metrics.note_in_flight(self._in_flight)
 
 
 # Paths a provider SDK talks to that RekAI promises to serve *in that SDK's own
