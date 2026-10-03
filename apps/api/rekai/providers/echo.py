@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator
 from rekai import models
 from rekai.providers.base import (
     EmbeddingResult,
+    ModerationResult,
     Provider,
     ProviderError,
     ProviderResult,
@@ -117,6 +118,22 @@ class EchoProvider(Provider):
             embeddings=[_embed_text(t, dim) for t in inputs],
             model=model,
             usage=Usage(prompt_tokens=tokens, total_tokens=tokens),
+        )
+
+    async def moderate(
+        self,
+        input: str | list[str] | list[dict],
+        model: str,
+        api_key: str | None,
+    ) -> ModerationResult:
+        # echo evaluates nothing — every entry is a deterministic unflagged
+        # result so the endpoint runs end-to-end in demos and tests.
+        items = [input] if isinstance(input, str) else input
+        digest = hashlib.sha256(repr(items).encode()).hexdigest()[:24]
+        return ModerationResult(
+            id=f"modr-echo-{digest}",
+            model=model,
+            results=[{"flagged": False, "categories": {}, "category_scores": {}} for _ in items],
         )
 
     async def list_models(self, api_key: str | None) -> list[str]:

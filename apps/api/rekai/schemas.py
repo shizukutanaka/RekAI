@@ -636,6 +636,32 @@ class EmbeddingsResponse(BaseModel):
     cached: bool = False
 
 
+class ModerationRequest(BaseModel):
+    # Tolerate unknown fields (e.g. future OpenAI additions) rather than
+    # 422-ing — same drop-in leniency as the chat-compat surface.
+    model_config = ConfigDict(extra="allow")
+
+    input: str | list[str] | list[dict[str, Any]] = Field(
+        ...,
+        description="Text to classify: a string, a list of strings, or OpenAI's "
+        "content-part list (`{'type': 'text'|'image_url', ...}`) — forwarded verbatim.",
+    )
+    model: str = Field(
+        default="omni-moderation-latest",
+        description="Moderation model; OpenAI's own default when omitted.",
+    )
+    provider: str | None = Field(default=None, description="Force a provider (else routed).")
+
+
+class ModerationResponse(BaseModel):
+    provider: str
+    model: str
+    id: str | None = None
+    # Upstream `results` entries verbatim — the category sets differ between
+    # moderation model versions, so the dicts are not re-typed.
+    results: list[dict[str, Any]]
+
+
 class ModelPricing(BaseModel):
     input_per_1m: float
     output_per_1m: float

@@ -12,6 +12,7 @@ from rekai.config import current_settings
 from rekai.providers.base import (
     EmbeddingResult,
     FinishReason,
+    ModerationResult,
     Provider,
     ProviderError,
     ProviderResult,
@@ -252,6 +253,33 @@ class OpenAIProvider(Provider):
                 prompt_tokens=usage.get("prompt_tokens", 0),
                 total_tokens=usage.get("total_tokens", 0),
             ),
+        )
+
+    async def moderate(
+        self,
+        input: str | list[str] | list[dict],
+        model: str,
+        api_key: str | None,
+    ) -> ModerationResult:
+        settings = current_settings()
+        url = f"{self._base_url().rstrip('/')}/moderations"
+        body: dict = {"input": input, "model": model}
+        try:
+            client = self._client(settings.request_timeout_seconds)
+            resp = await client.post(
+                url,
+                json=body,
+                headers=self._request_headers(api_key),
+            )
+        except httpx.HTTPError as exc:
+            raise ProviderError(f"{self.name} moderation request failed: {exc}") from exc
+        if resp.status_code >= 400:
+            raise provider_http_error(self.name, resp.status_code, resp.text, resp.headers)
+        data = resp.json()
+        return ModerationResult(
+            id=data.get("id"),
+            model=data.get("model", model),
+            results=data.get("results", []),
         )
 
     async def list_models(self, api_key: str | None) -> list[str]:

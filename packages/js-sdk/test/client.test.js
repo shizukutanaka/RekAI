@@ -94,6 +94,14 @@ before(async () => {
           cached: false,
         });
       }
+      if (req.url === "/v1/moderations") {
+        return send(res, 200, {
+          provider: "echo",
+          model: "omni-moderation-latest",
+          id: "modr-echo-abc123",
+          results: [{ flagged: false, categories: {}, category_scores: {} }],
+        });
+      }
       if (req.url === "/v1/models") {
         return send(res, 200, { data: [{ id: "echo", provider: "echo" }] });
       }
@@ -267,6 +275,29 @@ test("embeddings accepts a string input", async () => {
   await client.embeddings("echo", "hello", { cache: false });
   assert.equal(lastRequest.body.input, "hello");
   assert.equal(lastRequest.body.cache, false);
+});
+
+test("moderations posts input verbatim and returns results", async () => {
+  const client = new RekAIClient(baseUrl);
+  const result = await client.moderations(["a", "b"], {
+    model: "omni-moderation-latest",
+    provider: "echo",
+    providerKey: "sk-e",
+  });
+  assert.equal(result.results[0].flagged, false);
+  assert.equal(result.id, "modr-echo-abc123");
+  assert.deepEqual(lastRequest.body, {
+    input: ["a", "b"],
+    model: "omni-moderation-latest",
+    provider: "echo",
+  });
+  assert.equal(lastRequest.headers["x-provider-key"], "sk-e");
+});
+
+test("moderations omits model/provider when unset", async () => {
+  const client = new RekAIClient(baseUrl);
+  await client.moderations("text");
+  assert.deepEqual(lastRequest.body, { input: "text" });
 });
 
 test("models, usage, health", async () => {

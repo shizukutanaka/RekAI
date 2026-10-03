@@ -70,6 +70,10 @@ res = client.chat(
 emb = client.embeddings("echo", ["hello", "world"])
 print(len(emb.embeddings), emb.usage["total_tokens"], emb.cached)
 
+# Moderation (OpenAI's /v1/moderations shape; echo returns a stub)
+mod = client.moderations(["hello", "world"], provider="echo")
+print(mod.results[0]["flagged"])  # False
+
 # Introspection
 client.models()  # [{"id": "...", "provider": "..."}, ...]
 client.usage()  # aggregate counters

@@ -19,11 +19,26 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`POST /v1/moderations`** — OpenAI-compatible moderation pass-through, the
+  last absent OpenAI surface. `input` accepts a string, a list of strings, or
+  a list of content parts (OpenAI's text/image input shape) and is forwarded
+  verbatim; `model` defaults to `omni-moderation-latest` (which routes to
+  openai by name like other OpenAI families), and `provider` is RekAI's
+  routing extension as on embeddings. Responses keep the flat
+  `{provider, model, id, results}` envelope with upstream result entries
+  untouched. Routed through the shared pipeline — provider resolution, model
+  ACL, BYOK (`X-Provider-Key`), in-place retries, input-secret scanning — with
+  a deterministic echo stub (`modr-echo-<sha>`); providers without a
+  moderation endpoint answer 400. Errors leave in OpenAI's
+  `{"error": {message, type, param, code}}` envelope like
+  `/v1/chat/completions`. `moderations()` lands on both SDKs.
+
 - **Models page** — a `/models` browser in the web app: every advertised model
   grouped by its routing provider, with type (chat/embedding) and per-1M-token
   pricing from `GET /v1/models`. Until now the catalogue was only visible via
   model dropdowns filtered per playground; there was no way to see all of it —
   or which models are unpriced — without curling the endpoint.
+
 
 - **In-flight request gauges** — `rekai_in_flight_requests` and
   `rekai_in_flight_requests_peak` in `/metrics`, mirrored from the

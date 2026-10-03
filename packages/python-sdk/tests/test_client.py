@@ -12,6 +12,7 @@ from rekai_client import (
     AsyncRekAIClient,
     ChatResult,
     EmbeddingsResult,
+    ModerationResult,
     RekAIClient,
     RekAIError,
 )
@@ -810,6 +811,81 @@ def test_async_stream_raises_on_error_event() -> None:
 
     with pytest.raises(RekAIError):
         asyncio.run(run())
+
+
+def test_moderations_posts_input_verbatim() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        captured["key"] = request.headers.get("X-Provider-Key")
+        return httpx.Response(
+            200,
+            json={
+                "provider": "echo",
+                "model": "omni-moderation-latest",
+                "id": "modr-echo-abc123",
+                "results": [{"flagged": False, "categories": {}, "category_scores": {}}],
+            },
+        )
+
+    client = make_client(handler)
+    parts = [{"type": "text", "text": "hello"}]
+    result = client.moderations(parts, model="m1", provider="echo", provider_key="sk-e")
+    assert isinstance(result, ModerationResult)
+    assert result.id == "modr-echo-abc123"
+    assert result.results[0]["flagged"] is False
+    assert captured["body"] == {"input": parts, "model": "m1", "provider": "echo"}
+    assert captured["url"].endswith("/v1/moderations")
+    assert captured["key"] == "sk-e"
+
+
+def test_moderations_omits_optional_fields() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "provider": "echo",
+                "model": "omni-moderation-latest",
+                "id": None,
+                "results": [],
+            },
+        )
+
+    client = make_client(handler)
+    client.moderations("text")
+    assert captured["body"] == {"input": "text"}
+
+
+def test_async_moderations() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["auth"] = request.headers.get("Authorization")
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "provider": "echo",
+                "model": "m",
+                "id": "modr-1",
+                "results": [{"flagged": True}],
+            },
+        )
+
+    async def run() -> ModerationResult:
+        async with make_async_client(handler) as client:
+            return await client.moderations("x", gateway_key="sk-rekai-1")
+
+    result = asyncio.run(run())
+    assert isinstance(result, ModerationResult)
+    assert result.results[0]["flagged"] is True
+    assert captured["auth"] == "Bearer sk-rekai-1"
+    assert captured["body"] == {"input": "x"}
 
 
 def test_async_embeddings_and_gateway_key() -> None:

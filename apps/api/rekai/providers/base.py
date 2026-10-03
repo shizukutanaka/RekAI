@@ -163,6 +163,15 @@ class EmbeddingResult:
 
 
 @dataclass
+class ModerationResult:
+    id: str | None
+    model: str
+    # Verbatim upstream result entries (flagged, categories, scores) — the
+    # category sets differ between moderation model versions.
+    results: list[dict]
+
+
+@dataclass
 class StreamEvent:
     """One event from a streaming completion: a text ``delta``, and/or (yielded
     once at the end when available) provider-reported ``usage``, assembled
@@ -332,6 +341,19 @@ class Provider(ABC):
         ``user`` is OpenAI's end-user id for abuse detection — ignored by
         providers with no such field."""
         raise ProviderError(f"{self.name} does not support embeddings.", status_code=400)
+
+    async def moderate(
+        self,
+        input: str | list[str] | list[dict],
+        model: str,
+        api_key: str | None,
+    ) -> ModerationResult:
+        """Classify input against safety categories (OpenAI ``/v1/moderations``).
+
+        ``input`` is OpenAI's shape verbatim — a string, a list of strings, or
+        a content-part list (``text``/``image_url``). Providers without a
+        moderation endpoint keep the default 400."""
+        raise ProviderError(f"{self.name} does not support moderation.", status_code=400)
 
     async def list_models(self, api_key: str | None) -> list[str]:
         """Return known model ids. Override when the backend can enumerate them."""
