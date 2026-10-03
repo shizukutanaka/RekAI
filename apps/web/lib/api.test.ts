@@ -8,6 +8,7 @@ import {
   errorFromResponse,
   finishNote,
   formatCost,
+  formatPricing,
   gatewayAuthHeaders,
   modelsOfType,
   parseRateLimit,
@@ -33,6 +34,25 @@ describe("formatCost", () => {
   it("uses 2 decimals for larger costs", () => {
     expect(formatCost(1.5)).toBe("$1.50");
     expect(formatCost(0.25)).toBe("$0.25");
+  });
+});
+
+describe("formatPricing", () => {
+  it("returns 'unpriced' for null/undefined", () => {
+    expect(formatPricing(null)).toBe("unpriced");
+    expect(formatPricing(undefined)).toBe("unpriced");
+  });
+
+  it("shows both directions for a priced chat model", () => {
+    expect(formatPricing({ input_per_1m: 0.15, output_per_1m: 0.6 })).toBe(
+      "$0.15 in · $0.6 out / 1M",
+    );
+  });
+
+  it("omits the output side when it is zero (embeddings)", () => {
+    expect(formatPricing({ input_per_1m: 0.02, output_per_1m: 0 })).toBe(
+      "$0.02 in / 1M",
+    );
   });
 });
 
