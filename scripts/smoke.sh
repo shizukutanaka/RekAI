@@ -71,7 +71,7 @@ check "embeddings (echo) return vectors" bash -c \
 
 check "moderations (echo) returns results" bash -c \
   "curl -fsS '$BASE_URL/v1/moderations' $AUTH_ARG -H 'Content-Type: application/json' \
-     -d '{\"input\":\"hello\"}' \
+     -d '{\"input\":\"hello\",\"provider\":\"echo\"}' \
    | jq -e '(.results | length) > 0 and (.results[0].flagged == false)' >/dev/null"
 
 check "usage exposes counters" bash -c \

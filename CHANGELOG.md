@@ -22,8 +22,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`POST /v1/moderations`** — OpenAI-compatible moderation pass-through, the
   last absent OpenAI surface. `input` accepts a string, a list of strings, or
   a list of content parts (OpenAI's text/image input shape) and is forwarded
-  verbatim; `model` defaults to `omni-moderation-latest`, and `provider` is
-  RekAI's routing extension as on embeddings. Responses keep the flat
+  verbatim; `model` defaults to `omni-moderation-latest` (which routes to
+  openai by name like other OpenAI families), and `provider` is RekAI's
+  routing extension as on embeddings. Responses keep the flat
   `{provider, model, id, results}` envelope with upstream result entries
   untouched. Routed through the shared pipeline — provider resolution, model
   ACL, BYOK (`X-Provider-Key`), in-place retries, input-secret scanning — with

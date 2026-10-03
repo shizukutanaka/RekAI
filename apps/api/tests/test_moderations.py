@@ -59,7 +59,8 @@ class _Client:
 
 
 def test_moderations_echo_string_input(client: TestClient) -> None:
-    resp = client.post("/v1/moderations", json={"input": "hello"})
+    # omni-moderation-* routes to openai by name, so echo must be explicit.
+    resp = client.post("/v1/moderations", json={"input": "hello", "provider": "echo"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["provider"] == "echo"
@@ -70,7 +71,7 @@ def test_moderations_echo_string_input(client: TestClient) -> None:
 
 
 def test_moderations_echo_list_input(client: TestClient) -> None:
-    resp = client.post("/v1/moderations", json={"input": ["a", "b"]})
+    resp = client.post("/v1/moderations", json={"input": ["a", "b"], "provider": "echo"})
     assert resp.status_code == 200
     assert len(resp.json()["results"]) == 2
 
