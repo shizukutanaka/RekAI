@@ -157,6 +157,14 @@ class Metrics:
         # client_id -> (window_index, tokens in that window). Same rationale
         # for staying out of seed()/snapshot().
         self._token_window_usage: dict[str, tuple[int, int]] = {}
+        # In-flight /v1/ requests, mirrored from the concurrency middleware so
+        # /metrics can show how close to its cap the gateway is running —
+        # without it, saturation is invisible until errors_by_kind fires a
+        # concurrency_limit rejection. Instantaneous and per-process like the
+        # histograms: not seeded or merged (Prometheus sums across workers,
+        # which is what an operator wants anyway).
+        self._in_flight = 0
+        self._in_flight_peak = 0
         # Latency. Without these, "the gateway is slow" and "the upstream is
         # slow" are indistinguishable: request_duration covers the whole hop,
         # provider_duration covers only the call RekAI makes, and the gap
@@ -182,6 +190,17 @@ class Metrics:
     def observe_stream_ttft(self, provider: str, seconds: float) -> None:
         """Time to first token on a streamed completion."""
         self.stream_ttft.observe((("provider", provider),), seconds)
+
+    def note_in_flight(self, count: int) -> None:
+        """Current in-flight /v1/ requests, plus the running peak.
+
+        The concurrency middleware reports on every acquire and release. The
+        peak matters because a 15–60s scrape interval misses the short bursts
+        that actually hit the cap."""
+        with self._lock:
+            self._in_flight = count
+            if count > self._in_flight_peak:
+                self._in_flight_peak = count
 
     def observe_semantic_lookup(self, result: str, seconds: float) -> None:
         """Time spent scanning the semantic cache, hit or miss.
@@ -568,6 +587,13 @@ class Metrics:
             "# HELP rekai_cost_usd_total Approximate cumulative USD cost.",
             "# TYPE rekai_cost_usd_total counter",
             f"rekai_cost_usd_total {round(self.cost_usd_total, 6)}",
+            "# HELP rekai_in_flight_requests /v1/ requests in flight now (per process).",
+            "# TYPE rekai_in_flight_requests gauge",
+            f"rekai_in_flight_requests {self._in_flight}",
+            "# HELP rekai_in_flight_requests_peak Highest in-flight count "
+            "since start (per process) — the spikes a scrape interval misses.",
+            "# TYPE rekai_in_flight_requests_peak gauge",
+            f"rekai_in_flight_requests_peak {self._in_flight_peak}",
         ]
         # A separate family, NOT rekai_requests_total{provider="…"}: emitting
         # both a bare series and a labelled one under one metric name makes

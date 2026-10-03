@@ -32,6 +32,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   moderation endpoint answer 400. Errors leave in OpenAI's
   `{"error": {message, type, param, code}}` envelope like
   `/v1/chat/completions`. `moderations()` lands on both SDKs.
+- **In-flight request gauges** — `rekai_in_flight_requests` and
+  `rekai_in_flight_requests_peak` in `/metrics`, mirrored from the
+  concurrency middleware (active when `REKAI_MAX_CONCURRENT_REQUESTS` is
+  set). Until now saturation was invisible to a scrape until
+  `errors_by_kind{kind="concurrency_limit"}` started firing 429s — the peak
+  series keeps the high-water mark a 15–60s scrape interval would miss.
+  Per-process and instantaneous, like the histograms: not seeded or merged,
+  Prometheus sums across workers.
 - **Per-model usage attribution** — `usage_by_model` in `/v1/usage` plus
   `rekai_model_{requests,tokens,cost_usd}_total` series in `/metrics`. The
   provider-level series can't attribute spend when one provider serves many
