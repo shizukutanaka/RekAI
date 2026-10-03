@@ -440,6 +440,37 @@ describe("cache toggle", () => {
   });
 });
 
+describe("sendModerations", () => {
+  it("omits model/provider when unset and forwards them when set", async () => {
+    const { sendModerations } = await import("./api");
+    let body: Record<string, unknown> = {};
+    let seenHeaders: HeadersInit | undefined;
+    vi.stubGlobal(
+      "fetch",
+      async (_url: string | URL | Request, init?: RequestInit) => {
+        body = JSON.parse((init?.body as string) ?? "{}");
+        seenHeaders = init?.headers;
+        return new Response(
+          JSON.stringify({ provider: "echo", model: "m", id: null, results: [] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      },
+    );
+    await sendModerations({ input: ["a"] });
+    expect(body.input).toEqual(["a"]);
+    expect("model" in body).toBe(false);
+    expect("provider" in body).toBe(false);
+
+    await sendModerations({ input: ["a"], model: "omni", provider: "echo" });
+    expect(body.model).toBe("omni");
+    expect(body.provider).toBe("echo");
+
+    await sendModerations({ input: ["a"], providerKey: "sk-x" });
+    expect(seenHeaders).toMatchObject({ "X-Provider-Key": "sk-x" });
+    vi.unstubAllGlobals();
+  });
+});
+
 describe("thinkingText", () => {
   it("joins visible thinking and marks redacted blocks", () => {
     expect(
