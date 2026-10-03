@@ -256,9 +256,9 @@ propagate to `_provider_error_handler` is what keeps an upstream 429's
 in the route silently dropped both.
 
 The envelope is scoped to this one path. `/v1/chat`, `/v1/chat/stream`,
-`/v1/embeddings` and `/v1/usage` are RekAI's own API and keep the flat
-`{"error": "<kind>", "detail": "<message>"}` shape that the web app and both
-SDKs parse (`body.detail || body.error`).
+`/v1/embeddings`, `/v1/moderations` and `/v1/usage` are RekAI's own API and
+keep the flat `{"error": "<kind>", "detail": "<message>"}` shape that the web
+app and both SDKs parse (`body.detail || body.error`).
 
 One divergence remains, deliberately: a schema-invalid body is FastAPI's **422**,
 where OpenAI's API uses 400, so `except openai.BadRequestError` does not catch
