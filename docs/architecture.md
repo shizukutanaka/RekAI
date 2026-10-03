@@ -1292,6 +1292,22 @@ overriding `embed()`. `/v1/models` tags every entry with a `type`
 providers advertise them via `list_embedding_models()`, so clients (and the web
 **Embeddings** page) can discover and route to the right one.
 
+## Moderation
+
+`POST /v1/moderations` is the same pass-through shape minus the cache: route →
+`provider.moderate()`. `input` is forwarded verbatim — a string, a list of
+strings, or a list of content parts (OpenAI's text/image moderation input) —
+and `model` defaults to `omni-moderation-latest`, which routes to openai by
+name like the other OpenAI families. The response keeps the flat
+`{provider, model, id, results}` envelope with the upstream result entries
+untouched (flagged/categories/scores differ between moderation versions), so
+there is no cost field or usage accounting. No cache, failover, or
+idempotency: the call is cheap and side-effect-free, and a cached verdict
+could be wrong after a model upgrade. Providers opt in by overriding
+`moderate()` — OpenAI and OpenAI-compatible backends POST to
+`{base}/moderations`; echo returns a deterministic `modr-echo-<sha>` stub.
+Providers without a moderation endpoint answer 400.
+
 ## Adding a provider
 
 1. Subclass `rekai.providers.base.Provider` and implement `chat()`.
