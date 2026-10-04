@@ -7,6 +7,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **`docs/ai/instructions-sonnet.md` marked S-3b done though it never merged** —
+  the Next.js 16 upgrade (PR #13) was closed unmerged; main still ships
+  Next 14 / React 18 / ESLint 8 with the five remaining framework advisories.
+  The tracker now records the outcome and keeps the retry notes.
 - **`POST /v1/messages` no longer counts cached prompt tokens twice.** The
   Anthropic-compat usage block reported RekAI's all-inclusive `prompt_tokens`
   as `input_tokens`, but on Anthropic's wire `input_tokens` *excludes* cached
