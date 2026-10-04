@@ -19,6 +19,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Dependabot coverage for the real dependency ecosystems** — the config
+  only watched `github-actions`; `pip` (`apps/api`, `packages/python-sdk`)
+  and `npm` (`apps/web`) now get weekly update PRs too, direct dependencies
+  only. Also drops the inert `automerge` key (not a dependabot option).
 - **Usage page "Usage by model" section** — the per-model breakdown added to
   `/v1/usage` now renders in the web app's Usage page (requests / tokens /
   cost per model, sorted by requests), between the provider bars and the
