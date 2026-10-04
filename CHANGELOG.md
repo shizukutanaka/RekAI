@@ -7,6 +7,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **Documented `REKAI_INSTANCE_ID` in `.env.example`.** It is the only
+  `Settings` field missing from the file: the replica identity used for
+  persisted-metrics snapshot keys when several replicas share one Redis.
 - **`POST /v1/messages` no longer counts cached prompt tokens twice.** The
   Anthropic-compat usage block reported RekAI's all-inclusive `prompt_tokens`
   as `input_tokens`, but on Anthropic's wire `input_tokens` *excludes* cached
