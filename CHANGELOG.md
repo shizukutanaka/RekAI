@@ -8,6 +8,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 
+- **A duplicated `service_tier` assignment** in the Anthropic provider —
+  #79 and #52 each added the same `payload["service_tier"]` line on
+  different sides of `top_p`, and both shipped. The second copy and its
+  comment are gone (harmless but a real duplicate).
 - **Dead stream line parsers** (`_parse_openai_sse_line`,
   `_parse_anthropic_sse_line`, `_parse_gemini_sse_line`,
   `_parse_ollama_ndjson_line`). Vestiges from before `stream_events` —
