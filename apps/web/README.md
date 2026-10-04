@@ -25,9 +25,11 @@ Open http://localhost:3000.
   keyless with deterministic vectors; pick a real embeddings model and set a
   key in Settings for the rest. One input per line; shows vector count,
   dimensions, cost, and pairwise cosine similarity across all inputs.
+- **/models** — everything `GET /v1/models` advertises, grouped by provider
+  with type and per-1M-token pricing; chat/embedding type filter.
 - **/usage** — live dashboard of `/v1/usage`: requests, cache hit rate, tokens,
-  estimated cost, fallbacks, errors, and a per-provider request breakdown
-  (auto-refreshes every 5s).
+  estimated cost, fallbacks, errors, and per-provider, per-model, per-client,
+  and end-user breakdowns (auto-refreshes every 5s).
 - **/settings** — store your provider API key (BYOK; lives only in browser local
   storage, sent as the `X-Provider-Key` header) and see per-provider readiness
   (which providers work out of the box vs. need a key). Also has a separate

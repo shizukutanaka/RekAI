@@ -7,6 +7,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **`apps/web/README.md` Pages section missed `/models` and understated
+  `/usage`** — added the models browser row and the per-model/per-client/
+  end-user breakdowns the dashboard has rendered since #93/#97.
 - **`POST /v1/messages` no longer counts cached prompt tokens twice.** The
   Anthropic-compat usage block reported RekAI's all-inclusive `prompt_tokens`
   as `input_tokens`, but on Anthropic's wire `input_tokens` *excludes* cached
