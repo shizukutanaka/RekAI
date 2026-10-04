@@ -501,22 +501,6 @@ class AnthropicProvider(Provider):
         return models.advertised_models("anthropic", "chat")
 
 
-def _parse_anthropic_sse_line(line: str) -> str | None:
-    """Extract the text delta from one Anthropic SSE data line, if present."""
-    if not line or not line.startswith("data:"):
-        return None
-    data = line[len("data:") :].strip()
-    if not data:
-        return None
-    try:
-        event = json.loads(data)
-    except json.JSONDecodeError:
-        return None
-    if event.get("type") == "content_block_delta":
-        return event.get("delta", {}).get("text") or None
-    return None
-
-
 # --- OpenAI <-> Anthropic tool translation ----------------------------------
 
 

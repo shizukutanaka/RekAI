@@ -303,12 +303,6 @@ def _reasoning_tokens(usage: dict) -> int:
     return details.get("reasoning_tokens", 0) or 0
 
 
-def _parse_openai_sse_line(line: str) -> str | None:
-    """Extract the text delta from one OpenAI SSE line, if present."""
-    event = _parse_openai_sse_event(line)
-    return event.delta if event else None
-
-
 def _parse_openai_sse_event(line: str) -> StreamEvent | None:
     """Parse one OpenAI SSE line into a text delta or a final usage event."""
     if not line or not line.startswith("data:"):

@@ -8,11 +8,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 
-- **`_parse_gemini_sse_line` (dead code).** A Gemini SSE line parser that no
-  production code called — `stream_events` decodes each line itself because it
-  needs the whole chunk (usage, tool calls, finish reason), not just the text
-  the helper returned. Its only consumer was its own parametrize test, which
-  went with it.
+- **Dead stream line parsers** (`_parse_openai_sse_line`,
+  `_parse_anthropic_sse_line`, `_parse_gemini_sse_line`,
+  `_parse_ollama_ndjson_line`). Vestiges from before `stream_events` —
+  each helper reduced a streamed line to its text delta, but the streaming
+  loop now parses the whole chunk itself (usage, tool calls, finish reason)
+  via the `*_event` variants. The only consumer of each helper was its own
+  parametrize test, which went with it.
 
 ### Fixed
 - **`POST /v1/messages` no longer counts cached prompt tokens twice.** The
