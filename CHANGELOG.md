@@ -6,6 +6,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Wire-level tests for all three SSE adapters** — every `StreamEvent` kind's
+  translation onto `/v1/chat/stream`, `/v1/chat/completions` (stream), and
+  `/v1/messages` (stream) is now covered end-to-end, including the uncommon
+  orderings: citation before text, thinking left open when text starts,
+  verbatim blocks opening mid-text, mid-stream upstream errors, guardrail
+  flag/block, model-ACL deny, and tool-call summaries.
+
 ### Fixed
 - **`POST /v1/messages` no longer counts cached prompt tokens twice.** The
   Anthropic-compat usage block reported RekAI's all-inclusive `prompt_tokens`
