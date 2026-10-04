@@ -493,3 +493,31 @@ def test_input_secrets_scans_all_roles() -> None:
         },
     )
     assert resp.status_code == 403
+
+
+def test_late_redaction_scrubs_a_response_cached_before_redaction(monkeypatch) -> None:
+    # The route re-scans on the way out precisely for this case: an entry
+    # stored while redaction was off must not leak the secret on a later hit.
+    backend = MemoryCache()
+    monkeypatch.setattr("rekai.main.build_cache", lambda settings: backend)
+    secret = "sk-" + "a" * 40
+    body = {"model": "echo", "messages": [{"role": "user", "content": secret}]}
+    off = TestClient(
+        create_app(Settings(environment="test", default_provider="echo", cache_enabled=True))
+    )
+    assert secret in off.post("/v1/chat", json=body).json()["content"]
+    on = TestClient(
+        create_app(
+            Settings(
+                environment="test",
+                default_provider="echo",
+                cache_enabled=True,
+                output_redaction_enabled=True,
+            )
+        )
+    )
+    hit = on.post("/v1/chat", json=body)
+    assert hit.json()["cached"] is True
+    assert "[REDACTED:openai_api_key]" in hit.json()["content"]
+    assert secret not in hit.json()["content"]
+    assert "openai_api_key" in hit.headers["X-Redacted"]
