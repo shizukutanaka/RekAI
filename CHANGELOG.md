@@ -19,6 +19,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Playwright specs for the Models and Embeddings pages** — the two merged
+  playgrounds had no e2e coverage: catalog grouping by provider + the
+  chat/embedding type filter, and the three-line embed run (vector count,
+  dimensions, provider, pairwise similarity), all against the keyless `echo`
+  provider.
 - **Usage page "Usage by model" section** — the per-model breakdown added to
   `/v1/usage` now renders in the web app's Usage page (requests / tokens /
   cost per model, sorted by requests), between the provider bars and the
