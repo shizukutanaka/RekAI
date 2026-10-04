@@ -7,6 +7,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
+  four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
+  `POST /v1/messages`, `POST /v1/messages/count_tokens`,
+  `POST /v1/moderations`.
 - **`POST /v1/messages` no longer counts cached prompt tokens twice.** The
   Anthropic-compat usage block reported RekAI's all-inclusive `prompt_tokens`
   as `input_tokens`, but on Anthropic's wire `input_tokens` *excludes* cached
