@@ -6,6 +6,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- **`_parse_gemini_sse_line` (dead code).** A Gemini SSE line parser that no
+  production code called — `stream_events` decodes each line itself because it
+  needs the whole chunk (usage, tool calls, finish reason), not just the text
+  the helper returned. Its only consumer was its own parametrize test, which
+  went with it.
+
 ### Fixed
 - **`POST /v1/messages` no longer counts cached prompt tokens twice.** The
   Anthropic-compat usage block reported RekAI's all-inclusive `prompt_tokens`
