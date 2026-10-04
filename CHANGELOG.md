@@ -6,6 +6,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Playwright spec for the Usage page** — seeds two `/v1/chat` calls (one per
+  `user` id) and asserts the Requests card plus the per-provider, per-model,
+  per-client, and end-user breakdowns render them. The last web page without
+  e2e coverage.
+
 ### Fixed
 - **`POST /v1/messages` no longer counts cached prompt tokens twice.** The
   Anthropic-compat usage block reported RekAI's all-inclusive `prompt_tokens`
