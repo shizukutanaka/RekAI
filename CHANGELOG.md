@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **Web devDependency advisories** — `npm audit` on `apps/web` went from 10 to
+  the 5 advisories that only resolve via the Next 14→16 major (closed
+  unmerged as PR #13). `vitest` 4.1.10→4.1.11 clears the `@vitest/mocker`
+  path-traversal advisory (GHSA-82fw-gwwq-j7x9); `npm audit fix` cleared the
+  non-breaking transitive ones (brace-expansion DoS set, js-yaml, nanoid).
 - **`POST /v1/messages` no longer counts cached prompt tokens twice.** The
   Anthropic-compat usage block reported RekAI's all-inclusive `prompt_tokens`
   as `input_tokens`, but on Anthropic's wire `input_tokens` *excludes* cached
