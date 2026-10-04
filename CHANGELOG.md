@@ -7,6 +7,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **A thinking-only reply no longer vanishes when the stream errors before
+  its first text delta.** Extended-thinking streams emit `thinking_delta`
+  frames ahead of any text; the "nothing arrived → drop the bubble" check in
+  the chat playground looked at `content` alone, so an upstream error in that
+  window deleted reasoning the reader had already watched stream in. The drop
+  now requires *no visible payload* — text, thinking, citations, and tool
+  blocks all keep the bubble.
 - **`POST /v1/messages` no longer counts cached prompt tokens twice.** The
   Anthropic-compat usage block reported RekAI's all-inclusive `prompt_tokens`
   as `input_tokens`, but on Anthropic's wire `input_tokens` *excludes* cached
