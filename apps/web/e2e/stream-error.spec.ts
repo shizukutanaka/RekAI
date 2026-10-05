@@ -56,6 +56,33 @@ test("partial text survives a mid-stream error, with an error shown", async ({ p
   await expect(page.locator(".error")).toContainText("Upstream failed mid-stream.");
 });
 
+test("thinking deltas survive a mid-stream error even with no text yet", async ({ page }) => {
+  // Extended-thinking streams emit thinking_delta frames before any text.
+  // The "nothing arrived → drop the bubble" check used to look at content
+  // alone, so a thinking-only reply was deleted on upstream error.
+  await page.route("**/v1/chat/stream", async (route) => {
+    const frames = [
+      `data: ${JSON.stringify({ thinking_delta: "Let me think about France" })}\n\n`,
+      `data: ${JSON.stringify({ error: "provider_error", detail: "Upstream failed mid-stream." })}\n\n`,
+      "data: [DONE]\n\n",
+    ].join("");
+    await route.fulfill({
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+      body: frames,
+    });
+  });
+
+  await page.goto("/");
+  await page.fill('textarea[placeholder*="Type a message"]', "hi");
+  await page.click('button:has-text("Send")');
+
+  await expect(page.locator(".thinking-text")).toContainText(
+    "Let me think about France",
+  );
+  await expect(page.locator(".error")).toContainText("Upstream failed mid-stream.");
+});
+
 test("an aborted stream (no error) keeps behaving the same way", async ({ page }) => {
   // The pre-existing case, kept alongside the one above so a fix can't satisfy
   // the new test by making every stream failure look like a user abort.
