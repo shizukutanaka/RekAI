@@ -1423,8 +1423,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if payload.expires_in_seconds is not None
                 else None
             )
-            await key_store.add(payload.key, expires_at=expires_at)
+            added = await key_store.add(payload.key, expires_at=expires_at)
             masked = mask_key(payload.key)
+            if not added:
+                admin_logger.warning(
+                    "admin add key refused (store full) ip=%s",
+                    _admin_ip(request),
+                    extra={"admin_action": "add_key_full", "ip": _admin_ip(request)},
+                )
+                return JSONResponse(
+                    status_code=409,
+                    content=ErrorResponse(
+                        error="key_store_full",
+                        detail="Dynamic key store is full; revoke unused keys first.",
+                    ).model_dump(),
+                )
             admin_logger.info(
                 "admin added key=%s ip=%s",
                 masked,
