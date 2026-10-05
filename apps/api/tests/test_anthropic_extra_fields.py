@@ -170,3 +170,17 @@ def test_anthropic_fallbacks_is_not_misread_as_rekai_fallbacks() -> None:
     )
     chat_req = to_chat_request(req)
     assert chat_req.fallbacks is None
+
+
+def test_anthropic_cache_extension_reaches_chat_request() -> None:
+    """`cache` is RekAI's own extension on this surface (Anthropic has no such
+    field); extra="allow" used to swallow "cache": false silently."""
+    req = AnthropicMessagesRequest.model_validate(
+        {
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 2000,
+            "cache": False,
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+    )
+    assert to_chat_request(req).cache is False

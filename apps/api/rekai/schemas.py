@@ -427,6 +427,12 @@ class _AnthropicMessagesBase(BaseModel):
     # Same swallow-by-extra=allow hazard.
     output_config: dict[str, Any] | None = None
     provider: str | None = None  # RekAI extension: explicit provider override
+    # RekAI extension: the native surface's per-request cache toggle —
+    # otherwise extra="allow" swallows "cache": false silently.
+    cache: bool = True
+    # `fallbacks` deliberately stays undeclared: Anthropic's own field by that
+    # name is a list of model names, not provider targets, so mapping it onto
+    # RekAI's would misroute (see test_anthropic_fallbacks_is_not_misread…).
 
 
 class AnthropicMessagesRequest(_AnthropicMessagesBase):

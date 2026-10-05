@@ -48,6 +48,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **`/v1/messages` silently ignored `"cache": false`** — `extra="allow"`
+  swallowed the per-request cache toggle, so a drop-in Anthropic client
+  couldn't bypass the response cache. Now a declared extension field, like
+  `provider`. (`fallbacks` stays unmapped — Anthropic's own field by that
+  name is a list of model names, not provider targets.)
 - **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
   four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
   `POST /v1/messages`, `POST /v1/messages/count_tokens`,
