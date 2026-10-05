@@ -493,3 +493,94 @@ def test_input_secrets_scans_all_roles() -> None:
         },
     )
     assert resp.status_code == 403
+
+
+def test_late_redaction_scrubs_a_response_cached_before_redaction(monkeypatch) -> None:
+    # The route re-scans on the way out precisely for this case: an entry
+    # stored while redaction was off must not leak the secret on a later hit.
+    backend = MemoryCache()
+    monkeypatch.setattr("rekai.main.build_cache", lambda settings: backend)
+    secret = "sk-" + "a" * 40
+    body = {"model": "echo", "messages": [{"role": "user", "content": secret}]}
+    off = TestClient(
+        create_app(Settings(environment="test", default_provider="echo", cache_enabled=True))
+    )
+    assert secret in off.post("/v1/chat", json=body).json()["content"]
+    on = TestClient(
+        create_app(
+            Settings(
+                environment="test",
+                default_provider="echo",
+                cache_enabled=True,
+                output_redaction_enabled=True,
+            )
+        )
+    )
+    hit = on.post("/v1/chat", json=body)
+    assert hit.json()["cached"] is True
+    assert "[REDACTED:openai_api_key]" in hit.json()["content"]
+    assert secret not in hit.json()["content"]
+    assert "openai_api_key" in hit.headers["X-Redacted"]
+
+
+@pytest.mark.parametrize("field", ["thinking_delta", "refusal_delta", "extra_block_delta"])
+async def test_stream_redacts_secret_split_across_non_text_fields(field: str) -> None:
+    # The same incremental scrub runs per streamed field, not just `delta`:
+    # a secret split across thinking, refusal, or verbatim-block deltas must
+    # still be caught — per-field redactors hold back a suspect suffix until
+    # the next delta disambiguates it.
+    secret = "sk-" + "z" * 40
+    halves = [secret[:10], secret[10:]]
+    if field == "extra_block_delta":
+        events = [
+            ProviderStreamEvent(
+                extra_block_start={
+                    "type": "content_block_start",
+                    "content_block": {"type": "server_tool_use", "name": "web_search"},
+                }
+            ),
+            ProviderStreamEvent(extra_block_delta={"type": "text_delta", "text": halves[0]}),
+            ProviderStreamEvent(extra_block_delta={"type": "text_delta", "text": halves[1]}),
+            ProviderStreamEvent(extra_block={"type": "server_tool_use", "text": "done"}),
+        ]
+    else:
+        events = [ProviderStreamEvent(**{field: h}) for h in halves]
+        events.append(ProviderStreamEvent(delta="answer"))
+
+    class FieldSplittingProvider(Provider):
+        name = "field-splitter"
+        requires_key = False
+
+        async def chat(self, request, api_key):  # pragma: no cover - unused
+            raise NotImplementedError
+
+        async def stream_events(self, request, api_key):
+            for event in events:
+                yield event
+
+        async def embed(self, inputs, model, api_key):  # pragma: no cover - unused
+            raise NotImplementedError
+
+        async def list_models(self, api_key):
+            return ["field-splitter"]
+
+        async def list_embedding_models(self, api_key):
+            return []
+
+    register_provider(FieldSplittingProvider())
+    client = TestClient(
+        create_app(
+            Settings(
+                environment="test",
+                default_provider="field-splitter",
+                output_redaction_enabled=True,
+                rate_limit_enabled=False,
+            )
+        )
+    )
+    body = {"model": "field-splitter", "messages": [{"role": "user", "content": "go"}]}
+    with client.stream("POST", "/v1/chat/stream", json=body) as resp:
+        raw = "".join(resp.iter_text())
+
+    assert secret not in raw
+    assert "[REDACTED:openai_api_key]" in raw

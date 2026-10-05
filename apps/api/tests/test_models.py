@@ -3,8 +3,11 @@ routing, pricing, and the advertised /v1/models list all derive from it."""
 
 from __future__ import annotations
 
+from fastapi.testclient import TestClient
+
 from rekai import models
 from rekai.config import Settings
+from rekai.main import create_app
 from rekai.pricing import price_for_model
 from rekai.router import resolve_provider
 
@@ -96,3 +99,21 @@ def test_provider_for_prefix_routes_families() -> None:
     assert models.provider_for_prefix("gpt-5") == "openai"
     # Genuinely unknown -> None (caller falls back to the default provider).
     assert models.provider_for_prefix("some-unknown-model") is None
+
+
+def test_models_route_skips_providers_that_fail_to_resolve(monkeypatch) -> None:
+    """A name in the registry whose provider object can't be built is skipped
+    rather than 500ing the whole listing."""
+    import rekai.main as main_module
+    from rekai.providers import get_provider as real_get_provider
+
+    monkeypatch.setattr(main_module, "provider_names", lambda: ["echo", "ghost"])
+    monkeypatch.setattr(
+        main_module,
+        "get_provider",
+        lambda name: real_get_provider(name) if name == "echo" else None,
+    )
+    client = TestClient(create_app(Settings(environment="test", default_provider="echo")))
+    resp = client.get("/v1/models")
+    assert resp.status_code == 200
+    assert all(m["provider"] == "echo" for m in resp.json()["data"])
