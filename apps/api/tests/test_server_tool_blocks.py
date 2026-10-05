@@ -968,3 +968,63 @@ async def test_stream_secret_in_extra_block_is_reported() -> None:
     assert secret not in json.dumps(block)
     summary = [e.summary for e in events if e.summary is not None][0]
     assert summary.redacted == ["github_token"]
+
+
+async def test_redaction_scrubs_tool_call_arguments() -> None:
+    """function.arguments is model output on the same regurgitation channel
+    as the answer text — the flat tool_calls field gets the same scrub on
+    both the buffered and the streamed path."""
+    secret = "ghp_" + "A" * 36
+    call = {
+        "id": "c1",
+        "type": "function",
+        "function": {"name": "run", "arguments": '{"cmd": "leak ' + secret + '"}'},
+    }
+
+    class _ToolSecretProvider(Provider):
+        name = "svc-toolsecret"
+
+        async def chat(self, request, api_key):
+            return ProviderResult(
+                content="ok",
+                model="x",
+                usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+                tool_calls=[call],
+            )
+
+        async def stream_events(self, request, api_key):
+            yield StreamEvent(tool_calls=[dict(call)])
+            yield StreamEvent(delta="ok")
+            yield StreamEvent(finish_reason="stop")
+
+        async def embed(self, texts, model, api_key):
+            raise ProviderError("unused")
+
+    provider = _ToolSecretProvider()
+    register_provider(provider)
+    settings = Settings(environment="test", default_provider="echo", output_redaction_enabled=True)
+
+    result = await handle_chat(
+        _req().model_copy(update={"model": "x", "provider": "svc-toolsecret"}),
+        None,
+        settings,
+        NullCache(),
+    )
+    assert secret not in result.tool_calls[0]["function"]["arguments"]
+    assert result.redacted == ["github_token"]
+
+    events = [
+        e
+        async for e in handle_chat_stream(
+            ChatRequest(model="x", messages=[ChatMessage(role="user", content="hi")]),
+            None,
+            settings,
+            NullCache(),
+            "svc-toolsecret",
+            provider,
+            "anon",
+        )
+    ]
+    summary = [e.summary for e in events if e.summary is not None][0]
+    assert secret not in summary.tool_calls[0]["function"]["arguments"]
+    assert summary.redacted == ["github_token"]

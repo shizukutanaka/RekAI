@@ -341,6 +341,13 @@ def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
         if found:
             updates["content_blocks"] = scrubbed_blocks
             hits += found
+    if response.tool_calls:
+        # function.arguments is model-generated JSON — the same regurgitation
+        # channel as the answer text, shipped on a separate flat field.
+        scrubbed_calls, found = _scrub_block_strings(response.tool_calls)
+        if found:
+            updates["tool_calls"] = scrubbed_calls
+            hits += found
     if not hits:
         return response
     updates["redacted"] = list(dict.fromkeys(hits))
@@ -1070,6 +1077,11 @@ async def _handle_chat_stream(
             metrics.record_client_budget_usage(
                 client_id, cost_usd, settings.client_budget_window_seconds, time.time()
             )
+        tool_call_hits: list[str] = []
+        if redaction_on and reported_tool_calls is not None:
+            # Arguments arrive assembled in the last event — one whole-string
+            # scrub catches secrets split across upstream deltas too.
+            reported_tool_calls, tool_call_hits = _scrub_block_strings(reported_tool_calls)
         yield ChatStreamEvent(
             summary=StreamSummary(
                 provider=provider_name,
@@ -1092,6 +1104,7 @@ async def _handle_chat_stream(
                             + (citation_redactor.hits if citation_redactor is not None else [])
                             + (refusal_redactor.hits if refusal_redactor is not None else [])
                             + extra_hits
+                            + tool_call_hits
                         )
                     )
                     or None
