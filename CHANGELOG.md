@@ -48,6 +48,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Text logs could be forged by newline-bearing request fields** — a model
+  id (or fallback provider name) containing `\r`/`\n` reached `logger` calls
+  raw and split one record into multiple lines (`model=echo\nINFO forged`
+  produced a second, forged `INFO` line). The text formatter now escapes
+  CR/LF inside the message only; tracebacks keep real newlines and JSON
+  output was already safe via `json.dumps`.
 - **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
   four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
   `POST /v1/messages`, `POST /v1/messages/count_tokens`,
