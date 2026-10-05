@@ -7,6 +7,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`REKAI_TRUSTED_PROXIES` — real client IP behind a reverse proxy.** Without
+  it, every request arriving through a proxy or load balancer shares one
+  rate-limit/budget bucket under the proxy's own address (Render's managed LB
+  hits exactly this on the documented deploy path). Set it to the proxy's
+  IPs/CIDRs and client identity resolves from `X-Forwarded-For` — nginx
+  `real_ip` semantics: the first untrusted hop walking back from the edge,
+  or the leftmost entry when the whole chain is trusted. Off by default, and
+  entries only apply to direct peers that match, so a deployment that is also
+  reachable directly can't have its identity forged by a stray header.
 - **Wire-level tests for all three SSE adapters** — every `StreamEvent` kind's
   translation onto `/v1/chat/stream`, `/v1/chat/completions` (stream), and
   `/v1/messages` (stream) is now covered end-to-end, including the uncommon

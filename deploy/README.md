@@ -27,6 +27,14 @@ refuse to boot rather than run as an unauthenticated proxy that spends your
 provider balance. Set `REKAI_API_KEYS` (or `REKAI_DYNAMIC_KEYS_ENABLED=true`)
 alongside provider keys — the commented block in `render.yaml` shows both.
 
+Render fronts every service with a load balancer, so the TCP peer is the
+balancer's address, not the client's. Without more configuration the rate
+limiter, budgets, and audit logs would see a single shared "client". Render
+can't be reached except through its balancer, so set
+`REKAI_TRUSTED_PROXIES=*` on the API service to resolve the real client from
+`X-Forwarded-For`; use explicit CIDRs instead whenever the port is also
+directly reachable (otherwise the header is spoofable).
+
 ## Option 2 — Self-host with Docker Compose
 
 On any VM with Docker:

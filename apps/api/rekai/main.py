@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fnmatch
+import ipaddress
 import json
 import time
 import uuid
@@ -508,6 +509,63 @@ def _acl_models(request: ChatRequest | EmbeddingsRequest | ModerationRequest) ->
     return models
 
 
+def _trusted_proxy_nets(
+    settings: Settings,
+) -> tuple[tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...], bool]:
+    """Parse REKAI_TRUSTED_PROXIES into (networks, trust_any)."""
+    nets: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    trust_any = False
+    for entry in settings.trusted_proxy_entries:
+        if entry == "*":
+            trust_any = True
+            continue
+        try:
+            nets.append(ipaddress.ip_network(entry, strict=False))
+        except ValueError:
+            # Mistrust is the safe failure: a mistyped entry just isn't honored.
+            access_logger.warning("ignoring invalid REKAI_TRUSTED_PROXIES entry %r", entry)
+    return tuple(nets), trust_any
+
+
+def _is_trusted_proxy(
+    ip: str, nets: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]
+) -> bool:
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return any(addr in net for net in nets)
+
+
+def _resolve_client_ip(
+    request: Request,
+    nets: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...],
+    trust_any: bool,
+) -> str:
+    """The client's effective IP: the TCP peer, or — when that peer is a
+    trusted proxy — the resolved X-Forwarded-For origin.
+
+    XFF is read only when the direct peer is trusted, so a deployment that is
+    also reachable directly can't have its client identity forged by a stray
+    header. With explicit nets the walk takes the first untrusted hop from
+    the right (the nginx ``real_ip`` rule), or the leftmost entry when the
+    whole chain is trusted. Under "*" every address looks trusted, so the
+    walk can't run: the rightmost entry is always the one the edge proxy
+    appended — the only hop the client can't smuggle."""
+    peer = request.client.host if request.client else ""
+    hops = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+    if trust_any:
+        if not peer:
+            return peer
+        return hops[-1] if hops else peer
+    if not nets or not peer or not _is_trusted_proxy(peer, nets):
+        return peer
+    for hop in reversed(hops):
+        if not _is_trusted_proxy(hop, nets):
+            return hop
+    return hops[0] if hops else peer
+
+
 def _client_id(http_request: Request) -> str:
     """The requesting tenant: the masked API-key id under gateway auth, else the
     client IP (set by the ``_rate_limit`` middleware)."""
@@ -798,6 +856,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if settings.admin_key
         else None
     )
+    trusted_nets, trust_any = _trusted_proxy_nets(settings)
     key_cipher = (
         KeyCipher(settings.dynamic_keys_encryption_key)
         if settings.dynamic_keys_encryption_key
@@ -864,6 +923,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.middleware("http")
     async def _rate_limit(request: Request, call_next):
         is_api_write = request.method != "OPTIONS" and request.url.path.startswith("/v1/")
+
+        # Behind a reverse proxy the peer IP is the proxy's, not the client's —
+        # left unresolved it would collapse every tenant into one rate-limit
+        # and budget bucket. Rewrite scope["client"] to the X-Forwarded-For
+        # origin when (and only when) the peer is a configured trusted proxy,
+        # so the rate limiter, budgets, admin audit log and access log all see
+        # the same resolved address.
+        if trusted_nets or trust_any:
+            effective_ip = _resolve_client_ip(request, trusted_nets, trust_any)
+            if request.client and effective_ip != request.client.host:
+                request.scope["client"] = (effective_ip, request.client.port or 0)
 
         # The rate-limit bucket: the authenticated key (per-tenant) when present,
         # otherwise the client IP. Stashed for the access log.
