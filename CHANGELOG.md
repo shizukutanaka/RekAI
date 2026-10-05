@@ -7,6 +7,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`docs/sdk-compatibility.md` — server ↔ SDK route matrix** — every route
+  the gateway serves mapped to the Python SDK, JS SDK, and web UI surface that
+  reaches it, with the wire-level guarantees both SDKs rely on (error
+  envelope, SSE contract, idempotency, auth headers).
 - **`REKAI_TRUSTED_PROXIES` — real client IP behind a reverse proxy.** Without
   it, every request arriving through a proxy or load balancer shares one
   rate-limit/budget bucket under the proxy's own address (Render's managed LB

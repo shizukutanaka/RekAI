@@ -52,7 +52,9 @@ RekAI sits between your application and multiple LLM providers (OpenAI, Anthropi
                          └─────────────────┘
 ```
 
-See [`docs/architecture.md`](./docs/architecture.md) for details.
+See [`docs/architecture.md`](./docs/architecture.md) for details and
+[`docs/sdk-compatibility.md`](./docs/sdk-compatibility.md) for the
+route-by-route matrix of which SDK reaches which endpoint.
 
 ## 🚀 Quick start
 
