@@ -59,7 +59,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   keeps its user/tool role scope; input secrets keep every role, matching
   what actually leaves the process (`signature` integrity blobs excepted,
   same as the output scrubber, so replayed signed blocks can't
-  false-positive).
+  false-positive). Same change wires the missing input-secret scan into the
+  `POST /v1/messages` streaming path — the only surface that ran the
+  injection guardrail but skipped the credential check, so the same body
+  blocked non-stream sailed through with `stream: true`.
 - **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
   four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
   `POST /v1/messages`, `POST /v1/messages/count_tokens`,

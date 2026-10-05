@@ -537,6 +537,21 @@ def test_input_secrets_scan_non_content_fields() -> None:
     assert resp.status_code == 403
 
 
+def test_input_secrets_scan_anthropic_stream_path() -> None:
+    """The /v1/messages streaming path ran the injection guardrail but not the
+    input-secret scan — the same body 403'd non-stream, 200'd stream."""
+    client = _client(input_secrets_enabled=True, guardrails_action="block")
+    body = {
+        "model": "echo",
+        "max_tokens": 16,
+        "messages": [{"role": "user", "content": f"key {SECRET}"}],
+    }
+    assert client.post("/v1/messages", json=body).status_code == 403
+    resp = client.post("/v1/messages", json={**body, "stream": True})
+    assert resp.status_code == 403
+    assert resp.json()["error"]["type"] == "permission_error"
+
+
 def test_input_secrets_skip_signature_blobs() -> None:
     """Anthropic thinking signatures are integrity blobs replayed verbatim —
     one that happens to match a secret pattern must not block the round-trip."""
