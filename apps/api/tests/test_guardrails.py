@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -584,3 +585,70 @@ async def test_stream_redacts_secret_split_across_non_text_fields(field: str) ->
 
     assert secret not in raw
     assert "[REDACTED:openai_api_key]" in raw
+
+
+# --- operator-defined secret patterns (REKAI_SECRET_PATTERNS) -----------------
+
+ACME_SECRET = "ACME-" + "a1" * 12  # matches ACME-[a-z0-9]{24}
+ACME_SPEC = "acme-token:ACME-:ACME-[a-z0-9]{24}"
+
+
+def test_custom_secret_patterns_parse_and_skip_malformed() -> None:
+    s = Settings(
+        environment="test",
+        secret_patterns=(
+            ACME_SPEC
+            + ","
+            + "missing-regex:ACME-,"  # only two parts -> skipped
+            + "no-colons,"
+            + "bad-regex:x:[unclosed"
+        ),
+    )
+    parsed = s.custom_secret_patterns
+    assert [(name, sentinel) for name, sentinel, _ in parsed] == [("acme-token", "ACME-")]
+    assert parsed[0][2].search(ACME_SECRET)
+
+
+def test_custom_secret_patterns_scan_input() -> None:
+    client = _client(
+        input_secrets_enabled=True,
+        guardrails_action="block",
+        secret_patterns=ACME_SPEC,
+    )
+    bad = _chat(client, f"my internal key is {ACME_SECRET}")
+    assert bad.status_code == 403
+    assert "acme-token" in bad.json()["detail"]
+    assert ACME_SECRET not in bad.text
+    assert _chat(client, "hello").status_code == 200
+
+
+def test_custom_secret_patterns_redact_buffered_output() -> None:
+    client = _client(output_redaction_enabled=True, secret_patterns=ACME_SPEC)
+    resp = _chat(client, ACME_SECRET)
+    assert resp.status_code == 200
+    assert ACME_SECRET not in resp.json()["content"]
+    assert resp.headers["X-Redacted"] == "acme-token"
+
+
+def test_custom_secret_patterns_stream_holds_back() -> None:
+    # The sentinel is what lets a custom secret split across chunks be held
+    # rather than leaking its head — cut everywhere and confirm.
+    text = f"prefix {ACME_SECRET} suffix"
+    for cut in range(1, len(text)):
+        redactor = StreamRedactor(
+            extra_patterns=[("acme-token", re.compile(r"ACME-[a-z0-9]{24}"))],
+            extra_sentinels=(("ACME-", 512),),
+        )
+        out = redactor.feed(text[:cut]) + redactor.feed(text[cut:]) + redactor.flush()
+        assert ACME_SECRET not in out, f"leaked when split at {cut}"
+        assert "[REDACTED:acme-token]" in out
+
+
+def test_custom_secret_patterns_redact_streamed_response() -> None:
+    client = _client(output_redaction_enabled=True, secret_patterns=ACME_SPEC)
+    body = {"model": "echo", "messages": [{"role": "user", "content": ACME_SECRET}]}
+    with client.stream("POST", "/v1/chat/stream", json=body) as resp:
+        raw = "".join(resp.iter_text())
+    assert ACME_SECRET not in raw
+    assert "[REDACTED:acme-token]" in raw
+    assert "acme-token" in raw

@@ -895,6 +895,19 @@ before any provider call), and never rewrites the request — a secret in a
 prompt is usually an accident, so it is refused or signalled, not silently
 mutated. Off by default.
 
+`REKAI_SECRET_PATTERNS` appends operator-defined formats to the built-in set —
+comma-separated `name:sentinel:regex` entries, used by both scanners at once
+(input flag/block and output redaction, buffered and streamed). The sentinel
+is the literal prefix every match of that regex starts with, and it is
+required for the same reason the built-in sentinels exist: the stream
+redactor can only hold back a secret whose start it recognizes, so a custom
+pattern without an honest sentinel would leak its head mid-stream before the
+flush scrub. Custom sentinels hold up to 512 characters. Malformed entries —
+missing parts, empty name/sentinel, or a regex that does not compile — are
+skipped like the other env parsers. Custom pattern names appear in
+`X-Redacted`/`redacted` and in the `input_secret_detected` detail, so pick
+names that are safe to surface to clients.
+
 The buffered region is deliberately kept **raw**. Scrubbing it on every delta
 looks tempting and is wrong: the patterns end in `{20,}`, so a half-arrived key
 matches at its minimum length, gets replaced, and the *rest of the key* then

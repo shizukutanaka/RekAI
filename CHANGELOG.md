@@ -26,6 +26,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `user` id) and asserts the Requests card plus the per-provider, per-model,
   per-client, and end-user breakdowns render them. The last web page without
   e2e coverage.
+- **`REKAI_SECRET_PATTERNS` — operator-defined secret formats.** Comma-separated
+  `name:sentinel:regex` entries appended to the built-in secret set, used by
+  both scanners at once: input-side detection (`REKAI_INPUT_SECRETS_ENABLED`)
+  and output redaction (`REKAI_OUTPUT_REDACTION_ENABLED`), buffered and
+  streamed. The sentinel is the literal prefix every match starts with — the
+  stream redactor can only hold back a secret whose start it recognizes, so a
+  custom pattern without one would leak its head mid-stream. Malformed
+  entries are skipped like the other env parsers.
 
 ### Changed
 - **Provider HTTP clients now cap the connect phase at 5s** (httpx's default,

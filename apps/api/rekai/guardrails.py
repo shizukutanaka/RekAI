@@ -131,29 +131,37 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
-def scan_texts_for_secrets(texts: Iterable[str], enabled: bool) -> list[str]:
+SecretPatterns = list[tuple[str, "re.Pattern[str]"]]
+
+
+def scan_texts_for_secrets(
+    texts: Iterable[str], enabled: bool, extra: SecretPatterns | None = None
+) -> list[str]:
     """Return the names of every secret pattern found across ``texts``.
 
     The detection half of ``redact_secrets``: input-side scanning needs the
     pattern names (for the flag header / block detail) without producing a
     rewritten copy — a request is refused or flagged, never silently mutated.
+    ``extra`` carries operator-defined formats (``REKAI_SECRET_PATTERNS``),
+    checked after the built-ins.
     """
     if not enabled:
         return []
     joined = "\n".join(t for t in texts if t)
-    return [name for name, pattern in _SECRET_PATTERNS if pattern.search(joined)]
+    return [name for name, pattern in (*_SECRET_PATTERNS, *(extra or [])) if pattern.search(joined)]
 
 
-def redact_secrets(text: str) -> tuple[str, list[str]]:
+def redact_secrets(text: str, extra: SecretPatterns | None = None) -> tuple[str, list[str]]:
     """Redact common secret/API-key patterns from ``text``.
 
     Returns ``(redacted_text, pattern_names)`` — the names of every pattern that
     matched at least once, in the order checked. Each match is replaced with
     ``[REDACTED:<pattern_name>]``; the raw secret is never included in the
-    return value.
+    return value. ``extra`` carries operator-defined formats
+    (``REKAI_SECRET_PATTERNS``), checked after the built-ins.
     """
     hit_names: list[str] = []
-    for name, pattern in _SECRET_PATTERNS:
+    for name, pattern in (*_SECRET_PATTERNS, *(extra or [])):
         if pattern.search(text):
             hit_names.append(name)
             text = pattern.sub(f"[REDACTED:{name}]", text)
@@ -214,10 +222,23 @@ class StreamRedactor:
 
     A secret longer than its sentinel's span can still slip through; the spans
     are sized so that is not a realistic case for the formats above.
+
+    ``extra_patterns``/``extra_sentinels`` carry operator-defined formats
+    (``REKAI_SECRET_PATTERNS``): the sentinel is the literal prefix every match
+    of that pattern starts with — required so a custom secret split across
+    chunks is still held back instead of leaking its head.
     """
 
-    def __init__(self, max_hold: int = _MAX_SENTINEL_SPAN) -> None:
-        self._max = max_hold
+    def __init__(
+        self,
+        max_hold: int | None = None,
+        extra_patterns: SecretPatterns | None = None,
+        extra_sentinels: tuple[tuple[str, int], ...] = (),
+    ) -> None:
+        self._sentinels = _STREAM_SENTINELS + tuple(extra_sentinels)
+        self._overlap = max(len(s) for s, _ in self._sentinels) - 1
+        self._max = max_hold if max_hold is not None else max(span for _, span in self._sentinels)
+        self._extra = list(extra_patterns or [])
         self._pending = ""
         self._hits: list[str] = []
 
@@ -241,7 +262,7 @@ class StreamRedactor:
         return self._scrub(remaining)
 
     def _scrub(self, text: str) -> str:
-        scrubbed, hits = redact_secrets(text)
+        scrubbed, hits = redact_secrets(text, self._extra)
         for name in hits:
             if name not in self._hits:
                 self._hits.append(name)
@@ -257,8 +278,8 @@ class StreamRedactor:
         so holding for it would stall the stream for nothing.
         """
         tail = text[-self._max :]
-        hold = _SENTINEL_OVERLAP
-        for sentinel, span in _STREAM_SENTINELS:
+        hold = self._overlap
+        for sentinel, span in self._sentinels:
             index = tail.rfind(sentinel)
             if index != -1:
                 distance = len(tail) - index
