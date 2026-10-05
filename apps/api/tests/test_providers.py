@@ -160,6 +160,19 @@ async def test_client_rebuilt_when_timeout_changes() -> None:
     assert rebuilt.timeout.read == 5.0
 
 
+async def test_client_connect_timeout_stays_fail_fast() -> None:
+    # The connect phase caps at 5s (httpx's default) regardless of the read
+    # budget — a black-holed host must fail fast so the retry/fallback loop
+    # keeps the rest of the request timeout, not its full 60s.
+    provider = OpenAIProvider()
+    client = provider._client(30.0)
+    assert client.timeout.connect == 5.0
+    assert client.timeout.read == 30.0
+    # A read budget under 5s shrinks connect with it.
+    short = OpenAIProvider()._client(3.0)
+    assert short.timeout.connect == 3.0
+
+
 async def test_aclose_closes_the_pooled_client() -> None:
     # Shutdown teardown: the pooled client must be closed and the slot cleared
     # so a later _client() call builds fresh rather than reusing a dead pool.

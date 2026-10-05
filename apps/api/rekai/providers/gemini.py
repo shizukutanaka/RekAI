@@ -276,20 +276,6 @@ def _extract_text(data: dict) -> str:
     return "".join(p.get("text", "") for p in parts)
 
 
-def _parse_gemini_sse_line(line: str) -> str | None:
-    """Extract the text delta from one Gemini SSE data line, if present."""
-    if not line or not line.startswith("data:"):
-        return None
-    data = line[len("data:") :].strip()
-    if not data:
-        return None
-    try:
-        chunk = json.loads(data)
-    except json.JSONDecodeError:
-        return None
-    return _extract_text(chunk) or None
-
-
 # --- OpenAI <-> Gemini tool translation -------------------------------------
 
 
