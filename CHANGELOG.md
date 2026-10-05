@@ -41,6 +41,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on. Read/write/pool phases keep the configured timeout.
 
 ### Fixed
+- **`apps/web/README.md` Pages section missed `/models` and understated
+  `/usage`** — added the models browser row and the per-model/per-client/
+  end-user breakdowns the dashboard has rendered since #93/#97.
 - **`docs/ai/instructions-sonnet.md` marked S-3b done though it never merged** —
   the Next.js 16 upgrade (PR #13) was closed unmerged; main still ships
   Next 14 / React 18 / ESLint 8 with the five remaining framework advisories.
