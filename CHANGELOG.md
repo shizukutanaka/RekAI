@@ -13,6 +13,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   orderings: citation before text, thinking left open when text starts,
   verbatim blocks opening mid-text, mid-stream upstream errors, guardrail
   flag/block, model-ACL deny, and tool-call summaries.
+- **Playwright spec for the Usage page** — seeds two `/v1/chat` calls (one per
+  `user` id) and asserts the Requests card plus the per-provider, per-model,
+  per-client, and end-user breakdowns render them. The last web page without
+  e2e coverage.
+
+### Changed
+- **Provider HTTP clients now cap the connect phase at 5s** (httpx's default,
+  clamped by `request_timeout_seconds`) instead of holding a black-holed
+  upstream for the full read budget before the retry/fallback loop can move
+  on. Read/write/pool phases keep the configured timeout.
 
 ### Removed
 
@@ -27,18 +37,6 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   loop now parses the whole chunk itself (usage, tool calls, finish reason)
   via the `*_event` variants. The only consumer of each helper was its own
   parametrize test, which went with it.
-
-### Added
-- **Playwright spec for the Usage page** — seeds two `/v1/chat` calls (one per
-  `user` id) and asserts the Requests card plus the per-provider, per-model,
-  per-client, and end-user breakdowns render them. The last web page without
-  e2e coverage.
-
-### Changed
-- **Provider HTTP clients now cap the connect phase at 5s** (httpx's default,
-  clamped by `request_timeout_seconds`) instead of holding a black-holed
-  upstream for the full read budget before the retry/fallback loop can move
-  on. Read/write/pool phases keep the configured timeout.
 
 ### Fixed
 - **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
