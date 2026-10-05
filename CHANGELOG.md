@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Playwright spec for `/settings`** (`e2e/settings.spec.ts`) — the last
+  navigable page without dedicated coverage: keys persist to localStorage and
+  restore on revisit, Enter inside the password field submits the real
+  `<form>`, and the provider-readiness block renders ready vs needs-key
+  badges.
 - **`REKAI_TRUSTED_PROXIES` — real client IP behind a reverse proxy.** Without
   it, every request arriving through a proxy or load balancer shares one
   rate-limit/budget bucket under the proxy's own address (Render's managed LB
