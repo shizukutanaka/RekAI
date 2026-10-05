@@ -6,6 +6,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Playwright spec for the Usage page** — seeds two `/v1/chat` calls (one per
+  `user` id) and asserts the Requests card plus the per-provider, per-model,
+  per-client, and end-user breakdowns render them. The last web page without
+  e2e coverage.
+
+### Changed
+- **Provider HTTP clients now cap the connect phase at 5s** (httpx's default,
+  clamped by `request_timeout_seconds`) instead of holding a black-holed
+  upstream for the full read budget before the retry/fallback loop can move
+  on. Read/write/pool phases keep the configured timeout.
+
 ### Fixed
 - **A thinking-only reply no longer vanishes when the stream errors before
   its first text delta.** Extended-thinking streams emit `thinking_delta`
@@ -26,6 +38,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Playwright specs for the Models and Embeddings pages** — the two merged
+  playgrounds had no e2e coverage: catalog grouping by provider + the
+  chat/embedding type filter, and the three-line embed run (vector count,
+  dimensions, provider, pairwise similarity), all against the keyless `echo`
+  provider.
 - **Usage page "Usage by model" section** — the per-model breakdown added to
   `/v1/usage` now renders in the web app's Usage page (requests / tokens /
   cost per model, sorted by requests), between the provider bars and the
