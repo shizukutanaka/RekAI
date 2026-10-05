@@ -139,3 +139,25 @@ def test_non_ascii_admin_key_returns_401_not_500() -> None:
     client = TestClient(create_app(settings))
     resp = client.get("/admin/keys", headers={"Authorization": "Bearer é".encode("latin-1")})
     assert resp.status_code == 401
+
+
+def test_admin_key_accepts_comma_separated_values_for_rotation() -> None:
+    # Both secrets authenticate during a rotation window (new,old), so callers
+    # can flip to the new credential before the old one is dropped.
+    settings = Settings(
+        environment="test",
+        rate_limit_enabled=False,
+        admin_rate_limit_enabled=False,
+        admin_key="sk-admin-new, sk-admin-old",
+    )
+    client = TestClient(create_app(settings))
+    for key in ("sk-admin-new", "sk-admin-old"):
+        resp = client.get("/admin/keys", headers={"Authorization": f"Bearer {key}"})
+        assert resp.status_code == 200, key
+    resp = client.get("/admin/keys", headers={"Authorization": "Bearer sk-other"})
+    assert resp.status_code == 401
+
+
+def test_admin_key_list_strips_and_filters_empty_entries() -> None:
+    assert Settings(admin_key=" a , ,b ").admin_key_list == ["a", "b"]
+    assert Settings(admin_key=None).admin_key_list == []

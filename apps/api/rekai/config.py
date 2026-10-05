@@ -51,7 +51,9 @@ class Settings(BaseSettings):
 
     # Shared secret for /admin/* (key management). Unset (default) = the admin
     # API isn't registered at all. Distinct from api_keys: an admin credential,
-    # not a tenant one.
+    # not a tenant one. Comma-separated values are accepted — set the new key
+    # alongside the old one during a rotation, then drop the old, so the change
+    # has zero downtime window where a caller's credential is already wrong.
     admin_key: str | None = None
 
     # /admin/* has no per-tenant identity (one shared secret for the whole
@@ -324,6 +326,13 @@ class Settings(BaseSettings):
     @property
     def api_key_list(self) -> list[str]:
         return [k.strip() for k in self.api_keys.split(",") if k.strip()]
+
+    @property
+    def admin_key_list(self) -> list[str]:
+        """Accepted admin secrets — all entries authenticate identically, so a
+        rotation is ``admin_key=new,old`` for one deploy, then ``admin_key=new``.
+        """
+        return [k.strip() for k in (self.admin_key or "").split(",") if k.strip()]
 
     @property
     def gateway_auth_enabled(self) -> bool:

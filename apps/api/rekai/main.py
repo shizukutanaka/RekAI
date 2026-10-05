@@ -1302,7 +1302,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # operation has no distinct per-admin identity beyond the shared secret,
     # so IP is the best attribution available.
     if settings.admin_key:
-        admin_key = settings.admin_key
 
         def _admin_ip(request: Request) -> str:
             return request.client.host if request.client else "unknown"
@@ -1335,7 +1334,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         def _admin_authorized(request: Request) -> bool:
             token = auth.parse_bearer(request.headers.get("authorization"))
-            ok = token is not None and auth.key_allowed(token, [admin_key])
+            ok = token is not None and auth.key_allowed(token, settings.admin_key_list)
             if not ok:
                 admin_logger.warning(
                     "admin auth failed method=%s path=%s ip=%s",
