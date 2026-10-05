@@ -283,6 +283,33 @@ def test_echo_backed_semantic_cache_warns(capsys) -> None:
 # same claim: one is the answer to this prompt, the other to a different one.
 
 
+async def test_per_model_threshold_override_tightens_the_bar() -> None:
+    """semantic_cache_thresholds raises the hit bar for a matching model prefix:
+    the same paraphrase that clears 0.85 misses at a model-scoped 0.99."""
+    provider = StubSemanticProvider()
+    register_provider(provider)
+    semantic_cache.clear()
+    settings = _semantic_settings(semantic_cache_thresholds="semstub:0.99")
+
+    def ask(text: str) -> ChatRequest:
+        return ChatRequest(model="semstub", messages=[ChatMessage(role="user", content=text)])
+
+    await handle_chat(ask("how do i reset my password"), None, settings, NullCache(), "c1")
+    para = await handle_chat(ask("i forgot my password, help"), None, settings, NullCache(), "c1")
+    assert para.cached is False  # 0.98 < 0.99 — override wins over the global 0.85
+    assert provider.chat_calls == 2
+    semantic_cache.clear()
+
+    # A looser override than the global clears a borderline similarity too.
+    settings = _semantic_settings(
+        semantic_cache_threshold=0.99, semantic_cache_thresholds="semstub:0.5"
+    )
+    await handle_chat(ask("how do i reset my password"), None, settings, NullCache(), "c1")
+    para = await handle_chat(ask("i forgot my password, help"), None, settings, NullCache(), "c1")
+    assert para.cached is True
+    semantic_cache.clear()
+
+
 async def test_semantic_hit_discloses_its_similarity() -> None:
     provider = StubSemanticProvider()
     register_provider(provider)

@@ -36,3 +36,19 @@ def test_invalid_settings_are_rejected(kwargs: dict) -> None:
 
 def test_client_budget_window_seconds_defaults_to_none() -> None:
     assert Settings().client_budget_window_seconds is None
+
+
+def test_semantic_threshold_overrides_longest_prefix_wins() -> None:
+    s = Settings(
+        semantic_cache_threshold=0.85,
+        semantic_cache_thresholds="gpt:0.9, gpt-4o:0.92, echo:0.5",
+    )
+    assert s.semantic_cache_threshold_for("gpt-4o-mini") == 0.92
+    assert s.semantic_cache_threshold_for("gpt-3.5") == 0.9
+    assert s.semantic_cache_threshold_for("echo") == 0.5
+    assert s.semantic_cache_threshold_for("claude-sonnet") == 0.85
+
+
+def test_semantic_threshold_overrides_skip_malformed() -> None:
+    s = Settings(semantic_cache_thresholds="no-colon, :0.9, x:notafloat, y:1.5, z:nan, ok:0.7")
+    assert s.semantic_cache_threshold_overrides == {"ok": 0.7}

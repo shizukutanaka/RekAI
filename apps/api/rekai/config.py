@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from contextvars import ContextVar, Token
 from functools import lru_cache
 from typing import Literal
@@ -263,6 +264,12 @@ class Settings(BaseSettings):
     semantic_cache_verify_enabled: bool = False
     semantic_cache_verify_min_similarity: float = Field(default=0.80, ge=0.0, le=1.0)
     semantic_cache_max_entries: int = Field(default=1000, ge=1)
+    # Per-chat-model threshold overrides, ``model_prefix:value`` comma-separated
+    # (``gpt-4o:0.92,echo:0.5``). The right bar is model-dependent — a terse
+    # model's paraphrases deserve a stricter line than a creative one's — and
+    # the bucket already partitions by model, so this changes hit rate, never
+    # what an entry means. Longest-prefix wins, like pricing_overrides.
+    semantic_cache_thresholds: str = ""
 
     # Provider defaults (server-side keys; BYOK via header overrides these)
     openai_api_key: str | None = None
@@ -439,6 +446,40 @@ class Settings(BaseSettings):
             if limit > 0:
                 overrides[key] = limit
         return overrides
+
+    @property
+    def semantic_cache_threshold_overrides(self) -> dict[str, float]:
+        """Parse ``semantic_cache_thresholds`` into ``{model_prefix: threshold}``,
+        same ``name:value`` comma convention as ``client_budget_overrides``.
+        Malformed entries and non-finite/out-of-[0,1] values are skipped — same
+        contract as ``pricing_override_dict``."""
+        overrides: dict[str, float] = {}
+        for raw in self.semantic_cache_thresholds.split(","):
+            raw = raw.strip()
+            if not raw or ":" not in raw:
+                continue
+            prefix, _, amount = raw.partition(":")
+            prefix = prefix.strip()
+            if not prefix:
+                continue
+            try:
+                value = float(amount.strip())
+            except ValueError:
+                continue
+            if math.isfinite(value) and 0.0 <= value <= 1.0:
+                overrides[prefix] = value
+        return overrides
+
+    def semantic_cache_threshold_for(self, model: str) -> float:
+        """The hit threshold for ``model`` — the longest matching prefix from
+        ``semantic_cache_threshold_overrides``, else ``semantic_cache_threshold``.
+        Same longest-prefix rule as ``pricing.price_for_model``."""
+        best = self.semantic_cache_threshold
+        best_len = -1
+        for prefix, value in self.semantic_cache_threshold_overrides.items():
+            if model.startswith(prefix) and len(prefix) > best_len:
+                best, best_len = value, len(prefix)
+        return best
 
     @property
     def pricing_override_dict(self) -> dict[str, tuple[float, float]]:

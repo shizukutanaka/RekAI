@@ -543,13 +543,14 @@ async def _handle_chat(
             # a miss; the band between asks the provider to verify the stored
             # answer against this prompt before it is served. With verification
             # off, floor == threshold and the band never contains anything.
+            # The threshold resolves per chat model (semantic_cache_thresholds)
+            # — the bucket already partitions by model, so a model-scoped bar
+            # changes hit rate, never what an entry means.
+            threshold = settings.semantic_cache_threshold_for(request.model)
             floor = (
-                min(
-                    settings.semantic_cache_threshold,
-                    settings.semantic_cache_verify_min_similarity,
-                )
+                min(threshold, settings.semantic_cache_verify_min_similarity)
                 if settings.semantic_cache_verify_enabled
-                else settings.semantic_cache_threshold
+                else threshold
             )
             lookup_started = time.perf_counter()
             hit = semantic_cache.find(sem_bucket, sem_prompt, sem_embedding, floor)
@@ -560,7 +561,7 @@ async def _handle_chat(
             if hit is not None:
                 payload, similarity = hit
                 outcome = "hit"
-                if similarity < settings.semantic_cache_threshold:
+                if similarity < threshold:
                     try:
                         verified = await _verify_semantic_hit(
                             primary,
