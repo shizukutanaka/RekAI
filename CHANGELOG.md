@@ -48,6 +48,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **SDK `embeddings()` auto-retries could double-bill** — `/v1/embeddings`
+  honors `Idempotency-Key` like `/v1/chat`, but neither SDK sent it, so a
+  retried embeddings request re-ran the upstream call and charged twice. Both
+  SDKs now mint a key when retries are enabled and accept an explicit one
+  (`idempotency_key` / `idempotencyKey`), mirroring `chat()`. The JS type
+  declarations also gained `idempotencyKey`, which was implemented and
+  documented for `chat()` but never declared.
 - **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
   four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
   `POST /v1/messages`, `POST /v1/messages/count_tokens`,

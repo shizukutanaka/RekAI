@@ -637,12 +637,15 @@ class RekAIClient:
         dimensions: int | None = None,
         encoding_format: str | None = None,
         user: str | None = None,
+        idempotency_key: str | None = None,
     ) -> EmbeddingsResult:
         """Create embeddings for a string or list of strings.
 
         ``dimensions``/``encoding_format`` map to OpenAI's embeddings fields
         (supported providers only). ``user`` is the same end-user id as on
-        ``chat()`` — a routing hint, never a cache key."""
+        ``chat()`` — a routing hint, never a cache key. ``idempotency_key``
+        mirrors :meth:`RekAIClient.chat`: ``/v1/embeddings`` honors the header
+        too, and auto-generating one keeps a retried call from billing twice."""
         payload: dict[str, Any] = {"model": model, "input": input, "cache": cache}
         if provider is not None:
             payload["provider"] = provider
@@ -652,9 +655,14 @@ class RekAIClient:
             payload["encoding_format"] = encoding_format
         if user is not None:
             payload["user"] = user
-        resp = self._send(
-            "POST", "/v1/embeddings", json=payload, headers=self._headers(provider_key, gateway_key)
+        headers = _build_headers(
+            self._provider_key,
+            self._gateway_key,
+            provider_key,
+            gateway_key,
+            _resolve_idempotency_key(idempotency_key, self._max_retries),
         )
+        resp = self._send("POST", "/v1/embeddings", json=payload, headers=headers)
         self._raise_for_status(resp)
         return EmbeddingsResult.from_dict(resp.json())
 
@@ -942,12 +950,14 @@ class AsyncRekAIClient:
         dimensions: int | None = None,
         encoding_format: str | None = None,
         user: str | None = None,
+        idempotency_key: str | None = None,
     ) -> EmbeddingsResult:
         """Create embeddings for a string or list of strings.
 
         ``dimensions``/``encoding_format`` map to OpenAI's embeddings fields
         (supported providers only). ``user`` is the same end-user id as on
-        ``chat()`` — a routing hint, never a cache key."""
+        ``chat()`` — a routing hint, never a cache key. ``idempotency_key``
+        mirrors :meth:`RekAIClient.chat`."""
         payload: dict[str, Any] = {"model": model, "input": input, "cache": cache}
         if provider is not None:
             payload["provider"] = provider
@@ -957,9 +967,14 @@ class AsyncRekAIClient:
             payload["encoding_format"] = encoding_format
         if user is not None:
             payload["user"] = user
-        resp = await self._send(
-            "POST", "/v1/embeddings", json=payload, headers=self._headers(provider_key, gateway_key)
+        headers = _build_headers(
+            self._provider_key,
+            self._gateway_key,
+            provider_key,
+            gateway_key,
+            _resolve_idempotency_key(idempotency_key, self._max_retries),
         )
+        resp = await self._send("POST", "/v1/embeddings", json=payload, headers=headers)
         self._raise_for_status(resp)
         return EmbeddingsResult.from_dict(resp.json())
 
