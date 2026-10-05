@@ -303,9 +303,23 @@ class Settings(BaseSettings):
     request_deadline_seconds: float = Field(default=0.0, ge=0.0)
     cors_origins: str = "*"
 
+    # Trusted reverse proxies, comma-separated IPs/CIDRs (or "*" when the
+    # service can *only* be reached through a proxy, e.g. Render/Fly). When
+    # the direct peer matches, the client identity used for rate limiting,
+    # budgets and audit logs is resolved from X-Forwarded-For instead of the
+    # peer IP — without it, every proxied request shares one bucket under the
+    # proxy's own address. Off (default) = the peer IP is the client, today's
+    # behavior: trusting XFF unconditionally would let any caller that can
+    # reach the port directly forge its identity and evade its bucket.
+    trusted_proxies: str = ""
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def trusted_proxy_entries(self) -> list[str]:
+        return [p.strip() for p in self.trusted_proxies.split(",") if p.strip()]
 
     @property
     def api_key_list(self) -> list[str]:

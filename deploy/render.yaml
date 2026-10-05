@@ -41,6 +41,14 @@ services:
       # https://rekai-web.onrender.com.
       - key: REKAI_CORS_ORIGINS
         value: "*"
+      # Render fronts every service with a managed load balancer, so the TCP
+      # peer is the balancer's IP, not the client's — without this, rate
+      # limiting, budgets and audit logs all collapse into one shared bucket.
+      # The container is only reachable through that balancer, so "*" is safe
+      # here; deployments whose port is directly reachable must scope it to
+      # real proxy CIDRs instead (see apps/api/.env.example).
+      - key: REKAI_TRUSTED_PROXIES
+        value: "*"
       # Optional server-side keys (otherwise users supply their own via BYOK).
       # With REKAI_ENVIRONMENT=production these require gateway auth — set
       # REKAI_API_KEYS (or REKAI_DYNAMIC_KEYS_ENABLED) too, or the API refuses
