@@ -25,10 +25,14 @@ uvicorn rekai.main:app --reload
 | GET    | `/metrics`    | Prometheus-style metrics                 |
 | GET    | `/v1/usage`   | Aggregate counters (requests, tokens, cost) |
 | GET    | `/v1/models`  | Known models per provider (each tagged `type`; filter with `?type=chat\|embedding`) |
+| GET    | `/v1/models/{model_id}` | Single model lookup (404 when unknown) |
 | POST   | `/v1/chat`    | Chat completion (router + cache + BYOK)  |
 | POST   | `/v1/chat/stream` | Streaming chat completion (SSE)      |
 | POST   | `/v1/chat/completions` | OpenAI-compatible chat completion — drop-in for the OpenAI SDK / LangChain (non-streaming and streaming) |
+| POST   | `/v1/messages` | Anthropic-compatible messages — drop-in for the Anthropic SDK (non-streaming and streaming) |
+| POST   | `/v1/messages/count_tokens` | Anthropic-compatible token counting |
 | POST   | `/v1/embeddings` | Text embeddings (router + cache + BYOK) |
+| POST   | `/v1/moderations` | OpenAI-compatible moderation pass-through |
 | GET    | `/admin/usage` | Fleet-wide usage across every tenant (needs `REKAI_ADMIN_KEY`) |
 | GET/POST | `/admin/keys` | List / add runtime API keys (needs `REKAI_ADMIN_KEY`) |
 | DELETE | `/admin/keys/{key}` | Revoke a runtime API key |

@@ -41,6 +41,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on. Read/write/pool phases keep the configured timeout.
 
 ### Fixed
+- **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
+  four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
+  `POST /v1/messages`, `POST /v1/messages/count_tokens`,
+  `POST /v1/moderations`.
 - **`apps/web/README.md` Pages section missed `/models` and understated
   `/usage`** — added the models browser row and the per-model/per-client/
   end-user breakdowns the dashboard has rendered since #93/#97.
