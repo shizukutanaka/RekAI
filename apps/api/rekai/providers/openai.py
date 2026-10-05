@@ -17,6 +17,7 @@ from rekai.providers.base import (
     ProviderError,
     ProviderResult,
     StreamEvent,
+    check_header_safe,
     provider_http_error,
     trace_headers,
 )
@@ -60,6 +61,8 @@ class OpenAIProvider(Provider):
                 f"(BYOK) or set {self._key_env_hint()}.",
                 status_code=401,
             )
+        if key:
+            check_header_safe("API key", key)
         return key
 
     def _request_headers(self, api_key: str | None) -> dict[str, str]:

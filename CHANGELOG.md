@@ -48,6 +48,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Client-controlled strings spliced into upstream headers weren't validated**
+  — a BYOK key with obs-text bytes (legal in an inbound header) or an
+  `anthropic_beta`/`user_profile_id` body field with non-ASCII or control
+  characters crashed request building (`UnicodeEncodeError` → 500) or failed
+  mid-call as a `LocalProtocolError`. `check_header_safe` now rejects anything
+  outside printable ASCII with a 400 at key resolution and header build time.
 - **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
   four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
   `POST /v1/messages`, `POST /v1/messages/count_tokens`,
