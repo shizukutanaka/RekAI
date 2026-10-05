@@ -41,6 +41,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on. Read/write/pool phases keep the configured timeout.
 
 ### Fixed
+- **`docs/ai/instructions-sonnet.md` marked S-3b done though it never merged** —
+  the Next.js 16 upgrade (PR #13) was closed unmerged; main still ships
+  Next 14 / React 18 / ESLint 8 with the five remaining framework advisories.
+  The tracker now records the outcome and keeps the retry notes.
 - **`docs/ai/instructions-opus.md` task tracker was stale on two items** —
   O-2 (three-zone trust band) lacked its ✅ though the verify band shipped;
   O-3 (cascade routing) is now marked rejected per the #19 outcome so it

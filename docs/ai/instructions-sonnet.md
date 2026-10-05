@@ -20,7 +20,9 @@
 ## 割当タスク (優先度順)
 
 > **進捗**: S-1, S-2, S-4, S-6〜S-13 は実装・push 済み (下記各項の ✅ 参照)。
-> S-3/S-3b は Next.js 16 PR でレビュー待ち (npm audit 10件→0)。
+> S-3 は部分着地 (vitest 4 化で当時の critical 解消)。S-3b の
+> Next.js 16 PR (#13) は未マージで close — main は Next 14 / React 18 /
+> ESLint 8 のまま。
 > S-5 はメンテナ権限待ち。
 
 ### S-1. E2E スイートの v1.2 機能カバー
@@ -54,11 +56,15 @@
   として解消する。依存更新後は web の全検証 (tsc / lint / vitest / build / E2E) を必ず通す。
 
 ### S-3b. Next.js フレームワークメジャー (14→16)
-> ✅ **実装済み** (PR #13): next 16.3.5 / react 19.3.0 / eslint 9.39.5 flat config
-> (next lint 廃止に伴い `.eslintrc.json` → `eslint.config.mjs`) / vitest 4.1.11。
-> react-hooks v7 の set-state-in-effect 4件は queueMicrotask 遅延で修正 (lazy init は
-> hydration mismatch のため不可)。全ゲート緑 (tsc/eslint/vitest/build/standalone/E2E 22件)、
-> npm audit 0。eslint-plugin-react が ESLint 10 未対応のため eslint は 9 止まり。
+> ❌ **未マージ** (PR #13 は close): next 16.3.5 / react 19.3.0 / eslint 9.39.5
+> flat config / vitest 4.1.11 まで実装・全ゲート緑だったが、マージされず
+> クローズ。main は Next 14.2.35 / React 18 / ESLint 8 のまま — framework
+> 起因の advisory は未解消 (後発の advisory は別途 `npm audit fix` 等で対処)。
+> 再挑戦時の知見: `next lint` は 16 で廃止 (`.eslintrc.json` → flat
+> `eslint.config.mjs` + `eslint .` に置換)、react-hooks v7 の
+> set-state-in-effect は queueMicrotask 遅延で回避 (lazy init は hydration
+> mismatch のため不可)、eslint-plugin-react が ESLint 10 未対応のため
+> eslint は 9 止まり。
 - 残る 5 advisory (next/postcss/eslint-config-next/glob/@next/eslint-plugin-next) は
   next 14→16 メジャーでのみ解消。React 19 要件・App Router 挙動変更・eslint 9 flat
   config 移行を伴うため、専用セッション/PR で全ゲート(特に E2E とビルド)を通して実施。
