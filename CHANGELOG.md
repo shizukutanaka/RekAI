@@ -48,6 +48,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Python SDK `stream()` accepted a fraction of the chat option set** —
+  `fallbacks`, `tools`, `tool_choice`, `parallel_tool_calls`, `stop`, `top_p`,
+  `seed`, `frequency_penalty`, `presence_penalty`, `logit_bias`,
+  `service_tier`, `web_search_options`, `user`, and `safety_identifier`
+  raised `TypeError` on `stream()` even though the server handles them on
+  `/v1/chat/stream` and the JS SDK forwards all of them. Both the sync and
+  async clients now take the full `chat()` option set minus `cache` and
+  `idempotency_key` (streams are uncached and take no `Idempotency-Key`
+  server-side).
 - **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
   four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
   `POST /v1/messages`, `POST /v1/messages/count_tokens`,

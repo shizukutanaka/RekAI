@@ -464,6 +464,84 @@ def test_stream_raises_on_error_event() -> None:
         list(client.stream("echo", "hi"))
 
 
+def test_stream_forwards_the_full_chat_option_set() -> None:
+    # stream() accepts the same request options as chat() minus
+    # cache/idempotency_key (the server neither caches streams nor accepts
+    # Idempotency-Key on them) — the payload builder must forward them all.
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, text="data: [DONE]\n\n")
+
+    client = make_client(handler)
+    list(
+        client.stream(
+            "echo",
+            "hi",
+            fallbacks=[{"provider": "ollama"}],
+            tools=[{"type": "function", "function": {"name": "f"}}],
+            tool_choice="auto",
+            parallel_tool_calls=True,
+            stop=["###"],
+            top_p=0.9,
+            seed=7,
+            frequency_penalty=0.1,
+            presence_penalty=0.2,
+            logit_bias={"42": -1},
+            service_tier="flex",
+            web_search_options={"search_context_size": "low"},
+            user="u-1",
+            safety_identifier="s-1",
+            thinking={"type": "enabled", "budget_tokens": 128},
+        )
+    )
+    body = captured["body"]
+    for field in (
+        "fallbacks",
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "stop",
+        "top_p",
+        "seed",
+        "frequency_penalty",
+        "presence_penalty",
+        "logit_bias",
+        "service_tier",
+        "web_search_options",
+        "user",
+        "safety_identifier",
+        "thinking",
+    ):
+        assert field in body, field
+
+
+def test_async_stream_forwards_the_full_chat_option_set() -> None:
+    captured = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, text="data: [DONE]\n\n")
+
+    async def run() -> None:
+        client = make_async_client(handler)
+        async for _ in client.stream(
+            "echo",
+            "hi",
+            tools=[{"type": "function", "function": {"name": "f"}}],
+            stop=["###"],
+            service_tier="flex",
+            user="u-1",
+        ):
+            pass
+
+    asyncio.run(run())
+    body = captured["body"]
+    for field in ("tools", "stop", "service_tier", "user"):
+        assert field in body, field
+
+
 def test_embeddings_returns_result() -> None:
     captured = {}
 
