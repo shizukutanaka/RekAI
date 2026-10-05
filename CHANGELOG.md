@@ -6,6 +6,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Provider HTTP clients now cap the connect phase at 5s** (httpx's default,
+  clamped by `request_timeout_seconds`) instead of holding a black-holed
+  upstream for the full read budget before the retry/fallback loop can move
+  on. Read/write/pool phases keep the configured timeout.
+
 ### Fixed
 - **`POST /v1/messages` no longer counts cached prompt tokens twice.** The
   Anthropic-compat usage block reported RekAI's all-inclusive `prompt_tokens`
