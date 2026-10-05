@@ -613,3 +613,29 @@ def test_an_inverted_verify_band_warns_at_startup(capsys) -> None:
         )
     )
     assert "verify band is empty" in capsys.readouterr().out
+
+
+def test_semantic_hit_sets_the_similarity_header() -> None:
+    """The route discloses *how similar* the matched prompt was: a semantic hit
+    sends X-Cache-Similarity while an exact hit (above) sends none — otherwise
+    the two are indistinguishable to a client."""
+    from fastapi.testclient import TestClient
+
+    provider = StubSemanticProvider()
+    register_provider(provider)
+    semantic_cache.clear()
+    client = TestClient(create_app(_semantic_settings()))
+    first = {
+        "model": "semstub",
+        "messages": [{"role": "user", "content": "how do i reset my password"}],
+    }
+    client.post("/v1/chat", json=first)
+    second = {
+        "model": "semstub",
+        "messages": [{"role": "user", "content": "i forgot my password, help"}],
+    }
+    hit = client.post("/v1/chat", json=second)
+    assert hit.json()["cached"] is True
+    assert hit.json()["cache_similarity"] is not None
+    assert 0.9 < float(hit.headers["X-Cache-Similarity"]) < 1.0
+    semantic_cache.clear()

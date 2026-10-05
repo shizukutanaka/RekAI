@@ -264,7 +264,14 @@ class Provider(ABC):
             or self._http_client_loop is not loop
             or self._http_client_timeout != timeout
         ):
-            self._http_client = httpx.AsyncClient(timeout=timeout)
+            # A float `timeout=` would set every phase to the same value, so a
+            # black-holed host would hold the attempt for the full read budget
+            # before the retry/fallback loop could move on. The connect phase
+            # keeps httpx's fail-fast default (capped by the request timeout):
+            # a dead host fails in seconds, freeing the rest of the budget.
+            self._http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(timeout, connect=min(5.0, timeout))
+            )
             self._http_client_loop = loop
             self._http_client_timeout = timeout
         return self._http_client

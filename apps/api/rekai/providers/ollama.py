@@ -202,12 +202,6 @@ class OllamaProvider(Provider):
             ) from exc
 
 
-def _parse_ollama_ndjson_line(line: str) -> str | None:
-    """Extract the text delta from one Ollama NDJSON line, if present."""
-    event = _parse_ollama_ndjson_event(line)
-    return event.delta if event else None
-
-
 def _parse_ollama_ndjson_event(line: str) -> StreamEvent | None:
     """Parse one Ollama NDJSON line into a text delta or a final usage event."""
     if not line.strip():
