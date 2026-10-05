@@ -60,6 +60,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Dependabot coverage for the real dependency ecosystems** — the config
+  only watched `github-actions`; `pip` (`apps/api`, `packages/python-sdk`)
+  and `npm` (`apps/web`) now get weekly update PRs too, direct dependencies
+  only. Also drops the inert `automerge` key (not a dependabot option).
 - **Playwright specs for the Models and Embeddings pages** — the two merged
   playgrounds had no e2e coverage: catalog grouping by provider + the
   chat/embedding type filter, and the three-line embed run (vector count,
