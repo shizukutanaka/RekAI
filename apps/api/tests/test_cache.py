@@ -339,3 +339,47 @@ async def test_redis_cache_passes_through_on_success() -> None:
     await cache.delete("k")
     assert await cache.get("k") is None
     assert cache._local is None  # never degraded — Redis answered every call
+
+
+def test_redis_cache_init_does_not_require_a_live_server() -> None:
+    """`redis.from_url` is lazy: constructing the backend must not open a
+    connection — the fail-open contract handles reachability at call time."""
+    cache = cache_module.RedisCache("redis://127.0.0.1:6390/0")
+    assert cache.label == "redis"
+    assert cache._local is None
+    assert cache._degraded is False
+
+
+async def test_redis_cache_set_and_delete_degrade_before_any_get() -> None:
+    """Each method owns its degrade path: the first failure must fail open
+    even when a set() or delete() — not a get() — is what trips it."""
+    cache = cache_module.RedisCache.__new__(cache_module.RedisCache)
+    cache._client = _BrokenRedis()
+    cache._local = None
+    cache._degraded = False
+    await cache.set("k", "v", ttl=10)  # degrades through set's own except — a no-op write
+    assert cache._local is not None
+    await cache.set("k", "v", ttl=10)  # the local fallback now stores it
+    assert await cache.get("k") == "v"
+
+    cache2 = cache_module.RedisCache.__new__(cache_module.RedisCache)
+    cache2._client = _BrokenRedis()
+    cache2._local = None
+    cache2._degraded = False
+    await cache2.delete("k")  # degrades through delete's own except
+    assert cache2._local is not None
+
+
+def test_build_cache_falls_back_when_redis_init_raises(monkeypatch) -> None:
+    """A Redis client that can't even be constructed still yields a working
+    (local) cache — 'no service impact' applies at build time too."""
+    from rekai.config import Settings
+
+    def _boom(url):
+        raise RuntimeError("client init failed")
+
+    monkeypatch.setattr(cache_module, "RedisCache", _boom)
+    backend = cache_module.build_cache(
+        Settings(environment="test", cache_enabled=True, redis_url="redis://x")
+    )
+    assert backend.label == "memory"
