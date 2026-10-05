@@ -19,6 +19,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on. Read/write/pool phases keep the configured timeout.
 
 ### Fixed
+- **The JS SDK's `ChatMessage` type now covers the whole gateway message
+  shape.** The declaration only allowed `"system" | "user" | "assistant"`
+  with required `content`, so a TypeScript caller couldn't write a
+  tool-calling turn — `role: "tool"` messages (plus `tool_calls`,
+  `tool_call_id`, `name`, `is_error`, `cache_control`, `thinking_blocks`,
+  and content-less assistant messages) were all rejected by `tsc` even
+  though the runtime and the server already handled them. The interface
+  now mirrors the server's `ChatMessage`.
 - **A thinking-only reply no longer vanishes when the stream errors before
   its first text delta.** Extended-thinking streams emit `thinking_delta`
   frames ahead of any text; the "nothing arrived → drop the bubble" check in
