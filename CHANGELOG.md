@@ -41,6 +41,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on. Read/write/pool phases keep the configured timeout.
 
 ### Fixed
+- **Web devDependency advisories** — `npm audit` on `apps/web` went from 10 to
+  the 5 advisories that only resolve via the Next 14→16 major (closed
+  unmerged as PR #13). `vitest` 4.1.10→4.1.11 clears the `@vitest/mocker`
+  path-traversal advisory (GHSA-82fw-gwwq-j7x9); `npm audit fix` cleared the
+  non-breaking transitive ones (brace-expansion DoS set, js-yaml, nanoid).
 - **Documented `REKAI_INSTANCE_ID` in `.env.example`.** It is the only
   `Settings` field missing from the file: the replica identity used for
   persisted-metrics snapshot keys when several replicas share one Redis.
