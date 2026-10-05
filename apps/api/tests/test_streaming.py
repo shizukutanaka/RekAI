@@ -5,12 +5,9 @@ from __future__ import annotations
 import json
 
 import httpx
-import pytest
 from fastapi.testclient import TestClient
 
-from rekai.providers.anthropic import _parse_anthropic_sse_line
-from rekai.providers.ollama import _parse_ollama_ndjson_line
-from rekai.providers.openai import OpenAIProvider, _parse_openai_sse_line
+from rekai.providers.openai import OpenAIProvider, _parse_openai_sse_event
 from rekai.schemas import ChatMessage, ChatRequest
 
 
@@ -290,52 +287,10 @@ async def test_echo_stream_events_reports_exact_usage() -> None:
     assert usage_events[0].usage.total_tokens > 0
 
 
-# --- provider SSE/NDJSON line parsers ---------------------------------------
-
-
-@pytest.mark.parametrize(
-    "line,expected",
-    [
-        ('data: {"choices":[{"delta":{"content":"Hi"}}]}', "Hi"),
-        ("data: [DONE]", None),
-        ("", None),
-        (": comment", None),
-        ('data: {"choices":[]}', None),
-    ],
-)
-def test_openai_sse_parser(line, expected) -> None:
-    assert _parse_openai_sse_line(line) == expected
-
-
-@pytest.mark.parametrize(
-    "line,expected",
-    [
-        ('data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hi"}}', "Hi"),
-        ('data: {"type":"message_start"}', None),
-        ("event: ping", None),
-        ("", None),
-    ],
-)
-def test_anthropic_sse_parser(line, expected) -> None:
-    assert _parse_anthropic_sse_line(line) == expected
-
-
-@pytest.mark.parametrize(
-    "line,expected",
-    [
-        ('{"message":{"content":"Hi"},"done":false}', "Hi"),
-        ('{"message":{"content":""},"done":true}', None),
-        ("", None),
-        ("not json", None),
-    ],
-)
-def test_ollama_ndjson_parser(line, expected) -> None:
-    assert _parse_ollama_ndjson_line(line) == expected
+# --- provider SSE/NDJSON event parsers --------------------------------------
 
 
 def test_openai_sse_event_parses_usage() -> None:
-    from rekai.providers.openai import _parse_openai_sse_event
-
     line = (
         'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":7,"total_tokens":12}}'
     )

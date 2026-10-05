@@ -5,10 +5,14 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from rekai import idempotency
+from rekai import auth, idempotency
 from rekai.cache import MemoryCache
 from rekai.config import Settings
 from rekai.main import create_app
+from rekai.openai_compat import to_chat_request
+from rekai.providers.base import ProviderError
+from rekai.providers.echo import EchoProvider
+from rekai.schemas import ChatCompletionsRequest, ChatRequest, EmbeddingsRequest
 
 
 def _client() -> TestClient:
@@ -216,3 +220,105 @@ async def test_memory_cache_add_is_atomic_claim() -> None:
     assert await cache.add("k", "second", ttl=60) is False  # already claimed
     await cache.delete("k")
     assert await cache.add("k", "third", ttl=60) is True  # freed
+
+
+# --- wire-level conflict/release semantics -------------------------------------
+# The claim lifecycle is unit-tested above; these cover what a *client* sees —
+# a 409 while a twin request is in flight, and the sentinel being freed when the
+# upstream call fails so an immediate retry re-runs instead of deadlocking.
+
+
+async def test_chat_in_flight_key_returns_409(monkeypatch) -> None:
+    backend = MemoryCache()
+    monkeypatch.setattr("rekai.main.build_cache", lambda settings: backend)
+    client = TestClient(
+        create_app(Settings(environment="test", default_provider="echo", api_keys="sk-tenant-a"))
+    )
+    body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+    # Simulate a concurrent request already holding the sentinel for this key.
+    fp = idempotency.fingerprint(ChatRequest.model_validate(body).model_dump_json())
+    cid = auth.client_id("sk-tenant-a")
+    assert (await idempotency.claim(backend, cid, "key-1", fp, ttl=60)).kind == "proceed"
+    resp = client.post(
+        "/v1/chat",
+        json=body,
+        headers={"Idempotency-Key": "key-1", "Authorization": "Bearer sk-tenant-a"},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error"] == "idempotency_error"
+
+
+async def test_completions_in_flight_key_returns_409(monkeypatch) -> None:
+    backend = MemoryCache()
+    monkeypatch.setattr("rekai.main.build_cache", lambda settings: backend)
+    client = TestClient(
+        create_app(Settings(environment="test", default_provider="echo", api_keys="sk-tenant-a"))
+    )
+    body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+    # The fingerprint on this route is computed on the *internal* request after
+    # the OpenAI->ChatRequest mapping, not on the wire body.
+    fp = idempotency.fingerprint(
+        to_chat_request(ChatCompletionsRequest.model_validate(body)).model_dump_json()
+    )
+    cid = auth.client_id("sk-tenant-a")
+    assert (await idempotency.claim(backend, cid, "key-1", fp, ttl=60)).kind == "proceed"
+    resp = client.post(
+        "/v1/chat/completions",
+        json=body,
+        headers={"Idempotency-Key": "key-1", "Authorization": "Bearer sk-tenant-a"},
+    )
+    assert resp.status_code == 409
+    # The error leaves in the OpenAI envelope, not RekAI's own shape.
+    assert "already being processed" in resp.json()["error"]["message"]
+
+
+async def test_chat_key_released_when_provider_errors(monkeypatch) -> None:
+    backend = MemoryCache()
+    monkeypatch.setattr("rekai.main.build_cache", lambda settings: backend)
+    client = TestClient(create_app(Settings(environment="test", default_provider="echo")))
+
+    async def down(self, request, api_key):  # noqa: ANN001, ANN202
+        raise ProviderError("upstream down", status_code=503)
+
+    monkeypatch.setattr(EchoProvider, "chat", down)
+    body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}]}
+    headers = {"Idempotency-Key": "key-1"}
+    assert client.post("/v1/chat", json=body, headers=headers).status_code == 503
+    monkeypatch.undo()  # restore echo (the app still uses `backend`)
+    second = client.post("/v1/chat", json=body, headers=headers)
+    assert second.status_code == 200  # would be a 409 had the sentinel not been released
+
+
+async def test_embeddings_in_flight_key_returns_409(monkeypatch) -> None:
+    backend = MemoryCache()
+    monkeypatch.setattr("rekai.main.build_cache", lambda settings: backend)
+    client = TestClient(
+        create_app(Settings(environment="test", default_provider="echo", api_keys="sk-tenant-a"))
+    )
+    body = {"model": "echo", "input": "hi"}
+    fp = idempotency.fingerprint(EmbeddingsRequest.model_validate(body).model_dump_json())
+    cid = auth.client_id("sk-tenant-a")
+    assert (await idempotency.claim(backend, cid, "key-1", fp, ttl=60)).kind == "proceed"
+    resp = client.post(
+        "/v1/embeddings",
+        json=body,
+        headers={"Idempotency-Key": "key-1", "Authorization": "Bearer sk-tenant-a"},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error"] == "idempotency_error"
+
+
+async def test_embeddings_key_released_when_provider_errors(monkeypatch) -> None:
+    backend = MemoryCache()
+    monkeypatch.setattr("rekai.main.build_cache", lambda settings: backend)
+    client = TestClient(create_app(Settings(environment="test", default_provider="echo")))
+
+    async def down(self, inputs, model, api_key, **kwargs):  # noqa: ANN001, ANN202, ANN003
+        raise ProviderError("upstream down", status_code=503)
+
+    monkeypatch.setattr(EchoProvider, "embed", down)
+    body = {"model": "echo", "input": "hi"}
+    headers = {"Idempotency-Key": "key-1"}
+    assert client.post("/v1/embeddings", json=body, headers=headers).status_code == 503
+    monkeypatch.undo()
+    assert client.post("/v1/embeddings", json=body, headers=headers).status_code == 200

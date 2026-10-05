@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from rekai import anthropic_compat
 from rekai.config import Settings
-from rekai.main import create_app
+from rekai.main import _anthropic_error_body, create_app
 from rekai.schemas import ChatResponse, Usage
 
 
@@ -896,3 +897,35 @@ async def test_caller_beta_and_mcp_beta_coexist(monkeypatch) -> None:
         "key",
     )
     assert captured["headers"]["anthropic-beta"] == "context-1m-2025-08-07,mcp-client-2025-11-20"
+
+
+# --- error-envelope translation (_anthropic_error_body) ------------------------
+# Every error leaving /v1/messages must be Anthropic's {type: error, ...}
+# envelope, but only bodies that are ours get rewritten — anything unreadable or
+# already enveloped passes through unchanged so the translation stays idempotent.
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [b"not json at all", b'"a bare string"', b"[1, 2, 3]", b'{"unrecognised": true}'],
+)
+def test_error_translation_passes_through_what_it_cannot_read(raw: bytes) -> None:
+    assert _anthropic_error_body(raw, 500) == raw
+
+
+def test_error_translation_leaves_an_anthropic_envelope_alone() -> None:
+    already = json.dumps({"type": "error", "error": {"type": "api_error", "message": "m"}}).encode()
+    assert _anthropic_error_body(already, 500) == already
+
+
+def test_error_translation_lifts_a_string_error() -> None:
+    body = json.loads(_anthropic_error_body(json.dumps({"error": "nope"}).encode(), 400))
+    assert body["type"] == "error"
+    assert body["error"]["message"] == "nope"
+
+
+def test_error_translation_rewrites_a_detail_string() -> None:
+    body = json.loads(_anthropic_error_body(json.dumps({"detail": "bad input"}).encode(), 422))
+    assert body["type"] == "error"
+    assert body["error"]["message"] == "bad input"
+    assert body["error"]["type"] == "invalid_request_error"
