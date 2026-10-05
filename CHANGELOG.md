@@ -68,6 +68,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Per-field stream redaction and RedisCache success-path coverage** —
+  the split-across-deltas secret test now runs on `thinking_delta`,
+  `refusal_delta`, and verbatim `extra_block_delta` fields, not only
+  `delta` (each field has its own incremental redactor); and the
+  RedisCache success path (bytes→str decode, the atomic `nx` claim, and
+  never-degrading while Redis answers) is pinned alongside the existing
+  fail-open tests.
 - **Dependabot coverage for the real dependency ecosystems** — the config
   only watched `github-actions`; `pip` (`apps/api`, `packages/python-sdk`)
   and `npm` (`apps/web`) now get weekly update PRs too, direct dependencies
