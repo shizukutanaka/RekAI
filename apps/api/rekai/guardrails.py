@@ -276,13 +276,18 @@ class _HasRoleContent(Protocol):
 
 
 def string_leaves(value: Any) -> list[str]:
-    """Every string leaf nested inside a JSON-ish value (dicts, lists, str)."""
+    """Every string leaf nested inside a JSON-ish value (dicts, lists, str).
+
+    ``signature`` keys are skipped like the output scrubber skips them:
+    they are integrity blobs replayed verbatim, never caller text — scanning
+    them could only false-positive a legitimately signed block."""
     out: list[str] = []
 
     def walk(node: Any) -> None:
         if isinstance(node, dict):
-            for v in node.values():
-                walk(v)
+            for k, v in node.items():
+                if k != "signature":
+                    walk(v)
         elif isinstance(node, list):
             for v in node:
                 walk(v)

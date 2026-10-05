@@ -57,7 +57,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   same request 403s in `content`, 200s in `extra_blocks`). Both scans now
   collect every string leaf of the serialized message — the injection scan
   keeps its user/tool role scope; input secrets keep every role, matching
-  what actually leaves the process.
+  what actually leaves the process (`signature` integrity blobs excepted,
+  same as the output scrubber, so replayed signed blocks can't
+  false-positive).
 - **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
   four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
   `POST /v1/messages`, `POST /v1/messages/count_tokens`,

@@ -537,6 +537,27 @@ def test_input_secrets_scan_non_content_fields() -> None:
     assert resp.status_code == 403
 
 
+def test_input_secrets_skip_signature_blobs() -> None:
+    """Anthropic thinking signatures are integrity blobs replayed verbatim —
+    one that happens to match a secret pattern must not block the round-trip."""
+    client = _client(input_secrets_enabled=True, guardrails_action="block")
+    resp = client.post(
+        "/v1/chat",
+        json={
+            "model": "echo",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "ok",
+                    "thinking_blocks": [{"type": "thinking", "thinking": "…", "signature": SECRET}],
+                },
+                {"role": "user", "content": "hi"},
+            ],
+        },
+    )
+    assert resp.status_code == 200
+
+
 def test_guardrail_scans_block_fields_on_scanned_roles() -> None:
     """Injection text inside a scanned role's block fields is caught too —
     the same model_dump that carries it upstream no longer outruns the scan."""
