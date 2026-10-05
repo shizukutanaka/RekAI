@@ -48,6 +48,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **`NaN`/`Infinity` in a request body returned a bare 500, not a 422** —
+  Python's `json` accepts the non-standard literals on the way in, pydantic
+  correctly rejects the value, but the offending input rides inside the error
+  detail and FastAPI's stock validation handler crashed serializing it
+  (`allow_nan=False`). A custom handler now sanitizes non-finite floats to
+  their repr before rendering the same `{"detail": [...]}` 422 — on every
+  surface, compat envelopes included.
 - **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
   four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
   `POST /v1/messages`, `POST /v1/messages/count_tokens`,
