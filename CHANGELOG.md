@@ -48,6 +48,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **`/v1/chat/completions` silently ignored `fallbacks` and `cache`** —
+  `extra="allow"` swallowed the two RekAI extension fields without applying
+  them, so a drop-in OpenAI client couldn't reach the gateway's fallback
+  routing or per-request cache toggle at all. Both are now declared
+  extension fields (like `provider`) and forwarded to `ChatRequest`.
 - **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
   four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
   `POST /v1/messages`, `POST /v1/messages/count_tokens`,

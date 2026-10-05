@@ -123,7 +123,8 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         include_obfuscation=(
             req.stream_options.include_obfuscation if req.stream_options else None
         ),
-        cache=True,
+        cache=req.cache,
+        fallbacks=req.fallbacks,
         tools=tools,
         tool_choice=tool_choice,
         parallel_tool_calls=req.parallel_tool_calls,

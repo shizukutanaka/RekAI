@@ -317,6 +317,11 @@ class ChatCompletionsRequest(BaseModel):
     safety_identifier: str | None = None  # OpenAI's newer abuse-detection id
     n: int | None = None  # 400 if n > 1 (RekAI returns a single choice)
     provider: str | None = None  # RekAI extension: explicit provider override
+    # RekAI extensions mirroring /v1/chat: without them a drop-in OpenAI
+    # client can't reach the gateway's fallback routing or per-request cache
+    # toggle at all (extra="allow" swallows them silently).
+    fallbacks: list[FallbackTarget] | None = None
+    cache: bool = True
     # OpenAI's pre-tools function-calling API (deprecated since 0613 but still
     # emitted by older SDKs and codebases). Normalized to tools/tool_choice in
     # the compat layer; modern `tools` wins when both are sent.

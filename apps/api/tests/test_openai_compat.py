@@ -239,6 +239,22 @@ def test_modern_tools_win_over_legacy_functions(client: TestClient) -> None:
     assert req.tool_choice == "required"
 
 
+def test_rekai_extensions_forward(client: TestClient) -> None:
+    """`provider` had a compat extension but `fallbacks`/`cache` were silently
+    swallowed by extra="allow" — a drop-in client couldn't reach the gateway's
+    fallback routing or the per-request cache toggle at all."""
+    _post_legacy(
+        client,
+        fallbacks=[{"provider": "ollama", "model": "m2"}, {"provider": "openai"}],
+        cache=False,
+    )
+    req = _CaptureProvider.last_request
+    assert [f.provider for f in req.fallbacks] == ["ollama", "openai"]
+    assert req.fallbacks[0].model == "m2"
+    assert req.fallbacks[1].model is None
+    assert req.cache is False
+
+
 # --- middleware coverage ----------------------------------------------------
 
 
