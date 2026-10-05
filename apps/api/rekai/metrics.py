@@ -614,8 +614,9 @@ class Metrics:
             lines.append(f'rekai_provider_tokens_total{{provider="{provider}"}} {count}')
 
         def _escape_label(v: str) -> str:
-            # Caller-supplied ids (unlike client ids, which are hashes or IPs)
-            # can carry quotes/newlines that would corrupt the exposition.
+            # Caller-influenced ids can carry quotes/newlines that would
+            # corrupt the exposition (XFF-derived client ids are arbitrary
+            # tokens by design — see test_trusted_proxy).
             return v.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
         if self.usage_by_model:
@@ -686,22 +687,25 @@ class Metrics:
             "# TYPE rekai_client_requests_total counter",
         ]
         for client, usage in sorted(self.usage_by_client.items()):
+            label = _escape_label(client)
             lines.append(
-                f'rekai_client_requests_total{{client="{client}"}} {int(usage["requests"])}'
+                f'rekai_client_requests_total{{client="{label}"}} {int(usage["requests"])}'
             )
         lines += [
             "# HELP rekai_client_tokens_total Tokens accounted per client.",
             "# TYPE rekai_client_tokens_total counter",
         ]
         for client, usage in sorted(self.usage_by_client.items()):
-            lines.append(f'rekai_client_tokens_total{{client="{client}"}} {int(usage["tokens"])}')
+            label = _escape_label(client)
+            lines.append(f'rekai_client_tokens_total{{client="{label}"}} {int(usage["tokens"])}')
         lines += [
             "# HELP rekai_client_cost_usd_total Approximate cumulative USD cost per client.",
             "# TYPE rekai_client_cost_usd_total counter",
         ]
         for client, usage in sorted(self.usage_by_client.items()):
+            label = _escape_label(client)
             cost = round(usage["cost_usd"], 6)
-            lines.append(f'rekai_client_cost_usd_total{{client="{client}"}} {cost}')
+            lines.append(f'rekai_client_cost_usd_total{{client="{label}"}} {cost}')
 
         if self.usage_by_user:
             lines += [

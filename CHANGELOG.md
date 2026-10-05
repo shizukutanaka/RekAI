@@ -48,6 +48,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Client-id labels in `/metrics` were unescaped** — XFF-derived client ids
+  are arbitrary tokens by design (a trusted-proxy deployment resolves the
+  X-Forwarded-For origin), so an id containing `"` or a newline could forge
+  Prometheus exposition lines. The `rekai_client_*` series now use the same
+  `_escape_label` the model and user series already did.
 - **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
   four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
   `POST /v1/messages`, `POST /v1/messages/count_tokens`,

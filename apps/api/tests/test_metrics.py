@@ -726,6 +726,19 @@ def test_render_escapes_user_labels() -> None:
     assert 'user="u\\n1"' in out
 
 
+def test_render_escapes_client_labels() -> None:
+    """XFF-derived client ids are arbitrary tokens by design (see
+    test_trusted_proxy); a quote/newline in one must not forge exposition
+    lines via the unescaped client="..." series."""
+    m = Metrics()
+    m.record_client_usage('bad"\nrekai_forged_total 9', tokens=1, cost_usd=0.001)
+    out = m.render()
+    # The forged text survives only inside the escaped label — never as a
+    # line of its own.
+    assert "\nrekai_forged_total 9" not in out
+    assert 'client="bad\\"\\nrekai_forged_total 9"' in out
+
+
 def test_chat_user_lands_in_usage_by_user(client: TestClient) -> None:
     resp = client.post(
         "/v1/chat",
