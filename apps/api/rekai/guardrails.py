@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from typing import Protocol
+from typing import Any, Protocol
 
 # Every pattern below requires an object that refers to *the model's own
 # instructions or safety configuration*. That constraint is the whole design.
@@ -272,6 +272,25 @@ class _HasRoleContent(Protocol):
     def role(self) -> str: ...
     @property
     def content(self) -> str | None: ...
+    def model_dump(self, *, exclude_none: bool = False) -> dict[str, Any]: ...
+
+
+def string_leaves(value: Any) -> list[str]:
+    """Every string leaf nested inside a JSON-ish value (dicts, lists, str)."""
+    out: list[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+        elif isinstance(node, str):
+            out.append(node)
+
+    walk(value)
+    return out
 
 
 def detect_prompt_injection(text: str) -> str | None:
@@ -291,8 +310,19 @@ def scan_messages(messages: Iterable[_HasRoleContent], enabled: bool) -> str | N
     LLM01): a fetched page saying "ignore previous instructions" never passes
     through the user's own text. System/assistant text is the operator's and the
     model's own output and is not scanned.
+
+    Every string field on the scanned roles is covered — ``content``,
+    ``content_blocks``/``extra_blocks``/``tool_calls`` leaves and all — because
+    the OpenAI/Ollama serializers forward a message's whole ``model_dump``
+    verbatim, so scanning ``content`` alone let smuggled text ride a field the
+    control claimed to cover.
     """
     if not enabled:
         return None
-    text = "\n".join(m.content or "" for m in messages if m.role in ("user", "tool"))
+    text = "\n".join(
+        leaf
+        for m in messages
+        if m.role in ("user", "tool")
+        for leaf in string_leaves(m.model_dump(exclude_none=True))
+    )
     return detect_prompt_injection(text)

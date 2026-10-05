@@ -48,6 +48,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Input scans read only `content` while providers forward the whole
+  message** — `REKAI_INPUT_SECRETS_ENABLED` and the prompt-injection
+  guardrail collected text from `ChatMessage.content` alone, but the
+  OpenAI/Ollama serializers send each message's full `model_dump` upstream:
+  a credential in `extra_blocks`, `content_blocks`, or a `tool_calls`
+  argument shipped to the provider with no flag and no block (verified live:
+  same request 403s in `content`, 200s in `extra_blocks`). Both scans now
+  collect every string leaf of the serialized message — the injection scan
+  keeps its user/tool role scope; input secrets keep every role, matching
+  what actually leaves the process.
 - **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
   four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
   `POST /v1/messages`, `POST /v1/messages/count_tokens`,
