@@ -7,6 +7,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`/metrics` exposes per-client *windowed* usage gauges** —
+  `rekai_client_budget_window_used_usd{client}` and
+  `rekai_client_token_window_used_tokens{client}` report spend/tokens
+  accumulated so far in the current budget/token window, so a scrape can
+  alert on a window filling up before the 402/429 fires (the lifetime
+  counters only reveal it afterwards). Emitted only when the matching window
+  is configured, only for live-window entries, and only in the authenticated
+  per-client section alongside the other `rekai_client_*` series.
 - **`REKAI_TRUSTED_PROXIES` — real client IP behind a reverse proxy.** Without
   it, every request arriving through a proxy or load balancer shares one
   rate-limit/budget bucket under the proxy's own address (Render's managed LB

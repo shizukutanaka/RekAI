@@ -541,7 +541,13 @@ class Metrics:
                 },
             }
 
-    def render(self, include_clients: bool = True) -> str:
+    def render(
+        self,
+        include_clients: bool = True,
+        now: float | None = None,
+        budget_window_seconds: int | None = None,
+        token_window_seconds: int | None = None,
+    ) -> str:
         """Render metrics in Prometheus text exposition format.
 
         ``include_clients=False`` omits the ``rekai_client_*`` series — the
@@ -549,6 +555,11 @@ class Metrics:
         unauthenticated Prometheus scrape needs are all in the scalar and
         per-provider series, so dropping the per-client ones keeps the endpoint
         scrapeable without exposing one tenant's spend to another.
+
+        ``now`` + the two window sizes enable the per-client *windowed* gauges
+        (spend/tokens accumulated so far in the current budget/token window),
+        which is what a "budget nearly exhausted" alert would alert on — the
+        lifetime counters can't see a window filling up until the 402 fires.
         """
         lines = [
             "# HELP rekai_requests_total Total chat requests handled.",
@@ -680,6 +691,33 @@ class Metrics:
 
         if not include_clients:
             return "\n".join(lines) + "\n"
+
+        if budget_window_seconds and now is not None:
+            current = int(now / budget_window_seconds)
+            lines += [
+                "# HELP rekai_client_budget_window_used_usd Spend so far in "
+                "the current budget window.",
+                "# TYPE rekai_client_budget_window_used_usd gauge",
+            ]
+            for client, (window, usd) in sorted(self._budget_window_usage.items()):
+                if window == current:
+                    lines.append(
+                        f'rekai_client_budget_window_used_usd{{client="{_escape_label(client)}"}} '
+                        f"{round(usd, 6)}"
+                    )
+        if token_window_seconds and now is not None:
+            current = int(now / token_window_seconds)
+            lines += [
+                "# HELP rekai_client_token_window_used_tokens Tokens used so far "
+                "in the current token window.",
+                "# TYPE rekai_client_token_window_used_tokens gauge",
+            ]
+            for client, (window, tokens) in sorted(self._token_window_usage.items()):
+                if window == current:
+                    lines.append(
+                        "rekai_client_token_window_used_tokens"
+                        f'{{client="{_escape_label(client)}"}} {tokens}'
+                    )
 
         lines += [
             "# HELP rekai_client_requests_total Requests per client (API key or IP).",

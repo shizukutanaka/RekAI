@@ -260,6 +260,26 @@ def test_client_usage_surfaced_in_prometheus_render() -> None:
     assert 'rekai_client_cost_usd_total{client="key:abc123"} 0.007' in text
 
 
+def test_window_usage_gauges_in_prometheus_render() -> None:
+    m = Metrics()
+    now = 1_000_000.0
+    m.record_client_budget_usage("key:abc123", 0.05, 3600, now)
+    m.record_client_token_usage("key:abc123", 500, 60, now)
+    text = m.render(now=now, budget_window_seconds=3600, token_window_seconds=60)
+    assert 'rekai_client_budget_window_used_usd{client="key:abc123"} 0.05' in text
+    assert 'rekai_client_token_window_used_tokens{client="key:abc123"} 500' in text
+    # An entry from a past window is dead weight: dropped from the gauge.
+    text = m.render(now=now + 3600, budget_window_seconds=3600, token_window_seconds=3600)
+    assert "rekai_client_budget_window_used_usd{" not in text
+    assert "rekai_client_token_window_used_tokens{" not in text
+    # No window configured -> no series at all.
+    text = m.render(now=now)
+    assert "rekai_client_budget_window_used_usd" not in text
+    # Per-tenant data stays behind include_clients.
+    text = m.render(include_clients=False, now=now, budget_window_seconds=3600)
+    assert "rekai_client_budget_window_used_usd" not in text
+
+
 def test_retry_and_cooldown_counters() -> None:
     m = Metrics()
     m.record_retry()

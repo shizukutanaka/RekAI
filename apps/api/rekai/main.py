@@ -1253,8 +1253,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # only to an authenticated caller once gateway auth is in use (an
         # unauthenticated scrape still gets everything else). Operators who want
         # the whole endpoint behind the key set REKAI_METRICS_REQUIRE_AUTH.
+        window_args = {
+            "now": time.time(),
+            "budget_window_seconds": settings.client_budget_window_seconds,
+            "token_window_seconds": settings.client_token_limit_window_seconds,
+        }
         if not _multi_tenant():
-            return metrics.render()
+            return metrics.render(**window_args)
         authenticated = await _is_authenticated(request)
         if settings.metrics_require_auth and not authenticated:
             metrics.record_error("unauthorized")
@@ -1263,7 +1268,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return ErrorResponse(
                 error="unauthorized", detail="Missing or invalid API key."
             ).model_dump_json()
-        return metrics.render(include_clients=authenticated)
+        return metrics.render(include_clients=authenticated, **window_args)
 
     async def _fleet_snapshot() -> dict:
         """This replica's live counters plus every other replica's last-persisted
