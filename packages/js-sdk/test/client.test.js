@@ -1,7 +1,19 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import { after, before, test } from "node:test";
-import { RekAIClient, RekAIError } from "../src/index.js";
+import {
+  APIConnectionError,
+  APITimeoutError,
+  AuthenticationError,
+  ConflictError,
+  InternalServerError,
+  NotFoundError,
+  PermissionDeniedError,
+  RateLimitError,
+  RekAIClient,
+  RekAIError,
+  UnprocessableEntityError,
+} from "../src/index.js";
 
 let server;
 let baseUrl;
@@ -215,6 +227,46 @@ test("chat raises RekAIError on error status", async () => {
   await assert.rejects(
     () => client.chat("gpt-4o-mini", "hi"),
     (err) => err instanceof RekAIError && err.statusCode === 401,
+  );
+});
+
+test("error status maps to a classified subclass", async () => {
+  const cases = [
+    [401, AuthenticationError],
+    [403, PermissionDeniedError],
+    [404, NotFoundError],
+    [409, ConflictError],
+    [422, UnprocessableEntityError],
+    [429, RateLimitError],
+    [500, InternalServerError],
+    [503, InternalServerError],
+    [400, RekAIError], // no dedicated class — the base type itself
+  ];
+  const client = new RekAIClient(baseUrl, { maxRetries: 0 });
+  for (const [status, cls] of cases) {
+    flake = { remaining: 1, status, retryAfter: undefined, keys: [] };
+    await assert.rejects(
+      () => client.chat("echo", "hi"),
+      (err) =>
+        err instanceof cls && err.statusCode === status && err instanceof RekAIError,
+    );
+  }
+  flake = { remaining: 0, status: 503, retryAfter: undefined, keys: [] };
+});
+
+test("a dead server raises APIConnectionError", async () => {
+  const client = new RekAIClient("http://127.0.0.1:1", { maxRetries: 0 });
+  await assert.rejects(
+    () => client.chat("echo", "hi"),
+    (err) => err instanceof APIConnectionError && err instanceof RekAIError,
+  );
+});
+
+test("a client timeout raises APITimeoutError", async () => {
+  const client = new RekAIClient(baseUrl, { maxRetries: 0, timeout: 0.05 });
+  await assert.rejects(
+    () => client.chat("echo", "__slow__"),
+    (err) => err instanceof APITimeoutError && err instanceof RekAIError,
   );
 });
 

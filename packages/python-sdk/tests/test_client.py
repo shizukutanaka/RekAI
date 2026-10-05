@@ -9,12 +9,21 @@ import httpx
 import pytest
 
 from rekai_client import (
+    APIConnectionError,
+    APITimeoutError,
     AsyncRekAIClient,
+    AuthenticationError,
     ChatResult,
+    ConflictError,
     EmbeddingsResult,
+    InternalServerError,
     ModerationResult,
+    NotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
     RekAIClient,
     RekAIError,
+    UnprocessableEntityError,
 )
 
 
@@ -334,6 +343,67 @@ def test_chat_raises_on_error() -> None:
         client.chat("gpt-4o-mini", "hi")
     assert exc.value.status_code == 401
     assert "no key" in str(exc.value)
+
+
+def test_error_status_maps_to_subclass() -> None:
+    cases = {
+        401: AuthenticationError,
+        403: PermissionDeniedError,
+        404: NotFoundError,
+        409: ConflictError,
+        422: UnprocessableEntityError,
+        429: RateLimitError,
+        500: InternalServerError,
+        503: InternalServerError,
+        400: RekAIError,  # no dedicated class — the base type itself
+    }
+    for status, cls in cases.items():
+
+        def handler(request: httpx.Request, _s: int = status) -> httpx.Response:
+            return httpx.Response(_s, json={"detail": "nope"})
+
+        client = make_client(handler)
+        client._max_retries = 0
+        with pytest.raises(cls) as exc:
+            client.chat("echo", "hi")
+        assert exc.value.status_code == status
+        # Every subclass is also a RekAIError — existing broad catches work.
+        assert isinstance(exc.value, RekAIError)
+
+
+def test_transport_error_becomes_connection_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    client = make_client(handler)
+    client._max_retries = 0
+    with pytest.raises(APIConnectionError) as exc:
+        client.chat("echo", "hi")
+    assert exc.value.__cause__ is not None  # the httpx error stays chained
+    assert isinstance(exc.value, RekAIError)
+
+
+def test_timeout_becomes_timeout_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("slow", request=request)
+
+    client = make_client(handler)
+    client._max_retries = 0
+    with pytest.raises(APITimeoutError):
+        client.chat("echo", "hi")
+
+
+def test_async_transport_error_becomes_connection_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    async def run() -> None:
+        async with make_async_client(handler) as client:
+            client._max_retries = 0
+            await client.chat("echo", "hi")
+
+    with pytest.raises(APIConnectionError):
+        asyncio.run(run())
 
 
 def test_stream_yields_deltas() -> None:

@@ -10,6 +10,53 @@ export class RekAIError extends Error {
   }
 }
 
+// Status-classified subclasses — the same taxonomy the OpenAI SDK uses, so
+// `catch (e) { if (e instanceof RateLimitError) … }` works without parsing
+// statusCode. RekAIError stays the base for everything else, so existing
+// `instanceof RekAIError` catches keep working.
+function _errorClass(name) {
+  return class extends RekAIError {
+    constructor(message, statusCode) {
+      super(message, statusCode);
+      this.name = name;
+    }
+  };
+}
+
+export const AuthenticationError = _errorClass("AuthenticationError"); // 401
+export const PermissionDeniedError = _errorClass("PermissionDeniedError"); // 403
+export const NotFoundError = _errorClass("NotFoundError"); // 404
+export const ConflictError = _errorClass("ConflictError"); // 409
+export const UnprocessableEntityError = _errorClass("UnprocessableEntityError"); // 422
+export const RateLimitError = _errorClass("RateLimitError"); // 429
+export const InternalServerError = _errorClass("InternalServerError"); // 5xx
+export const APITimeoutError = _errorClass("APITimeoutError"); // timed out
+export const APIConnectionError = _errorClass("APIConnectionError"); // unreachable
+
+const _STATUS_ERROR = new Map([
+  [401, AuthenticationError],
+  [403, PermissionDeniedError],
+  [404, NotFoundError],
+  [409, ConflictError],
+  [422, UnprocessableEntityError],
+  [429, RateLimitError],
+]);
+
+function _errorForStatus(status, detail) {
+  const cls = _STATUS_ERROR.get(status) ?? (status >= 500 ? InternalServerError : RekAIError);
+  return new cls(detail, status);
+}
+
+// fetch() failures carry no status: AbortSignal.timeout() rejects with a
+// DOMException named "TimeoutError"; a dead host throws a TypeError. Wrap
+// both so `catch (e instanceof RekAIError)` sees a dead server, not just a
+// status it didn't like.
+function _transportError(err) {
+  return err?.name === "TimeoutError"
+    ? new APITimeoutError(`request timed out: ${err.message}`)
+    : new APIConnectionError(`connection failed: ${err?.message ?? err}`);
+}
+
 /** @param {string|Array<{role:string,content:string}>} messages */
 function normalize(messages) {
   if (typeof messages === "string") {
@@ -118,7 +165,7 @@ export class RekAIClient {
           signal: this.timeout > 0 ? AbortSignal.timeout(this.timeout * 1000) : init.signal,
         });
       } catch (err) {
-        if (attempt >= this.maxRetries) throw err;
+        if (attempt >= this.maxRetries) throw _transportError(err);
         await sleep(this._retryDelayMs(null, attempt));
         attempt++;
         continue;
@@ -177,7 +224,7 @@ export class RekAIClient {
     } catch {
       /* ignore */
     }
-    throw new RekAIError(detail, res.status);
+    throw _errorForStatus(res.status, detail);
   }
 
   /**
@@ -227,7 +274,7 @@ export class RekAIClient {
       if (this.timeout <= 0) return;
       clearTimeout(watchdog);
       watchdog = setTimeout(
-        () => ctrl.abort(new RekAIError(`stream idle for ${this.timeout}s`)),
+        () => ctrl.abort(new APITimeoutError(`stream idle for ${this.timeout}s`)),
         this.timeout * 1000,
       );
       watchdog.unref?.();

@@ -141,7 +141,13 @@ client.chat("gpt-4o-mini", "charge me once", idempotency_key="order-42")
 
 ## Errors
 
-Failed requests raise `RekAIError` with a `.status_code` attribute.
+Failed requests raise `RekAIError` with a `.status_code` attribute, classified
+by status — `AuthenticationError` (401), `PermissionDeniedError` (403),
+`NotFoundError` (404), `ConflictError` (409), `UnprocessableEntityError` (422),
+`RateLimitError` (429), `InternalServerError` (5xx) — plus `APITimeoutError`
+and `APIConnectionError` for failures with no HTTP response at all. All
+subclass `RekAIError`, so a broad `except RekAIError` catches every failure,
+including a server that never answered.
 
 ## Develop
 

@@ -257,6 +257,24 @@ export class RekAIError extends Error {
   statusCode?: number;
   constructor(message: string, statusCode?: number);
 }
+/** 401 — missing or invalid gateway key. */
+export class AuthenticationError extends RekAIError {}
+/** 403 — key denied (model allowlist, guardrail). */
+export class PermissionDeniedError extends RekAIError {}
+/** 404 — unknown route or model. */
+export class NotFoundError extends RekAIError {}
+/** 409 — e.g. an Idempotency-Key still in flight on another request. */
+export class ConflictError extends RekAIError {}
+/** 422 — the request body failed validation. */
+export class UnprocessableEntityError extends RekAIError {}
+/** 429 — rate-limit or capacity rejection (see Retry-After). */
+export class RateLimitError extends RekAIError {}
+/** 5xx — a gateway or upstream failure. */
+export class InternalServerError extends RekAIError {}
+/** The request timed out before a response arrived. */
+export class APITimeoutError extends RekAIError {}
+/** The server could not be reached (DNS, refused connection, reset). */
+export class APIConnectionError extends RekAIError {}
 
 export type Messages = string | ChatMessage[];
 

@@ -28,6 +28,72 @@ class RekAIError(Exception):
         self.status_code = status_code
 
 
+# Status-classified subclasses — the same taxonomy the OpenAI SDK uses, so
+# `except RateLimitError` works without parsing status_code. RekAIError stays
+# the base for everything else (4xx without a dedicated class, stream error
+# events, malformed bodies), so existing `except RekAIError` keeps working.
+class AuthenticationError(RekAIError):
+    """401 — missing or invalid gateway key."""
+
+
+class PermissionDeniedError(RekAIError):
+    """403 — key denied (model allowlist, guardrail, key-store check)."""
+
+
+class NotFoundError(RekAIError):
+    """404 — unknown route or model."""
+
+
+class ConflictError(RekAIError):
+    """409 — e.g. an Idempotency-Key is still in flight on another request."""
+
+
+class UnprocessableEntityError(RekAIError):
+    """422 — the request body failed validation."""
+
+
+class RateLimitError(RekAIError):
+    """429 — rate-limit or capacity rejection (see Retry-After)."""
+
+
+class InternalServerError(RekAIError):
+    """5xx — a gateway or upstream failure."""
+
+
+class APITimeoutError(RekAIError):
+    """The request timed out before a response arrived."""
+
+
+class APIConnectionError(RekAIError):
+    """The server could not be reached (DNS, refused connection, reset)."""
+
+
+_STATUS_ERROR: dict[int, type[RekAIError]] = {
+    401: AuthenticationError,
+    403: PermissionDeniedError,
+    404: NotFoundError,
+    409: ConflictError,
+    422: UnprocessableEntityError,
+    429: RateLimitError,
+}
+
+
+def _error_for_status(status_code: int, detail: str) -> RekAIError:
+    cls = _STATUS_ERROR.get(status_code)
+    if cls is None:
+        cls = InternalServerError if status_code >= 500 else RekAIError
+    return cls(detail, status_code=status_code)
+
+
+def _transport_error(exc: httpx.TransportError) -> RekAIError:
+    """Give a transport failure a RekAIError shape — a bare
+    httpx.TransportError escaping _send means `except RekAIError` catches a
+    500 page but not a dead server."""
+    if isinstance(exc, httpx.TimeoutException):
+        return APITimeoutError(f"request timed out: {exc}")
+    return APIConnectionError(f"connection failed: {exc}")
+
+
 @dataclass
 class ChatResult:
     """A non-streamed chat response."""
@@ -438,7 +504,7 @@ class RekAIClient:
             body = resp.json()
         except Exception:
             body = None
-        raise RekAIError(_detail_from_body(resp.status_code, body), status_code=resp.status_code)
+        raise _error_for_status(resp.status_code, _detail_from_body(resp.status_code, body))
 
     def _send(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         """Issue a request, retrying transient failures with exponential backoff.
@@ -451,9 +517,9 @@ class RekAIClient:
         while True:
             try:
                 resp = self._client.request(method, url, **kwargs)
-            except httpx.TransportError:
+            except httpx.TransportError as exc:
                 if attempt >= self._max_retries:
-                    raise
+                    raise _transport_error(exc) from exc
                 time.sleep(
                     _retry_delay(None, attempt, self._retry_backoff, self._max_retry_delay) or 0.0
                 )
@@ -759,7 +825,7 @@ class AsyncRekAIClient:
             body = resp.json()
         except Exception:
             body = None
-        raise RekAIError(_detail_from_body(resp.status_code, body), status_code=resp.status_code)
+        raise _error_for_status(resp.status_code, _detail_from_body(resp.status_code, body))
 
     async def _send(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         """Async twin of ``RekAIClient._send`` (see there for retry semantics)."""
@@ -767,9 +833,9 @@ class AsyncRekAIClient:
         while True:
             try:
                 resp = await self._client.request(method, url, **kwargs)
-            except httpx.TransportError:
+            except httpx.TransportError as exc:
                 if attempt >= self._max_retries:
-                    raise
+                    raise _transport_error(exc) from exc
                 await asyncio.sleep(
                     _retry_delay(None, attempt, self._retry_backoff, self._max_retry_delay) or 0.0
                 )
