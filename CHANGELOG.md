@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Automated accessibility checks in e2e** (`e2e/a11y.spec.ts`,
+  `@axe-core/playwright`) — axe scans every navigable page
+  (`/`, `/models`, `/embeddings`, `/usage`, `/admin`, `/settings`) and fails on
+  any `serious`/`critical` WCAG violation, plus a smoke check that each route
+  actually renders before it is scanned.
 - **`REKAI_TRUSTED_PROXIES` — real client IP behind a reverse proxy.** Without
   it, every request arriving through a proxy or load balancer shares one
   rate-limit/budget bucket under the proxy's own address (Render's managed LB
@@ -48,6 +53,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Button contrast failed WCAG AA on every page** — white text on
+  `--accent` (`#6c7cff`) measured ≈3.4:1 (axe `color-contrast`, serious).
+  Buttons now use `--accent-2` (`#4c5bd4`, ≈5.5:1) with a new darker
+  `--accent-3` hover state.
 - **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
   four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
   `POST /v1/messages`, `POST /v1/messages/count_tokens`,

@@ -6,6 +6,7 @@
   --muted: #9aa0ad;
   --accent: #6c7cff;
   --accent-2: #4c5bd4;
+  --accent-3: #3a47b8;
   --border: #2c3040;
   --user: #2a3358;
   --assistant: #232634;
@@ -259,7 +260,7 @@ button.regenerate {
 }
 
 button {
-  background: var(--accent);
+  background: var(--accent-2);
   color: white;
   border: none;
   border-radius: 8px;
@@ -270,7 +271,7 @@ button {
 }
 
 button:hover {
-  background: var(--accent-2);
+  background: var(--accent-3);
 }
 
 button:disabled {
