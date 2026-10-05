@@ -6,6 +6,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- **A duplicated `service_tier` assignment** in the Anthropic provider —
+  #79 and #52 each added the same `payload["service_tier"]` line on
+  different sides of `top_p`, and both shipped. The second copy and its
+  comment are gone (harmless but a real duplicate).
+- **Dead stream line parsers** (`_parse_openai_sse_line`,
+  `_parse_anthropic_sse_line`, `_parse_gemini_sse_line`,
+  `_parse_ollama_ndjson_line`). Vestiges from before `stream_events` —
+  each helper reduced a streamed line to its text delta, but the streaming
+  loop now parses the whole chunk itself (usage, tool calls, finish reason)
+  via the `*_event` variants. The only consumer of each helper was its own
+  parametrize test, which went with it.
+
 ### Added
 - **Playwright spec for the Usage page** — seeds two `/v1/chat` calls (one per
   `user` id) and asserts the Requests card plus the per-provider, per-model,
