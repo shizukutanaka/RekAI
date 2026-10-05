@@ -1113,3 +1113,53 @@ def test_a_normal_client_is_unaffected_by_the_cap() -> None:
     # Sanity: ordinary traffic still gets exactly its configured budget.
     limiter = RateLimiter(capacity=3, window=3600.0, max_buckets=1000)
     assert [limiter.allow("solo") for _ in range(4)] == [True, True, True, False]
+
+
+def test_admin_rate_limit_covers_every_admin_route() -> None:
+    # The brute-force budget is shared per-IP across the admin surface — once
+    # spent, listing usage, minting keys, and revoking them all 429, not just
+    # the route the budget was burned on.
+    settings = Settings(
+        environment="test",
+        rate_limit_enabled=False,
+        admin_key="sk-admin-1",
+        admin_rate_limit_requests=2,
+        admin_rate_limit_window_seconds=60,
+    )
+    client = TestClient(create_app(settings))
+    headers = {"Authorization": "Bearer sk-admin-1"}
+    assert client.get("/admin/keys", headers=headers).status_code == 200
+    assert client.get("/admin/keys", headers=headers).status_code == 200
+    assert client.get("/admin/usage", headers=headers).status_code == 429
+    assert client.post("/admin/keys", json={"key": "sk-new"}, headers=headers).status_code == 429
+    assert client.delete("/admin/keys/sk-x", headers=headers).status_code == 429
+
+
+def test_model_acl_denies_unlisted_model_on_moderations() -> None:
+    # The allowlist is enforced on the moderations route too, not just chat.
+    client = TestClient(create_app(_acl_settings()))
+    denied = client.post(
+        "/v1/moderations",
+        json={"model": "omni-moderation-latest", "input": "hi"},
+        headers={"Authorization": "Bearer sk-acl"},
+    )
+    assert denied.status_code == 403
+    # This route returns the OpenAI error envelope, not RekAI's own shape.
+    assert "not permitted" in denied.json()["error"]["message"]
+
+
+def test_admin_write_routes_reject_wrong_key_and_disabled_store() -> None:
+    client = TestClient(
+        create_app(Settings(environment="test", admin_key="sk-admin-1", rate_limit_enabled=False))
+    )
+    wrong = {"Authorization": "Bearer wrong-guess"}
+    assert client.post("/admin/keys", json={"key": "sk-x"}, headers=wrong).status_code == 401
+    assert client.delete("/admin/keys/sk-x", headers=wrong).status_code == 401
+    # The right key is not enough on its own: without REKAI_DYNAMIC_KEYS_ENABLED
+    # there is no store to write to, so writes are refused loudly rather than
+    # pretending to succeed.
+    headers = {"Authorization": "Bearer sk-admin-1"}
+    denied = client.post("/admin/keys", json={"key": "sk-x"}, headers=headers)
+    assert denied.status_code == 400
+    assert denied.json()["error"] == "dynamic_keys_disabled"
+    assert client.delete("/admin/keys/sk-x", headers=headers).status_code == 400

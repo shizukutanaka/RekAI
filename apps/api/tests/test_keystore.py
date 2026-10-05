@@ -200,3 +200,20 @@ async def test_revoke_still_finds_an_expired_key() -> None:
     await store.add("sk-dead", expires_at=time.time() - 1)
     assert await store.revoke("sk-dead") is True
     assert await store.list_keys() == []
+
+
+def test_dynamic_keys_without_cache_logs_a_warning(capsys) -> None:
+    # With NullCache the store can never persist, so added keys would silently
+    # vanish between requests — the gateway says so loudly at startup.
+    from rekai.config import Settings
+    from rekai.main import create_app
+
+    create_app(
+        Settings(
+            environment="test",
+            default_provider="echo",
+            dynamic_keys_enabled=True,
+            cache_enabled=False,
+        )
+    )
+    assert "REKAI_DYNAMIC_KEYS_ENABLED" in capsys.readouterr().out

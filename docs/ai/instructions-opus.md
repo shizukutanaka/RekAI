@@ -102,6 +102,9 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
   多数あるため、レジストリの形を変えるならテスト移行計画込みで。
 
 ### O-2. セマンティックキャッシュ three-zone 信頼帯 (短所 2)
+> ✅ **完了**: `REKAI_SEMANTIC_CACHE_VERIFY_ENABLED` /
+> `REKAI_SEMANTIC_CACHE_VERIFY_MIN_SIMILARITY` で帯を実装 (既定 off)。
+> `docs/architecture.md` も更新済み。
 - 単一閾値 → 「確実ヒット (>= high) / 不確実 (mid: 検証してから返す or ミス扱い) /
   ミス」の 3 ゾーン。検証は追加レイテンシ (+1 呼び出し) を伴うため、デフォルト off の
   opt-in 設定として設計 (`REKAI_SEMANTIC_CACHE_VERIFY_*`)。誤ヒットは正しさを直接
@@ -110,6 +113,8 @@ Sonnet 向けの実装タスクは [`instructions-sonnet.md`](./instructions-son
 - 併せて `docs/architecture.md` の Semantic cache 節を更新。
 
 ### O-3. コスト×品質カスケードルーティング
+> ❌ **却下** (PR #19): 実装は提案済みだが非採用 — 現在の設計意図として
+> 「信頼度ベースのエスカレーションは入れない」ことが確定。再提案しない。
 - 既存 `fallbacks` 機構 (service.py `_build_attempts`) を土台に、「安い先行モデルで
   試し、低信頼応答のときだけ上位モデルへエスカレーション」を opt-in で追加。
   信頼判定の設計 (長さ/logprobs は取れないので、応答の自己申告 or 分類器) が本体。

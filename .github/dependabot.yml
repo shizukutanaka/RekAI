@@ -4,7 +4,26 @@ updates:
     directory: "/"
     allow:
       - dependency-type: "direct"
-    automerge:
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "pip"
+    directory: "/apps/api"
+    allow:
+      - dependency-type: "direct"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "pip"
+    directory: "/packages/python-sdk"
+    allow:
+      - dependency-type: "direct"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "npm"
+    directory: "/apps/web"
+    allow:
       - dependency-type: "direct"
     schedule:
       interval: "weekly"
