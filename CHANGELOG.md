@@ -48,6 +48,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **`POST /v1/moderations` couldn't dedupe a retried request** — every other
+  mutating POST (`/v1/chat`, `/v1/embeddings`, `/v1/chat/completions`,
+  `/v1/messages`) accepts `Idempotency-Key`, but moderations ignored it, so an
+  SDK auto-retry re-ran the upstream call. The route now runs the same
+  claim → replay → complete cycle, and both SDKs send a key (auto-generated
+  under retries, or explicit via `idempotency_key` / `idempotencyKey` —
+  declared on `ModerationOptions`).
 - **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
   four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
   `POST /v1/messages`, `POST /v1/messages/count_tokens`,

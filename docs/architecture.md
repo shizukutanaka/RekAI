@@ -426,8 +426,8 @@ none of them.
 ## Idempotency
 
 A client can send an `Idempotency-Key` header (a unique id, e.g. a UUID) on
-`POST /v1/chat`, `/v1/embeddings`, or the non-streaming path of the
-OpenAI-compatible `/v1/chat/completions`. The first call's response is stored
+`POST /v1/chat`, `/v1/embeddings`, `/v1/moderations`, or the non-streaming
+paths of `/v1/chat/completions` and `/v1/messages`. The first call's response is stored
 under that key; a repeat with the **same key returns the stored response**
 (with `Idempotent-Replay: true`) without processing again — so a network blip
 or an automatic client retry can't double-process. Unlike the content cache, it
