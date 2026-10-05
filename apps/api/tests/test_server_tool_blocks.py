@@ -978,7 +978,9 @@ async def test_redaction_scrubs_tool_call_arguments() -> None:
     call = {
         "id": "c1",
         "type": "function",
-        "function": {"name": "run", "arguments": '{"cmd": "leak ' + secret + '"}'},
+        # The name is deliberately secret-shaped: it is a dispatch identifier
+        # and must pass through verbatim — only arguments get scrubbed.
+        "function": {"name": secret, "arguments": '{"cmd": "leak ' + secret + '"}'},
     }
 
     class _ToolSecretProvider(Provider):
@@ -1011,6 +1013,9 @@ async def test_redaction_scrubs_tool_call_arguments() -> None:
         NullCache(),
     )
     assert secret not in result.tool_calls[0]["function"]["arguments"]
+    # name/id/type are dispatch identifiers — verbatim even when secret-shaped.
+    assert result.tool_calls[0]["function"]["name"] == secret
+    assert result.tool_calls[0]["id"] == "c1"
     assert result.redacted == ["github_token"]
 
     events = [
@@ -1027,4 +1032,5 @@ async def test_redaction_scrubs_tool_call_arguments() -> None:
     ]
     summary = [e.summary for e in events if e.summary is not None][0]
     assert secret not in summary.tool_calls[0]["function"]["arguments"]
+    assert summary.tool_calls[0]["function"]["name"] == secret
     assert summary.redacted == ["github_token"]

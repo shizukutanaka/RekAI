@@ -343,8 +343,9 @@ def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
             hits += found
     if response.tool_calls:
         # function.arguments is model-generated JSON — the same regurgitation
-        # channel as the answer text, shipped on a separate flat field.
-        scrubbed_calls, found = _scrub_block_strings(response.tool_calls)
+        # channel as the answer text, shipped on a separate flat field. Name
+        # and id are dispatch identifiers and must survive verbatim.
+        scrubbed_calls, found = _scrub_tool_call_arguments(response.tool_calls)
         if found:
             updates["tool_calls"] = scrubbed_calls
             hits += found
@@ -352,6 +353,38 @@ def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
         return response
     updates["redacted"] = list(dict.fromkeys(hits))
     return response.model_copy(update=updates)
+
+
+def _scrub_tool_call_arguments(calls: Any) -> tuple[Any, list[str]]:
+    """Scrub secrets from ``function.arguments`` only — not the rest of the call.
+
+    ``arguments`` is model-generated JSON: the same regurgitation channel as
+    the answer text, shipped on a separate field. But ``name``/``id``/``type``
+    are identifiers the client dispatches the call on — a tool that happens to
+    be named like a secret must pass through verbatim or the caller can no
+    longer route it.
+    """
+    hits: list[str] = []
+
+    def scrub(call: Any) -> Any:
+        if not isinstance(call, dict):
+            return call
+        fn = call.get("function")
+        if not isinstance(fn, dict):
+            return call
+        args = fn.get("arguments")
+        if isinstance(args, str):
+            scrubbed, found = guardrails.redact_secrets(args)
+            if not found:
+                return call
+        else:
+            scrubbed, found = _scrub_block_strings(args)
+            if not found:
+                return call
+        hits.extend(found)
+        return {**call, "function": {**fn, "arguments": scrubbed}}
+
+    return [scrub(c) for c in calls] if isinstance(calls, list) else calls, hits
 
 
 def _scrub_block_strings(value: Any) -> tuple[Any, list[str]]:
@@ -1081,7 +1114,7 @@ async def _handle_chat_stream(
         if redaction_on and reported_tool_calls is not None:
             # Arguments arrive assembled in the last event — one whole-string
             # scrub catches secrets split across upstream deltas too.
-            reported_tool_calls, tool_call_hits = _scrub_block_strings(reported_tool_calls)
+            reported_tool_calls, tool_call_hits = _scrub_tool_call_arguments(reported_tool_calls)
         yield ChatStreamEvent(
             summary=StreamSummary(
                 provider=provider_name,
