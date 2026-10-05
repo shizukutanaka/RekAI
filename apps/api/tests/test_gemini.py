@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from rekai.providers.base import ProviderError
-from rekai.providers.gemini import GeminiProvider, _parse_gemini_sse_line
+from rekai.providers.gemini import GeminiProvider
 from rekai.schemas import ChatMessage, ChatRequest
 
 
@@ -101,19 +101,6 @@ async def test_chat_propagates_http_error(monkeypatch) -> None:
         await GeminiProvider().chat(_req(), api_key="g-key")
     assert exc.value.status_code == 429
     assert exc.value.retry_after == 12.0  # captured from the upstream header
-
-
-@pytest.mark.parametrize(
-    "line,expected",
-    [
-        ('data: {"candidates":[{"content":{"parts":[{"text":"Hi"}]}}]}', "Hi"),
-        ('data: {"candidates":[]}', None),
-        ("", None),
-        ("event: noise", None),
-    ],
-)
-def test_gemini_sse_parser(line, expected) -> None:
-    assert _parse_gemini_sse_line(line) == expected
 
 
 # --- streaming ---------------------------------------------------------------

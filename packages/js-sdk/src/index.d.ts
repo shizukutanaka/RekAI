@@ -1,6 +1,21 @@
 export interface ChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
+  role: "system" | "user" | "assistant" | "tool";
+  /** Optional because assistant tool-call messages carry tool_calls instead. */
+  content?: string;
+  /** Tool name, for tool-result messages. */
+  name?: string;
+  /** OpenAI-style tool calls on an assistant turn, passed through. */
+  tool_calls?: Record<string, unknown>[];
+  /** Which tool call a `role="tool"` result answers. */
+  tool_call_id?: string;
+  /** Provider-native prompt-cache breakpoint (e.g. Anthropic's
+   * `{type: "ephemeral"}`), passed through verbatim. */
+  cache_control?: Record<string, unknown>;
+  /** True when this `role="tool"` message reports a *failed* tool call
+   * (Anthropic `tool_result.is_error`). */
+  is_error?: boolean;
+  /** Anthropic thinking/redacted_thinking blocks echoed back on assistant turns. */
+  thinking_blocks?: Record<string, unknown>[];
   /** Anthropic server-side tool blocks echoed back verbatim on assistant turns. */
   extra_blocks?: Record<string, unknown>[];
   /** Ordered verbatim content array for an assistant turn — replays the exact upstream sequence. */
