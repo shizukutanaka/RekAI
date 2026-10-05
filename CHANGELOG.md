@@ -41,6 +41,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on. Read/write/pool phases keep the configured timeout.
 
 ### Fixed
+- **Documented `REKAI_INSTANCE_ID` in `.env.example`.** It is the only
+  `Settings` field missing from the file: the replica identity used for
+  persisted-metrics snapshot keys when several replicas share one Redis.
 - **The JS SDK's `ChatMessage` type now covers the whole gateway message
   shape.** The declaration only allowed `"system" | "user" | "assistant"`
   with required `content`, so a TypeScript caller couldn't write a
