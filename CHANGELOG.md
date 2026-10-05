@@ -6,6 +6,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Playwright spec for the Usage page** — seeds two `/v1/chat` calls (one per
+  `user` id) and asserts the Requests card plus the per-provider, per-model,
+  per-client, and end-user breakdowns render them. The last web page without
+  e2e coverage.
+
 ### Changed
 - **Provider HTTP clients now cap the connect phase at 5s** (httpx's default,
   clamped by `request_timeout_seconds`) instead of holding a black-holed
