@@ -48,6 +48,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Non-finite amounts in env config slipped through as valid limits** —
+  `REKAI_CLIENT_BUDGETS_USD` and `REKAI_PRICING_OVERRIDES` parsed `nan`/`inf`
+  fine via `float()`: a NaN budget fails every `>=` comparison so the cap
+  silently never trips, and NaN/inf prices poison every cost metric the
+  estimate feeds (totals, budget windows). Non-finite values now skip like
+  the other malformed entries.
 - **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
   four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
   `POST /v1/messages`, `POST /v1/messages/count_tokens`,
