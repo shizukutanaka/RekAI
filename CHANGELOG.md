@@ -41,6 +41,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on. Read/write/pool phases keep the configured timeout.
 
 ### Fixed
+- **`docs/ai/instructions-opus.md` task tracker was stale on two items** —
+  O-2 (three-zone trust band) lacked its ✅ though the verify band shipped;
+  O-3 (cascade routing) is now marked rejected per the #19 outcome so it
+  isn't re-attempted.
 - **Web devDependency advisories** — `npm audit` on `apps/web` went from 10 to
   the 5 advisories that only resolve via the Next 14→16 major (closed
   unmerged as PR #13). `vitest` 4.1.10→4.1.11 clears the `@vitest/mocker`
