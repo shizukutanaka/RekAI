@@ -68,6 +68,22 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Route-edge coverage for the non-stream paths in `main.py`** — the
+  remainder of the branch-coverage audit: Idempotency-Key wire semantics a
+  unit test can't show (a 409 while a twin request is in flight, on
+  `/v1/chat`, `/v1/chat/completions`, and `/v1/embeddings`; the sentinel
+  being freed when the upstream call fails so an immediate retry re-runs);
+  the error-envelope translators' pass-through/idempotency branches on both
+  compat surfaces; the admin rate limit shared across every admin route;
+  admin writes rejected when the dynamic-key store is disabled; the model
+  allowlist enforced on `/v1/moderations`; the `X-Cache-Similarity` header
+  on a semantic hit; `/v1/models` skipping a provider that fails to
+  resolve; the startup warning when dynamic keys are enabled without a
+  cache; and the backstop output re-scan catching a secret cached before
+  redaction was switched on. `rekai/main.py` coverage: 97% → 99% (the
+  remaining misses are a mid-chunk disconnect, the metrics flush loop, and
+  the inner Content-Length advisory — all unreachable through a normal
+  client).
 - **Per-field stream redaction and RedisCache success-path coverage** —
   the split-across-deltas secret test now runs on `thinking_delta`,
   `refusal_delta`, and verbatim `extra_block_delta` fields, not only

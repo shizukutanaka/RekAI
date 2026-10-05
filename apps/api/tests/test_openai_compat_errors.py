@@ -221,3 +221,21 @@ def test_translation_passes_through_what_it_cannot_read(raw: bytes) -> None:
     """A body with no message to lift is returned unchanged rather than being
     replaced by an envelope asserting something the gateway does not know."""
     assert _openai_error_body(raw, 500) == raw
+
+
+def test_translation_lifts_a_string_error() -> None:
+    """`{"error": "<text>"}` is RekAI's own error shape — the compat surface
+    still has to hand back an OpenAI envelope carrying that text."""
+    raw = json.dumps({"error": "upstream exploded"}).encode()
+    body = json.loads(_openai_error_body(raw, 502))
+    assert body["error"]["message"] == "upstream exploded"
+    assert body["error"]["type"] == "api_error"
+
+
+def test_translation_falls_back_when_detail_has_no_errors() -> None:
+    """A detail list with no dict entries can't name a field — the envelope
+    says 'Invalid request.' with no param rather than fabricating one."""
+    raw = json.dumps({"detail": [123, "junk"]}).encode()
+    body = json.loads(_openai_error_body(raw, 422))
+    assert body["error"]["message"] == "Invalid request."
+    assert body["error"]["param"] is None
