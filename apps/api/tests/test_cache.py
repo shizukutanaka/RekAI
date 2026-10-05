@@ -300,3 +300,42 @@ async def test_embeddings_concurrent_misses_coalesce_to_one_provider_call() -> N
     assert calls == 1
     assert (r1.cached, r2.cached).count(True) == 1
     assert metrics.cache_fills_coalesced_total == before + 1
+
+
+class _HealthyRedis:
+    """The success-side twin of _BrokenRedis — answers like a real client so
+    the pass-through paths (including bytes->str decode and the nx claim) run."""
+
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+
+    async def get(self, key):
+        return self.store.get(key)
+
+    async def set(self, key, value, ex=None, nx=False):
+        if nx and key in self.store:
+            return False
+        self.store[key] = value
+        return True
+
+    async def delete(self, key):
+        self.store.pop(key, None)
+
+
+async def test_redis_cache_passes_through_on_success() -> None:
+    # The fail-open behaviour is proven above; this pins the happy path —
+    # values come back (bytes decoded to str), writes land, and `add` honours
+    # the atomic claim instead of silently succeeding twice.
+    cache = cache_module.RedisCache.__new__(cache_module.RedisCache)
+    cache._client = _HealthyRedis()
+    cache._local = None
+    cache._degraded = False
+
+    assert await cache.get("k") is None
+    await cache.set("k", b"bytes-value", ttl=10)
+    assert await cache.get("k") == "bytes-value"  # bytes decoded to str
+    assert await cache.add("claim", "sentinel", ttl=10) is True
+    assert await cache.add("claim", "sentinel", ttl=10) is False  # held already
+    await cache.delete("k")
+    assert await cache.get("k") is None
+    assert cache._local is None  # never degraded — Redis answered every call
