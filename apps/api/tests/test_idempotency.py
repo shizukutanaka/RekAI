@@ -322,3 +322,68 @@ async def test_embeddings_key_released_when_provider_errors(monkeypatch) -> None
     assert client.post("/v1/embeddings", json=body, headers=headers).status_code == 503
     monkeypatch.undo()
     assert client.post("/v1/embeddings", json=body, headers=headers).status_code == 200
+
+
+# --- fail-open observability --------------------------------------------------
+# Every other backend (cache, rate limiter, metrics store, keystore) logs when
+# it degrades; the idempotency store's fail-open is where a silent failure costs
+# real money (a replayed request re-processes) or turns visible (a stuck
+# sentinel 409s retries until TTL). Each path must warn, not just swallow.
+
+
+class _BoomCache:
+    """Cache backend that raises on every operation (Redis outage stand-in)."""
+
+    async def get(self, key):  # noqa: ANN001, ANN202
+        raise ConnectionError("redis down")
+
+    async def set(self, key, value, ttl):  # noqa: ANN001, ANN202
+        raise ConnectionError("redis down")
+
+    async def add(self, key, value, ttl):  # noqa: ANN001, ANN202
+        raise ConnectionError("redis down")
+
+    async def delete(self, key):  # noqa: ANN001, ANN202
+        raise ConnectionError("redis down")
+
+    @property
+    def label(self) -> str:
+        return "boom"
+
+
+async def test_claim_fails_open_and_warns(caplog) -> None:
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="rekai.idempotency"):
+        outcome = await idempotency.claim(_BoomCache(), "c1", "key", "fp", ttl=60)
+    assert outcome.kind == "proceed"  # fail-open preserved
+    assert any("replay protection" in r.message for r in caplog.records)
+
+
+async def test_complete_failure_warns(caplog) -> None:
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="rekai.idempotency"):
+        await idempotency.complete(_BoomCache(), "c1", "key", "fp", {"id": "x"}, ttl=60)
+    assert any("re-process" in r.message for r in caplog.records)
+
+
+async def test_release_failure_warns(caplog) -> None:
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="rekai.idempotency"):
+        await idempotency.release(_BoomCache(), "c1", "key")
+    assert any("409" in r.message for r in caplog.records)
+
+
+async def test_get_failure_treats_key_as_absent_and_warns(caplog) -> None:
+    import logging
+
+    class _HalfBoom(_BoomCache):
+        async def add(self, key, value, ttl):  # noqa: ANN001, ANN202
+            return False  # claim succeeds reading nothing: forces the _get path
+
+    with caplog.at_level(logging.WARNING, logger="rekai.idempotency"):
+        outcome = await idempotency.claim(_HalfBoom(), "c1", "key", "fp", ttl=60)
+    assert outcome.kind == "proceed"
+    assert any("treating the key as absent" in r.message for r in caplog.records)

@@ -48,6 +48,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Idempotency store failures were silent** — every other Redis-backed
+  subsystem (cache, rate limiter, metrics store, key store) warns when it
+  fails open, but `idempotency` logged nothing. A transient backend error
+  during `complete`/`release` left an `in_progress` sentinel that 409s
+  same-key retries until TTL with no log attribution, and a failed `claim`
+  quietly dropped replay protection (re-processing a retried request). Each
+  fail-open path now warns with the operation and consequence.
 - **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
   four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
   `POST /v1/messages`, `POST /v1/messages/count_tokens`,
