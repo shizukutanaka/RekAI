@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from rekai import guardrails
+from rekai import guardrails, tracing
 from rekai.cache import CacheBackend, cache_key, embedding_cache_key, semantic_bucket
 from rekai.circuit_breaker import consecutive_failures
 from rekai.config import (
@@ -39,6 +39,41 @@ from rekai.schemas import (
 from rekai.semantic_cache import semantic_cache
 
 logger = get_logger("rekai.service")
+upstream_logger = get_logger("rekai.upstream")
+
+
+def _audit_upstream(
+    settings: Settings,
+    *,
+    provider: str,
+    operation: str,
+    model: str | None,
+    elapsed_ms: float,
+    outcome: str,
+    error_status: int | None = None,
+) -> None:
+    """One line per upstream call outcome when REKAI_UPSTREAM_AUDIT_ENABLED is
+    set — metadata only (never prompt text or keys): who was called, what for,
+    how it ended, correlated to the request's trace id."""
+    if not settings.upstream_audit_enabled:
+        return
+    upstream_logger.info(
+        "upstream provider=%s op=%s model=%s %.1fms outcome=%s",
+        provider,
+        operation,
+        model,
+        elapsed_ms,
+        outcome,
+        extra={
+            "provider": provider,
+            "operation": operation,
+            "model": model,
+            "duration_ms": round(elapsed_ms, 1),
+            "outcome": outcome,
+            "error_status": error_status,
+            "trace_id": tracing.current_trace_id(),
+        },
+    )
 
 
 @dataclass
@@ -187,8 +222,25 @@ async def _semantic_embed(request: ChatRequest, settings: Settings) -> list[floa
     started = time.perf_counter()
     try:
         result = await provider.embed([text], settings.semantic_cache_model, None)
-    except ProviderError:
+    except ProviderError as exc:
+        _audit_upstream(
+            settings,
+            provider=provider_name,
+            operation="semantic_embed",
+            model=settings.semantic_cache_model,
+            elapsed_ms=(time.perf_counter() - started) * 1000,
+            outcome="error",
+            error_status=exc.status_code,
+        )
         return None  # embeddings unavailable -> just skip the semantic cache
+    _audit_upstream(
+        settings,
+        provider=provider_name,
+        operation="semantic_embed",
+        model=settings.semantic_cache_model,
+        elapsed_ms=(time.perf_counter() - started) * 1000,
+        outcome="ok",
+    )
     metrics.observe_provider_duration(provider_name, "embed", time.perf_counter() - started)
     metrics.record_tokens(result.usage.total_tokens, provider_name)
     embed_cost = estimate_cost(
@@ -257,7 +309,27 @@ async def _verify_semantic_hit(
         }
     )
     started = time.perf_counter()
-    result = await provider.chat(verifier, api_key)
+    try:
+        result = await provider.chat(verifier, api_key)
+    except ProviderError as exc:
+        _audit_upstream(
+            settings,
+            provider=provider_name,
+            operation="semantic_verify",
+            model=request.model,
+            elapsed_ms=(time.perf_counter() - started) * 1000,
+            outcome="error",
+            error_status=exc.status_code,
+        )
+        return False  # a failed check is "not verified" -> normal provider call
+    _audit_upstream(
+        settings,
+        provider=provider_name,
+        operation="semantic_verify",
+        model=request.model,
+        elapsed_ms=(time.perf_counter() - started) * 1000,
+        outcome="ok",
+    )
     metrics.observe_provider_duration(
         provider_name, "semantic_verify", time.perf_counter() - started
     )
@@ -678,6 +750,15 @@ async def _handle_chat(
                 # poll until timeout — the value will never arrive for this key.
                 await cache.delete(inflight_key)
                 holds_inflight = False
+            _audit_upstream(
+                settings,
+                provider=attempt.provider_name,
+                operation="chat",
+                model=attempt.model,
+                elapsed_ms=(time.perf_counter() - started) * 1000,
+                outcome="error",
+                error_status=exc.status_code,
+            )
             metrics.observe_provider_duration(
                 attempt.provider_name, "chat", time.perf_counter() - started
             )
@@ -726,6 +807,14 @@ async def _handle_chat(
                 continue
             raise
 
+        _audit_upstream(
+            settings,
+            provider=attempt.provider_name,
+            operation="chat",
+            model=attempt.model,
+            elapsed_ms=(time.perf_counter() - started) * 1000,
+            outcome="ok",
+        )
         metrics.observe_provider_duration(
             attempt.provider_name, "chat", time.perf_counter() - started
         )
@@ -1019,8 +1108,25 @@ async def _handle_chat_stream(
             # held-back tails in their last-seen delta shapes.
             for tail_event in _extra_tail_events(extra_redactors, extra_delta_shapes, extra_hits):
                 yield tail_event
+        _audit_upstream(
+            settings,
+            provider=provider_name,
+            operation="chat_stream",
+            model=request.model,
+            elapsed_ms=(time.perf_counter() - started) * 1000,
+            outcome="ok",
+        )
     except ProviderError as exc:
         errored = True
+        _audit_upstream(
+            settings,
+            provider=provider_name,
+            operation="chat_stream",
+            model=request.model,
+            elapsed_ms=(time.perf_counter() - started) * 1000,
+            outcome="error",
+            error_status=exc.status_code,
+        )
         metrics.record_error("provider_error")
         metrics.record_provider_error(provider_name, exc.status_code)
         metrics.observe_provider_duration(provider_name, "stream", time.perf_counter() - started)
@@ -1205,13 +1311,31 @@ async def _handle_embeddings(
             on_retry=metrics.record_retry,
             deadline=deadline,
         )
-    except BaseException:
+    except BaseException as exc:
+        if isinstance(exc, ProviderError):
+            _audit_upstream(
+                settings,
+                provider=provider_name,
+                operation="embed",
+                model=request.model,
+                elapsed_ms=(time.perf_counter() - started) * 1000,
+                outcome="error",
+                error_status=exc.status_code,
+            )
         if holds_inflight:
             await cache.delete(inflight_key)
             holds_inflight = False
         raise
     finally:
         metrics.observe_provider_duration(provider_name, "embed", time.perf_counter() - started)
+    _audit_upstream(
+        settings,
+        provider=provider_name,
+        operation="embed",
+        model=request.model,
+        elapsed_ms=(time.perf_counter() - started) * 1000,
+        outcome="ok",
+    )
     metrics.record_tokens(result.usage.total_tokens, provider_name)
     cost_usd = estimate_cost(
         provider_name, result.model, result.usage, settings.pricing_override_dict
@@ -1259,13 +1383,33 @@ async def _handle_moderation(
         raise ProviderError(f"Unknown provider '{provider_name}'.", status_code=400)
     metrics.record_request(provider_name)
     started = time.perf_counter()
-    result = await call_with_retry(
-        lambda: provider.moderate(request.input, request.model, api_key),
-        attempts=settings.retry_max_attempts,
-        base_delay=settings.retry_base_delay_seconds,
-        max_delay=settings.retry_max_delay_seconds,
-        on_retry=metrics.record_retry,
-        deadline=_request_deadline(settings),
+    try:
+        result = await call_with_retry(
+            lambda: provider.moderate(request.input, request.model, api_key),
+            attempts=settings.retry_max_attempts,
+            base_delay=settings.retry_base_delay_seconds,
+            max_delay=settings.retry_max_delay_seconds,
+            on_retry=metrics.record_retry,
+            deadline=_request_deadline(settings),
+        )
+    except ProviderError as exc:
+        _audit_upstream(
+            settings,
+            provider=provider_name,
+            operation="moderate",
+            model=request.model,
+            elapsed_ms=(time.perf_counter() - started) * 1000,
+            outcome="error",
+            error_status=exc.status_code,
+        )
+        raise
+    _audit_upstream(
+        settings,
+        provider=provider_name,
+        operation="moderate",
+        model=request.model,
+        elapsed_ms=(time.perf_counter() - started) * 1000,
+        outcome="ok",
     )
     metrics.observe_provider_duration(provider_name, "moderation", time.perf_counter() - started)
     # Moderation responses carry no usage object — count the request only.

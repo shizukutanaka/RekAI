@@ -48,6 +48,11 @@ def reset_current_trace_id(token: Token[str | None]) -> None:
     _current_trace_id.reset(token)
 
 
+def current_trace_id() -> str | None:
+    """The ambient request's trace id, or ``None`` outside a request context."""
+    return _current_trace_id.get()
+
+
 def current_traceparent() -> str | None:
     """A fresh ``traceparent`` (new span id, same ambient trace id) for an
     outbound provider call — or ``None`` outside a request context (e.g. a

@@ -5,7 +5,18 @@ from __future__ import annotations
 import json
 import logging
 
+import pytest
+from fastapi.testclient import TestClient
+
 from rekai.logging_config import JsonFormatter, configure_logging
+from rekai.main import create_app
+
+
+@pytest.fixture
+def audit_client(settings) -> TestClient:
+    # Built in a fixture (not inline) because create_app -> configure_logging
+    # clears root handlers, which would detach caplog's call-phase capture.
+    return TestClient(create_app(settings.model_copy(update={"upstream_audit_enabled": True})))
 
 
 def test_json_formatter_emits_one_object() -> None:
@@ -82,3 +93,30 @@ def test_access_log_gen_ai_operation_for_embeddings(client, caplog) -> None:
     )
     assert getattr(rec, "gen_ai.operation.name") == "embeddings"
     assert getattr(rec, "gen_ai.provider.name") == "echo"
+
+
+def test_upstream_audit_log_records_call_outcomes(audit_client, caplog) -> None:
+    """REKAI_UPSTREAM_AUDIT_ENABLED logs one metadata line per upstream call."""
+    with caplog.at_level(logging.INFO, logger="rekai.upstream"):
+        audit_client.post(
+            "/v1/chat",
+            json={"model": "echo", "messages": [{"role": "user", "content": "hi"}]},
+        )
+        audit_client.post("/v1/embeddings", json={"model": "echo", "input": "hello"})
+    recs = [r for r in caplog.records if r.name == "rekai.upstream"]
+    assert {(r.operation, r.provider, r.outcome) for r in recs} == {
+        ("chat", "echo", "ok"),
+        ("embed", "echo", "ok"),
+    }
+    assert all(r.duration_ms >= 0 for r in recs)
+    # Metadata only — never request content.
+    assert all("hi" not in r.getMessage() and "hello" not in r.getMessage() for r in recs)
+
+
+def test_upstream_audit_log_is_silent_by_default(client, caplog) -> None:
+    with caplog.at_level(logging.INFO, logger="rekai.upstream"):
+        client.post(
+            "/v1/chat",
+            json={"model": "echo", "messages": [{"role": "user", "content": "hi"}]},
+        )
+    assert not [r for r in caplog.records if r.name == "rekai.upstream"]

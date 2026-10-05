@@ -94,6 +94,13 @@ class Settings(BaseSettings):
 
     log_format: Literal["text", "json"] = "text"
 
+    # Opt-in upstream audit log (rekai.upstream, INFO): one line per upstream
+    # call outcome — provider, operation, model, duration, outcome, trace_id.
+    # Metadata only, never prompt text or keys. Off by default because it adds
+    # one log line per upstream call (~per attempt, incl. retries' final
+    # outcome and the gateway's own semantic-cache calls).
+    upstream_audit_enabled: bool = False
+
     # Routing
     default_provider: str = "echo"
 
