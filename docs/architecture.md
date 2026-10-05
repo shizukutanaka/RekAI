@@ -963,6 +963,25 @@ API key (a non-reversible `key:<hash>` id, also attached to the structured
 access log as `client`) rather than the client IP, so one tenant's traffic can't
 exhaust another's budget. Without auth it falls back to the client IP.
 
+What "the client IP" means is set by `REKAI_TRUSTED_PROXIES`. Behind a
+reverse proxy or load balancer the TCP peer is the proxy's address, which
+would collapse every proxied tenant into one bucket — so when the peer
+matches a configured proxy IP/CIDR the `/v1` middleware rewrites
+`scope["client"]` to the resolved `X-Forwarded-For` origin before anything
+reads it: the first untrusted hop walking back from the edge, or the
+leftmost entry when the whole chain is trusted (nginx `real_ip`
+semantics). `*` means the service is only reachable through a proxy
+(Render's managed LB is exactly this, and the Render blueprint sets it);
+there the rightmost entry wins because it is the one the edge appended — a
+client can smuggle values only to its left. The same resolved address
+feeds budgets, the admin brute-force guard, and the access log. Off by
+default, and entries apply only to direct peers that match: trusting XFF
+unconditionally would let a deployment that is also directly reachable
+have its client identity forged by a stray header. uvicorn's own
+`--proxy-headers` composes with this (it defaults to trusting localhost
+only); when it has already resolved XFF, the resolved peer is not a
+trusted proxy and this pass-through leaves it alone.
+
 It is also **shared across workers/nodes when `REKAI_REDIS_URL` is set**: the
 limiter switches from the in-process token bucket to a fixed-window counter
 using Redis `INCR` (atomic — a plain get/set cache can't count race-free), so
