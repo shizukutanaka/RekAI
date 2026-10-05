@@ -86,6 +86,10 @@ export interface ChatOptions {
   /** OpenAI's `web_search_options` — hosted web-search config (context size,
    * user location). OpenAI-compatible providers only. */
   webSearchOptions?: Record<string, unknown>;
+  /** Sent as the `Idempotency-Key` header (non-streaming `chat()` only).
+   * When omitted and `maxRetries > 0` the client generates one automatically
+   * so its own retries are safe. */
+  idempotencyKey?: string;
   /** The providers' end-user id for abuse detection (OpenAI's `user`,
    * Anthropic's `metadata.user_id`). A routing hint — never a cache key. */
   user?: string;
@@ -96,6 +100,8 @@ export interface ChatOptions {
    * `{type: "enabled", budget_tokens: 1024}` — forwarded verbatim to Anthropic
    * upstreams. Thinking blocks come back on `ChatResult.thinking_blocks`. */
   thinking?: Record<string, unknown>;
+  /** Called once with the assembled tool_calls list during streaming. */
+  onToolCalls?: (toolCalls: Record<string, unknown>[]) => void;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
   /** Called with each refusal-text chunk when the model declines. */

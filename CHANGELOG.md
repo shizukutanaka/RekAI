@@ -48,6 +48,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **JS SDK `index.d.ts` drifted from the implementation** — `opts.idempotencyKey`
+  (sent as `Idempotency-Key` by `chat()` since its introduction) and
+  `opts.onToolCalls` (the stream callback for the assembled `tool_calls` list)
+  were both readable by the implementation but undeclared, so TypeScript
+  callers hit `Object literal may only specify known properties` for options
+  that work fine at runtime.
 - **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
   four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
   `POST /v1/messages`, `POST /v1/messages/count_tokens`,
