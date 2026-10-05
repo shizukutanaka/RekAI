@@ -127,17 +127,14 @@ class AnthropicProvider(Provider):
         if request.stop:
             payload["stop_sequences"] = request.stop
         # Anthropic's own processing tier ('auto' | 'standard_only') — same
-        # field name as OpenAI's, different vocabulary. Forwarded verbatim.
+        # field name as OpenAI's, different vocabulary. Forwarded verbatim;
+        # an unrecognized tier surfaces as Anthropic's own validation error.
         if request.service_tier is not None:
             payload["service_tier"] = request.service_tier
         # Anthropic supports top_p but has no seed/frequency/presence/logit_bias
         # equivalents — those stay RekAI-side rather than erroring upstream.
         if request.top_p is not None:
             payload["top_p"] = request.top_p
-        # Anthropic accepts service_tier too ('auto' | 'standard_only'); an
-        # unrecognized tier surfaces as Anthropic's own validation error.
-        if request.service_tier is not None:
-            payload["service_tier"] = request.service_tier
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
         # Structured output: Anthropic has no `response_format`, but forcing a
@@ -499,22 +496,6 @@ class AnthropicProvider(Provider):
 
     async def list_models(self, api_key: str | None) -> list[str]:
         return models.advertised_models("anthropic", "chat")
-
-
-def _parse_anthropic_sse_line(line: str) -> str | None:
-    """Extract the text delta from one Anthropic SSE data line, if present."""
-    if not line or not line.startswith("data:"):
-        return None
-    data = line[len("data:") :].strip()
-    if not data:
-        return None
-    try:
-        event = json.loads(data)
-    except json.JSONDecodeError:
-        return None
-    if event.get("type") == "content_block_delta":
-        return event.get("delta", {}).get("text") or None
-    return None
 
 
 # --- OpenAI <-> Anthropic tool translation ----------------------------------

@@ -12,11 +12,7 @@ import httpx
 import pytest
 
 from rekai.providers.base import ProviderError
-from rekai.providers.ollama import (
-    OllamaProvider,
-    _parse_ollama_ndjson_event,
-    _parse_ollama_ndjson_line,
-)
+from rekai.providers.ollama import OllamaProvider, _parse_ollama_ndjson_event
 from rekai.schemas import ChatMessage, ChatRequest
 
 WEATHER_TOOL = {
@@ -190,12 +186,6 @@ def test_parse_ndjson_event_final_usage() -> None:
     assert event is not None
     assert event.usage is not None
     assert event.usage.total_tokens == 7
-
-
-def test_parse_ndjson_line_delegates_to_event() -> None:
-    assert _parse_ollama_ndjson_line('{"message": {"content": "x"}}') == "x"
-    assert _parse_ollama_ndjson_line("") is None
-    assert _parse_ollama_ndjson_line("not json") is None
 
 
 # --- max_tokens ---------------------------------------------------------------

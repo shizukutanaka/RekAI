@@ -321,7 +321,16 @@ export default function ChatPage() {
           const next = [...prev];
           const last = next[next.length - 1];
           if (last?.role !== "assistant") return next;
-          if (streamError && !last.content) return next.slice(0, -1);
+          // "Nothing arrived" means no visible payload at all — thinking
+          // deltas, citations and tool blocks count too. Checking content
+          // alone dropped a thinking-only reply on upstream error, erasing
+          // text the reader had watched stream in.
+          const nothingStreamed =
+            !last.content &&
+            !last.thinking &&
+            !last.extraBlocks?.length &&
+            !last.citations?.length;
+          if (streamError && nothingStreamed) return next.slice(0, -1);
           // Streamed thinking precedes verbatim redacted blocks in Anthropic's
           // own ordering (visible reasoning first, encrypted blocks after).
           const assembled = thinkText

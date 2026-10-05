@@ -6,11 +6,72 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Wire-level tests for all three SSE adapters** — every `StreamEvent` kind's
+  translation onto `/v1/chat/stream`, `/v1/chat/completions` (stream), and
+  `/v1/messages` (stream) is now covered end-to-end, including the uncommon
+  orderings: citation before text, thinking left open when text starts,
+  verbatim blocks opening mid-text, mid-stream upstream errors, guardrail
+  flag/block, model-ACL deny, and tool-call summaries.
+
+### Removed
+
+- **A duplicated `service_tier` assignment** in the Anthropic provider —
+  #79 and #52 each added the same `payload["service_tier"]` line on
+  different sides of `top_p`, and both shipped. The second copy and its
+  comment are gone (harmless but a real duplicate).
+- **Dead stream line parsers** (`_parse_openai_sse_line`,
+  `_parse_anthropic_sse_line`, `_parse_gemini_sse_line`,
+  `_parse_ollama_ndjson_line`). Vestiges from before `stream_events` —
+  each helper reduced a streamed line to its text delta, but the streaming
+  loop now parses the whole chunk itself (usage, tool calls, finish reason)
+  via the `*_event` variants. The only consumer of each helper was its own
+  parametrize test, which went with it.
+
+### Added
+- **Playwright spec for the Usage page** — seeds two `/v1/chat` calls (one per
+  `user` id) and asserts the Requests card plus the per-provider, per-model,
+  per-client, and end-user breakdowns render them. The last web page without
+  e2e coverage.
+
+### Changed
+- **Provider HTTP clients now cap the connect phase at 5s** (httpx's default,
+  clamped by `request_timeout_seconds`) instead of holding a black-holed
+  upstream for the full read budget before the retry/fallback loop can move
+  on. Read/write/pool phases keep the configured timeout.
+
 ### Fixed
 - **`docs/ai/instructions-sonnet.md` marked S-3b done though it never merged** —
   the Next.js 16 upgrade (PR #13) was closed unmerged; main still ships
   Next 14 / React 18 / ESLint 8 with the five remaining framework advisories.
   The tracker now records the outcome and keeps the retry notes.
+- **`docs/ai/instructions-opus.md` task tracker was stale on two items** —
+  O-2 (three-zone trust band) lacked its ✅ though the verify band shipped;
+  O-3 (cascade routing) is now marked rejected per the #19 outcome so it
+  isn't re-attempted.
+- **Web devDependency advisories** — `npm audit` on `apps/web` went from 10 to
+  the 5 advisories that only resolve via the Next 14→16 major (closed
+  unmerged as PR #13). `vitest` 4.1.10→4.1.11 clears the `@vitest/mocker`
+  path-traversal advisory (GHSA-82fw-gwwq-j7x9); `npm audit fix` cleared the
+  non-breaking transitive ones (brace-expansion DoS set, js-yaml, nanoid).
+- **Documented `REKAI_INSTANCE_ID` in `.env.example`.** It is the only
+  `Settings` field missing from the file: the replica identity used for
+  persisted-metrics snapshot keys when several replicas share one Redis.
+- **The JS SDK's `ChatMessage` type now covers the whole gateway message
+  shape.** The declaration only allowed `"system" | "user" | "assistant"`
+  with required `content`, so a TypeScript caller couldn't write a
+  tool-calling turn — `role: "tool"` messages (plus `tool_calls`,
+  `tool_call_id`, `name`, `is_error`, `cache_control`, `thinking_blocks`,
+  and content-less assistant messages) were all rejected by `tsc` even
+  though the runtime and the server already handled them. The interface
+  now mirrors the server's `ChatMessage`.
+- **A thinking-only reply no longer vanishes when the stream errors before
+  its first text delta.** Extended-thinking streams emit `thinking_delta`
+  frames ahead of any text; the "nothing arrived → drop the bubble" check in
+  the chat playground looked at `content` alone, so an upstream error in that
+  window deleted reasoning the reader had already watched stream in. The drop
+  now requires *no visible payload* — text, thinking, citations, and tool
+  blocks all keep the bubble.
 - **`POST /v1/messages` no longer counts cached prompt tokens twice.** The
   Anthropic-compat usage block reported RekAI's all-inclusive `prompt_tokens`
   as `input_tokens`, but on Anthropic's wire `input_tokens` *excludes* cached
@@ -23,6 +84,38 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Route-edge coverage for the non-stream paths in `main.py`** — the
+  remainder of the branch-coverage audit: Idempotency-Key wire semantics a
+  unit test can't show (a 409 while a twin request is in flight, on
+  `/v1/chat`, `/v1/chat/completions`, and `/v1/embeddings`; the sentinel
+  being freed when the upstream call fails so an immediate retry re-runs);
+  the error-envelope translators' pass-through/idempotency branches on both
+  compat surfaces; the admin rate limit shared across every admin route;
+  admin writes rejected when the dynamic-key store is disabled; the model
+  allowlist enforced on `/v1/moderations`; the `X-Cache-Similarity` header
+  on a semantic hit; `/v1/models` skipping a provider that fails to
+  resolve; the startup warning when dynamic keys are enabled without a
+  cache; and the backstop output re-scan catching a secret cached before
+  redaction was switched on. `rekai/main.py` coverage: 97% → 99% (the
+  remaining misses are a mid-chunk disconnect, the metrics flush loop, and
+  the inner Content-Length advisory — all unreachable through a normal
+  client).
+- **Per-field stream redaction and RedisCache success-path coverage** —
+  the split-across-deltas secret test now runs on `thinking_delta`,
+  `refusal_delta`, and verbatim `extra_block_delta` fields, not only
+  `delta` (each field has its own incremental redactor); and the
+  RedisCache success path (bytes→str decode, the atomic `nx` claim, and
+  never-degrading while Redis answers) is pinned alongside the existing
+  fail-open tests.
+- **Dependabot coverage for the real dependency ecosystems** — the config
+  only watched `github-actions`; `pip` (`apps/api`, `packages/python-sdk`)
+  and `npm` (`apps/web`) now get weekly update PRs too, direct dependencies
+  only. Also drops the inert `automerge` key (not a dependabot option).
+- **Playwright specs for the Models and Embeddings pages** — the two merged
+  playgrounds had no e2e coverage: catalog grouping by provider + the
+  chat/embedding type filter, and the three-line embed run (vector count,
+  dimensions, provider, pairwise similarity), all against the keyless `echo`
+  provider.
 - **Usage page "Usage by model" section** — the per-model breakdown added to
   `/v1/usage` now renders in the web app's Usage page (requests / tokens /
   cost per model, sorted by requests), between the provider bars and the
