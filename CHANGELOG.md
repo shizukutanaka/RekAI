@@ -7,6 +7,26 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`trace=` in the text access-log line** — the structured `extra` has
+  carried `trace_id` for JSON logging all along, and the response sends
+  `traceparent`, but the human-readable line only had `id=`, so a text-mode
+  log couldn't be grepped by an incoming trace id. Same line, one field.
+- **Status-classified SDK error classes in both SDKs** — the OpenAI-SDK
+  taxonomy as `RekAIError` subclasses: `AuthenticationError` (401),
+  `PermissionDeniedError` (403), `NotFoundError` (404), `ConflictError` (409),
+  `UnprocessableEntityError` (422), `RateLimitError` (429),
+  `InternalServerError` (5xx), `APITimeoutError`, and `APIConnectionError`.
+  Transport failures (dead server, timeout) used to escape `except
+  RekAIError`/`instanceof RekAIError` entirely — they are now wrapped, with
+  the original error chained.
+- **`/metrics` exposes per-client *windowed* usage gauges** —
+  `rekai_client_budget_window_used_usd{client}` and
+  `rekai_client_token_window_used_tokens{client}` report spend/tokens
+  accumulated so far in the current budget/token window, so a scrape can
+  alert on a window filling up before the 402/429 fires (the lifetime
+  counters only reveal it afterwards). Emitted only when the matching window
+  is configured, only for live-window entries, and only in the authenticated
+  per-client section alongside the other `rekai_client_*` series.
 - **`REKAI_TRUSTED_PROXIES` — real client IP behind a reverse proxy.** Without
   it, every request arriving through a proxy or load balancer shares one
   rate-limit/budget bucket under the proxy's own address (Render's managed LB

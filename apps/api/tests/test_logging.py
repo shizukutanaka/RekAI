@@ -72,6 +72,21 @@ def test_access_log_carries_gen_ai_attributes(client, caplog) -> None:
     assert getattr(rec, "gen_ai.usage.output_tokens") > 0
 
 
+def test_access_log_message_carries_trace_id(client, caplog) -> None:
+    """The text log line can be grepped by the traceparent's trace id —
+    the structured extra has carried it for JSON mode all along."""
+    with caplog.at_level(logging.INFO, logger="rekai.access"):
+        resp = client.post(
+            "/v1/chat",
+            json={"model": "echo", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"},
+        )
+    rec = next(r for r in caplog.records if r.name == "rekai.access")
+    assert rec.trace_id == "4bf92f3577b34da6a3ce929d0e0e4736"
+    assert f"trace={rec.trace_id}" in rec.getMessage()
+    assert rec.trace_id in resp.headers["traceparent"]
+
+
 def test_access_log_gen_ai_operation_for_embeddings(client, caplog) -> None:
     with caplog.at_level(logging.INFO, logger="rekai.access"):
         client.post("/v1/embeddings", json={"model": "echo", "input": "hello"})

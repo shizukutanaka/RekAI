@@ -1124,12 +1124,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if request.url.path.startswith(("/v1/", "/admin/", "/metrics")):
             response.headers.setdefault("Cache-Control", "no-store")
         access_logger.info(
-            "%s %s -> %s %.1fms id=%s",
+            "%s %s -> %s %.1fms id=%s trace=%s",
             request.method,
             request.url.path,
             response.status_code,
             elapsed_ms,
             request_id,
+            trace_id,
             extra={
                 "method": request.method,
                 "path": request.url.path,
