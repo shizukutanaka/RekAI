@@ -75,6 +75,13 @@ def test_settings_pricing_override_dict_skips_malformed_entries() -> None:
     assert settings.pricing_override_dict == {"ok-model": (0.1, 0.2)}
 
 
+def test_settings_pricing_override_dict_skips_non_finite_prices() -> None:
+    # NaN/inf prices would poison every downstream cost metric the estimate
+    # feeds (totals, budget windows), not just misprice one model.
+    settings = Settings(pricing_overrides="bad:nan:inf, also-bad:1.0:inf, ok:0.1:0.2")
+    assert settings.pricing_override_dict == {"ok": (0.1, 0.2)}
+
+
 def test_settings_pricing_override_dict_empty_by_default() -> None:
     assert Settings().pricing_override_dict == {}
 
