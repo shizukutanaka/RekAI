@@ -48,6 +48,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Gemini provider spliced the model id into the upstream URL unvalidated** —
+  `model` containing `/`, `?`, `&`, `%`, or `..` could traverse or inject into
+  the request path (e.g. escape `/models/` onto a different endpoint on the
+  Google host while still carrying the operator's API key). The id is now
+  validated against the real Gemini charset before the URL is built; invalid
+  ids get a 400. The qualified `models/<id>` form is also normalized on all
+  three call paths (chat/stream previously produced `models/models/<id>`).
 - **Input scans read only `content` while providers forward the whole
   message** — `REKAI_INPUT_SECRETS_ENABLED` and the prompt-injection
   guardrail collected text from `ChatMessage.content` alone, but the
