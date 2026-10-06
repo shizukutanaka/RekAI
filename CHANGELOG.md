@@ -63,6 +63,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `POST /v1/messages` streaming path — the only surface that ran the
   injection guardrail but skipped the credential check, so the same body
   blocked non-stream sailed through with `stream: true`.
+- **Non-finite amounts in env config slipped through as valid limits** —
+  `REKAI_CLIENT_BUDGETS_USD` and `REKAI_PRICING_OVERRIDES` parsed `nan`/`inf`
+  fine via `float()`: a NaN budget fails every `>=` comparison so the cap
+  silently never trips, and NaN/inf prices poison every cost metric the
+  estimate feeds (totals, budget windows). Non-finite values now skip like
+  the other malformed entries.
 - **Windowed token limit never filled on streamed calls** —
   `REKAI_CLIENT_TOKEN_LIMIT` with `REKAI_CLIENT_TOKEN_LIMIT_WINDOW_SECONDS`
   reads a windowed bucket that only the non-stream path updated, so a client
