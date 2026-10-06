@@ -71,6 +71,27 @@ async def test_chat_parses_response(monkeypatch) -> None:
     assert "anthropic-version" in captured["headers"]
 
 
+async def test_headers_reject_non_ascii_request_fields() -> None:
+    # user_profile_id and anthropic_beta are spliced into upstream headers;
+    # a JSON body can carry anything (non-ASCII crashed httpx's encoding,
+    # control bytes failed httpcore's wire check mid-call).
+    provider = AnthropicProvider()
+    for bad in ("日本語", "prof\nle", "prof\x00ile"):
+        try:
+            provider._headers("sk-ant-test", _req(user_profile_id=bad))
+        except ProviderError as exc:
+            assert exc.status_code == 400
+        else:
+            raise AssertionError(f"user_profile_id={bad!r} should have been rejected")
+    for bad in ("fast\x80", "fast\nbeta"):
+        try:
+            provider._headers("sk-ant-test", _req(anthropic_beta=bad))
+        except ProviderError as exc:
+            assert exc.status_code == 400
+        else:
+            raise AssertionError(f"anthropic_beta={bad!r} should have been rejected")
+
+
 async def test_chat_propagates_http_error(monkeypatch) -> None:
     class FakeResponse:
         status_code = 400
