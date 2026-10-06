@@ -284,13 +284,14 @@ def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
         return response
     hits: list[str] = []
     updates: dict[str, Any] = {}
+    extra = [(n, p) for n, _, p in settings.custom_secret_patterns]
     if response.content:
-        scrubbed, found = guardrails.redact_secrets(response.content)
+        scrubbed, found = guardrails.redact_secrets(response.content, extra)
         if found:
             updates["content"] = scrubbed
             hits += found
     if response.refusal:
-        scrubbed, found = guardrails.redact_secrets(response.refusal)
+        scrubbed, found = guardrails.redact_secrets(response.refusal, extra)
         if found:
             updates["refusal"] = scrubbed
             hits += found
@@ -302,7 +303,7 @@ def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
         for block in response.thinking_blocks:
             text = block.get("thinking") if block.get("type") == "thinking" else None
             if isinstance(text, str):
-                scrubbed, found = guardrails.redact_secrets(text)
+                scrubbed, found = guardrails.redact_secrets(text, extra)
                 if found:
                     block = {**block, "thinking": scrubbed}
                     hits += found
@@ -318,7 +319,7 @@ def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
         for citation in response.citations:
             text = citation.get("cited_text")
             if isinstance(text, str):
-                scrubbed, found = guardrails.redact_secrets(text)
+                scrubbed, found = guardrails.redact_secrets(text, extra)
                 if found:
                     citation = {**citation, "cited_text": scrubbed}
                     hits += found
@@ -332,12 +333,12 @@ def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
     # they are crypto blobs whose integrity Anthropic verifies on echo, not
     # human-readable text.
     if response.extra_blocks:
-        scrubbed_blocks, found = _scrub_block_strings(response.extra_blocks)
+        scrubbed_blocks, found = _scrub_block_strings(response.extra_blocks, extra)
         if found:
             updates["extra_blocks"] = scrubbed_blocks
             hits += found
     if response.content_blocks:
-        scrubbed_blocks, found = _scrub_block_strings(response.content_blocks)
+        scrubbed_blocks, found = _scrub_block_strings(response.content_blocks, extra)
         if found:
             updates["content_blocks"] = scrubbed_blocks
             hits += found
@@ -347,7 +348,9 @@ def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
     return response.model_copy(update=updates)
 
 
-def _scrub_block_strings(value: Any) -> tuple[Any, list[str]]:
+def _scrub_block_strings(
+    value: Any, extra: guardrails.SecretPatterns | None = None
+) -> tuple[Any, list[str]]:
     """Recursively redact secrets from every string leaf inside a block.
 
     ``signature`` keys are skipped: they are integrity blobs Anthropic
@@ -360,7 +363,7 @@ def _scrub_block_strings(value: Any) -> tuple[Any, list[str]]:
         if isinstance(node, list):
             return [walk(v) for v in node]
         if isinstance(node, str):
-            scrubbed, found = guardrails.redact_secrets(node)
+            scrubbed, found = guardrails.redact_secrets(node, extra)
             if found:
                 hits.extend(found)
             return scrubbed
@@ -369,15 +372,36 @@ def _scrub_block_strings(value: Any) -> tuple[Any, list[str]]:
     return walk(value), hits
 
 
-def _scrub_if(value: Any, enabled: bool, hits: list[str] | None = None) -> Any:
+def _scrub_if(
+    value: Any,
+    enabled: bool,
+    hits: list[str] | None = None,
+    extra: guardrails.SecretPatterns | None = None,
+) -> Any:
     """Verbatim pass-through, or the recursively secret-scrubbed copy when
     output redaction is on. Redacted pattern names append to ``hits``."""
     if not enabled:
         return value
-    scrubbed, found = _scrub_block_strings(value)
+    scrubbed, found = _scrub_block_strings(value, extra)
     if hits is not None:
         hits.extend(found)
     return scrubbed
+
+
+# Operator-defined patterns (REKAI_SECRET_PATTERNS) get one shared hold span:
+# the env format declares no span of its own, and 512 chars comfortably covers
+# a real credential without stalling the stream as long as a PEM block can.
+_CUSTOM_SENTINEL_SPAN = 512
+
+
+def _redactor_for(
+    custom: list[tuple[str, str, Any]],
+) -> guardrails.StreamRedactor:
+    """A StreamRedactor that also honors operator-defined secret formats."""
+    return guardrails.StreamRedactor(
+        extra_patterns=[(n, p) for n, _, p in custom],
+        extra_sentinels=tuple((s, _CUSTOM_SENTINEL_SPAN) for _, s, _ in custom),
+    )
 
 
 def _scrub_extra_delta(
@@ -386,6 +410,7 @@ def _scrub_extra_delta(
     shapes: dict[str, str],
     hits: list[str],
     enabled: bool,
+    custom: list[tuple[str, str, Any]] | None = None,
 ) -> Any:
     """Scrub one streamed extra-block delta through per-field redactors.
 
@@ -399,17 +424,18 @@ def _scrub_extra_delta(
     (a citation dict, say) arrives whole inside a single delta and scrubs
     per-frame.
     """
+    extra = [(n, p) for n, _, p in (custom or [])]
     if not enabled or not isinstance(delta, dict):
-        return _scrub_if(delta, enabled, hits)
+        return _scrub_if(delta, enabled, hits, extra)
     out = dict(delta)
     for key, value in delta.items():
         if key in ("type", "signature"):
             continue
         if isinstance(value, str):
             shapes[key] = str(delta.get("type") or "")
-            out[key] = redactors.setdefault(key, guardrails.StreamRedactor()).feed(value)
+            out[key] = redactors.setdefault(key, _redactor_for(custom or [])).feed(value)
         else:
-            out[key] = _scrub_if(value, enabled, hits)
+            out[key] = _scrub_if(value, enabled, hits, extra)
     return out
 
 
@@ -887,10 +913,11 @@ async def _handle_chat_stream(
     # Output redaction applies here too, incrementally (see StreamRedactor).
     # It holds back a few characters of every delta, so it is only constructed
     # when actually enabled.
-    redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
-    thinking_redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
-    citation_redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
-    refusal_redactor = guardrails.StreamRedactor() if settings.output_redaction_enabled else None
+    custom = settings.custom_secret_patterns if settings.output_redaction_enabled else []
+    redactor = _redactor_for(custom) if settings.output_redaction_enabled else None
+    thinking_redactor = _redactor_for(custom) if settings.output_redaction_enabled else None
+    citation_redactor = _redactor_for(custom) if settings.output_redaction_enabled else None
+    refusal_redactor = _redactor_for(custom) if settings.output_redaction_enabled else None
     redaction_on = settings.output_redaction_enabled
     # Each open extra block gets incremental redactors per payload field — a
     # secret split across that block's deltas must still be caught, and each
@@ -1000,7 +1027,12 @@ async def _handle_chat_stream(
                 # verbatim — but their free text (search results, tool inputs)
                 # still gets the same secret scrub as the answer.
                 yield ChatStreamEvent(
-                    extra_block_start=_scrub_if(event.extra_block_start, redaction_on, extra_hits)
+                    extra_block_start=_scrub_if(
+                        event.extra_block_start,
+                        redaction_on,
+                        extra_hits,
+                        [(n, p) for n, _, p in custom],
+                    )
                 )
                 # Fresh incremental redactors per block — each delta field is
                 # one logical string chunked across frames.
@@ -1014,6 +1046,7 @@ async def _handle_chat_stream(
                         extra_delta_shapes,
                         extra_hits,
                         redaction_on,
+                        custom,
                     )
                 )
             if event.extra_block is not None:
@@ -1027,11 +1060,21 @@ async def _handle_chat_stream(
                 extra_redactors.clear()
                 extra_delta_shapes.clear()
                 yield ChatStreamEvent(
-                    extra_block=_scrub_if(event.extra_block, redaction_on, extra_hits)
+                    extra_block=_scrub_if(
+                        event.extra_block,
+                        redaction_on,
+                        extra_hits,
+                        [(n, p) for n, _, p in custom],
+                    )
                 )
             if event.extra_fields is not None:
                 yield ChatStreamEvent(
-                    extra_fields=_scrub_if(event.extra_fields, redaction_on, extra_hits)
+                    extra_fields=_scrub_if(
+                        event.extra_fields,
+                        redaction_on,
+                        extra_hits,
+                        [(n, p) for n, _, p in custom],
+                    )
                 )
             if event.usage is not None:
                 reported_usage = event.usage

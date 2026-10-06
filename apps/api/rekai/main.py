@@ -473,7 +473,11 @@ def _input_secrets_response(
     a user pasting ``sk-…`` into a chat prompt otherwise ships that key to the
     provider. Honors ``guardrails_action`` — flag sets ``X-Input-Secrets-Flag``,
     block returns 403 before any provider call."""
-    hits = guardrails.scan_texts_for_secrets(texts, settings.input_secrets_enabled)
+    hits = guardrails.scan_texts_for_secrets(
+        texts,
+        settings.input_secrets_enabled,
+        [(n, p) for n, _, p in settings.custom_secret_patterns],
+    )
     if not hits:
         return None
     if settings.guardrails_action == "block":
@@ -611,7 +615,10 @@ def _redact_output(result: ChatResponse, settings: Settings, response: Response)
     TTL outlived the config change). It is a no-op on already-scrubbed text."""
     hits = list(result.redacted or [])
     if settings.output_redaction_enabled and result.content:
-        scrubbed, late_hits = guardrails.redact_secrets(result.content)
+        scrubbed, late_hits = guardrails.redact_secrets(
+            result.content,
+            [(n, p) for n, _, p in settings.custom_secret_patterns],
+        )
         if late_hits:
             result = result.model_copy(update={"content": scrubbed})
             hits += [h for h in late_hits if h not in hits]
