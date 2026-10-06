@@ -136,3 +136,18 @@ def test_request_id_present_on_errors(client: TestClient) -> None:
     )
     assert resp.status_code == 400
     assert "X-Request-ID" in resp.headers
+
+
+def test_non_finite_float_body_gets_a_422_not_a_500(client: TestClient) -> None:
+    # Python's json accepts NaN/Infinity; pydantic correctly rejects the value,
+    # but the offending input rides inside the error detail — the stock handler
+    # crashed serializing it and the caller got a bare 500 instead of this 422.
+    resp = client.post(
+        "/v1/chat",
+        content=b'{"model":"echo","messages":[{"role":"user","content":"hi"}],"temperature":NaN}',
+        headers={"content-type": "application/json"},
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert detail[0]["loc"] == ["body", "temperature"]
+    assert detail[0]["input"] == "nan"
