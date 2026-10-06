@@ -55,6 +55,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`idempotency_key` / `idempotencyKey`), mirroring `chat()`. The JS type
   declarations also gained `idempotencyKey`, which was implemented and
   documented for `chat()` but never declared.
+- **Windowed token limit never filled on streamed calls** —
+  `REKAI_CLIENT_TOKEN_LIMIT` with `REKAI_CLIENT_TOKEN_LIMIT_WINDOW_SECONDS`
+  reads a windowed bucket that only the non-stream path updated, so a client
+  could stream indefinitely without ever counting against the cap (the
+  lifetime variant and the USD budget already recorded on streams). The
+  stream summary path now calls `record_client_token_usage` with the settled
+  usage — real upstream counts when reported, the same estimate the rest of
+  the stream accounting uses otherwise.
 - **`apps/api/README.md` endpoint table listed 13 of 17 routes** — added the
   four shipped-but-undocumented ones: `GET /v1/models/{model_id}`,
   `POST /v1/messages`, `POST /v1/messages/count_tokens`,
