@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator
 
 import httpx
@@ -34,6 +35,22 @@ _GEMINI_FINISH_REASONS: dict[str, FinishReason] = {
     "SPII": "content_filter",
     "IMAGE_SAFETY": "content_filter",
 }
+
+
+# Model ids are spliced into the upstream URL path below, so one containing
+# "/", "?", "#", "&", "%", or ".." could traverse or inject into it — e.g.
+# escape /models/ onto another endpoint on the same Google host, still
+# carrying the operator's API key. Real Gemini ids only use [A-Za-z0-9._-]
+# (plus the optional "models/" resource prefix the embed path accepts), so
+# anything else is rejected before the URL is built.
+_GEMINI_ID = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def _safe_model_id(model: str) -> str:
+    bare = model.removeprefix("models/")
+    if not _GEMINI_ID.fullmatch(bare):
+        raise ProviderError(f"invalid Gemini model id: {model!r}", status_code=400)
+    return bare
 
 
 def _finish_reason(chunk: dict, tool_calls: list[dict] | None = None) -> FinishReason | None:
@@ -117,7 +134,10 @@ class GeminiProvider(Provider):
         settings = current_settings()
         key = self._resolve_key(api_key)
         payload = self._build_payload(request)
-        url = f"{settings.gemini_base_url.rstrip('/')}/models/{request.model}:generateContent"
+        url = (
+            f"{settings.gemini_base_url.rstrip('/')}/models/"
+            f"{_safe_model_id(request.model)}:generateContent"
+        )
         try:
             client = self._client(settings.request_timeout_seconds)
             resp = await client.post(
@@ -164,7 +184,7 @@ class GeminiProvider(Provider):
         settings = current_settings()
         key = self._resolve_key(api_key)
         # Gemini wants the fully-qualified model name in each request.
-        qualified = model if model.startswith("models/") else f"models/{model}"
+        qualified = f"models/{_safe_model_id(model)}"
         per_request: dict = {"model": qualified}
         # Gemini's name for output sizing; encoding_format is OpenAI-only.
         if dimensions is not None:
@@ -199,7 +219,7 @@ class GeminiProvider(Provider):
         payload = self._build_payload(request)
         url = (
             f"{settings.gemini_base_url.rstrip('/')}/models/"
-            f"{request.model}:streamGenerateContent?alt=sse"
+            f"{_safe_model_id(request.model)}:streamGenerateContent?alt=sse"
         )
         last_usage: dict | None = None
         finish_reason: FinishReason | None = None
