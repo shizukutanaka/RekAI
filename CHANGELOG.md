@@ -48,6 +48,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Idempotency store failures were silent** — every other Redis-backed
+  subsystem (cache, rate limiter, metrics store, key store) warns when it
+  fails open, but `idempotency` logged nothing. A transient backend error
+  during `complete`/`release` left an `in_progress` sentinel that 409s
+  same-key retries until TTL with no log attribution, and a failed `claim`
+  quietly dropped replay protection (re-processing a retried request). Each
+  fail-open path now warns with the operation and consequence.
 - **SDK `embeddings()` auto-retries could double-bill** — `/v1/embeddings`
   honors `Idempotency-Key` like `/v1/chat`, but neither SDK sent it, so a
   retried embeddings request re-ran the upstream call and charged twice. Both
