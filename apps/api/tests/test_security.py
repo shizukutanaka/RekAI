@@ -409,6 +409,35 @@ def test_client_token_limit_window_enforces_cap_within_window(monkeypatch) -> No
         main_module.metrics.seed({})
 
 
+def test_client_token_limit_window_records_streamed_calls(monkeypatch) -> None:
+    """The windowed token bucket must fill on streams too — previously only
+    the non-stream path recorded it, so streamed calls never counted against
+    REKAI_CLIENT_TOKEN_LIMIT."""
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys="sk-tokens-s",
+        rate_limit_enabled=False,
+        client_token_limit=500,
+        client_token_limit_window_seconds=100,
+    )
+    client = TestClient(create_app(settings))
+    try:
+        monkeypatch.setattr(main_module.time, "time", lambda: 1000.0)
+        resp = client.post(
+            "/v1/chat/stream",
+            json={"model": "echo", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer sk-tokens-s"},
+        )
+        assert resp.status_code == 200
+        used = main_module.metrics.client_window_tokens(
+            client_id("sk-tokens-s"), window_seconds=100, now=1000.0
+        )
+        assert used > 0
+    finally:
+        main_module.metrics.seed({})
+
+
 def test_client_budget_window_seconds_resets_after_rollover(monkeypatch) -> None:
     settings = Settings(
         environment="test",
