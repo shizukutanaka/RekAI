@@ -61,6 +61,13 @@ _LOCK_TTL_SECONDS = 10
 _LOCK_RETRY_DELAY_SECONDS = 0.05
 _LOCK_MAX_ATTEMPTS = 40  # ~2s worst case under contention
 
+# The whole key set lives in one blob that ``_load`` re-reads on every
+# authenticated request, so its size taxes every call. Same bounded-structure
+# invariant as ``Metrics.max_tracked_clients`` and
+# ``RateLimiter.max_buckets``: a mistaken bulk-add script (or a compromised
+# admin credential) shouldn't be able to grow it without limit.
+_MAX_DYNAMIC_KEYS = 10_000
+
 T = TypeVar("T")
 
 
@@ -167,21 +174,39 @@ class DynamicKeyStore:
             await asyncio.sleep(_LOCK_RETRY_DELAY_SECONDS)
         return await mutate()
 
-    async def add(self, key: str, expires_at: float | None = None) -> None:
-        async def _mutate() -> None:
-            keys = await self._load()
-            keys[key] = expires_at
-            await self._save(keys)
+    async def add(self, key: str, expires_at: float | None = None) -> bool:
+        """Store ``key``; returns False (nothing written) when the set is full."""
 
-        await self._with_lock(_mutate)
+        async def _mutate() -> bool:
+            keys = await self._load()
+            # Prune entries that were already expired before this write —
+            # _load keeps them (so revoke can report "found" on an expired
+            # key) and this write is the only place they're ever dropped;
+            # otherwise the blob would accumulate dead keys forever. A key
+            # added already-expired still persists for one cycle, so a
+            # revoke before the next write reports "found" as documented.
+            now = time.time()
+            live = {k: v for k, v in keys.items() if v is None or v > now}
+            # Re-adding an existing key (live or expired) refreshes it rather
+            # than consuming a new slot, so the cap counts only new keys.
+            if key not in keys and len(live) >= _MAX_DYNAMIC_KEYS:
+                return False
+            live[key] = expires_at
+            await self._save(live)
+            return True
+
+        return await self._with_lock(_mutate)
 
     async def revoke(self, key: str) -> bool:
         async def _mutate() -> bool:
             keys = await self._load()
             if key not in keys:
                 return False
-            del keys[key]
-            await self._save(keys)
+            # Same prune as add(): drop every other dead entry while writing.
+            now = time.time()
+            live = {k: v for k, v in keys.items() if v is None or v > now}
+            live.pop(key, None)  # absent from live when the key was expired
+            await self._save(live)
             return True
 
         return await self._with_lock(_mutate)
