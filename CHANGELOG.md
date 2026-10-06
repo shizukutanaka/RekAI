@@ -55,6 +55,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`idempotency_key` / `idempotencyKey`), mirroring `chat()`. The JS type
   declarations also gained `idempotencyKey`, which was implemented and
   documented for `chat()` but never declared.
+- **A client disconnecting mid-stream could stream indefinitely for free** —
+  the summary yield carried all usage accounting, so an aborted stream's
+  already-generated tokens never reached `usage_by_*`, the budget window, or
+  the `REKAI_CLIENT_TOKEN_LIMIT` bucket. The stream now records the estimated
+  usage (prompt + streamed completion so far) when it is closed early, and
+  the provider's upstream HTTP stream is closed deterministically on abort
+  instead of waiting on asyncgen GC finalization.
 - **`POST /v1/moderations` couldn't dedupe a retried request** — every other
   mutating POST (`/v1/chat`, `/v1/embeddings`, `/v1/chat/completions`,
   `/v1/messages`) accepts `Idempotency-Key`, but moderations ignored it, so an
