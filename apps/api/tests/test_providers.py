@@ -1,10 +1,51 @@
 import httpx
 
 from rekai.providers import get_provider, provider_names, register_provider
-from rekai.providers.base import Provider, ProviderResult, parse_retry_after, provider_http_error
+from rekai.providers.anthropic import AnthropicProvider
+from rekai.providers.base import (
+    Provider,
+    ProviderError,
+    ProviderResult,
+    check_header_safe,
+    parse_retry_after,
+    provider_http_error,
+)
 from rekai.providers.echo import EchoProvider
+from rekai.providers.gemini import GeminiProvider
 from rekai.providers.openai import OpenAIProvider
 from rekai.schemas import ChatMessage, ChatRequest, Usage
+
+
+def test_check_header_safe_accepts_printable_ascii() -> None:
+    check_header_safe("x", "sk-ant-api03:AbC_123-tilde~")
+    check_header_safe("x", "")  # empty stays allowed — only illegal chars are rejected
+
+
+def test_check_header_safe_rejects_non_header_chars() -> None:
+    # Non-ASCII (obs-text from an inbound header, anything from a JSON body)
+    # raises UnicodeEncodeError inside httpx; control bytes fail httpcore's
+    # wire check — both used to surface as an opaque mid-call failure.
+    for bad in ("日本語", "sk-\x80", "a\nb", "a\rb", "a\x00b", "a\x7fb", "a\tb"):
+        try:
+            check_header_safe("X-Provider-Key", bad)
+        except ProviderError as exc:
+            assert exc.status_code == 400
+            assert "X-Provider-Key" in str(exc)
+            assert bad not in str(exc)  # never echo the value — it may be a credential
+        else:
+            raise AssertionError(f"{bad!r} should have been rejected")
+
+
+def test_resolved_keys_are_header_safe() -> None:
+    # BYOK keys ride in Authorization/x-api-key/x-goog-api-key; obs-text can
+    # arrive inside an inbound header, so resolution rejects non-ASCII early.
+    for provider in (OpenAIProvider(), AnthropicProvider(), GeminiProvider()):
+        try:
+            provider._resolve_key("sk-\x80bad")
+        except ProviderError as exc:
+            assert exc.status_code == 400
+        else:
+            raise AssertionError(f"{provider.name}: non-ASCII key should have been rejected")
 
 
 def test_parse_retry_after() -> None:
