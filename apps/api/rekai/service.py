@@ -6,7 +6,7 @@ import asyncio
 import json
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -839,16 +839,54 @@ async def handle_chat_stream(
     provider_name: str,
     provider: Provider,
     client_id: str,
-) -> AsyncIterator[ChatStreamEvent]:
+) -> AsyncGenerator[ChatStreamEvent, None]:
     # Same request-scoped Settings binding as handle_chat (O-1).
     token = bind_current_settings(settings)
+    inner = _handle_chat_stream(
+        request, api_key, settings, cache, provider_name, provider, client_id
+    )
     try:
-        async for event in _handle_chat_stream(
-            request, api_key, settings, cache, provider_name, provider, client_id
-        ):
+        async for event in inner:
             yield event
     finally:
+        # `async for` never closes its iterator on early exit — without this,
+        # the inner generator's cleanup (abort accounting, upstream release)
+        # would wait on asyncgen GC finalization instead of running now.
+        await inner.aclose()
         reset_current_settings(token)
+
+
+def _record_stream_accounting(
+    settings: Settings,
+    client_id: str,
+    provider_name: str,
+    model: str,
+    user: str | None,
+    usage: Usage,
+) -> float | None:
+    """Attribute stream usage and cost to every accounting dimension; returns
+    the USD cost. Shared by the summary and mid-stream-abort paths so a client
+    disconnect fills the same buckets a completed stream does."""
+    cost_usd = estimate_cost(provider_name, model, usage, settings.pricing_override_dict)
+    metrics.record_tokens(usage.total_tokens, provider_name)
+    metrics.record_cost(cost_usd)
+    metrics.record_model_usage(model, usage.total_tokens, cost_usd)
+    metrics.record_client_usage(client_id, usage.total_tokens, cost_usd)
+    metrics.record_user_usage(client_id, user, usage.total_tokens, cost_usd)
+    if settings.client_budget_window_seconds is not None:
+        metrics.record_client_budget_usage(
+            client_id, cost_usd, settings.client_budget_window_seconds, time.time()
+        )
+    if settings.client_token_limit_window_seconds is not None:
+        # The middleware cap reads this windowed bucket — it must fill on
+        # streams too or streamed calls never count against the token cap.
+        metrics.record_client_token_usage(
+            client_id,
+            usage.total_tokens,
+            settings.client_token_limit_window_seconds,
+            time.time(),
+        )
+    return cost_usd
 
 
 async def _handle_chat_stream(
@@ -859,7 +897,7 @@ async def _handle_chat_stream(
     provider_name: str,
     provider: Provider,
     client_id: str,
-) -> AsyncIterator[ChatStreamEvent]:
+) -> AsyncGenerator[ChatStreamEvent, None]:
     """Drive a streaming completion through one provider, yielding typed events.
 
     Emits text ``delta`` events as they arrive, then exactly one terminal event:
@@ -883,6 +921,7 @@ async def _handle_chat_stream(
     reported_refusal: list[str] = []
     reported_annotations: list[dict] = []
     errored = False
+    finished = False
     started = time.perf_counter()
     first_token_at: float | None = None
     # Output redaction applies here too, incrementally (see StreamRedactor).
@@ -901,10 +940,11 @@ async def _handle_chat_stream(
     extra_redactors: dict[str, guardrails.StreamRedactor] = {}
     extra_delta_shapes: dict[str, str] = {}
     extra_hits: list[str] = []
+    stream = provider.stream_events(request, api_key)
     try:
         seen_fingerprint: str | None = None
         seen_tier: str | None = None
-        async for event in provider.stream_events(request, api_key):
+        async for event in stream:
             if event.system_fingerprint is not None:
                 seen_fingerprint = event.system_fingerprint
             if event.service_tier is not None:
@@ -1059,6 +1099,7 @@ async def _handle_chat_stream(
             # held-back tails in their last-seen delta shapes.
             for tail_event in _extra_tail_events(extra_redactors, extra_delta_shapes, extra_hits):
                 yield tail_event
+        finished = True
     except ProviderError as exc:
         errored = True
         metrics.record_error("provider_error")
@@ -1083,6 +1124,31 @@ async def _handle_chat_stream(
                 # Start the next streak fresh (see ConsecutiveFailureTracker.reset).
                 consecutive_failures.reset(provider_name)
         yield ChatStreamEvent(error=exc)
+    finally:
+        if not finished and not errored and (completion or reported_refusal):
+            # The generator was closed mid-stream (client disconnect or
+            # cancellation): no summary was emitted, but the provider already
+            # generated `completion`, so the usage is still billable. Without
+            # this, repeated aborts would stream indefinitely without ever
+            # filling the client's budget/token windows.
+            prompt_tokens = sum(estimate_tokens(m.content or "") for m in request.messages)
+            completion_tokens = estimate_tokens("".join(completion) + "".join(reported_refusal))
+            _record_stream_accounting(
+                settings,
+                client_id,
+                provider_name,
+                request.model,
+                request.user,
+                Usage(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=prompt_tokens + completion_tokens,
+                ),
+            )
+        # `async for` doesn't close the upstream generator on early exit —
+        # aclose it deterministically so the provider's HTTP stream is released
+        # on a client disconnect rather than on asyncgen GC timing.
+        await stream.aclose()  # type: ignore[attr-defined]
 
     if not errored:
         metrics.observe_provider_duration(provider_name, "stream", time.perf_counter() - started)
@@ -1098,27 +1164,9 @@ async def _handle_chat_stream(
                 completion_tokens=completion_tokens,
                 total_tokens=prompt_tokens + completion_tokens,
             )
-        cost_usd = estimate_cost(
-            provider_name, request.model, usage, settings.pricing_override_dict
+        cost_usd = _record_stream_accounting(
+            settings, client_id, provider_name, request.model, request.user, usage
         )
-        metrics.record_tokens(usage.total_tokens, provider_name)
-        metrics.record_cost(cost_usd)
-        metrics.record_model_usage(request.model, usage.total_tokens, cost_usd)
-        metrics.record_client_usage(client_id, usage.total_tokens, cost_usd)
-        metrics.record_user_usage(client_id, request.user, usage.total_tokens, cost_usd)
-        if settings.client_budget_window_seconds is not None:
-            metrics.record_client_budget_usage(
-                client_id, cost_usd, settings.client_budget_window_seconds, time.time()
-            )
-        if settings.client_token_limit_window_seconds is not None:
-            # The middleware cap reads this windowed bucket — it must fill on
-            # streams too or streamed calls never count against the token cap.
-            metrics.record_client_token_usage(
-                client_id,
-                usage.total_tokens,
-                settings.client_token_limit_window_seconds,
-                time.time(),
-            )
         tool_call_hits: list[str] = []
         if redaction_on and reported_tool_calls is not None:
             # Arguments arrive assembled in the last event — one whole-string

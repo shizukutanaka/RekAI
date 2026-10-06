@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
@@ -71,6 +72,29 @@ def parse_retry_after(headers: Mapping[str, str]) -> float | None:
     except ValueError:
         return None
     return seconds if seconds >= 0 else None
+
+
+# HTTP header values must be printable ASCII (optionally HTAB/obs-text on
+# the wire, but httpx encodes them as ASCII and httpcore rejects control
+# bytes at write time). Client-controlled strings spliced into upstream
+# headers — BYOK keys, forwarded compat headers, Anthropic's profile-id —
+# can carry characters outside this range (obs-text via an inbound header,
+# anything via a JSON body field) and must be rejected up front: a non-ASCII
+# value raises UnicodeEncodeError at request build (an unhandled 500), and
+# \x00-\x1f/\x7f fails mid-call as a LocalProtocolError.
+_HEADER_VALUE = re.compile(r"[\x20-\x7e]*")
+
+
+def check_header_safe(name: str, value: str) -> None:
+    """Reject a client-controlled string that can't ride in an upstream header.
+
+    ``name`` identifies the source (a header or field name), never the value —
+    the value may be a credential."""
+    if not _HEADER_VALUE.fullmatch(value):
+        raise ProviderError(
+            f"invalid character in {name}: must be printable ASCII to send as an upstream header",
+            status_code=400,
+        )
 
 
 def provider_http_error(
