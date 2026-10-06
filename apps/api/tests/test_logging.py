@@ -4,8 +4,50 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 
-from rekai.logging_config import JsonFormatter, configure_logging
+from rekai.logging_config import _TEXT_FORMAT, JsonFormatter, TextFormatter, configure_logging
+
+
+def test_text_formatter_escapes_newlines_in_message() -> None:
+    # Client-controlled values (model ids, fallback provider names) reach log
+    # messages; a CR/LF inside them would otherwise forge extra log lines.
+    record = logging.LogRecord(
+        name="rekai.service",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="chat ok model=%s",
+        args=("echo\nINFO forged",),
+        exc_info=None,
+    )
+    line = TextFormatter(_TEXT_FORMAT).format(record)
+    assert "\n" not in line
+    assert "echo\\nINFO forged" in line
+    # The record is restored so other handlers still see the original fields.
+    assert record.msg == "chat ok model=%s"
+    assert record.args == ("echo\nINFO forged",)
+
+
+def test_text_formatter_keeps_traceback_newlines() -> None:
+    try:
+        raise ValueError("boom")
+    except ValueError:
+        record = logging.LogRecord(
+            name="rekai.service",
+            level=logging.ERROR,
+            pathname=__file__,
+            lineno=1,
+            msg="failed\nmore",
+            args=(),
+            exc_info=True,
+        )
+        record.exc_info = sys.exc_info()
+    line = TextFormatter(_TEXT_FORMAT).format(record)
+    # The message newline is escaped but the traceback's real newlines survive.
+    assert "failed\\nmore" in line
+    assert "ValueError: boom" in line
+    assert line.count("\n") >= 3
 
 
 def test_json_formatter_emits_one_object() -> None:
