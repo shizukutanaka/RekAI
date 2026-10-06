@@ -516,6 +516,14 @@ def test_client_budget_overrides_skips_malformed_entries() -> None:
     assert settings.client_budget_overrides == {"sk-b": 1.0}
 
 
+def test_client_budget_overrides_skips_non_finite_amounts() -> None:
+    # float("nan")/inf parse fine but are not budgets: nan fails every `>=`
+    # comparison so the cap silently never trips, inf means "never" or
+    # "always" by accident.
+    settings = Settings(client_budgets_usd="sk-a:nan, sk-b:inf, sk-c:-inf, sk-ok:1.5")
+    assert settings.client_budget_overrides == {"sk-ok": 1.5}
+
+
 def test_key_model_allowlists_parses_key_glob_pairs() -> None:
     settings = Settings(key_models="sk-a:gpt-4o*;echo, sk-b:echo, junk-no-colon, :x")
     assert settings.key_model_allowlists == {
