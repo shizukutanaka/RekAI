@@ -321,9 +321,13 @@ export class RekAIClient {
     const payload = { input };
     if (opts.model != null) payload.model = opts.model;
     if (opts.provider != null) payload.provider = opts.provider;
+    // /v1/moderations honors Idempotency-Key like /v1/chat — generate one
+    // under retries so an auto-retried call can't run the upstream twice.
+    const idempotencyKey =
+      opts.idempotencyKey ?? (this.maxRetries > 0 ? randomIdempotencyKey() : undefined);
     const res = await this._send("/v1/moderations", {
       method: "POST",
-      headers: this._headers(opts.providerKey, opts.gatewayKey),
+      headers: this._headers(opts.providerKey, opts.gatewayKey, idempotencyKey),
       body: JSON.stringify(payload),
     });
     await this._raiseForStatus(res);
