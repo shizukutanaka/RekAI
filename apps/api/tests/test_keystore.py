@@ -7,6 +7,8 @@ import json
 import logging
 import time
 
+from fastapi.testclient import TestClient
+
 from rekai.cache import MemoryCache, NullCache
 from rekai.keystore import DynamicKeyStore
 from rekai.security import KeyCipher, generate_key
@@ -217,3 +219,59 @@ def test_dynamic_keys_without_cache_logs_a_warning(capsys) -> None:
         )
     )
     assert "REKAI_DYNAMIC_KEYS_ENABLED" in capsys.readouterr().out
+
+
+async def test_expired_keys_are_pruned_on_the_next_write() -> None:
+    # _load keeps expired entries (so revoke can report "found"), but the blob
+    # must not accumulate them forever: every write path prunes them.
+    cache = MemoryCache()
+    store = DynamicKeyStore(cache)
+    await store.add("sk-live", expires_at=None)
+    await store.add("sk-dead", expires_at=time.time() - 1)
+    await store.add("sk-new", expires_at=None)
+    stored = json.loads(await cache.get("rekai:api_keys:dynamic"))
+    assert sorted(stored) == ["sk-live", "sk-new"]
+
+
+async def test_add_is_refused_when_the_store_is_full(monkeypatch) -> None:
+    import rekai.keystore as keystore
+
+    monkeypatch.setattr(keystore, "_MAX_DYNAMIC_KEYS", 2)
+    store = DynamicKeyStore(MemoryCache())
+    assert await store.add("sk-a") is True
+    assert await store.add("sk-b") is True
+    assert await store.add("sk-c") is False
+    # Nothing was written for the refused key.
+    assert sorted(await store.list_keys()) == ["sk-a", "sk-b"]
+    # Re-adding an existing key refreshes it — it consumes no new slot.
+    assert await store.add("sk-a") is True
+
+
+async def test_expired_keys_do_not_count_toward_the_cap(monkeypatch) -> None:
+    import rekai.keystore as keystore
+
+    monkeypatch.setattr(keystore, "_MAX_DYNAMIC_KEYS", 1)
+    store = DynamicKeyStore(MemoryCache())
+    await store.add("sk-dead", expires_at=time.time() - 1)
+    # The one slot is occupied by a dead key only, so the add still fits.
+    assert await store.add("sk-live") is True
+
+
+def test_admin_add_key_returns_409_when_store_full(monkeypatch) -> None:
+    import rekai.keystore as keystore
+    from rekai.config import Settings
+    from rekai.main import create_app
+
+    monkeypatch.setattr(keystore, "_MAX_DYNAMIC_KEYS", 1)
+    settings = Settings(
+        environment="test",
+        rate_limit_enabled=False,
+        admin_key="sk-admin-1",
+        dynamic_keys_enabled=True,
+    )
+    client = TestClient(create_app(settings))
+    headers = {"Authorization": "Bearer sk-admin-1"}
+    assert client.post("/admin/keys", json={"key": "sk-first"}, headers=headers).status_code == 201
+    resp = client.post("/admin/keys", json={"key": "sk-second"}, headers=headers)
+    assert resp.status_code == 409
+    assert resp.json()["error"] == "key_store_full"

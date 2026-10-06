@@ -57,6 +57,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and the streamed path (assembled calls scrubbed once before the summary
   event, which also catches secrets split across upstream deltas); hits land
   in `redacted` alongside the other fields.
+- **Dynamic API keys never pruned expired entries** — `_load` keeps dead
+  keys (so `revoke` can still report "found"), and the write path was the
+  only place they were ever dropped — but `add`/`revoke` saved the
+  unfiltered map back, so dead keys accumulated forever, growing the blob
+  that every authenticated request re-reads. Writes now drop entries that
+  were already expired; a key added already-expired still persists one
+  cycle so `revoke` reports "found" as documented.
+- **Dynamic key store had no size cap** — violating the repo's own
+  bounded-structure invariant (`Metrics.max_tracked_clients`,
+  `RateLimiter.max_buckets`), a bulk-add script or compromised admin
+  credential could grow the per-request-parsed blob without limit.
+  `add` now refuses new keys past `_MAX_DYNAMIC_KEYS` (10,000 live
+  entries) and `POST /admin/keys` returns 409 `key_store_full`.
 - **Client-controlled strings spliced into upstream headers weren't validated**
   — a BYOK key with obs-text bytes (legal in an inbound header) or an
   `anthropic_beta`/`user_profile_id` body field with non-ASCII or control
