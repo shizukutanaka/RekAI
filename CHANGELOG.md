@@ -55,6 +55,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`allow_nan=False`). A custom handler now sanitizes non-finite floats to
   their repr before rendering the same `{"detail": [...]}` 422 — on every
   surface, compat envelopes included.
+- **`POST /v1/moderations` couldn't dedupe a retried request** — every other
+  mutating POST (`/v1/chat`, `/v1/embeddings`, `/v1/chat/completions`,
+  `/v1/messages`) accepts `Idempotency-Key`, but moderations ignored it, so an
+  SDK auto-retry re-ran the upstream call. The route now runs the same
+  claim → replay → complete cycle, and both SDKs send a key (auto-generated
+  under retries, or explicit via `idempotency_key` / `idempotencyKey` —
+  declared on `ModerationOptions`).
 - **Non-finite amounts in env config slipped through as valid limits** —
   `REKAI_CLIENT_BUDGETS_USD` and `REKAI_PRICING_OVERRIDES` parsed `nan`/`inf`
   fine via `float()`: a NaN budget fails every `>=` comparison so the cap
