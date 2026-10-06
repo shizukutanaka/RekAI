@@ -48,6 +48,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Client-controlled strings spliced into upstream headers weren't validated**
+  — a BYOK key with obs-text bytes (legal in an inbound header) or an
+  `anthropic_beta`/`user_profile_id` body field with non-ASCII or control
+  characters crashed request building (`UnicodeEncodeError` → 500) or failed
+  mid-call as a `LocalProtocolError`. `check_header_safe` now rejects anything
+  outside printable ASCII with a 400 at key resolution and header build time.
 - **Gemini provider spliced the model id into the upstream URL unvalidated** —
   `model` containing `/`, `?`, `&`, `%`, or `..` could traverse or inject into
   the request path (e.g. escape `/models/` onto a different endpoint on the

@@ -17,6 +17,7 @@ from rekai.providers.base import (
     ProviderError,
     ProviderResult,
     StreamEvent,
+    check_header_safe,
     provider_http_error,
     trace_headers,
 )
@@ -87,6 +88,7 @@ class GeminiProvider(Provider):
                 "or set REKAI_GEMINI_API_KEY.",
                 status_code=401,
             )
+        check_header_safe("API key", key)
         return key
 
     def _build_payload(self, request: ChatRequest) -> dict:
