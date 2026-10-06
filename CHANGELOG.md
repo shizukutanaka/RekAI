@@ -57,6 +57,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and the streamed path (assembled calls scrubbed once before the summary
   event, which also catches secrets split across upstream deltas); hits land
   in `redacted` alongside the other fields.
+- **Non-finite amounts in env config slipped through as valid limits** —
+  `REKAI_CLIENT_BUDGETS_USD` and `REKAI_PRICING_OVERRIDES` parsed `nan`/`inf`
+  fine via `float()`: a NaN budget fails every `>=` comparison so the cap
+  silently never trips, and NaN/inf prices poison every cost metric the
+  estimate feeds (totals, budget windows). Non-finite values now skip like
+  the other malformed entries.
 - **Windowed token limit never filled on streamed calls** —
   `REKAI_CLIENT_TOKEN_LIMIT` with `REKAI_CLIENT_TOKEN_LIMIT_WINDOW_SECONDS`
   reads a windowed bucket that only the non-stream path updated, so a client
