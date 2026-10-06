@@ -1,5 +1,5 @@
-"""Tests for Idempotency-Key semantics on the chat/embeddings endpoints and the
-idempotency module (claim / complete / release lifecycle)."""
+"""Tests for Idempotency-Key semantics on the chat/embeddings/moderations
+endpoints and the idempotency module (claim / complete / release lifecycle)."""
 
 from __future__ import annotations
 
@@ -97,6 +97,29 @@ def test_embeddings_idempotency_key_reused_with_different_body_is_422() -> None:
     )
     assert resp.status_code == 422
     assert resp.json()["error"] == "idempotency_error"
+
+
+def test_moderations_idempotency_key_replays() -> None:
+    client = _client()
+    headers = {"Idempotency-Key": "mod-1"}
+    # omni-moderation-* routes to openai by name, so echo must be explicit.
+    body = {"input": "x", "provider": "echo"}
+    first = client.post("/v1/moderations", json=body, headers=headers)
+    second = client.post("/v1/moderations", json=body, headers=headers)
+    assert second.headers["Idempotent-Replay"] == "true"
+    assert second.json() == first.json()
+
+
+def test_moderations_idempotency_key_reused_with_different_body_is_422() -> None:
+    client = _client()
+    headers = {"Idempotency-Key": "mod-reuse"}
+    client.post("/v1/moderations", json={"input": "x", "provider": "echo"}, headers=headers)
+    resp = client.post(
+        "/v1/moderations", json={"input": "different", "provider": "echo"}, headers=headers
+    )
+    assert resp.status_code == 422
+    # /v1/moderations speaks the OpenAI error envelope, like /v1/chat/completions.
+    assert resp.json()["error"]["type"] == "invalid_request_error"
 
 
 # --- module lifecycle (claim / complete / release) ---------------------------
