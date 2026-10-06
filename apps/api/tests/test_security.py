@@ -409,6 +409,35 @@ def test_client_token_limit_window_enforces_cap_within_window(monkeypatch) -> No
         main_module.metrics.seed({})
 
 
+def test_client_token_limit_window_records_streamed_calls(monkeypatch) -> None:
+    """The windowed token bucket must fill on streams too — previously only
+    the non-stream path recorded it, so streamed calls never counted against
+    REKAI_CLIENT_TOKEN_LIMIT."""
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys="sk-tokens-s",
+        rate_limit_enabled=False,
+        client_token_limit=500,
+        client_token_limit_window_seconds=100,
+    )
+    client = TestClient(create_app(settings))
+    try:
+        monkeypatch.setattr(main_module.time, "time", lambda: 1000.0)
+        resp = client.post(
+            "/v1/chat/stream",
+            json={"model": "echo", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer sk-tokens-s"},
+        )
+        assert resp.status_code == 200
+        used = main_module.metrics.client_window_tokens(
+            client_id("sk-tokens-s"), window_seconds=100, now=1000.0
+        )
+        assert used > 0
+    finally:
+        main_module.metrics.seed({})
+
+
 def test_client_budget_window_seconds_resets_after_rollover(monkeypatch) -> None:
     settings = Settings(
         environment="test",
@@ -485,6 +514,14 @@ def test_client_budget_overrides_parses_key_amount_pairs() -> None:
 def test_client_budget_overrides_skips_malformed_entries() -> None:
     settings = Settings(client_budgets_usd="sk-a:oops, no-colon-here, :5.00, sk-b:1.0")
     assert settings.client_budget_overrides == {"sk-b": 1.0}
+
+
+def test_client_budget_overrides_skips_non_finite_amounts() -> None:
+    # float("nan")/inf parse fine but are not budgets: nan fails every `>=`
+    # comparison so the cap silently never trips, inf means "never" or
+    # "always" by accident.
+    settings = Settings(client_budgets_usd="sk-a:nan, sk-b:inf, sk-c:-inf, sk-ok:1.5")
+    assert settings.client_budget_overrides == {"sk-ok": 1.5}
 
 
 def test_key_model_allowlists_parses_key_glob_pairs() -> None:

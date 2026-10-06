@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from contextvars import ContextVar, Token
 from functools import lru_cache
@@ -405,9 +406,14 @@ class Settings(BaseSettings):
             if not key:
                 continue
             try:
-                overrides[key] = float(amount.strip())
+                amount_value = float(amount.strip())
             except ValueError:
                 continue
+            # A non-finite cap is malformed, not a valid budget: NaN fails every
+            # comparison so the cap silently never trips, and ±inf means either
+            # "never trips" or "always trips" by accident.
+            if math.isfinite(amount_value):
+                overrides[key] = amount_value
         return overrides
 
     @property
@@ -497,9 +503,14 @@ class Settings(BaseSettings):
             if not prefix:
                 continue
             try:
-                overrides[prefix.lower()] = (float(input_str), float(output_str))
+                input_price = float(input_str)
+                output_price = float(output_str)
             except ValueError:
                 continue
+            # Same non-finite rule as budgets: NaN/inf prices would poison every
+            # downstream cost metric the estimate feeds (totals, budget windows).
+            if math.isfinite(input_price) and math.isfinite(output_price):
+                overrides[prefix.lower()] = (input_price, output_price)
         return overrides
 
     @property

@@ -1113,6 +1113,15 @@ async def _handle_chat_stream(
             metrics.record_client_budget_usage(
                 client_id, cost_usd, settings.client_budget_window_seconds, time.time()
             )
+        if settings.client_token_limit_window_seconds is not None:
+            # The middleware cap reads this windowed bucket — it must fill on
+            # streams too or streamed calls never count against the token cap.
+            metrics.record_client_token_usage(
+                client_id,
+                usage.total_tokens,
+                settings.client_token_limit_window_seconds,
+                time.time(),
+            )
         yield ChatStreamEvent(
             summary=StreamSummary(
                 provider=provider_name,
