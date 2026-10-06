@@ -459,3 +459,108 @@ async def test_gemini_stream_events_surfaces_usage(monkeypatch) -> None:
     assert "".join(e.delta or "" for e in events) == "Hi!"
     usage = next((e.usage for e in events if e.usage is not None), None)
     assert usage is not None and usage.total_tokens == 5
+
+
+async def test_stream_abort_records_consumed_tokens(monkeypatch) -> None:
+    """Closing the stream early must still attribute the tokens the provider
+    already generated — otherwise repeated aborts bypass usage windows."""
+    from rekai.cache import NullCache
+    from rekai.config import Settings
+    from rekai.metrics import metrics
+    from rekai.providers import register_provider
+    from rekai.providers.base import Provider, StreamEvent
+    from rekai.schemas import Usage
+    from rekai.service import handle_chat_stream
+
+    class TrickleProvider(Provider):
+        name = "svc-trickle"
+
+        async def chat(self, request, api_key):
+            raise NotImplementedError
+
+        async def stream_events(self, request, api_key):
+            yield StreamEvent(delta="partial answer")
+            yield StreamEvent(delta="never delivered")
+            yield StreamEvent(
+                usage=Usage(prompt_tokens=1, completion_tokens=5, total_tokens=6),
+                finish_reason="stop",
+            )
+
+    register_provider(TrickleProvider())
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        client_token_limit_window_seconds=100,
+    )
+    monkeypatch.setattr("rekai.service.time.time", lambda: 1000.0)
+    metrics.seed({})
+    try:
+        gen = handle_chat_stream(
+            ChatRequest(
+                model="x",
+                provider="svc-trickle",
+                messages=[ChatMessage(role="user", content="hi")],
+            ),
+            None,
+            settings,
+            NullCache(),
+            "svc-trickle",
+            TrickleProvider(),
+            "client-abort",
+        )
+        async for _ in gen:
+            break  # take the first delta, then walk away like a disconnect
+        await gen.aclose()
+        assert metrics.client_window_tokens("client-abort", window_seconds=100, now=1000.0) > 0
+    finally:
+        metrics.seed({})
+
+
+async def test_stream_abort_before_first_token_records_nothing(monkeypatch) -> None:
+    """Aborting before any output can't be billed — nothing was provably
+    generated, so no usage is estimated."""
+    from rekai.cache import NullCache
+    from rekai.config import Settings
+    from rekai.metrics import metrics
+    from rekai.providers import register_provider
+    from rekai.providers.base import Provider, StreamEvent
+    from rekai.service import handle_chat_stream
+
+    class SilentProvider(Provider):
+        name = "svc-silent"
+
+        async def chat(self, request, api_key):
+            raise NotImplementedError
+
+        async def stream_events(self, request, api_key):
+            yield StreamEvent(system_fingerprint="fp_x")
+            yield StreamEvent(delta="never reached")
+
+    register_provider(SilentProvider())
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        client_token_limit_window_seconds=100,
+    )
+    monkeypatch.setattr("rekai.service.time.time", lambda: 1000.0)
+    metrics.seed({})
+    try:
+        gen = handle_chat_stream(
+            ChatRequest(
+                model="x",
+                provider="svc-silent",
+                messages=[ChatMessage(role="user", content="hi")],
+            ),
+            None,
+            settings,
+            NullCache(),
+            "svc-silent",
+            SilentProvider(),
+            "client-early",
+        )
+        async for _ in gen:
+            break
+        await gen.aclose()
+        assert metrics.client_window_tokens("client-early", window_seconds=100, now=1000.0) == 0
+    finally:
+        metrics.seed({})

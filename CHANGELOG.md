@@ -55,6 +55,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   same-key retries until TTL with no log attribution, and a failed `claim`
   quietly dropped replay protection (re-processing a retried request). Each
   fail-open path now warns with the operation and consequence.
+- **SDK `embeddings()` auto-retries could double-bill** — `/v1/embeddings`
+  honors `Idempotency-Key` like `/v1/chat`, but neither SDK sent it, so a
+  retried embeddings request re-ran the upstream call and charged twice. Both
+  SDKs now mint a key when retries are enabled and accept an explicit one
+  (`idempotency_key` / `idempotencyKey`), mirroring `chat()`. The JS type
+  declarations also gained `idempotencyKey`, which was implemented and
+  documented for `chat()` but never declared.
+- **A client disconnecting mid-stream could stream indefinitely for free** —
+  the summary yield carried all usage accounting, so an aborted stream's
+  already-generated tokens never reached `usage_by_*`, the budget window, or
+  the `REKAI_CLIENT_TOKEN_LIMIT` bucket. The stream now records the estimated
+  usage (prompt + streamed completion so far) when it is closed early, and
+  the provider's upstream HTTP stream is closed deterministically on abort
+  instead of waiting on asyncgen GC finalization.
 - **`POST /v1/moderations` couldn't dedupe a retried request** — every other
   mutating POST (`/v1/chat`, `/v1/embeddings`, `/v1/chat/completions`,
   `/v1/messages`) accepts `Idempotency-Key`, but moderations ignored it, so an

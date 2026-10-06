@@ -296,9 +296,13 @@ export class RekAIClient {
     if (opts.dimensions != null) payload.dimensions = opts.dimensions;
     if (opts.encodingFormat != null) payload.encoding_format = opts.encodingFormat;
     if (opts.user != null) payload.user = opts.user;
+    // /v1/embeddings honors Idempotency-Key just like /v1/chat — generate one
+    // under retries so an auto-retried call can't bill the upstream twice.
+    const idempotencyKey =
+      opts.idempotencyKey ?? (this.maxRetries > 0 ? randomIdempotencyKey() : undefined);
     const res = await this._send("/v1/embeddings", {
       method: "POST",
-      headers: this._headers(opts.providerKey, opts.gatewayKey),
+      headers: this._headers(opts.providerKey, opts.gatewayKey, idempotencyKey),
       body: JSON.stringify(payload),
     });
     await this._raiseForStatus(res);
