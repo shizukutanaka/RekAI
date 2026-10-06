@@ -674,22 +674,26 @@ class RekAIClient:
         provider: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
+        idempotency_key: str | None = None,
     ) -> ModerationResult:
         """Classify input against safety categories (providers with a
         moderation endpoint — OpenAI's ``/v1/moderations``; echo returns a
         deterministic stub). ``model`` defaults to OpenAI's own default
-        (omni-moderation-latest)."""
+        (omni-moderation-latest). ``idempotency_key`` mirrors
+        :meth:`RekAIClient.chat` — the route honors the header the same way."""
         payload: dict[str, Any] = {"input": input}
         if model is not None:
             payload["model"] = model
         if provider is not None:
             payload["provider"] = provider
-        resp = self._send(
-            "POST",
-            "/v1/moderations",
-            json=payload,
-            headers=self._headers(provider_key, gateway_key),
+        headers = _build_headers(
+            self._provider_key,
+            self._gateway_key,
+            provider_key,
+            gateway_key,
+            _resolve_idempotency_key(idempotency_key, self._max_retries),
         )
+        resp = self._send("POST", "/v1/moderations", json=payload, headers=headers)
         self._raise_for_status(resp)
         return ModerationResult.from_dict(resp.json())
 
@@ -986,6 +990,7 @@ class AsyncRekAIClient:
         provider: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
+        idempotency_key: str | None = None,
     ) -> ModerationResult:
         """Async twin of :meth:`RekAIClient.moderations`."""
         payload: dict[str, Any] = {"input": input}
@@ -993,12 +998,14 @@ class AsyncRekAIClient:
             payload["model"] = model
         if provider is not None:
             payload["provider"] = provider
-        resp = await self._send(
-            "POST",
-            "/v1/moderations",
-            json=payload,
-            headers=self._headers(provider_key, gateway_key),
+        headers = _build_headers(
+            self._provider_key,
+            self._gateway_key,
+            provider_key,
+            gateway_key,
+            _resolve_idempotency_key(idempotency_key, self._max_retries),
         )
+        resp = await self._send("POST", "/v1/moderations", json=payload, headers=headers)
         self._raise_for_status(resp)
         return ModerationResult.from_dict(resp.json())
 

@@ -214,6 +214,10 @@ export interface ModerationOptions {
   provider?: string;
   providerKey?: string;
   gatewayKey?: string;
+  /** Sent as the `Idempotency-Key` header so a retried request replays the
+   * first response instead of re-processing — `/v1/moderations` honors it
+   * like `/v1/chat`. Auto-generated when omitted and `maxRetries > 0`. */
+  idempotencyKey?: string;
 }
 
 export interface ModerationResult {

@@ -101,6 +101,12 @@ before(async () => {
         });
       }
       if (req.url === "/v1/moderations") {
+        flake.keys.push(req.headers["idempotency-key"]);
+        if (flake.remaining > 0) {
+          flake.remaining -= 1;
+          const h = flake.retryAfter ? { "Retry-After": String(flake.retryAfter) } : {};
+          return send(res, flake.status, { detail: "transient" }, h);
+        }
         return send(res, 200, {
           provider: "echo",
           model: "omni-moderation-latest",
@@ -369,6 +375,36 @@ test("embeddings retries a 429 and reuses the same Idempotency-Key", async () =>
   const result = await client.embeddings("echo", "hi", { idempotencyKey: "e1" });
   assert.deepEqual(result.embeddings[0], [0.1, 0.2]);
   assert.deepEqual(flake.keys, ["e1", "e1"]); // one retry, same key
+  flake = { remaining: 0, status: 503, retryAfter: undefined, keys: [] };
+});
+
+// /v1/moderations honors Idempotency-Key too — moderations() auto-retries on
+// the same _send path, so it needs the same protection chat() has.
+
+test("moderations sends an explicit Idempotency-Key", async () => {
+  const client = new RekAIClient(baseUrl);
+  await client.moderations("hi", { idempotencyKey: "mod-42" });
+  assert.equal(lastRequest.headers["idempotency-key"], "mod-42");
+});
+
+test("moderations auto-generates an Idempotency-Key when retries are enabled", async () => {
+  const client = new RekAIClient(baseUrl); // default maxRetries=2
+  await client.moderations("hi");
+  assert.match(lastRequest.headers["idempotency-key"], /^rekai-sdk-/);
+});
+
+test("moderations omits the Idempotency-Key when retries are disabled", async () => {
+  const client = new RekAIClient(baseUrl, { maxRetries: 0 });
+  await client.moderations("hi");
+  assert.equal(lastRequest.headers["idempotency-key"], undefined);
+});
+
+test("moderations retries a 429 and reuses the same Idempotency-Key", async () => {
+  flake = { remaining: 1, status: 429, retryAfter: undefined, keys: [] };
+  const client = new RekAIClient(baseUrl, { retryBackoff: 0 });
+  const result = await client.moderations("hi", { idempotencyKey: "m1" });
+  assert.equal(result.results[0].flagged, false);
+  assert.deepEqual(flake.keys, ["m1", "m1"]); // one retry, same key
   flake = { remaining: 0, status: 503, retryAfter: undefined, keys: [] };
 });
 
