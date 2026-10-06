@@ -103,6 +103,70 @@ async def test_chat_propagates_http_error(monkeypatch) -> None:
     assert exc.value.retry_after == 12.0  # captured from the upstream header
 
 
+# --- model id → URL path safety ------------------------------------------------
+
+
+async def test_chat_rejects_model_ids_with_path_chars() -> None:
+    # The model id is spliced into the upstream URL path; a "/" or "?" would
+    # traverse or inject into it (still carrying the operator's key), so it is
+    # rejected before the URL is built.
+    for bad in (
+        "gemini-x/../v1beta2/models",
+        "gemini-x?key=1",
+        "gemini-x#y",
+        "gemini-x&alt=html",
+        "gemini-x%2f..%2f",
+        "gemini x",
+    ):
+        with pytest.raises(ProviderError) as exc:
+            await GeminiProvider().chat(_req(model=bad), api_key="g-key")
+        assert exc.value.status_code == 400
+
+
+async def test_embed_rejects_model_ids_with_path_chars() -> None:
+    with pytest.raises(ProviderError) as exc:
+        await GeminiProvider().embed(["hi"], "text-embedding-004/../x", api_key="g-key")
+    assert exc.value.status_code == 400
+
+
+async def test_stream_rejects_model_ids_with_path_chars() -> None:
+    with pytest.raises(ProviderError) as exc:
+        async for _ in GeminiProvider().stream_events(_req(model="gemini-x/../"), api_key="g-key"):
+            pass
+    assert exc.value.status_code == 400
+
+
+async def test_models_prefixed_id_normalizes_url(monkeypatch) -> None:
+    # A qualified "models/<id>" is accepted on all three call paths, not just
+    # embed — otherwise chat produced "models/models/<id>" and 404'd.
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json, headers):
+            captured["url"] = url
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    await GeminiProvider().chat(_req(model="models/gemini-1.5-flash"), api_key="g-key")
+    assert "/models/gemini-1.5-flash:generateContent" in captured["url"]
+    assert "models/models/" not in captured["url"]
+
+
 # --- streaming ---------------------------------------------------------------
 
 
