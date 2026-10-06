@@ -48,6 +48,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Input scans read only `content` while providers forward the whole
+  message** — `REKAI_INPUT_SECRETS_ENABLED` and the prompt-injection
+  guardrail collected text from `ChatMessage.content` alone, but the
+  OpenAI/Ollama serializers send each message's full `model_dump` upstream:
+  a credential in `extra_blocks`, `content_blocks`, or a `tool_calls`
+  argument shipped to the provider with no flag and no block (verified live:
+  same request 403s in `content`, 200s in `extra_blocks`). Both scans now
+  collect every string leaf of the serialized message — the injection scan
+  keeps its user/tool role scope; input secrets keep every role, matching
+  what actually leaves the process (`signature` integrity blobs excepted,
+  same as the output scrubber, so replayed signed blocks can't
+  false-positive). Same change wires the missing input-secret scan into the
+  `POST /v1/messages` streaming path — the only surface that ran the
+  injection guardrail but skipped the credential check, so the same body
+  blocked non-stream sailed through with `stream: true`.
 - **Idempotency store failures were silent** — every other Redis-backed
   subsystem (cache, rate limiter, metrics store, key store) warns when it
   fails open, but `idempotency` logged nothing. A transient backend error

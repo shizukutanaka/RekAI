@@ -421,8 +421,12 @@ def _guardrail_response(
 
 def _message_texts(messages: list[ChatMessage]) -> list[str]:
     """Caller-supplied message text — every role, since any of it is forwarded
-    verbatim to the upstream provider."""
-    return [m.content for m in messages if m.content]
+    verbatim to the upstream provider. All string fields count, not just
+    ``content``: OpenAI/Ollama serialize the whole ``model_dump``, so a key
+    hidden in ``extra_blocks`` or a ``tool_calls`` argument ships too."""
+    return [
+        leaf for m in messages for leaf in guardrails.string_leaves(m.model_dump(exclude_none=True))
+    ]
 
 
 def _moderation_texts(input: str | list[str] | list[dict]) -> list[str]:
@@ -2084,6 +2088,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         blocked = _guardrail_response(chat_request.messages, config, response)
         if blocked is not None:
             return blocked
+        leaked = _input_secrets_response(_message_texts(chat_request.messages), config, response)
+        if leaked is not None:
+            return leaked
         guardrail_flag = response.headers.get("X-Guardrail-Flag")
         client_id = _client_id(http_request)
         provider_name, provider = select_provider(chat_request, config)
