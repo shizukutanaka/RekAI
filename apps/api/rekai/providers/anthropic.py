@@ -16,6 +16,7 @@ from rekai.providers.base import (
     ProviderError,
     ProviderResult,
     StreamEvent,
+    check_header_safe,
     provider_http_error,
     trace_headers,
 )
@@ -108,6 +109,7 @@ class AnthropicProvider(Provider):
                 "or set REKAI_ANTHROPIC_API_KEY.",
                 status_code=401,
             )
+        check_header_safe("API key", key)
         return key
 
     def _build_payload(self, request: ChatRequest, *, stream: bool) -> dict:
@@ -200,6 +202,14 @@ class AnthropicProvider(Provider):
 
     def _headers(self, key: str, request: ChatRequest | None = None) -> dict[str, str]:
         beta = request.anthropic_beta if request is not None else None
+        # These two request values are spliced into headers below — the beta
+        # string may also arrive verbatim from an inbound `anthropic-beta`
+        # header (obs-text bytes pass the inbound parser but not httpx's
+        # ASCII encoding). Reject anything that can't ride in a header.
+        if beta:
+            check_header_safe("anthropic-beta", beta)
+        if request is not None and request.user_profile_id is not None:
+            check_header_safe("anthropic-user-profile-id", request.user_profile_id)
         headers = {
             **trace_headers(),
             "x-api-key": key,

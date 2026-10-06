@@ -7,12 +7,14 @@ import contextlib
 import fnmatch
 import ipaddress
 import json
+import math
 import time
 import uuid
 from collections.abc import AsyncIterator
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from fastapi import Depends, FastAPI, Header, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import ValidationError
@@ -237,6 +239,25 @@ _OPENAI_COMPAT_PATHS = frozenset({"/v1/chat/completions", "/v1/moderations"})
 _ANTHROPIC_COMPAT_PATHS = frozenset({"/v1/messages", "/v1/messages/count_tokens"})
 
 
+def _json_safe(value: Any) -> Any:
+    """Recursively replace non-finite floats so a value survives JSON encoding.
+
+    Python's ``json`` accepts ``NaN``/``Infinity`` on the way in, but
+    ``JSONResponse`` refuses them on the way out — and Pydantic's error detail
+    embeds the offending request input verbatim. Without this, FastAPI's stock
+    validation handler crashes mid-serialization on such a body and the caller
+    gets a bare 500 instead of the 422 it earned.``repr`` keeps the token
+    legible (``'nan'``, ``'inf'``, ``'-inf'``) without inventing a number.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return repr(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
 def _validation_message(detail: list) -> tuple[str, str | None]:
     """Render FastAPI's list-of-dicts validation detail as a message + param.
 
@@ -421,8 +442,12 @@ def _guardrail_response(
 
 def _message_texts(messages: list[ChatMessage]) -> list[str]:
     """Caller-supplied message text — every role, since any of it is forwarded
-    verbatim to the upstream provider."""
-    return [m.content for m in messages if m.content]
+    verbatim to the upstream provider. All string fields count, not just
+    ``content``: OpenAI/Ollama serialize the whole ``model_dump``, so a key
+    hidden in ``extra_blocks`` or a ``tool_calls`` argument ships too."""
+    return [
+        leaf for m in messages for leaf in guardrails.string_leaves(m.model_dump(exclude_none=True))
+    ]
 
 
 def _moderation_texts(input: str | list[str] | list[dict]) -> list[str]:
@@ -912,6 +937,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return settings
 
     # --- error handling ---------------------------------------------------
+    @app.exception_handler(RequestValidationError)
+    async def _request_validation_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # Stock FastAPI behaviour — the same {"detail": [...]} 422 — except the
+        # detail is sanitized first: a body carrying NaN/Infinity passes
+        # Python's json parser, fails a ge/le constraint, and would then crash
+        # the default handler while serializing the offending input verbatim.
+        return JSONResponse(
+            status_code=422,
+            content={"detail": _json_safe(exc.errors())},
+        )
+
     @app.exception_handler(ProviderError)
     async def _provider_error_handler(_: Request, exc: ProviderError) -> JSONResponse:
         metrics.record_error("provider_error")
@@ -1430,8 +1466,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if payload.expires_in_seconds is not None
                 else None
             )
-            await key_store.add(payload.key, expires_at=expires_at)
+            added = await key_store.add(payload.key, expires_at=expires_at)
             masked = mask_key(payload.key)
+            if not added:
+                admin_logger.warning(
+                    "admin add key refused (store full) ip=%s",
+                    _admin_ip(request),
+                    extra={"admin_action": "add_key_full", "ip": _admin_ip(request)},
+                )
+                return JSONResponse(
+                    status_code=409,
+                    content=ErrorResponse(
+                        error="key_store_full",
+                        detail="Dynamic key store is full; revoke unused keys first.",
+                    ).model_dump(),
+                )
             admin_logger.info(
                 "admin added key=%s ip=%s",
                 masked,
@@ -1650,6 +1699,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             400: {"model": ErrorResponse},
             401: {"model": ErrorResponse},
             403: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
             413: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
             429: {"model": ErrorResponse},
@@ -1661,7 +1711,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: ModerationRequest,
         http_request: Request,
         x_provider_key: str | None = Header(default=None, alias="X-Provider-Key"),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         config: Settings = Depends(get_config),
+        cache_backend: CacheBackend = Depends(get_cache),
     ) -> ModerationResponse | JSONResponse:
         denied = _model_acl_denied(http_request, _acl_models(request))
         if denied is not None:
@@ -1669,7 +1721,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         leaked = _input_secrets_response(_moderation_texts(request.input), config, response)
         if leaked is not None:
             return leaked
-        return await handle_moderation(request, x_provider_key, config)
+        # Same claim → replay → complete cycle as /v1/embeddings: SDK retries
+        # hit this route too, and a re-run still costs an upstream call.
+        fingerprint: str | None = None
+        claimed = False
+        client_id = _client_id(http_request)
+        if idempotency_key:
+            fingerprint = idempotency.fingerprint(request.model_dump_json())
+            outcome = await idempotency.claim(
+                cache_backend,
+                client_id,
+                idempotency_key,
+                fingerprint,
+                config.idempotency_ttl_seconds,
+            )
+            if outcome.kind == "mismatch":
+                return _idempotency_error(422, _IDEM_MISMATCH)
+            if outcome.kind == "conflict":
+                return _idempotency_error(409, _IDEM_CONFLICT)
+            if outcome.kind == "replay" and outcome.response is not None:
+                response.headers["Idempotent-Replay"] = "true"
+                return ModerationResponse(**outcome.response)
+            claimed = True
+        try:
+            result = await handle_moderation(request, x_provider_key, config)
+        except Exception:
+            if claimed:
+                await idempotency.release(cache_backend, client_id, idempotency_key)  # type: ignore[arg-type]
+            raise
+        if idempotency_key and fingerprint is not None:
+            await idempotency.complete(
+                cache_backend,
+                client_id,
+                idempotency_key,
+                fingerprint,
+                result.model_dump(mode="json"),
+                config.idempotency_ttl_seconds,
+            )
+        return result
 
     @app.post(
         "/v1/chat/stream",
@@ -2051,6 +2140,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         blocked = _guardrail_response(chat_request.messages, config, response)
         if blocked is not None:
             return blocked
+        leaked = _input_secrets_response(_message_texts(chat_request.messages), config, response)
+        if leaked is not None:
+            return leaked
         guardrail_flag = response.headers.get("X-Guardrail-Flag")
         client_id = _client_id(http_request)
         provider_name, provider = select_provider(chat_request, config)

@@ -426,8 +426,8 @@ none of them.
 ## Idempotency
 
 A client can send an `Idempotency-Key` header (a unique id, e.g. a UUID) on
-`POST /v1/chat`, `/v1/embeddings`, or the non-streaming path of the
-OpenAI-compatible `/v1/chat/completions`. The first call's response is stored
+`POST /v1/chat`, `/v1/embeddings`, `/v1/moderations`, or the non-streaming
+paths of `/v1/chat/completions` and `/v1/messages`. The first call's response is stored
 under that key; a repeat with the **same key returns the stored response**
 (with `Idempotent-Replay: true`) without processing again — so a network blip
 or an automatic client retry can't double-process. Unlike the content cache, it
@@ -822,7 +822,8 @@ There are two ways to override or extend the table:
 
 ## Guardrails
 
-With `REKAI_GUARDRAILS_ENABLED=true`, RekAI scans the **user** and **tool**
+With `REKAI_GUARDRAILS_ENABLED=true`, RekAI scans every string field of the
+**user** and **tool**
 messages of a chat / chat-stream request for common prompt-injection / jailbreak
 phrasings
 ("ignore previous instructions", "reveal your system prompt", "developer mode
@@ -888,12 +889,18 @@ kilobytes it needs.
 `REKAI_INPUT_SECRETS_ENABLED=true` runs the same pattern set the other way —
 against the **request**, not the response. A user pasting `sk-…` into a chat
 prompt otherwise ships that key to the upstream provider. It scans every
-message role on `/v1/chat`, `/v1/chat/stream` and `/v1/chat/completions` plus
-embeddings inputs on `/v1/embeddings`, shares `REKAI_GUARDRAILS_ACTION`
+string field of every message role — not just `content`, since the
+OpenAI/Ollama serializers forward a message's whole `model_dump` upstream,
+so text hidden in `extra_blocks`/`content_blocks` or a `tool_calls`
+argument would otherwise ride a field the check claimed to cover — on all
+four chat surfaces (`/v1/chat`, `/v1/chat/stream`, `/v1/chat/completions`,
+`/v1/messages`, streaming included), plus text inputs on `/v1/embeddings`
+and `/v1/moderations`. It shares `REKAI_GUARDRAILS_ACTION`
 (`flag` → `X-Input-Secrets-Flag` header, `block` → 403 `input_secret_detected`
 before any provider call), and never rewrites the request — a secret in a
 prompt is usually an accident, so it is refused or signalled, not silently
-mutated. Off by default.
+mutated. `signature` keys inside blocks are skipped — they are Anthropic's
+integrity blobs replayed verbatim, not caller text. Off by default.
 
 `REKAI_SECRET_PATTERNS` appends operator-defined formats to the built-in set —
 comma-separated `name:sentinel:regex` entries, used by both scanners at once

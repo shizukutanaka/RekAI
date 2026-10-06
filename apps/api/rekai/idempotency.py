@@ -41,6 +41,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from rekai.cache import CacheBackend
+from rekai.logging_config import get_logger
+
+logger = get_logger("rekai.idempotency")
 
 _PREFIX = "rekai:idem:"
 _IN_PROGRESS = "in_progress"
@@ -84,7 +87,8 @@ class Outcome:
 async def _get(cache: CacheBackend, client_id: str, raw_key: str) -> dict[str, Any] | None:
     try:
         stored = await cache.get(_store_key(client_id, raw_key))
-    except Exception:  # pragma: no cover - fail open on backend error
+    except Exception as exc:  # pragma: no cover - fail open on backend error
+        logger.warning("idempotency read failed; treating the key as absent (error: %s)", exc)
         return None
     if stored is None:
         return None
@@ -105,7 +109,11 @@ async def claim(
     sentinel = json.dumps({"status": _IN_PROGRESS, "fingerprint": body_fingerprint})
     try:
         claimed = await cache.add(_store_key(client_id, raw_key), sentinel, ttl)
-    except Exception:  # pragma: no cover - fail open on backend error
+    except Exception as exc:  # pragma: no cover - fail open on backend error
+        logger.warning(
+            "idempotency claim failing open; proceeding without replay protection (error: %s)",
+            exc,
+        )
         return Outcome("proceed")
     if claimed:
         return Outcome("proceed")
@@ -136,8 +144,11 @@ async def complete(
     record = json.dumps({"status": _DONE, "fingerprint": body_fingerprint, "response": response})
     try:
         await cache.set(_store_key(client_id, raw_key), record, ttl)
-    except Exception:  # pragma: no cover - fail open on backend error
-        pass
+    except Exception as exc:  # pragma: no cover - fail open on backend error
+        logger.warning(
+            "idempotency record not persisted; a replayed request may re-process (error: %s)",
+            exc,
+        )
 
 
 async def release(cache: CacheBackend, client_id: str, raw_key: str) -> None:
@@ -145,5 +156,8 @@ async def release(cache: CacheBackend, client_id: str, raw_key: str) -> None:
     (instead of being blocked by its own stale sentinel until TTL)."""
     try:
         await cache.delete(_store_key(client_id, raw_key))
-    except Exception:  # pragma: no cover - fail open on backend error
-        pass
+    except Exception as exc:  # pragma: no cover - fail open on backend error
+        logger.warning(
+            "idempotency sentinel not released; same-key retries may see 409 until TTL (error: %s)",
+            exc,
+        )

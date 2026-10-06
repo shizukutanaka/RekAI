@@ -56,6 +56,88 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **`NaN`/`Infinity` in a request body returned a bare 500, not a 422** —
+  Python's `json` accepts the non-standard literals on the way in, pydantic
+  correctly rejects the value, but the offending input rides inside the error
+  detail and FastAPI's stock validation handler crashed serializing it
+  (`allow_nan=False`). A custom handler now sanitizes non-finite floats to
+  their repr before rendering the same `{"detail": [...]}` 422 — on every
+  surface, compat envelopes included.
+- **Text logs could be forged by newline-bearing request fields** — a model
+  id (or fallback provider name) containing `\r`/`\n` reached `logger` calls
+  raw and split one record into multiple lines (`model=echo\nINFO forged`
+  produced a second, forged `INFO` line). The text formatter now escapes
+  CR/LF inside the message only; tracebacks keep real newlines and JSON
+  output was already safe via `json.dumps`.
+- **Dynamic API keys never pruned expired entries** — `_load` keeps dead
+  keys (so `revoke` can still report "found"), and the write path was the
+  only place they were ever dropped — but `add`/`revoke` saved the
+  unfiltered map back, so dead keys accumulated forever, growing the blob
+  that every authenticated request re-reads. Writes now drop entries that
+  were already expired; a key added already-expired still persists one
+  cycle so `revoke` reports "found" as documented.
+- **Dynamic key store had no size cap** — violating the repo's own
+  bounded-structure invariant (`Metrics.max_tracked_clients`,
+  `RateLimiter.max_buckets`), a bulk-add script or compromised admin
+  credential could grow the per-request-parsed blob without limit.
+  `add` now refuses new keys past `_MAX_DYNAMIC_KEYS` (10,000 live
+  entries) and `POST /admin/keys` returns 409 `key_store_full`.
+- **Client-controlled strings spliced into upstream headers weren't validated**
+  — a BYOK key with obs-text bytes (legal in an inbound header) or an
+  `anthropic_beta`/`user_profile_id` body field with non-ASCII or control
+  characters crashed request building (`UnicodeEncodeError` → 500) or failed
+  mid-call as a `LocalProtocolError`. `check_header_safe` now rejects anything
+  outside printable ASCII with a 400 at key resolution and header build time.
+- **Gemini provider spliced the model id into the upstream URL unvalidated** —
+  `model` containing `/`, `?`, `&`, `%`, or `..` could traverse or inject into
+  the request path (e.g. escape `/models/` onto a different endpoint on the
+  Google host while still carrying the operator's API key). The id is now
+  validated against the real Gemini charset before the URL is built; invalid
+  ids get a 400. The qualified `models/<id>` form is also normalized on all
+  three call paths (chat/stream previously produced `models/models/<id>`).
+- **Input scans read only `content` while providers forward the whole
+  message** — `REKAI_INPUT_SECRETS_ENABLED` and the prompt-injection
+  guardrail collected text from `ChatMessage.content` alone, but the
+  OpenAI/Ollama serializers send each message's full `model_dump` upstream:
+  a credential in `extra_blocks`, `content_blocks`, or a `tool_calls`
+  argument shipped to the provider with no flag and no block (verified live:
+  same request 403s in `content`, 200s in `extra_blocks`). Both scans now
+  collect every string leaf of the serialized message — the injection scan
+  keeps its user/tool role scope; input secrets keep every role, matching
+  what actually leaves the process (`signature` integrity blobs excepted,
+  same as the output scrubber, so replayed signed blocks can't
+  false-positive). Same change wires the missing input-secret scan into the
+  `POST /v1/messages` streaming path — the only surface that ran the
+  injection guardrail but skipped the credential check, so the same body
+  blocked non-stream sailed through with `stream: true`.
+- **Idempotency store failures were silent** — every other Redis-backed
+  subsystem (cache, rate limiter, metrics store, key store) warns when it
+  fails open, but `idempotency` logged nothing. A transient backend error
+  during `complete`/`release` left an `in_progress` sentinel that 409s
+  same-key retries until TTL with no log attribution, and a failed `claim`
+  quietly dropped replay protection (re-processing a retried request). Each
+  fail-open path now warns with the operation and consequence.
+- **SDK `embeddings()` auto-retries could double-bill** — `/v1/embeddings`
+  honors `Idempotency-Key` like `/v1/chat`, but neither SDK sent it, so a
+  retried embeddings request re-ran the upstream call and charged twice. Both
+  SDKs now mint a key when retries are enabled and accept an explicit one
+  (`idempotency_key` / `idempotencyKey`), mirroring `chat()`. The JS type
+  declarations also gained `idempotencyKey`, which was implemented and
+  documented for `chat()` but never declared.
+- **A client disconnecting mid-stream could stream indefinitely for free** —
+  the summary yield carried all usage accounting, so an aborted stream's
+  already-generated tokens never reached `usage_by_*`, the budget window, or
+  the `REKAI_CLIENT_TOKEN_LIMIT` bucket. The stream now records the estimated
+  usage (prompt + streamed completion so far) when it is closed early, and
+  the provider's upstream HTTP stream is closed deterministically on abort
+  instead of waiting on asyncgen GC finalization.
+- **`POST /v1/moderations` couldn't dedupe a retried request** — every other
+  mutating POST (`/v1/chat`, `/v1/embeddings`, `/v1/chat/completions`,
+  `/v1/messages`) accepts `Idempotency-Key`, but moderations ignored it, so an
+  SDK auto-retry re-ran the upstream call. The route now runs the same
+  claim → replay → complete cycle, and both SDKs send a key (auto-generated
+  under retries, or explicit via `idempotency_key` / `idempotencyKey` —
+  declared on `ModerationOptions`).
 - **Non-finite amounts in env config slipped through as valid limits** —
   `REKAI_CLIENT_BUDGETS_USD` and `REKAI_PRICING_OVERRIDES` parsed `nan`/`inf`
   fine via `float()`: a NaN budget fails every `>=` comparison so the cap

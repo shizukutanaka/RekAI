@@ -96,6 +96,10 @@ export interface ChatOptions {
    * `{type: "enabled", budget_tokens: 1024}` — forwarded verbatim to Anthropic
    * upstreams. Thinking blocks come back on `ChatResult.thinking_blocks`. */
   thinking?: Record<string, unknown>;
+  /** Sent as the `Idempotency-Key` header so a retried request replays the
+   * first response instead of re-processing. Auto-generated when omitted and
+   * `maxRetries > 0`. */
+  idempotencyKey?: string;
   /** Called once with the final usage summary during streaming. */
   onUsage?: (summary: StreamSummary) => void;
   /** Called with each refusal-text chunk when the model declines. */
@@ -189,6 +193,10 @@ export interface EmbeddingsOptions {
   /** OpenAI's end-user id for abuse detection — a routing hint,
    * never a cache key. */
   user?: string;
+  /** Sent as the `Idempotency-Key` header so a retried request replays the
+   * first response instead of re-processing — `/v1/embeddings` honors it just
+   * like `/v1/chat`. Auto-generated when omitted and `maxRetries > 0`. */
+  idempotencyKey?: string;
 }
 
 export interface EmbeddingsResult {
@@ -206,6 +214,10 @@ export interface ModerationOptions {
   provider?: string;
   providerKey?: string;
   gatewayKey?: string;
+  /** Sent as the `Idempotency-Key` header so a retried request replays the
+   * first response instead of re-processing — `/v1/moderations` honors it
+   * like `/v1/chat`. Auto-generated when omitted and `maxRetries > 0`. */
+  idempotencyKey?: string;
 }
 
 export interface ModerationResult {
