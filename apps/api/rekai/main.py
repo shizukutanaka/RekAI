@@ -1647,6 +1647,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             400: {"model": ErrorResponse},
             401: {"model": ErrorResponse},
             403: {"model": ErrorResponse},
+            409: {"model": ErrorResponse},
             413: {"model": ErrorResponse},
             422: {"model": ErrorResponse},
             429: {"model": ErrorResponse},
@@ -1658,7 +1659,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: ModerationRequest,
         http_request: Request,
         x_provider_key: str | None = Header(default=None, alias="X-Provider-Key"),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         config: Settings = Depends(get_config),
+        cache_backend: CacheBackend = Depends(get_cache),
     ) -> ModerationResponse | JSONResponse:
         denied = _model_acl_denied(http_request, _acl_models(request))
         if denied is not None:
@@ -1666,7 +1669,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         leaked = _input_secrets_response(_moderation_texts(request.input), config, response)
         if leaked is not None:
             return leaked
-        return await handle_moderation(request, x_provider_key, config)
+        # Same claim → replay → complete cycle as /v1/embeddings: SDK retries
+        # hit this route too, and a re-run still costs an upstream call.
+        fingerprint: str | None = None
+        claimed = False
+        client_id = _client_id(http_request)
+        if idempotency_key:
+            fingerprint = idempotency.fingerprint(request.model_dump_json())
+            outcome = await idempotency.claim(
+                cache_backend,
+                client_id,
+                idempotency_key,
+                fingerprint,
+                config.idempotency_ttl_seconds,
+            )
+            if outcome.kind == "mismatch":
+                return _idempotency_error(422, _IDEM_MISMATCH)
+            if outcome.kind == "conflict":
+                return _idempotency_error(409, _IDEM_CONFLICT)
+            if outcome.kind == "replay" and outcome.response is not None:
+                response.headers["Idempotent-Replay"] = "true"
+                return ModerationResponse(**outcome.response)
+            claimed = True
+        try:
+            result = await handle_moderation(request, x_provider_key, config)
+        except Exception:
+            if claimed:
+                await idempotency.release(cache_backend, client_id, idempotency_key)  # type: ignore[arg-type]
+            raise
+        if idempotency_key and fingerprint is not None:
+            await idempotency.complete(
+                cache_backend,
+                client_id,
+                idempotency_key,
+                fingerprint,
+                result.model_dump(mode="json"),
+                config.idempotency_ttl_seconds,
+            )
+        return result
 
     @app.post(
         "/v1/chat/stream",

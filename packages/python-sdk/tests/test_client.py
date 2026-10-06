@@ -668,6 +668,75 @@ def test_async_retry_on_429_then_succeeds() -> None:
     assert attempts == ["ka", "ka"]
 
 
+# /v1/moderations honors Idempotency-Key too — moderations() auto-retries on
+# the same _send path, so it needs the same protection chat() has.
+
+
+def _moderations_ok(_request: httpx.Request) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "provider": "echo",
+            "model": "omni-moderation-latest",
+            "id": "modr-1",
+            "results": [{"flagged": False, "categories": {}, "category_scores": {}}],
+        },
+    )
+
+
+def test_moderations_sends_explicit_idempotency_key() -> None:
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["key"] = request.headers.get("Idempotency-Key")
+        return _moderations_ok(request)
+
+    client = make_client(handler)
+    client.moderations("hi", idempotency_key="mod-42")
+    assert seen["key"] == "mod-42"
+
+
+def test_moderations_auto_generates_idempotency_key_when_retries_enabled() -> None:
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["key"] = request.headers.get("Idempotency-Key")
+        return _moderations_ok(request)
+
+    client = make_client(handler)  # default max_retries=2
+    client.moderations("hi")
+    assert seen["key"] and seen["key"].startswith("rekai-sdk-")
+
+
+def test_moderations_omits_idempotency_key_when_retries_disabled() -> None:
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["key"] = request.headers.get("Idempotency-Key")
+        return _moderations_ok(request)
+
+    client = make_client(handler)
+    client._max_retries = 0
+    client.moderations("hi")
+    assert seen["key"] is None
+
+
+def test_moderations_retry_reuses_the_same_idempotency_key() -> None:
+    attempts = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request.headers.get("Idempotency-Key"))
+        if len(attempts) == 1:
+            return httpx.Response(429, json={"detail": "slow down"})
+        return _moderations_ok(request)
+
+    client = make_client(handler)
+    client._retry_backoff = 0
+    client.moderations("hi")
+    assert len(attempts) == 2
+    assert attempts[0] == attempts[1]
+
+
 # --- AsyncRekAIClient (driven via asyncio.run to avoid a pytest-asyncio dep) --
 
 
