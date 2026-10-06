@@ -48,6 +48,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Text logs could be forged by newline-bearing request fields** — a model
+  id (or fallback provider name) containing `\r`/`\n` reached `logger` calls
+  raw and split one record into multiple lines (`model=echo\nINFO forged`
+  produced a second, forged `INFO` line). The text formatter now escapes
+  CR/LF inside the message only; tracebacks keep real newlines and JSON
+  output was already safe via `json.dumps`.
 - **Dynamic API keys never pruned expired entries** — `_load` keeps dead
   keys (so `revoke` can still report "found"), and the write path was the
   only place they were ever dropped — but `add`/`revoke` saved the
