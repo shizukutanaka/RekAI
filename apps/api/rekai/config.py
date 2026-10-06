@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from contextvars import ContextVar, Token
 from functools import lru_cache
 from typing import Literal
@@ -92,6 +93,16 @@ class Settings(BaseSettings):
     # "flag" sets X-Input-Secrets-Flag, "block" refuses with 403. A secret in
     # a prompt is usually an accident, not an attack, so the default stays off.
     input_secrets_enabled: bool = False
+
+    # Operator-defined secret formats for both scanners above, comma-separated
+    # "name:sentinel:regex" entries, e.g.
+    # "acme-token:ACME-:ACME-[a-z0-9]{24},internal-key:ik_:ik_[A-F0-9]{32}".
+    # The sentinel is the literal prefix every match of that regex starts with:
+    # the stream redactor can only hold back a secret whose start it
+    # recognizes, so a pattern without an honest sentinel would leak its head
+    # mid-stream before the flush scrub. Malformed entries (missing parts,
+    # non-compiling regex) are skipped, matching the other env parsers.
+    secret_patterns: str = ""
 
     log_format: Literal["text", "json"] = "text"
 
@@ -423,6 +434,34 @@ class Settings(BaseSettings):
                 continue
             allowlists[key] = [p.strip() for p in patterns.split(";") if p.strip()]
         return allowlists
+
+    @property
+    def custom_secret_patterns(
+        self,
+    ) -> list[tuple[str, str, re.Pattern[str]]]:
+        """Parse ``secret_patterns`` into ``[(name, sentinel, compiled), ...]``.
+
+        Entries are ``name:sentinel:regex`` — split on the first two colons so
+        the regex may contain colons itself. Malformed entries (missing parts,
+        an empty name or sentinel, a non-compiling regex) are skipped like the
+        other env parsers.
+        """
+        patterns: list[tuple[str, str, re.Pattern[str]]] = []
+        for raw in self.secret_patterns.split(","):
+            raw = raw.strip()
+            if not raw:
+                continue
+            parts = raw.split(":", 2)
+            if len(parts) != 3:
+                continue
+            name, sentinel, source = (p.strip() for p in parts)
+            if not name or not sentinel or not source:
+                continue
+            try:
+                patterns.append((name, sentinel, re.compile(source)))
+            except re.error:
+                continue
+        return patterns
 
     @property
     def client_rate_limit_overrides(self) -> dict[str, int]:
