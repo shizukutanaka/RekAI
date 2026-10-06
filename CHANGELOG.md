@@ -55,6 +55,42 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   validated against the real Gemini charset before the URL is built; invalid
   ids get a 400. The qualified `models/<id>` form is also normalized on all
   three call paths (chat/stream previously produced `models/models/<id>`).
+- **Input scans read only `content` while providers forward the whole
+  message** — `REKAI_INPUT_SECRETS_ENABLED` and the prompt-injection
+  guardrail collected text from `ChatMessage.content` alone, but the
+  OpenAI/Ollama serializers send each message's full `model_dump` upstream:
+  a credential in `extra_blocks`, `content_blocks`, or a `tool_calls`
+  argument shipped to the provider with no flag and no block (verified live:
+  same request 403s in `content`, 200s in `extra_blocks`). Both scans now
+  collect every string leaf of the serialized message — the injection scan
+  keeps its user/tool role scope; input secrets keep every role, matching
+  what actually leaves the process (`signature` integrity blobs excepted,
+  same as the output scrubber, so replayed signed blocks can't
+  false-positive). Same change wires the missing input-secret scan into the
+  `POST /v1/messages` streaming path — the only surface that ran the
+  injection guardrail but skipped the credential check, so the same body
+  blocked non-stream sailed through with `stream: true`.
+- **Idempotency store failures were silent** — every other Redis-backed
+  subsystem (cache, rate limiter, metrics store, key store) warns when it
+  fails open, but `idempotency` logged nothing. A transient backend error
+  during `complete`/`release` left an `in_progress` sentinel that 409s
+  same-key retries until TTL with no log attribution, and a failed `claim`
+  quietly dropped replay protection (re-processing a retried request). Each
+  fail-open path now warns with the operation and consequence.
+- **SDK `embeddings()` auto-retries could double-bill** — `/v1/embeddings`
+  honors `Idempotency-Key` like `/v1/chat`, but neither SDK sent it, so a
+  retried embeddings request re-ran the upstream call and charged twice. Both
+  SDKs now mint a key when retries are enabled and accept an explicit one
+  (`idempotency_key` / `idempotencyKey`), mirroring `chat()`. The JS type
+  declarations also gained `idempotencyKey`, which was implemented and
+  documented for `chat()` but never declared.
+- **A client disconnecting mid-stream could stream indefinitely for free** —
+  the summary yield carried all usage accounting, so an aborted stream's
+  already-generated tokens never reached `usage_by_*`, the budget window, or
+  the `REKAI_CLIENT_TOKEN_LIMIT` bucket. The stream now records the estimated
+  usage (prompt + streamed completion so far) when it is closed early, and
+  the provider's upstream HTTP stream is closed deterministically on abort
+  instead of waiting on asyncgen GC finalization.
 - **`POST /v1/moderations` couldn't dedupe a retried request** — every other
   mutating POST (`/v1/chat`, `/v1/embeddings`, `/v1/chat/completions`,
   `/v1/messages`) accepts `Idempotency-Key`, but moderations ignored it, so an
