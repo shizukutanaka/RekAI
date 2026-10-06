@@ -7,12 +7,14 @@ import contextlib
 import fnmatch
 import ipaddress
 import json
+import math
 import time
 import uuid
 from collections.abc import AsyncIterator
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from fastapi import Depends, FastAPI, Header, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import ValidationError
@@ -235,6 +237,25 @@ class ConcurrencyLimitMiddleware:
 # their error bodies, so their shape must not change.
 _OPENAI_COMPAT_PATHS = frozenset({"/v1/chat/completions", "/v1/moderations"})
 _ANTHROPIC_COMPAT_PATHS = frozenset({"/v1/messages", "/v1/messages/count_tokens"})
+
+
+def _json_safe(value: Any) -> Any:
+    """Recursively replace non-finite floats so a value survives JSON encoding.
+
+    Python's ``json`` accepts ``NaN``/``Infinity`` on the way in, but
+    ``JSONResponse`` refuses them on the way out — and Pydantic's error detail
+    embeds the offending request input verbatim. Without this, FastAPI's stock
+    validation handler crashes mid-serialization on such a body and the caller
+    gets a bare 500 instead of the 422 it earned.``repr`` keeps the token
+    legible (``'nan'``, ``'inf'``, ``'-inf'``) without inventing a number.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return repr(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
 
 
 def _validation_message(detail: list) -> tuple[str, str | None]:
@@ -909,6 +930,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return settings
 
     # --- error handling ---------------------------------------------------
+    @app.exception_handler(RequestValidationError)
+    async def _request_validation_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # Stock FastAPI behaviour — the same {"detail": [...]} 422 — except the
+        # detail is sanitized first: a body carrying NaN/Infinity passes
+        # Python's json parser, fails a ge/le constraint, and would then crash
+        # the default handler while serializing the offending input verbatim.
+        return JSONResponse(
+            status_code=422,
+            content={"detail": _json_safe(exc.errors())},
+        )
+
     @app.exception_handler(ProviderError)
     async def _provider_error_handler(_: Request, exc: ProviderError) -> JSONResponse:
         metrics.record_error("provider_error")
