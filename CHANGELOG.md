@@ -56,6 +56,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Output redaction missed `tool_calls[].function.arguments`** — a model
+  regurgitating a secret inside a tool call (e.g. `curl -H 'Authorization:
+  Bearer sk-…'`) escaped the `REKAI_OUTPUT_SECRETS_ENABLED` scrub that the
+  same string would get in message content, and the unscrubbed copy also
+  persisted in response/semantic/idempotency caches. The flat field now gets
+  the same recursive string-leaf scrub on both the buffered path (`_redact`)
+  and the streamed path (assembled calls scrubbed once before the summary
+  event, which also catches secrets split across upstream deltas); hits land
+  in `redacted` alongside the other fields.
 - **`NaN`/`Infinity` in a request body returned a bare 500, not a 422** —
   Python's `json` accepts the non-standard literals on the way in, pydantic
   correctly rejects the value, but the offending input rides inside the error
