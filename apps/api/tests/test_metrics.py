@@ -447,6 +447,7 @@ def test_admin_usage_returns_the_cross_tenant_breakdown() -> None:
         rate_limit_enabled=False,
     )
     client = TestClient(create_app(settings))
+    main_module.metrics.seed({})  # start from a clean breakdown
     try:
         body = {"model": "echo", "messages": [{"role": "user", "content": "hi"}], "cache": False}
         client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-usage-a"})
