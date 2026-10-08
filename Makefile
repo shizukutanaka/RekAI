@@ -55,8 +55,9 @@ fmt: ## Auto-format the API (ruff)
 	cd $(API_DIR) && $(API_TOOL)ruff check --fix . && $(API_TOOL)ruff format .
 
 .PHONY: typecheck
-typecheck: ## Type-check the API (mypy)
+typecheck: ## Type-check the API (mypy) and web (tsc)
 	cd $(API_DIR) && $(API_TOOL)mypy rekai
+	cd $(WEB_DIR) && npx tsc --noEmit -p .
 
 .PHONY: test
 test: ## Run the API, Python SDK, JS SDK, and web test suites
