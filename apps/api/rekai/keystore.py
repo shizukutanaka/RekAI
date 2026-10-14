@@ -198,7 +198,10 @@ class DynamicKeyStore:
             credits = await self._load_credits()
             if client_id not in credits and len(credits) >= _MAX_CREDIT_ENTRIES:
                 return False
-            credits[client_id] = round(credits.get(client_id, 0.0) + amount_usd, 6)
+            new = credits.get(client_id, 0.0) + amount_usd
+            # A positive grant must land above zero — a sub-quantum top-up
+            # that rounds to 0 would mint an already-exhausted key.
+            credits[client_id] = max(round(new, 6), 0.000001) if new > 0 else round(new, 6)
             await self._save_credits(credits)
             return True
 
@@ -273,12 +276,24 @@ class DynamicKeyStore:
             # revoke before the next write reports "found" as documented.
             now = time.time()
             live = {k: v for k, v in keys.items() if v is None or v > now}
+            # Keys the prune is about to drop — a re-added key that had
+            # already expired counts too: it died and is being reborn, so it
+            # must not inherit the predecessor's balance either.
+            dead = keys.keys() - live.keys()
             # Re-adding an existing key (live or expired) refreshes it rather
             # than consuming a new slot, so the cap counts only new keys.
             if key not in keys and len(live) >= _MAX_DYNAMIC_KEYS:
                 return False
             live[key] = expires_at
             await self._save(live)
+            # A key dropped by the prune above forfeits its balance too —
+            # otherwise re-added keys would inherit stale credit and
+            # abandoned balances would fill the ledger.
+            if dead:
+                credits = await self._load_credits()
+                removed = [k for k in dead if credits.pop(_client_id(k), None) is not None]
+                if removed:
+                    await self._save_credits(credits)
             return True
 
         return await self._with_lock(_mutate)
