@@ -1484,7 +1484,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 },
                 credit_remaining_usd={
                     mask_key(raw): credits[auth.client_id(raw)]
-                    for raw in expiries
+                    for raw in settings.api_key_list + list(expiries)
                     if auth.client_id(raw) in credits
                 },
             )

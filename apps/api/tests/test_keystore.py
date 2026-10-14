@@ -415,3 +415,45 @@ def test_admin_mint_with_credit_usd_lists_balance() -> None:
 
     listed = client.get("/admin/keys", headers=headers).json()
     assert listed["credit_remaining_usd"] == {"sk-d…paid": 25.0}
+
+
+async def test_expired_key_pruned_on_write_forfeits_credit() -> None:
+    """A key dropped by the add() expiry prune loses its balance too — a
+    re-added key must not inherit the predecessor's credit."""
+    store = DynamicKeyStore(MemoryCache())
+    await store.add("sk-dyn-old", expires_at=time.time() - 1)
+    await store.grant_credit(_client_id("sk-dyn-old"), 9.0)
+    # The next write prunes the dead key and its balance.
+    await store.add("sk-dyn-new")
+    assert await store.credit_balance(_client_id("sk-dyn-old")) is None
+
+
+async def test_sub_quantum_grant_stays_spendable() -> None:
+    """A positive top-up must land above zero — rounding to the ledger's
+    6-dp quantum must not mint an already-exhausted balance."""
+    store = DynamicKeyStore(MemoryCache())
+    assert await store.grant_credit("key:abc", 0.0000004) is True
+    assert (await store.credit_balance("key:abc")) > 0
+
+
+def test_admin_listing_shows_static_key_balances() -> None:
+    from rekai.config import Settings
+    from rekai.main import create_app
+
+    settings = Settings(
+        environment="test",
+        rate_limit_enabled=False,
+        admin_key="sk-admin-1",
+        dynamic_keys_enabled=True,
+        api_keys="sk-static-paid",
+    )
+    client = TestClient(create_app(settings))
+    headers = {"Authorization": "Bearer sk-admin-1"}
+    resp = client.post(
+        "/admin/keys/sk-static-paid/credits",
+        json={"usd_amount": 7.0},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    listed = client.get("/admin/keys", headers=headers).json()
+    assert listed["credit_remaining_usd"] == {"sk-s…paid": 7.0}

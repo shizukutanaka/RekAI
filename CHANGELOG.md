@@ -68,6 +68,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Prepaid credits: three ledger edge cases** — `GET /admin/keys` now lists
+  balances for credited *static* `REKAI_API_KEYS` keys too (it only iterated
+  dynamic keys); the `add()` expiry prune now forfeits a dead key's balance
+  alongside it, so a re-added key can't inherit stale credit and abandoned
+  balances can't fill the ledger; and a sub-quantum top-up
+  (`usd_amount < $0.0000005`) can no longer round to a zero — i.e. instantly
+  exhausted — balance.
 - **Output redaction missed `tool_calls[].function.arguments`** — a model
   regurgitating a secret inside a tool call (e.g. `curl -H 'Authorization:
   Bearer sk-…'`) escaped the `REKAI_OUTPUT_SECRETS_ENABLED` scrub that the
