@@ -14,7 +14,8 @@ import {
 
 function formatCredit(v: number): string {
   if (v <= 0) return "credit exhausted";
-  return `$${v.toFixed(v < 0.01 ? 6 : 2)} credit`;
+  const wholeCents = Math.abs(v * 100 - Math.round(v * 100)) < 1e-9;
+  return `$${v.toFixed(wholeCents ? 2 : 6)} credit`;
 }
 
 export default function AdminPage() {
@@ -60,6 +61,7 @@ export default function AdminPage() {
 
   function save(e: React.FormEvent) {
     e.preventDefault();
+    setActionMsg("");
     const trimmed = adminKey.trim();
     setStoredAdminKey(trimmed);
     setSaved(true);
