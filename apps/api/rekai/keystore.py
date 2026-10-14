@@ -16,6 +16,15 @@ Unlike BYOK (transient, never stored), dynamic keys *are* persisted server-side
 encrypt the blob at rest (e.g. in a shared Redis an operator doesn't fully
 trust); omit it to store plaintext, same as before this existed.
 
+A second blob, ``rekai:api_keys:credits``, holds prepaid USD balances —
+``{client_id: remaining_usd}`` — for the operator-facing billing side of
+dynamic keys: mint a key, grant it credit, and the gateway debits it per
+request until exhausted (see the credit check in ``main.py``'s middleware and
+the admin ``/admin/keys/{key}/credits`` route). A key with no credit entry is
+unbilled and unaffected — credits are opt-in per key. Entries are keyed by
+the ``auth.client_id`` digest (never the raw key), matching the id the rest
+of the gateway bills against.
+
 ``add``/``revoke`` are read-modify-write against that one blob, so they need to
 serialize against each other. In the Redis-backed, multi-worker case — the
 deployment this whole feature is *for* — two concurrent writes really can
@@ -39,6 +48,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, TypeVar
 
+from rekai.auth import client_id as _client_id
 from rekai.cache import CacheBackend
 from rekai.logging_config import get_logger
 
@@ -48,6 +58,7 @@ if TYPE_CHECKING:
 logger = get_logger("rekai.keystore")
 
 _CACHE_KEY = "rekai:api_keys:dynamic"
+_CREDITS_KEY = "rekai:api_keys:credits"
 # Cache backends require a positive TTL; there's no "forever" option, so this
 # stands in for one (renewed on every write, so it never lapses in practice).
 _TTL_SECONDS = 10 * 365 * 24 * 3600
@@ -67,6 +78,8 @@ _LOCK_MAX_ATTEMPTS = 40  # ~2s worst case under contention
 # ``RateLimiter.max_buckets``: a mistaken bulk-add script (or a compromised
 # admin credential) shouldn't be able to grow it without limit.
 _MAX_DYNAMIC_KEYS = 10_000
+# Same bound for the credits map — it is read on every /v1 request.
+_MAX_CREDIT_ENTRIES = 10_000
 
 T = TypeVar("T")
 
@@ -76,27 +89,22 @@ class DynamicKeyStore:
         self._cache = cache
         self._cipher = cipher
 
-    async def _load(self) -> dict[str, float | None]:
-        """Return ``{key: expires_at_unix_or_None}``, migrating a legacy
-        ``[str, ...]`` blob (written before key expiry existed) to ``{k: None}``.
-        Expired entries are kept in the map here — filtering them is the
-        caller's job — so ``revoke`` can still report "found" on an expired key
-        and a later ``_save`` drops them by simply not re-adding.
+    async def _read_blob(self, cache_key: str) -> object:
+        """Fetch + decrypt + JSON-parse one store blob, or None on any failure.
+
+        Decrypt/parse failures degrade to empty rather than crashing every
+        request that checks auth. Warn loudly on decrypt failure: it looks
+        identical to "all dynamic keys were revoked" from the caller's side,
+        and write paths calling _load() internally would silently overwrite
+        the undecryptable blob with a map containing only the new entry.
         """
-        raw = await self._cache.get(_CACHE_KEY)
+        raw = await self._cache.get(cache_key)
         if not raw:
-            return {}
+            return None
         if self._cipher is not None:
             try:
                 raw = self._cipher.decrypt(raw)
             except ValueError:
-                # Wrong/rotated encryption key, or a plaintext blob written
-                # before encryption was turned on — treat as empty rather than
-                # crash every request that checks auth. Warn loudly: this looks
-                # identical to "all dynamic keys were revoked" from the caller's
-                # side, and add()/revoke() calling _load() internally means
-                # the next add() would silently overwrite the undecryptable
-                # blob with a map containing only the new key.
                 logger.warning(
                     "failed to decrypt dynamic key store — wrong or rotated "
                     "REKAI_DYNAMIC_KEYS_ENCRYPTION_KEY? Treating as empty; "
@@ -104,11 +112,26 @@ class DynamicKeyStore:
                     "fixed (they are not lost, but the next write will "
                     "overwrite them)."
                 )
-                return {}
+                return None
         try:
-            data = json.loads(raw)
+            return json.loads(raw)
         except json.JSONDecodeError:
-            return {}
+            return None
+
+    async def _write_blob(self, cache_key: str, payload: dict) -> None:
+        raw = json.dumps(payload, sort_keys=True)
+        if self._cipher is not None:
+            raw = self._cipher.encrypt(raw)
+        await self._cache.set(cache_key, raw, ttl=_TTL_SECONDS)
+
+    async def _load(self) -> dict[str, float | None]:
+        """Return ``{key: expires_at_unix_or_None}``, migrating a legacy
+        ``[str, ...]`` blob (written before key expiry existed) to ``{k: None}``.
+        Expired entries are kept in the map here — filtering them is the
+        caller's job — so ``revoke`` can still report "found" on an expired key
+        and a later ``_save`` drops them by simply not re-adding.
+        """
+        data = await self._read_blob(_CACHE_KEY)
         if isinstance(data, list):  # pre-expiry blob: bare key list
             return {k: None for k in data if isinstance(k, str)}
         if isinstance(data, dict):
@@ -118,6 +141,20 @@ class DynamicKeyStore:
                 if isinstance(k, str)
             }
         return {}
+
+    async def _load_credits(self) -> dict[str, float]:
+        """Return ``{client_id: remaining_credit_usd}``."""
+        data = await self._read_blob(_CREDITS_KEY)
+        if isinstance(data, dict):
+            return {
+                k: float(v)
+                for k, v in data.items()
+                if isinstance(k, str) and isinstance(v, int | float)
+            }
+        return {}
+
+    async def _save_credits(self, credits: dict[str, float]) -> None:
+        await self._write_blob(_CREDITS_KEY, credits)
 
     async def list_keys(self) -> list[str]:
         """Keys that are currently valid — expired entries are excluded."""
@@ -138,10 +175,59 @@ class DynamicKeyStore:
         }
 
     async def _save(self, keys: dict[str, float | None]) -> None:
-        payload = json.dumps(keys, sort_keys=True)
-        if self._cipher is not None:
-            payload = self._cipher.encrypt(payload)
-        await self._cache.set(_CACHE_KEY, payload, ttl=_TTL_SECONDS)
+        await self._write_blob(_CACHE_KEY, keys)
+
+    async def credit_balance(self, client_id: str) -> float | None:
+        """Remaining prepaid USD for a client, or None when it holds no
+        credit entry (unbilled — the credit gate only applies to keys that
+        were granted a balance)."""
+        return (await self._load_credits()).get(client_id)
+
+    async def credit_balances(self) -> dict[str, float]:
+        """Full client_id → balance map, for the admin key listing."""
+        return await self._load_credits()
+
+    async def grant_credit(self, client_id: str, amount_usd: float) -> bool:
+        """Add ``amount_usd`` to the client's balance (negative debits it).
+
+        Returns False — nothing written — when adding a *new* entry would
+        exceed the credits cap.
+        """
+
+        async def _mutate() -> bool:
+            credits = await self._load_credits()
+            if client_id not in credits and len(credits) >= _MAX_CREDIT_ENTRIES:
+                return False
+            credits[client_id] = round(credits.get(client_id, 0.0) + amount_usd, 6)
+            await self._save_credits(credits)
+            return True
+
+        return await self._with_lock(_mutate)
+
+    async def spend_credit(self, client_id: str, cost_usd: float | None) -> float | None:
+        """Debit ``cost_usd`` from the client's balance; returns the new
+        balance, or None when the client holds no credit entry.
+
+        The balance is allowed to go negative: a request that already
+        completed is always billed, and the middleware rejects the *next*
+        one. Unpriced/free calls (cost_usd None/0) debit nothing, and the
+        no-entry case skips the locked write entirely so uncredited traffic
+        pays only one extra cache read.
+        """
+        if not cost_usd or cost_usd <= 0:
+            return None
+        if (await self._load_credits()).get(client_id) is None:
+            return None
+
+        async def _mutate() -> float | None:
+            credits = await self._load_credits()
+            if client_id not in credits:
+                return None
+            credits[client_id] = round(credits[client_id] - cost_usd, 6)
+            await self._save_credits(credits)
+            return credits[client_id]
+
+        return await self._with_lock(_mutate)
 
     async def _with_lock(self, mutate: Callable[[], Awaitable[T]]) -> T:
         """Run ``mutate`` (a read-modify-write against the key set) holding a
@@ -207,6 +293,11 @@ class DynamicKeyStore:
             live = {k: v for k, v in keys.items() if v is None or v > now}
             live.pop(key, None)  # absent from live when the key was expired
             await self._save(live)
+            # Drop any credit balance with it — a revoked key can't spend it,
+            # and a re-added key must not inherit a stranger's balance.
+            credits = await self._load_credits()
+            if credits.pop(_client_id(key), None) is not None:
+                await self._save_credits(credits)
             return True
 
         return await self._with_lock(_mutate)

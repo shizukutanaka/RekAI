@@ -7,6 +7,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Prepaid credit balances — sellable metered access.** `POST /admin/keys`
+  now accepts `credit_usd`, and a new `POST /admin/keys/{key}/credits` route
+  tops up any key's USD balance (static `REKAI_API_KEYS` entries included).
+  A credited key is debited its measured request cost on every billed call —
+  non-streaming, streaming (including mid-stream aborts), cache hits, and
+  idempotent replays — and `/v1` calls return `402 credit_exhausted` once the
+  balance is spent. Keys with no credit entry are unbilled and unaffected,
+  balances live in the same bounded, optionally-encrypted, Redis-shareable
+  store as dynamic keys, and `GET /admin/keys` reports
+  `credit_remaining_usd` per masked key. This is the OpenRouter-style revenue
+  primitive: issue a key, sell it with a balance, and the gateway meters it
+  until exhausted.
 - **`REKAI_TRUSTED_PROXIES` — real client IP behind a reverse proxy.** Without
   it, every request arriving through a proxy or load balancer shares one
   rate-limit/budget bucket under the proxy's own address (Render's managed LB

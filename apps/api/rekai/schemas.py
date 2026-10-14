@@ -770,12 +770,32 @@ class ErrorResponse(BaseModel):
     detail: str | None = None
 
 
+class AdminCreditRequest(BaseModel):
+    usd_amount: float = Field(gt=0, description="USD credit to add to the key's balance")
+
+
+class AdminCreditResponse(BaseModel):
+    status: Literal["granted"]
+    key: str
+    credit_usd: float
+    credit_remaining_usd: float | None = None
+
+
 class AdminKeyRequest(BaseModel):
     key: str = Field(..., min_length=1, description="The raw API key to add.")
     expires_in_seconds: int | None = Field(
         default=None,
         gt=0,
         description="Optional TTL for the key, in seconds (e.g. 86400 = 1 day).",
+    )
+    credit_usd: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Optional prepaid USD balance granted with the key. A key holding "
+            "credit is debited its request cost until the balance is spent, "
+            "then /v1 calls return 402. Omit for an unbilled key."
+        ),
     )
 
 
@@ -785,6 +805,10 @@ class AdminKeyList(BaseModel):
     dynamic_expires_at: dict[str, float] = Field(
         default_factory=dict,
         description="Masked dynamic key → expiry unix timestamp (expiring keys only).",
+    )
+    credit_remaining_usd: dict[str, float] = Field(
+        default_factory=dict,
+        description="Masked dynamic key → remaining prepaid USD balance (credited keys only).",
     )
 
 

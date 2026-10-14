@@ -9,6 +9,7 @@ import time
 
 from fastapi.testclient import TestClient
 
+from rekai.auth import client_id as _client_id
 from rekai.cache import MemoryCache, NullCache
 from rekai.keystore import DynamicKeyStore
 from rekai.security import KeyCipher, generate_key
@@ -275,3 +276,142 @@ def test_admin_add_key_returns_409_when_store_full(monkeypatch) -> None:
     resp = client.post("/admin/keys", json={"key": "sk-second"}, headers=headers)
     assert resp.status_code == 409
     assert resp.json()["error"] == "key_store_full"
+
+
+async def test_credit_grant_spend_and_balance() -> None:
+    store = DynamicKeyStore(MemoryCache())
+    assert await store.credit_balance("key:abc") is None  # no entry -> unbilled
+
+    assert await store.grant_credit("key:abc", 5.0) is True
+    assert await store.credit_balance("key:abc") == 5.0
+
+    # Granting again tops the entry up rather than replacing it.
+    assert await store.grant_credit("key:abc", 2.5) is True
+    assert await store.credit_balance("key:abc") == 7.5
+
+    remaining = await store.spend_credit("key:abc", 7.0)
+    assert remaining == 0.5
+
+    # The balance may go negative: the in-flight request is still billed and
+    # the middleware rejects the *next* one.
+    assert await store.spend_credit("key:abc", 1.0) == -0.5
+    assert await store.credit_balance("key:abc") == -0.5
+
+
+async def test_spend_credit_is_a_noop_without_an_entry() -> None:
+    store = DynamicKeyStore(MemoryCache())
+    assert await store.spend_credit("key:abc", 1.0) is None
+    # A free/unpriced request never debits either.
+    await store.grant_credit("key:abc", 1.0)
+    assert await store.spend_credit("key:abc", 0.0) is None
+    assert await store.spend_credit("key:abc", None) is None
+    assert await store.credit_balance("key:abc") == 1.0
+
+
+async def test_revoke_drops_the_credit_entry() -> None:
+    store = DynamicKeyStore(MemoryCache())
+    await store.add("sk-dyn-1")
+    await store.grant_credit(_client_id("sk-dyn-1"), 3.0)
+    assert await store.revoke("sk-dyn-1") is True
+    # A re-added key must not inherit the predecessor's balance.
+    assert await store.credit_balance(_client_id("sk-dyn-1")) is None
+
+
+async def test_encrypted_store_roundtrips_credits() -> None:
+    cache = MemoryCache()
+    cipher = KeyCipher(generate_key())
+    store = DynamicKeyStore(cache, cipher)
+    await store.grant_credit("key:abc", 4.0)
+    assert await store.credit_balance("key:abc") == 4.0
+    assert "key:abc" not in (await cache.get("rekai:api_keys:credits") or "")
+
+
+async def test_credit_cap_refuses_new_entries(monkeypatch) -> None:
+    import rekai.keystore as keystore
+
+    monkeypatch.setattr(keystore, "_MAX_CREDIT_ENTRIES", 1)
+    store = DynamicKeyStore(MemoryCache())
+    assert await store.grant_credit("key:a", 1.0) is True
+    assert await store.grant_credit("key:b", 1.0) is False
+    # ...while topping up an existing entry still fits.
+    assert await store.grant_credit("key:a", 1.0) is True
+    assert await store.credit_balance("key:a") == 2.0
+
+
+def test_admin_grant_credit_and_402_gate() -> None:
+    """Sellable prepaid access: grant credits, spend them on billed calls,
+    and get a 402 once the balance is gone."""
+    from rekai.config import Settings
+    from rekai.main import create_app
+    from rekai.providers import register_provider
+    from rekai.providers.base import Provider, ProviderResult
+    from rekai.schemas import Usage
+
+    class PricedProvider(Provider):
+        name = "priced"
+        requires_key = False
+
+        async def chat(self, request, api_key) -> ProviderResult:
+            return ProviderResult(
+                model=request.model or "m",
+                content="ok",
+                usage=Usage(prompt_tokens=1_000_000, completion_tokens=0, total_tokens=1_000_000),
+            )
+
+    register_provider(PricedProvider())
+    settings = Settings(
+        environment="test",
+        default_provider="priced",
+        api_keys="sk-buyer,sk-free",
+        dynamic_keys_enabled=True,
+        admin_key="sk-admin-1",
+        rate_limit_enabled=False,
+        pricing_overrides="m:10.0:10.0",  # $10 per 1M tokens -> $10/request
+    )
+    client = TestClient(create_app(settings))
+    admin = {"Authorization": "Bearer sk-admin-1"}
+    body = {"messages": [{"role": "user", "content": "hi"}], "model": "m"}
+
+    # Top up $15 on the buyer's key — the revenue-bearing primitive.
+    resp = client.post("/admin/keys/sk-buyer/credits", json={"usd_amount": 15.0}, headers=admin)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "granted"
+    assert resp.json()["credit_remaining_usd"] == 15.0
+
+    # One $10 request succeeds and debits the balance to $5.
+    ok = client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-buyer"})
+    assert ok.status_code == 200
+    # Second request: balance is now $5, still positive -> allowed, then $-5.
+    ok2 = client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-buyer"})
+    assert ok2.status_code == 200
+    # Third: balance exhausted -> prepaid gate rejects before any work.
+    dead = client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-buyer"})
+    assert dead.status_code == 402
+    assert dead.json()["error"] == "credit_exhausted"
+
+    # A key that was never granted credit is unbilled and unaffected.
+    free = client.post("/v1/chat", json=body, headers={"Authorization": "Bearer sk-free"})
+    assert free.status_code == 200
+
+
+def test_admin_mint_with_credit_usd_lists_balance() -> None:
+    from rekai.config import Settings
+    from rekai.main import create_app
+
+    settings = Settings(
+        environment="test",
+        rate_limit_enabled=False,
+        admin_key="sk-admin-1",
+        dynamic_keys_enabled=True,
+    )
+    client = TestClient(create_app(settings))
+    headers = {"Authorization": "Bearer sk-admin-1"}
+    resp = client.post(
+        "/admin/keys",
+        json={"key": "sk-dyn-paid", "credit_usd": 25.0},
+        headers=headers,
+    )
+    assert resp.status_code == 201
+
+    listed = client.get("/admin/keys", headers=headers).json()
+    assert listed["credit_remaining_usd"] == {"sk-d…paid": 25.0}

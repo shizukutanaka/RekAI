@@ -47,6 +47,8 @@ from rekai.providers.registry import configure_custom_provider
 from rekai.rate_limit import build_rate_limiter
 from rekai.router import resolve_provider, select_provider
 from rekai.schemas import (
+    AdminCreditRequest,
+    AdminCreditResponse,
     AdminKeyList,
     AdminKeyRequest,
     AdminKeyResponse,
@@ -665,12 +667,13 @@ def _stash_gen_ai_prestream(http_request: Request, provider: str, model: str) ->
     }
 
 
-def _record_client_usage(
+async def _record_client_usage(
     http_request: Request,
     result: _HasUsageAndCost,
     settings: Settings,
     operation: str = "chat",
     user: str | None = None,
+    key_store: DynamicKeyStore | None = None,
 ) -> None:
     """Attribute a chat/embeddings response's tokens and cost to the requesting
     client (the masked API-key id, or the client IP with no gateway auth).
@@ -698,6 +701,11 @@ def _record_client_usage(
             time.time(),
         )
     _stash_gen_ai(http_request, operation, result)
+    # Prepaid billing: debit the key's credit balance for whatever the client
+    # consumed — including cache hits and idempotent replays, consistent with
+    # the per-client counting above (a no-op when the key holds no credit).
+    if key_store is not None and result.cost_usd:
+        await key_store.spend_credit(client_id, result.cost_usd)
 
 
 async def _run_chat(
@@ -708,6 +716,7 @@ async def _run_chat(
     idempotency_key: str | None,
     settings: Settings,
     cache_backend: CacheBackend,
+    key_store: DynamicKeyStore | None = None,
 ) -> ChatResponse | JSONResponse:
     """The shared non-streaming chat pipeline.
 
@@ -750,7 +759,9 @@ async def _run_chat(
         if outcome.kind == "replay" and outcome.response is not None:
             response.headers["Idempotent-Replay"] = "true"
             replayed = _redact_output(ChatResponse(**outcome.response), settings, response)
-            _record_client_usage(http_request, replayed, settings, user=request.user)
+            await _record_client_usage(
+                http_request, replayed, settings, user=request.user, key_store=key_store
+            )
             return replayed
         claimed = True  # we hold the in-progress sentinel
     try:
@@ -766,7 +777,9 @@ async def _run_chat(
         # Disclose that this answer is to a *similar* prompt, not this one —
         # otherwise a semantic hit is indistinguishable from an exact one.
         response.headers["X-Cache-Similarity"] = f"{result.cache_similarity:.4f}"
-    _record_client_usage(http_request, result, settings, user=request.user)
+    await _record_client_usage(
+        http_request, result, settings, user=request.user, key_store=key_store
+    )
     if idempotency_key and fingerprint is not None:
         await idempotency.complete(
             cache_backend,
@@ -1033,6 +1046,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         detail=f"Client budget of ${budget:.2f} exceeded (spent ${spent:.4f}).",
                     ).model_dump(),
                     headers=headers,
+                )
+
+        # Prepaid credits: a key holding a credit balance (granted via
+        # POST /admin/keys{,/credits}) is rejected once it hits zero — the
+        # operator-facing mechanism for selling metered access. Keys with no
+        # credit entry are unbilled and unaffected. One extra store read per
+        # /v1 request, same order as _allowed_keys above.
+        if is_api_write and token is not None and key_store is not None:
+            credit = await key_store.credit_balance(rl_client)
+            if credit is not None and credit <= 0:
+                metrics.record_error("credit_exhausted")
+                return JSONResponse(
+                    status_code=402,
+                    content=ErrorResponse(
+                        error="credit_exhausted",
+                        detail="Prepaid credit exhausted; ask the operator to top up.",
+                    ).model_dump(),
+                    headers={"X-Credit-Remaining": "0"},
                 )
 
         # Per-client token cap: the USD budget's counterpart in tokens, which
@@ -1444,11 +1475,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 _admin_ip(request),
                 extra={"admin_action": "list_keys", "ip": _admin_ip(request)},
             )
+            credits = await key_store.credit_balances() if key_store is not None else {}
             return AdminKeyList(
                 static=[mask_key(k) for k in settings.api_key_list],
                 dynamic=[mask_key(k) for k in expiries],
                 dynamic_expires_at={
                     mask_key(k): ts for k, ts in expiries.items() if ts is not None
+                },
+                credit_remaining_usd={
+                    mask_key(raw): credits[auth.client_id(raw)]
+                    for raw in expiries
+                    if auth.client_id(raw) in credits
                 },
             )
 
@@ -1482,11 +1519,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     ).model_dump(),
                 )
             admin_logger.info(
-                "admin added key=%s ip=%s",
+                "admin added key=%s credit_usd=%s ip=%s",
                 masked,
+                payload.credit_usd,
                 _admin_ip(request),
-                extra={"admin_action": "add_key", "key": masked, "ip": _admin_ip(request)},
+                extra={
+                    "admin_action": "add_key",
+                    "key": masked,
+                    "credit_usd": payload.credit_usd,
+                    "ip": _admin_ip(request),
+                },
             )
+            if payload.credit_usd is not None:
+                await key_store.grant_credit(auth.client_id(payload.key), payload.credit_usd)
             return AdminKeyResponse(status="added", key=masked, expires_at=expires_at)
 
         @app.delete("/admin/keys/{key}", response_model=AdminKeyResponse, tags=["admin"])
@@ -1525,6 +1570,53 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 extra={"admin_action": "revoke_key", "key": masked, "ip": _admin_ip(request)},
             )
             return AdminKeyResponse(status="revoked", key=masked)
+
+        @app.post(
+            "/admin/keys/{key}/credits",
+            response_model=AdminCreditResponse,
+            tags=["admin"],
+        )
+        async def grant_admin_key_credits(key: str, payload: AdminCreditRequest, request: Request):
+            """Top up a key's prepaid USD balance. Works on any key the caller
+            authenticates with — static ``REKAI_API_KEYS`` keys included — so
+            operators can bill fixed deployments too, not just dynamic keys.
+            """
+            rate_limited = await _admin_rate_limited(request)
+            if rate_limited is not None:
+                return rate_limited
+            if not _admin_authorized(request):
+                return _admin_auth_error()
+            if key_store is None:
+                return _dynamic_keys_disabled_error()
+            cid = auth.client_id(key)
+            if not await key_store.grant_credit(cid, payload.usd_amount):
+                return JSONResponse(
+                    status_code=409,
+                    content=ErrorResponse(
+                        error="key_store_full",
+                        detail="Credit ledger is full; revoke unused keys first.",
+                    ).model_dump(),
+                )
+            masked = mask_key(key)
+            remaining = await key_store.credit_balance(cid)
+            admin_logger.info(
+                "admin granted credit key=%s credit_usd=%s ip=%s",
+                masked,
+                payload.usd_amount,
+                _admin_ip(request),
+                extra={
+                    "admin_action": "grant_credit",
+                    "key": masked,
+                    "credit_usd": payload.usd_amount,
+                    "ip": _admin_ip(request),
+                },
+            )
+            return AdminCreditResponse(
+                status="granted",
+                key=masked,
+                credit_usd=payload.usd_amount,
+                credit_remaining_usd=remaining,
+            )
 
     async def _collect_model_infos(
         kind_filter: Literal["chat", "embedding"] | None,
@@ -1611,7 +1703,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         cache_backend: CacheBackend = Depends(get_cache),
     ):
         return await _run_chat(
-            request, http_request, response, x_provider_key, idempotency_key, config, cache_backend
+            request,
+            http_request,
+            response,
+            x_provider_key,
+            idempotency_key,
+            config,
+            cache_backend,
+            key_store,
         )
 
     @app.post(
@@ -1666,8 +1765,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if outcome.kind == "replay" and outcome.response is not None:
                 response.headers["Idempotent-Replay"] = "true"
                 replayed = EmbeddingsResponse(**outcome.response)
-                _record_client_usage(
-                    http_request, replayed, config, operation="embeddings", user=request.user
+                await _record_client_usage(
+                    http_request,
+                    replayed,
+                    config,
+                    operation="embeddings",
+                    user=request.user,
+                    key_store=key_store,
                 )
                 return replayed
             claimed = True
@@ -1677,8 +1781,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if claimed:
                 await idempotency.release(cache_backend, client_id, idempotency_key)  # type: ignore[arg-type]
             raise
-        _record_client_usage(
-            http_request, result, config, operation="embeddings", user=request.user
+        await _record_client_usage(
+            http_request,
+            result,
+            config,
+            operation="embeddings",
+            user=request.user,
+            key_store=key_store,
         )
         if idempotency_key and fingerprint is not None:
             await idempotency.complete(
@@ -1805,7 +1914,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         async def event_source():
             async for ev in handle_chat_stream(
-                request, x_provider_key, config, cache_backend, provider_name, provider, client_id
+                request,
+                x_provider_key,
+                config,
+                cache_backend,
+                provider_name,
+                provider,
+                client_id,
+                key_store,
             ):
                 if ev.delta is not None:
                     yield f"data: {json.dumps({'delta': ev.delta})}\n\n"
@@ -1947,6 +2063,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 idempotency_key,
                 config,
                 cache_backend,
+                key_store,
             )
             # A guardrail block or an Idempotency-Key conflict — already a RekAI
             # error body, so pass it along rather than guessing at its meaning.
@@ -1991,6 +2108,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 provider_name,
                 provider,
                 client_id,
+                key_store,
             ):
                 if ev.system_fingerprint is not None:
                     seen_fingerprint = ev.system_fingerprint
@@ -2128,6 +2246,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 idempotency_key,
                 config,
                 cache_backend,
+                key_store,
             )
             if isinstance(result, JSONResponse):
                 return result
@@ -2170,6 +2289,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 provider_name,
                 provider,
                 client_id,
+                key_store,
             ):
                 if not started:
                     yield anthropic_compat.ev_message_start(
