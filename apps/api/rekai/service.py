@@ -8,7 +8,7 @@ import time
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rekai import guardrails
 from rekai.cache import CacheBackend, cache_key, embedding_cache_key, semantic_bucket
@@ -37,6 +37,9 @@ from rekai.schemas import (
     Usage,
 )
 from rekai.semantic_cache import semantic_cache
+
+if TYPE_CHECKING:
+    from rekai.keystore import DynamicKeyStore
 
 logger = get_logger("rekai.service")
 
@@ -867,11 +870,12 @@ async def handle_chat_stream(
     provider_name: str,
     provider: Provider,
     client_id: str,
+    key_store: DynamicKeyStore | None = None,
 ) -> AsyncGenerator[ChatStreamEvent, None]:
     # Same request-scoped Settings binding as handle_chat (O-1).
     token = bind_current_settings(settings)
     inner = _handle_chat_stream(
-        request, api_key, settings, cache, provider_name, provider, client_id
+        request, api_key, settings, cache, provider_name, provider, client_id, key_store
     )
     try:
         async for event in inner:
@@ -884,17 +888,20 @@ async def handle_chat_stream(
         reset_current_settings(token)
 
 
-def _record_stream_accounting(
+async def _record_stream_accounting(
     settings: Settings,
     client_id: str,
     provider_name: str,
     model: str,
     user: str | None,
     usage: Usage,
+    key_store: DynamicKeyStore | None = None,
 ) -> float | None:
     """Attribute stream usage and cost to every accounting dimension; returns
     the USD cost. Shared by the summary and mid-stream-abort paths so a client
-    disconnect fills the same buckets a completed stream does."""
+    disconnect fills the same buckets a completed stream does — including the
+    prepaid-credit debit, which must live here or an aborted stream could
+    still bypass billing."""
     cost_usd = estimate_cost(provider_name, model, usage, settings.pricing_override_dict)
     metrics.record_tokens(usage.total_tokens, provider_name)
     metrics.record_cost(cost_usd)
@@ -914,6 +921,8 @@ def _record_stream_accounting(
             settings.client_token_limit_window_seconds,
             time.time(),
         )
+    if key_store is not None:
+        await key_store.spend_credit(client_id, cost_usd)
     return cost_usd
 
 
@@ -925,6 +934,7 @@ async def _handle_chat_stream(
     provider_name: str,
     provider: Provider,
     client_id: str,
+    key_store: DynamicKeyStore | None = None,
 ) -> AsyncGenerator[ChatStreamEvent, None]:
     """Drive a streaming completion through one provider, yielding typed events.
 
@@ -1178,7 +1188,7 @@ async def _handle_chat_stream(
             # filling the client's budget/token windows.
             prompt_tokens = sum(estimate_tokens(m.content or "") for m in request.messages)
             completion_tokens = estimate_tokens("".join(completion) + "".join(reported_refusal))
-            _record_stream_accounting(
+            await _record_stream_accounting(
                 settings,
                 client_id,
                 provider_name,
@@ -1189,6 +1199,7 @@ async def _handle_chat_stream(
                     completion_tokens=completion_tokens,
                     total_tokens=prompt_tokens + completion_tokens,
                 ),
+                key_store,
             )
         # `async for` doesn't close the upstream generator on early exit —
         # aclose it deterministically so the provider's HTTP stream is released
@@ -1209,8 +1220,8 @@ async def _handle_chat_stream(
                 completion_tokens=completion_tokens,
                 total_tokens=prompt_tokens + completion_tokens,
             )
-        cost_usd = _record_stream_accounting(
-            settings, client_id, provider_name, request.model, request.user, usage
+        cost_usd = await _record_stream_accounting(
+            settings, client_id, provider_name, request.model, request.user, usage, key_store
         )
         tool_call_hits: list[str] = []
         if redaction_on and reported_tool_calls is not None:
