@@ -1580,6 +1580,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             """Top up a key's prepaid USD balance. Works on any key the caller
             authenticates with — static ``REKAI_API_KEYS`` keys included — so
             operators can bill fixed deployments too, not just dynamic keys.
+            Unknown or expired keys return 404.
             """
             rate_limited = await _admin_rate_limited(request)
             if rate_limited is not None:
@@ -1588,6 +1589,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return _admin_auth_error()
             if key_store is None:
                 return _dynamic_keys_disabled_error()
+            if key not in settings.api_key_list and key not in await key_store.list_keys():
+                masked = mask_key(key)
+                ip = _admin_ip(request)
+                admin_logger.warning(
+                    "admin grant_credit failed (not found) key=%s ip=%s",
+                    masked,
+                    ip,
+                    extra={
+                        "admin_action": "grant_credit_not_found",
+                        "key": masked,
+                        "ip": ip,
+                    },
+                )
+                return JSONResponse(
+                    status_code=404,
+                    content=ErrorResponse(
+                        error="not_found",
+                        detail="Key not found among static or dynamically-added keys.",
+                    ).model_dump(),
+                )
             cid = auth.client_id(key)
             if not await key_store.grant_credit(cid, payload.usd_amount):
                 return JSONResponse(

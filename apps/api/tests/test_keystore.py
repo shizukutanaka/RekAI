@@ -394,6 +394,31 @@ def test_admin_grant_credit_and_402_gate() -> None:
     assert free.status_code == 200
 
 
+def test_admin_grant_to_unknown_key_is_404() -> None:
+    from rekai.config import Settings
+    from rekai.main import create_app
+
+    settings = Settings(
+        environment="test",
+        admin_key="sk-admin-1",
+        dynamic_keys_enabled=True,
+        rate_limit_enabled=False,
+    )
+    client = TestClient(create_app(settings))
+    headers = {"Authorization": "Bearer sk-admin-1"}
+
+    resp = client.post(
+        "/admin/keys/sk-typo/credits",
+        json={"usd_amount": 9.0},
+        headers=headers,
+    )
+    assert resp.status_code == 404
+    assert resp.json()["error"] == "not_found"
+
+    listed = client.get("/admin/keys", headers=headers)
+    assert listed.json()["credit_remaining_usd"] == {}
+
+
 def test_admin_mint_with_credit_usd_lists_balance() -> None:
     from rekai.config import Settings
     from rekai.main import create_app
