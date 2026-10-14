@@ -428,6 +428,19 @@ async def test_expired_key_pruned_on_write_forfeits_credit() -> None:
     assert await store.credit_balance(_client_id("sk-dyn-old")) is None
 
 
+async def test_prune_forfeits_every_expired_keys_credit() -> None:
+    store = DynamicKeyStore(MemoryCache())
+    expired_at = time.time() - 1
+    await store._save({"sk-dyn-old-a": expired_at, "sk-dyn-old-b": expired_at})
+    await store.grant_credit(_client_id("sk-dyn-old-a"), 9.0)
+    await store.grant_credit(_client_id("sk-dyn-old-b"), 9.0)
+
+    await store.add("sk-dyn-new")
+
+    assert await store.credit_balance(_client_id("sk-dyn-old-a")) is None
+    assert await store.credit_balance(_client_id("sk-dyn-old-b")) is None
+
+
 async def test_sub_quantum_grant_stays_spendable() -> None:
     """A positive top-up must land above zero — rounding to the ledger's
     6-dp quantum must not mint an already-exhausted balance."""

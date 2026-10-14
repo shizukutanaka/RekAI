@@ -291,7 +291,8 @@ class DynamicKeyStore:
             # abandoned balances would fill the ledger.
             if dead:
                 credits = await self._load_credits()
-                if any(credits.pop(_client_id(k), None) is not None for k in dead):
+                removed = [k for k in dead if credits.pop(_client_id(k), None) is not None]
+                if removed:
                     await self._save_credits(credits)
             return True
 
