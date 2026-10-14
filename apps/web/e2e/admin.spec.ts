@@ -38,6 +38,13 @@ test("admin page: wrong key errors, correct key manages runtime keys", async ({ 
   await expect(dynamicList).toContainText("sk-e…-key");
   await expect(page.locator(".page")).not.toContainText("sk-e2e-added-runtime-key");
 
+  // Top up the runtime key -> the balance appears in the list and success message.
+  await page.fill("#creditKey", "sk-e2e-added-runtime-key");
+  await page.fill("#creditAmount", "5");
+  await page.click('button:has-text("Grant")');
+  await expect(dynamicList).toContainText("$5.00 credit");
+  await expect(page.locator(".page")).toContainText("Granted $5");
+
   // Revoke it -> it disappears from the list again.
   await page.fill("#revokeKey", "sk-e2e-added-runtime-key");
   await page.click('button:has-text("Revoke")');
