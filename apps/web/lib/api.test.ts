@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  addAdminKey,
   cacheHitDetail,
   cacheNote,
   cooldownRemaining,
@@ -10,6 +11,7 @@ import {
   formatCost,
   formatPricing,
   gatewayAuthHeaders,
+  grantAdminKeyCredit,
   modelsOfType,
   parseRateLimit,
   parseSSEFrame,
@@ -375,6 +377,51 @@ function stubFetch(capture: (body: Record<string, unknown>) => void) {
     );
   };
 }
+
+describe("admin credit requests", () => {
+  it("grants credit to an encoded key with the admin bearer header", async () => {
+    let url = "";
+    let method = "";
+    let headers: HeadersInit | undefined;
+    let body: Record<string, unknown> = {};
+    vi.stubGlobal(
+      "fetch",
+      async (input: string | URL | Request, init?: RequestInit) => {
+        url = String(input);
+        method = init?.method ?? "";
+        headers = init?.headers;
+        body = JSON.parse((init?.body as string) ?? "{}");
+        return new Response(
+          JSON.stringify({
+            status: "granted",
+            key: "sk/odd key",
+            credit_usd: 2.5,
+            credit_remaining_usd: 2.5,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      },
+    );
+
+    await grantAdminKeyCredit("adm", "sk/odd key", 2.5);
+
+    expect(url).toMatch(/\/admin\/keys\/sk%2Fodd%20key\/credits$/);
+    expect(method).toBe("POST");
+    expect(body).toEqual({ usd_amount: 2.5 });
+    expect(new Headers(headers).get("Authorization")).toBe("Bearer adm");
+    vi.unstubAllGlobals();
+  });
+
+  it("omits an undefined TTL when adding a key with initial credit", async () => {
+    let body: Record<string, unknown> = {};
+    vi.stubGlobal("fetch", stubFetch((requestBody) => (body = requestBody)));
+
+    await addAdminKey("adm", "k", undefined, 5);
+
+    expect(body).toEqual({ key: "k", credit_usd: 5 });
+    vi.unstubAllGlobals();
+  });
+});
 
 describe("cache toggle", () => {
   const msgs = [{ role: "user" as const, content: "hi" }];

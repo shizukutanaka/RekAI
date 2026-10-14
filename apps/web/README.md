@@ -42,7 +42,8 @@ Open http://localhost:3000.
   from the gateway/provider keys above. Only a key's masked form is ever shown,
   so revoking one needs the raw key typed back in; keep a record of it when you
   add one. If `REKAI_ADMIN_KEY` isn't configured on the API, the page shows a
-  clear notice instead of the key-management forms.
+  clear notice instead of the key-management forms. It also shows prepaid USD
+  balances and lets you grant initial credit or top up any static or runtime key.
 
 ## Configuration
 

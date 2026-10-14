@@ -1230,8 +1230,8 @@ that's misbehaving without restarting the process:
   prepaid USD balance at mint time.
 - `DELETE /admin/keys/{key}` — revoke a key (`200`, or `404` if unknown).
 - `POST /admin/keys/{key}/credits {"usd_amount": N}` — top up any key's
-  prepaid balance, static `REKAI_API_KEYS` keys included (`200`, or `409`
-  when the ledger cap is hit).
+  prepaid balance, static `REKAI_API_KEYS` keys included (`200`, `404` if
+  unknown or expired, or `409` when the ledger cap is hit).
 
 An expired key fails auth exactly like a revoked one and drops out of the
 list response; it stays in the store blob until the next write rather than

@@ -7,9 +7,16 @@ import {
   addAdminKey,
   fetchAdminKeys,
   getStoredAdminKey,
+  grantAdminKeyCredit,
   revokeAdminKey,
   setStoredAdminKey,
 } from "@/lib/api";
+
+function formatCredit(v: number): string {
+  if (v <= 0) return "credit exhausted";
+  const wholeCents = Math.abs(v * 100 - Math.round(v * 100)) < 1e-9;
+  return `$${v.toFixed(wholeCents ? 2 : 6)} credit`;
+}
 
 export default function AdminPage() {
   const [adminKey, setAdminKey] = useState("");
@@ -19,7 +26,10 @@ export default function AdminPage() {
   const [notConfigured, setNotConfigured] = useState(false);
   const [newKey, setNewKey] = useState("");
   const [newKeyTtl, setNewKeyTtl] = useState("");
+  const [newKeyCredit, setNewKeyCredit] = useState("");
   const [revokeKeyValue, setRevokeKeyValue] = useState("");
+  const [creditKeyValue, setCreditKeyValue] = useState("");
+  const [creditAmountValue, setCreditAmountValue] = useState("");
   const [actionMsg, setActionMsg] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -51,6 +61,7 @@ export default function AdminPage() {
 
   function save(e: React.FormEvent) {
     e.preventDefault();
+    setActionMsg("");
     const trimmed = adminKey.trim();
     setStoredAdminKey(trimmed);
     setSaved(true);
@@ -66,21 +77,65 @@ export default function AdminPage() {
     setActionMsg("");
     try {
       const ttl = newKeyTtl.trim() === "" ? undefined : Number(newKeyTtl);
+      const initialCredit =
+        newKeyCredit.trim() === "" ? undefined : Number(newKeyCredit);
+      const creditUsd =
+        initialCredit !== undefined && Number.isFinite(initialCredit) && initialCredit > 0
+          ? initialCredit
+          : undefined;
       const res = await addAdminKey(
         adminKey,
         newKey.trim(),
         ttl !== undefined && Number.isFinite(ttl) && ttl > 0 ? ttl : undefined,
+        creditUsd,
       );
+      const creditSuffix =
+        creditUsd === undefined ? "" : ` with $${creditUsd} credit`;
       setActionMsg(
         res.expires_at === null
-          ? `Added ${res.key}. Keep the raw key somewhere safe — it won't be shown again.`
-          : `Added ${res.key} (expires ${new Date(res.expires_at * 1000).toLocaleString()}). Keep the raw key somewhere safe — it won't be shown again.`,
+          ? `Added ${res.key}${creditSuffix}. Keep the raw key somewhere safe — it won't be shown again.`
+          : `Added ${res.key} (expires ${new Date(res.expires_at * 1000).toLocaleString()})${creditSuffix}. Keep the raw key somewhere safe — it won't be shown again.`,
       );
       setNewKey("");
       setNewKeyTtl("");
+      setNewKeyCredit("");
       await load(adminKey);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add key");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleGrantCredit(e: React.FormEvent) {
+    e.preventDefault();
+    const amount = Number(creditAmountValue);
+    if (
+      !creditKeyValue.trim() ||
+      !adminKey ||
+      !creditAmountValue.trim() ||
+      !Number.isFinite(amount) ||
+      amount <= 0
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setActionMsg("");
+    try {
+      const res = await grantAdminKeyCredit(adminKey, creditKeyValue.trim(), amount);
+      setActionMsg(
+        `Granted $${amount} to ${res.key}${
+          res.credit_remaining_usd === null
+            ? ""
+            : ` — balance ${formatCredit(res.credit_remaining_usd)}`
+        }`,
+      );
+      setCreditKeyValue("");
+      setCreditAmountValue("");
+      await load(adminKey);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to grant credit");
     } finally {
       setBusy(false);
     }
@@ -111,7 +166,8 @@ export default function AdminPage() {
         Add or revoke gateway API keys at runtime, without a redeploy (
         <code>REKAI_DYNAMIC_KEYS_ENABLED</code>). Requires a separate{" "}
         <code>REKAI_ADMIN_KEY</code> configured on the API — distinct from any gateway
-        or provider key.
+        or provider key. You can also sell prepaid USD credit per key; credited keys
+        are metered at their real request cost.
       </p>
 
       <form onSubmit={save}>
@@ -154,6 +210,9 @@ export default function AdminPage() {
                 {keys.static.map((k) => (
                   <li key={k}>
                     <span>{k}</span>
+                    {keys.credit_remaining_usd[k] !== undefined && (
+                      <span className="hint"> — {formatCredit(keys.credit_remaining_usd[k])}</span>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -174,6 +233,9 @@ export default function AdminPage() {
                         {" "}
                         — expires {new Date(keys.dynamic_expires_at[k] * 1000).toLocaleString()}
                       </span>
+                    )}
+                    {keys.credit_remaining_usd[k] !== undefined && (
+                      <span className="hint"> — {formatCredit(keys.credit_remaining_usd[k])}</span>
                     )}
                   </li>
                 ))}
@@ -198,8 +260,53 @@ export default function AdminPage() {
                 style={{ maxWidth: 220 }}
                 onChange={(e) => setNewKeyTtl(e.target.value)}
               />
+              <input
+                value={newKeyCredit}
+                placeholder="Credit USD (blank = unbilled)"
+                aria-label="Initial credit in USD"
+                inputMode="decimal"
+                style={{ maxWidth: 200 }}
+                onChange={(e) => setNewKeyCredit(e.target.value)}
+              />
               <button type="submit" disabled={busy || !newKey.trim()}>
                 Add
+              </button>
+            </form>
+          </div>
+
+          <div className="field">
+            <label htmlFor="creditKey">Top up credit</label>
+            <p className="hint">
+              Works for static and runtime keys. Requests are debited at their real cost; a
+              key at $0 is refused with 402 until topped up. Keys never given credit stay
+              unbilled.
+            </p>
+            <form onSubmit={handleGrantCredit} style={{ display: "flex", gap: 8 }}>
+              <input
+                id="creditKey"
+                value={creditKeyValue}
+                placeholder="sk-rekai-key-to-top-up"
+                onChange={(e) => setCreditKeyValue(e.target.value)}
+              />
+              <input
+                id="creditAmount"
+                value={creditAmountValue}
+                placeholder="USD"
+                inputMode="decimal"
+                style={{ maxWidth: 140 }}
+                onChange={(e) => setCreditAmountValue(e.target.value)}
+              />
+              <button
+                type="submit"
+                disabled={
+                  busy ||
+                  !creditKeyValue.trim() ||
+                  !creditAmountValue.trim() ||
+                  !Number.isFinite(Number(creditAmountValue)) ||
+                  Number(creditAmountValue) <= 0
+                }
+              >
+                Grant
               </button>
             </form>
           </div>

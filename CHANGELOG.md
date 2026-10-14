@@ -19,6 +19,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `credit_remaining_usd` per masked key. This is the OpenRouter-style revenue
   primitive: issue a key, sell it with a balance, and the gateway meters it
   until exhausted.
+- Admin page: grant and view prepaid USD credit per key (initial credit on add,
+  top-up form, balances in the key lists); top-ups to an unknown or expired key
+  return 404 instead of crediting an orphan balance.
 - **`REKAI_TRUSTED_PROXIES` — real client IP behind a reverse proxy.** Without
   it, every request arriving through a proxy or load balancer shares one
   rate-limit/budget bucket under the proxy's own address (Render's managed LB

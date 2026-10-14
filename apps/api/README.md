@@ -36,7 +36,7 @@ uvicorn rekai.main:app --reload
 | GET    | `/admin/usage` | Fleet-wide usage across every tenant (needs `REKAI_ADMIN_KEY`) |
 | GET/POST | `/admin/keys` | List / add runtime API keys (needs `REKAI_ADMIN_KEY`) |
 | DELETE | `/admin/keys/{key}` | Revoke a runtime API key |
-| POST | `/admin/keys/{key}/credits` | Top up a key's prepaid USD balance |
+| POST | `/admin/keys/{key}/credits` | Top up a key's prepaid USD balance (404 if unknown or expired) |
 
 ### Example
 

@@ -327,12 +327,20 @@ export interface AdminKeyList {
   static: string[];
   dynamic: string[];
   dynamic_expires_at: Record<string, number>;
+  credit_remaining_usd: Record<string, number>;
 }
 
 export interface AdminKeyActionResponse {
   status: "added" | "revoked";
   key: string;
   expires_at: number | null;
+}
+
+export interface AdminCreditResponse {
+  status: "granted";
+  key: string;
+  credit_usd: number;
+  credit_remaining_usd: number | null;
 }
 
 export async function fetchAdminKeys(adminKey: string): Promise<AdminKeyList> {
@@ -348,13 +356,16 @@ export async function addAdminKey(
   adminKey: string,
   key: string,
   expiresInSeconds?: number,
+  creditUsd?: number,
 ): Promise<AdminKeyActionResponse> {
   const res = await fetch(`${API_URL}/admin/keys`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...gatewayAuthHeaders(adminKey) },
-    body: JSON.stringify(
-      expiresInSeconds === undefined ? { key } : { key, expires_in_seconds: expiresInSeconds },
-    ),
+    body: JSON.stringify({
+      key,
+      ...(expiresInSeconds !== undefined && { expires_in_seconds: expiresInSeconds }),
+      ...(creditUsd !== undefined && { credit_usd: creditUsd }),
+    }),
   });
   if (!res.ok) throw await errorFromResponse(res);
   return res.json();
@@ -367,6 +378,20 @@ export async function revokeAdminKey(
   const res = await fetch(`${API_URL}/admin/keys/${encodeURIComponent(key)}`, {
     method: "DELETE",
     headers: gatewayAuthHeaders(adminKey),
+  });
+  if (!res.ok) throw await errorFromResponse(res);
+  return res.json();
+}
+
+export async function grantAdminKeyCredit(
+  adminKey: string,
+  key: string,
+  usdAmount: number,
+): Promise<AdminCreditResponse> {
+  const res = await fetch(`${API_URL}/admin/keys/${encodeURIComponent(key)}/credits`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...gatewayAuthHeaders(adminKey) },
+    body: JSON.stringify({ usd_amount: usdAmount }),
   });
   if (!res.ok) throw await errorFromResponse(res);
   return res.json();
