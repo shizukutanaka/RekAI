@@ -355,6 +355,42 @@ def test_client_token_limit_exceeded_returns_429() -> None:
         main_module.metrics.seed({})
 
 
+@pytest.mark.parametrize(
+    ("quota_settings", "tokens", "cost_usd", "status_code", "error"),
+    [
+        ({"client_budget_usd": 0.5}, 0, 1.0, 402, "budget_exceeded"),
+        ({"client_token_limit": 100}, 150, 0.0, 429, "token_limit_exceeded"),
+    ],
+)
+def test_admission_gate_precedence_over_body_size(
+    quota_settings, tokens, cost_usd, status_code, error
+) -> None:
+    token = "sk-admission-precedence"
+    settings = Settings(
+        environment="test",
+        default_provider="echo",
+        api_keys=token,
+        rate_limit_enabled=False,
+        max_body_bytes=200,
+        **quota_settings,
+    )
+    client = TestClient(create_app(settings))
+    try:
+        main_module.metrics.record_client_usage(client_id(token), tokens=tokens, cost_usd=cost_usd)
+        response = client.post(
+            "/v1/chat",
+            json={"model": "echo", "messages": [{"role": "user", "content": "body too large"}]},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Length": "201",
+            },
+        )
+        assert response.status_code == status_code
+        assert response.json()["error"] == error
+    finally:
+        main_module.metrics.seed({})
+
+
 def test_client_token_limit_allows_requests_under_the_cap() -> None:
     settings = Settings(
         environment="test",

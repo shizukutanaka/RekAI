@@ -975,6 +975,112 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers=headers or None,
         )
 
+    def _deny(
+        status_code: int,
+        error: str,
+        detail: str,
+        headers: dict[str, str] | None = None,
+    ) -> JSONResponse:
+        metrics.record_error(error)
+        return JSONResponse(
+            status_code=status_code,
+            content=ErrorResponse(error=error, detail=detail).model_dump(),
+            headers=headers,
+        )
+
+    def _budget_denial(client: str, token: str | None) -> JSONResponse | None:
+        # Per-client spend cap: once exceeded, block before doing any real work
+        # (parsing, provider calls) so an over-budget client can't rack up more.
+        # A per-key override (client_budgets_usd) wins over the global default.
+        budget = settings.client_budget_usd
+        if token is not None and token in settings.client_budget_overrides:
+            budget = settings.client_budget_overrides[token]
+        if budget is None:
+            return None
+        window = settings.client_budget_window_seconds
+        if window is not None:
+            spent = metrics.client_budget_window_cost(client, window, time.time())
+        else:
+            spent = metrics.client_cost_usd(client)
+        if spent >= budget:
+            headers = {"X-Budget-Remaining": "0"}
+            if window is not None:
+                headers["X-Budget-Reset"] = str((int(time.time() / window) + 1) * window)
+            return _deny(
+                402,
+                "budget_exceeded",
+                f"Client budget of ${budget:.2f} exceeded (spent ${spent:.4f}).",
+                headers,
+            )
+        return None
+
+    async def _credit_denial(client: str, token: str | None) -> JSONResponse | None:
+        # Prepaid credits: a key holding a credit balance (granted via
+        # POST /admin/keys{,/credits}) is rejected once it hits zero — the
+        # operator-facing mechanism for selling metered access. Keys with no
+        # credit entry are unbilled and unaffected. One extra store read per
+        # /v1 request, same order as _allowed_keys above.
+        if token is None or key_store is None:
+            return None
+        credit = await key_store.credit_balance(client)
+        if credit is not None and credit <= 0:
+            return _deny(
+                402,
+                "credit_exhausted",
+                "Prepaid credit exhausted; ask the operator to top up.",
+                {"X-Credit-Remaining": "0"},
+            )
+        return None
+
+    def _token_limit_denial(client: str) -> JSONResponse | None:
+        # Per-client token cap: the USD budget's counterpart in tokens, which
+        # bites where a cost cap can't — free/local providers (cost_usd=0) and
+        # upstream TPM limits. Same window-or-lifetime semantics, same
+        # best-effort process-local enforcement.
+        if settings.client_token_limit is None:
+            return None
+        token_window = settings.client_token_limit_window_seconds
+        if token_window is not None:
+            used_tokens = metrics.client_window_tokens(client, token_window, time.time())
+        else:
+            used_tokens = metrics.client_tokens(client)
+        if used_tokens >= settings.client_token_limit:
+            headers = {"X-TokenLimit-Remaining": "0"}
+            if token_window is not None:
+                now = time.time()
+                reset = (int(now / token_window) + 1) * token_window
+                headers["X-TokenLimit-Reset"] = str(reset)
+                headers["Retry-After"] = str(max(1, int(reset - now)))
+            return _deny(
+                429,
+                "token_limit_exceeded",
+                (
+                    f"Client token limit of {settings.client_token_limit} exceeded "
+                    f"(used {used_tokens})."
+                ),
+                headers,
+            )
+        return None
+
+    def _body_size_denial(request: Request) -> JSONResponse | None:
+        # Reject oversized bodies up front (cheap Content-Length check) so a huge
+        # payload can't tie up parsing or memory. This is only advisory — a
+        # client using chunked transfer-encoding sends no Content-Length at
+        # all, or the header could simply understate the real size — the hard
+        # cap enforced against every byte actually received is
+        # MaxBodySizeMiddleware, wrapped around the whole app (see create_app).
+        if settings.max_body_bytes <= 0:
+            return None
+        content_length = request.headers.get("content-length")
+        if content_length is not None and content_length.isdigit():
+            if int(content_length) > settings.max_body_bytes:
+                return _deny(
+                    413,
+                    "payload_too_large",
+                    f"Request body exceeds {settings.max_body_bytes} bytes.",
+                )
+        return None
+
     # --- middleware: auth + body size + rate limiting (the /v1 gate) ------
     @app.middleware("http")
     async def _rate_limit(request: Request, call_next):
@@ -1006,13 +1112,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if token is None and request.url.path in _ANTHROPIC_COMPAT_PATHS:
                 token = request.headers.get("x-api-key")
             if token is None or not auth.key_allowed(token, await _allowed_keys()):
-                metrics.record_error("unauthorized")
-                return JSONResponse(
-                    status_code=401,
-                    content=ErrorResponse(
-                        error="unauthorized", detail="Missing or invalid API key."
-                    ).model_dump(),
-                    headers={"WWW-Authenticate": "Bearer"},
+                return _deny(
+                    401,
+                    "unauthorized",
+                    "Missing or invalid API key.",
+                    {"WWW-Authenticate": "Bearer"},
                 )
             rl_client = auth.client_id(token)
         request.state.client_id = rl_client
@@ -1022,98 +1126,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             settings.key_model_allowlists.get(token) if token is not None else None
         )
 
-        # Per-client spend cap: once exceeded, block before doing any real work
-        # (parsing, provider calls) so an over-budget client can't rack up more.
-        # A per-key override (client_budgets_usd) wins over the global default.
-        budget = settings.client_budget_usd
-        if token is not None and token in settings.client_budget_overrides:
-            budget = settings.client_budget_overrides[token]
-        if is_api_write and budget is not None:
-            window = settings.client_budget_window_seconds
-            if window is not None:
-                spent = metrics.client_budget_window_cost(rl_client, window, time.time())
-            else:
-                spent = metrics.client_cost_usd(rl_client)
-            if spent >= budget:
-                metrics.record_error("budget_exceeded")
-                headers = {"X-Budget-Remaining": "0"}
-                if window is not None:
-                    headers["X-Budget-Reset"] = str((int(time.time() / window) + 1) * window)
-                return JSONResponse(
-                    status_code=402,
-                    content=ErrorResponse(
-                        error="budget_exceeded",
-                        detail=f"Client budget of ${budget:.2f} exceeded (spent ${spent:.4f}).",
-                    ).model_dump(),
-                    headers=headers,
-                )
-
-        # Prepaid credits: a key holding a credit balance (granted via
-        # POST /admin/keys{,/credits}) is rejected once it hits zero — the
-        # operator-facing mechanism for selling metered access. Keys with no
-        # credit entry are unbilled and unaffected. One extra store read per
-        # /v1 request, same order as _allowed_keys above.
-        if is_api_write and token is not None and key_store is not None:
-            credit = await key_store.credit_balance(rl_client)
-            if credit is not None and credit <= 0:
-                metrics.record_error("credit_exhausted")
-                return JSONResponse(
-                    status_code=402,
-                    content=ErrorResponse(
-                        error="credit_exhausted",
-                        detail="Prepaid credit exhausted; ask the operator to top up.",
-                    ).model_dump(),
-                    headers={"X-Credit-Remaining": "0"},
-                )
-
-        # Per-client token cap: the USD budget's counterpart in tokens, which
-        # bites where a cost cap can't — free/local providers (cost_usd=0) and
-        # upstream TPM limits. Same window-or-lifetime semantics, same
-        # best-effort process-local enforcement.
-        if is_api_write and settings.client_token_limit is not None:
-            token_window = settings.client_token_limit_window_seconds
-            if token_window is not None:
-                used_tokens = metrics.client_window_tokens(rl_client, token_window, time.time())
-            else:
-                used_tokens = metrics.client_tokens(rl_client)
-            if used_tokens >= settings.client_token_limit:
-                metrics.record_error("token_limit_exceeded")
-                headers = {"X-TokenLimit-Remaining": "0"}
-                if token_window is not None:
-                    now = time.time()
-                    reset = (int(now / token_window) + 1) * token_window
-                    headers["X-TokenLimit-Reset"] = str(reset)
-                    headers["Retry-After"] = str(max(1, int(reset - now)))
-                return JSONResponse(
-                    status_code=429,
-                    content=ErrorResponse(
-                        error="token_limit_exceeded",
-                        detail=(
-                            f"Client token limit of {settings.client_token_limit} exceeded "
-                            f"(used {used_tokens})."
-                        ),
-                    ).model_dump(),
-                    headers=headers,
-                )
-
-        # Reject oversized bodies up front (cheap Content-Length check) so a huge
-        # payload can't tie up parsing or memory. This is only advisory — a
-        # client using chunked transfer-encoding sends no Content-Length at
-        # all, or the header could simply understate the real size — the hard
-        # cap enforced against every byte actually received is
-        # MaxBodySizeMiddleware, wrapped around the whole app (see create_app).
-        if is_api_write and settings.max_body_bytes > 0:
-            content_length = request.headers.get("content-length")
-            if content_length is not None and content_length.isdigit():
-                if int(content_length) > settings.max_body_bytes:
-                    metrics.record_error("payload_too_large")
-                    return JSONResponse(
-                        status_code=413,
-                        content=ErrorResponse(
-                            error="payload_too_large",
-                            detail=f"Request body exceeds {settings.max_body_bytes} bytes.",
-                        ).model_dump(),
-                    )
+        if is_api_write:
+            denial = _budget_denial(rl_client, token)
+            if denial is None:
+                denial = await _credit_denial(rl_client, token)
+            if denial is None:
+                denial = _token_limit_denial(rl_client)
+            if denial is None:
+                denial = _body_size_denial(request)
+            if denial is not None:
+                return denial
 
         # CORS preflight (OPTIONS) must not consume budget, or the browser sees a
         # 429 on the preflight ("Failed to fetch") instead of the real response.
@@ -1125,15 +1147,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 capacity = settings.client_rate_limit_overrides.get(token, capacity)
             limit = str(capacity)
             if not await limiter.allow(rl_client, capacity):
-                metrics.record_error("rate_limited")
                 retry_after = await limiter.retry_after(rl_client, capacity)
-                return JSONResponse(
-                    status_code=429,
-                    content=ErrorResponse(
-                        error="rate_limited",
-                        detail=f"Too many requests. Retry in {retry_after}s.",
-                    ).model_dump(),
-                    headers={
+                return _deny(
+                    429,
+                    "rate_limited",
+                    f"Too many requests. Retry in {retry_after}s.",
+                    {
                         "Retry-After": str(retry_after),
                         "X-RateLimit-Limit": limit,
                         "X-RateLimit-Remaining": "0",
