@@ -18,17 +18,22 @@ export interface ChatMessage {
  */
 export type FinishReason = "stop" | "length" | "tool_calls" | "content_filter" | null;
 
+export interface ChatUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  /** Provider prompt-cache token breakdown; breakdowns, not additive tokens. */
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  reasoning_tokens?: number;
+}
+
 export interface ChatResponse {
   id: string;
   provider: string;
   model: string;
   content: string;
-  usage: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-    reasoning_tokens?: number;
-  };
+  usage: ChatUsage;
   cost_usd: number | null;
   cached: boolean;
   created: number;
@@ -136,6 +141,15 @@ export function formatCost(cost: number | null | undefined): string {
   if (cost === 0) return "free";
   if (cost < 0.01) return `$${cost.toFixed(4)}`;
   return `$${cost.toFixed(2)}`;
+}
+
+/** Compact provider-reported token breakdown for assistant metadata. */
+export function usageBreakdown(usage?: ChatUsage | null): string {
+  const parts: string[] = [];
+  if (usage?.cache_read_tokens) parts.push(`prompt cache read ${usage.cache_read_tokens}`);
+  if (usage?.cache_write_tokens) parts.push(`prompt cache write ${usage.cache_write_tokens}`);
+  if (usage?.reasoning_tokens) parts.push(`reasoning ${usage.reasoning_tokens}`);
+  return parts.join(" · ");
 }
 
 /** Format a model's per-1M-token price pair, or "unpriced" when not listed. */
@@ -515,12 +529,7 @@ export async function streamChat(
 export interface StreamSummary {
   provider: string;
   model: string;
-  usage: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-    reasoning_tokens?: number;
-  };
+  usage: ChatUsage;
   cost_usd: number | null;
   estimated: boolean;
   tool_calls?: Record<string, unknown>[];
