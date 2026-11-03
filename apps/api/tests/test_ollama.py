@@ -165,6 +165,43 @@ async def test_text_format_and_absent_format_send_nothing(monkeypatch) -> None:
         assert "format" not in FakeClient.captured["json"]
 
 
+def _req_with_provider_native_message_fields() -> ChatRequest:
+    return ChatRequest(
+        model="llama3",
+        messages=[
+            ChatMessage(role="user", content="hi", cache_control={"type": "ephemeral"}),
+            ChatMessage(
+                role="assistant",
+                content="answer",
+                thinking_blocks=[{"type": "thinking", "thinking": "hidden"}],
+                extra_blocks=[{"type": "server_tool_use"}],
+                content_blocks=[{"type": "text", "text": "answer"}],
+            ),
+            ChatMessage(role="tool", content="boom", tool_call_id="t1", is_error=True),
+        ],
+    )
+
+
+_EXPECTED_OPENAI_MESSAGES = [
+    {"role": "user", "content": "hi"},
+    {"role": "assistant", "content": "answer"},
+    {"role": "tool", "content": "boom", "tool_call_id": "t1"},
+]
+
+
+async def test_chat_drops_provider_native_message_fields(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    await OllamaProvider().chat(_req_with_provider_native_message_fields(), api_key=None)
+    assert FakeClient.captured["json"]["messages"] == _EXPECTED_OPENAI_MESSAGES
+
+
+async def test_streaming_drops_provider_native_message_fields(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", StreamingFakeClient)
+    req = _req_with_provider_native_message_fields()
+    _ = [ev async for ev in OllamaProvider().stream_events(req, api_key=None)]
+    assert StreamingFakeClient.captured["json"]["messages"] == _EXPECTED_OPENAI_MESSAGES
+
+
 async def test_no_unsupported_fields_no_log(monkeypatch, caplog) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
     req = ChatRequest(model="llama3", messages=[ChatMessage(role="user", content="hi")])

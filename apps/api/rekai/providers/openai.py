@@ -18,6 +18,7 @@ from rekai.providers.base import (
     ProviderResult,
     StreamEvent,
     check_header_safe,
+    openai_chat_message,
     provider_http_error,
     trace_headers,
 )
@@ -92,7 +93,7 @@ class OpenAIProvider(Provider):
         """
         payload: dict = {
             "model": request.model,
-            "messages": [m.model_dump(exclude_none=True) for m in request.messages],
+            "messages": [openai_chat_message(m) for m in request.messages],
             "temperature": request.temperature,
         }
         if stream:
