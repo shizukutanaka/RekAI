@@ -108,6 +108,50 @@ def test_native_stream_thinking_frames(client: TestClient, monkeypatch) -> None:
     assert {"thinking_block": block} in frames
 
 
+def test_native_stream_summary_repeats_anthropic_blocks(client: TestClient, monkeypatch) -> None:
+    citation = {
+        "type": "web_search_result_location",
+        "url": "https://example.com/a",
+        "title": "a",
+        "cited_text": "x",
+    }
+    extra_fields = {"container": {"id": "container_abc"}}
+    start = {"type": "server_tool_use", "id": "t1", "name": "web_search", "input": {}}
+    delta = {"type": "input_json_delta", "partial_json": "{}"}
+    extra = {"type": "server_tool_use", "id": "t1", "name": "web_search", "input": {}}
+    redacted = {"type": "redacted_thinking", "data": "encrypted"}
+
+    async def fake(self, request, api_key):
+        yield StreamEvent(thinking_delta="ponder")
+        yield StreamEvent(thinking_signature="sig")
+        yield StreamEvent(thinking_block=redacted)
+        yield StreamEvent(delta="answer")
+        yield StreamEvent(citation=citation)
+        yield StreamEvent(extra_fields=extra_fields)
+        yield StreamEvent(extra_block_start=start)
+        yield StreamEvent(extra_block_delta=delta)
+        yield StreamEvent(extra_block=extra)
+        yield StreamEvent(finish_reason="stop")
+
+    monkeypatch.setattr(EchoProvider, "stream_events", fake)
+    resp = client.post(
+        "/v1/chat/stream",
+        json={"model": "echo", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    frames = _data_frames(resp.text)
+    summary = next(f for f in frames if isinstance(f, dict) and "usage" in f)
+    assert summary["thinking_blocks"] == [
+        {"type": "thinking", "thinking": "ponder", "signature": "sig"},
+        redacted,
+    ]
+    assert summary["citations"] == [citation]
+    assert summary["extra_blocks"] == [extra]
+    assert summary["extra_fields"] == extra_fields
+    # Stream frames carry no upstream block index, so the summary does not
+    # pretend to reproduce content_blocks' exact interleaving.
+    assert "content_blocks" not in summary
+
+
 def test_native_stream_extra_block_and_extra_fields_frames(client: TestClient, monkeypatch) -> None:
     start = {"type": "server_tool_use", "id": "t1", "name": "web_search", "input": {}}
     delta = {"type": "input_json_delta", "partial_json": "{}"}

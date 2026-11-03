@@ -57,6 +57,7 @@ def _to_chat_message(m: OpenAIChatMessage) -> ChatMessage:
         name=m.name,
         tool_calls=m.tool_calls,
         tool_call_id=m.tool_call_id,
+        is_error=m.is_error,
     )
 
 

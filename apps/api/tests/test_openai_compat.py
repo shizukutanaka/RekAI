@@ -177,6 +177,41 @@ def test_tool_calls_finish_reason(client: TestClient) -> None:
     assert body["choices"][0]["message"]["tool_calls"][0]["id"] == "c1"
 
 
+def test_tool_result_is_error_reaches_provider(client: TestClient) -> None:
+    """The OpenAI envelope carries RekAI's `is_error` extension on tool results;
+    dropping it here made Anthropic see a failed call as successful."""
+    register_provider(_CaptureProvider())
+    resp = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "m",
+            "provider": "cap",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "t1",
+                            "type": "function",
+                            "function": {"name": "get_weather", "arguments": "{}"},
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "t1",
+                    "content": "boom",
+                    "is_error": True,
+                },
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    tool_msg = _CaptureProvider.last_request.messages[-1]
+    assert tool_msg.role == "tool"
+    assert tool_msg.is_error is True
+
+
 class _CaptureProvider(Provider):
     """Records the ChatRequest it was given so tests can inspect what the
     compat layer normalized the request into."""
