@@ -197,7 +197,12 @@ requests that check the cooldown).
 provider works on the streaming path even without native support. The endpoint
 emits `data: {"delta": "..."}` events, then a final
 `data: {"usage": {...}, "cost_usd": ..., "estimated": true}` summary, then a
-terminating `data: [DONE]`. Providers expose `stream_events()` yielding text
+terminating `data: [DONE]`. When Anthropic granular frames were streamed, the
+summary also repeats their completed `thinking_blocks`, `citations`,
+`extra_blocks`, and `extra_fields` so terminal-summary consumers (including the
+SDK `on_usage`/`onUsage` callbacks) do not have to reconstruct them;
+`content_blocks` is not synthesized because stream frames carry no upstream
+block index. Providers expose `stream_events()` yielding text
 deltas and an optional final provider-reported usage; when present it is used
 verbatim (`estimated: false`) — all five providers do this (echo exact; OpenAI
 via `stream_options`; Anthropic from `message_start`/`message_delta`; Gemini from
