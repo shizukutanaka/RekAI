@@ -70,6 +70,9 @@ res = client.chat(
     response_format={"type": "json_object"},
 )
 
+# Anthropic prompt-cache breakpoint (ignored by providers that don't support it)
+client.chat("claude-sonnet-4-6", "stable instructions", cache_control={"type": "ephemeral"})
+
 # Embeddings (echo works keyless; OpenAI-compatible call the real API)
 emb = client.embeddings("echo", ["hello", "world"])
 print(len(emb.embeddings), emb.usage["total_tokens"], emb.cached)
