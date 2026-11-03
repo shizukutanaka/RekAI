@@ -36,6 +36,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (the JS client returns `usage` verbatim, so the data was already there —
   only the type was missing). No request or response shape changes; older
   servers simply leave the new fields unset.
+- **JS SDK stream summary typing.** `StreamSummary` now exposes the
+  `finish_reason` and `redacted` fields the gateway can already emit on native
+  `/v1/chat/stream` summaries, so TypeScript callers don't have to cast to read
+  why a stream stopped or which guardrail patterns were scrubbed.
 - **`REKAI_TRUSTED_PROXIES` — real client IP behind a reverse proxy.** Without
   it, every request arriving through a proxy or load balancer shares one
   rate-limit/budget bucket under the proxy's own address (Render's managed LB
