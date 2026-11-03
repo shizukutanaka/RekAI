@@ -44,6 +44,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/v1/chat/stream`. Message dicts are also typed to carry tool/thinking
   round-trip fields instead of only string values. Caching, fallbacks, and
   idempotency remain non-streaming concerns and are not sent on this path.
+- **JS SDK stream summary typing.** `StreamSummary` now exposes the
+  `finish_reason` and `redacted` fields the gateway can already emit on native
+  `/v1/chat/stream` summaries, so TypeScript callers don't have to cast to read
+  why a stream stopped or which guardrail patterns were scrubbed.
 - **`REKAI_TRUSTED_PROXIES` — real client IP behind a reverse proxy.** Without
   it, every request arriving through a proxy or load balancer shares one
   rate-limit/budget bucket under the proxy's own address (Render's managed LB

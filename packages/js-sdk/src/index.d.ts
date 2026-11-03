@@ -39,8 +39,12 @@ export interface StreamSummary {
   /** Which stop sequence ended the turn (Anthropic reports it; OpenAI has
    * no equivalent field, so it's absent for other providers). */
   stop_sequence?: string;
+  finish_reason?: string | null;
   refusal?: string;
   annotations?: Record<string, unknown>[];
+  /** Secret patterns scrubbed from the streamed output by the gateway's
+   * output-redaction guardrail. Absent when redaction is off or found nothing. */
+  redacted?: string[] | null;
 }
 
 export interface ChatOptions {

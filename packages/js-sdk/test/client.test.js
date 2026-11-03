@@ -80,7 +80,8 @@ before(async () => {
           'data: {"delta": " world"}\n\n' +
           'data: {"provider":"echo","model":"echo",' +
           '"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3},' +
-          '"cost_usd":0,"estimated":false' + toolCalls + "}\n\n" +
+          '"cost_usd":0,"estimated":false,"finish_reason":"stop",' +
+          '"redacted":["secret-pattern"]' + toolCalls + "}\n\n" +
           "data: [DONE]\n\n";
         return send(res, 200, sse, { "Content-Type": "text/event-stream" });
       }
@@ -248,6 +249,8 @@ test("stream reports usage via onUsage", async () => {
   assert.ok(summary);
   assert.equal(summary.usage.total_tokens, 3);
   assert.equal(summary.estimated, false);
+  assert.equal(summary.finish_reason, "stop");
+  assert.deepEqual(summary.redacted, ["secret-pattern"]);
 });
 
 test("stream surfaces tool_calls via onToolCalls", async () => {
