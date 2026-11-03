@@ -181,11 +181,13 @@ def test_chat_passes_options() -> None:
         [{"role": "user", "content": "hi"}],
         provider="openai",
         max_tokens=64,
+        max_completion_tokens=128,
         fallbacks=[{"provider": "echo"}],
     )
     body = captured["body"]
     assert body["provider"] == "openai"
     assert body["max_tokens"] == 64
+    assert body["max_completion_tokens"] == 128
     assert body["fallbacks"] == [{"provider": "echo"}]
 
 
@@ -567,6 +569,7 @@ def test_stream_forwards_the_same_chat_request_options() -> None:
             [{"role": "user", "content": "weather?"}],
             provider="openai",
             max_tokens=64,
+            max_completion_tokens=96,
             tools=tools,
             tool_choice="auto",
             parallel_tool_calls=False,
@@ -593,6 +596,7 @@ def test_stream_forwards_the_same_chat_request_options() -> None:
     body = captured["body"]
     assert body["provider"] == "openai"
     assert body["max_tokens"] == 64
+    assert body["max_completion_tokens"] == 96
     assert body["tools"] == tools
     assert body["tool_choice"] == "auto"
     assert body["parallel_tool_calls"] is False
@@ -1031,13 +1035,19 @@ def test_async_chat_returns_result() -> None:
 
     async def run() -> ChatResult:
         async with make_async_client(handler) as client:
-            return await client.chat("echo", "hi", provider_key="sk-x")
+            return await client.chat(
+                "echo",
+                "hi",
+                provider_key="sk-x",
+                max_completion_tokens=16,
+            )
 
     result = asyncio.run(run())
     assert isinstance(result, ChatResult)
     assert result.content == "Echo: hi"
     assert result.usage["total_tokens"] == 3
     assert captured["body"]["messages"] == [{"role": "user", "content": "hi"}]
+    assert captured["body"]["max_completion_tokens"] == 16
     assert captured["url"].endswith("/v1/chat")
     assert captured["key"] == "sk-x"
 
@@ -1190,6 +1200,7 @@ def test_async_stream_forwards_chat_request_options() -> None:
                 tools=[{"type": "function", "function": {"name": "get_weather"}}],
                 tool_choice="auto",
                 stop=["END"],
+                max_completion_tokens=80,
                 service_tier="priority",
                 cache_control={"type": "ephemeral"},
                 output_config={"effort": "medium"},
@@ -1201,6 +1212,7 @@ def test_async_stream_forwards_chat_request_options() -> None:
     assert body["tools"][0]["function"]["name"] == "get_weather"
     assert body["tool_choice"] == "auto"
     assert body["stop"] == ["END"]
+    assert body["max_completion_tokens"] == 80
     assert body["service_tier"] == "priority"
     assert body["cache_control"] == {"type": "ephemeral"}
     assert body["output_config"] == {"effort": "medium"}

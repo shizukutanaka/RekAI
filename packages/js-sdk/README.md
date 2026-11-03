@@ -49,6 +49,9 @@ await client.chat("gpt-4o-mini", "hi", {
 // Stop sequences (a string or an array; forwarded to whichever provider you call)
 await client.chat("gpt-4o-mini", "Count to ten.", { stop: ["5", "six"] });
 
+// OpenAI reasoning models: cap completion tokens, including reasoning
+await client.chat("o3", "hi", { provider: "openai", maxCompletionTokens: 512 });
+
 // Tool / function calling (OpenAI-compatible)
 const res = await client.chat("gpt-4o-mini", "weather in Tokyo?", {
   tools: [{ type: "function", function: { name: "get_weather" } }],

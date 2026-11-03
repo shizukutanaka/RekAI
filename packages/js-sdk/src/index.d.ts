@@ -59,6 +59,9 @@ export interface ChatOptions {
   provider?: string;
   temperature?: number;
   maxTokens?: number;
+  /** OpenAI's reasoning-model completion cap (`max_completion_tokens`),
+   * including reasoning tokens. Forwarded as `max_completion_tokens`. */
+  maxCompletionTokens?: number;
   cache?: boolean;
   fallbacks?: FallbackTarget[];
   providerKey?: string;

@@ -68,6 +68,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **JS SDK forwards Anthropic output config.** `ChatOptions.outputConfig` now
   reaches the gateway as `output_config`, so Anthropic callers can request
   effort/format controls from both `chat()` and `stream()`.
+- **SDKs forward OpenAI `max_completion_tokens`.** Python `chat()`/`stream()`
+  (sync and async) accept `max_completion_tokens`, and JS
+  `ChatOptions.maxCompletionTokens` maps to it, so reasoning-model callers can
+  cap completion (including reasoning) without dropping to deprecated
+  `max_tokens`.
 - **OpenAI reasoning models can cap completions correctly.** `ChatRequest` and
   the OpenAI provider now accept `max_completion_tokens`; when it is set, the
   provider sends that field instead of the deprecated `max_tokens`, which
