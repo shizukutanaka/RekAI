@@ -112,6 +112,17 @@ def test_system_block_list_without_cache_control_stays_flat() -> None:
     assert chat.messages[0].content == "a\nb"
 
 
+def test_top_level_cache_control_maps_to_chat_request() -> None:
+    req = AnthropicMessagesRequest(
+        model="claude-sonnet-4-6",
+        max_tokens=16,
+        cache_control={"type": "ephemeral"},
+        messages=[{"role": "user", "content": "hi"}],
+    )
+    chat = anthropic_compat.to_chat_request(req)
+    assert chat.cache_control == {"type": "ephemeral"}
+
+
 def test_max_tokens_required(client: TestClient) -> None:
     # Anthropic requires max_tokens; a 422 must still come back in *their*
     # envelope so the SDK's error handling parses it.

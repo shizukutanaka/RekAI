@@ -513,6 +513,17 @@ test("chat forwards top-level cache control", async () => {
   assert.deepEqual(lastRequest.body.cache_control, { type: "ephemeral" });
 });
 
+test("chat forwards output config", async () => {
+  const client = new RekAIClient(baseUrl);
+  await client.chat("claude-sonnet-4-6", "answer tersely", {
+    outputConfig: { effort: "low", format: { type: "json_object" } },
+  });
+  assert.deepEqual(lastRequest.body.output_config, {
+    effort: "low",
+    format: { type: "json_object" },
+  });
+});
+
 // --- Request timeout ----------------------------------------------------------
 // fetch has no built-in timeout: without `timeout`, a hung connection parked
 // chat()/stream() forever. The Python SDK bounds every call at 60s; this client

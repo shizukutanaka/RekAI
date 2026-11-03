@@ -65,6 +65,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `stream()` — sync and async — accept `cache_control={...}` and forward it to
   the gateway unchanged, matching the JS SDK and Anthropic's prompt-cache
   breakpoint shape.
+- **JS SDK forwards Anthropic output config.** `ChatOptions.outputConfig` now
+  reaches the gateway as `output_config`, so Anthropic callers can request
+  effort/format controls from both `chat()` and `stream()`.
 - **OpenAI reasoning models can cap completions correctly.** `ChatRequest` and
   the OpenAI provider now accept `max_completion_tokens`; when it is set, the
   provider sends that field instead of the deprecated `max_tokens`, which
@@ -136,6 +139,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ChatRequest.system_blocks`, marked system messages are emitted as Anthropic
   text blocks split at the breakpoints, and `system_blocks` joins the exact and
   semantic cache keys.
+- **`/v1/messages` dropped top-level `cache_control`.** Anthropic's automatic
+  prompt-cache breakpoint was accepted by the compat schema's `extra="allow"`
+  but never copied onto `ChatRequest`, so `/v1/messages` callers could not
+  enable prompt caching the way `/v1/chat` callers already could. The field is
+  now declared and forwarded to the Anthropic provider's existing
+  last-cacheable-block behavior.
 - **Output redaction missed unary `extra_fields`.** Streamed message-level
   extras were already scrubbed, but buffered `/v1/chat` responses could carry
   an upstream secret inside `extra_fields` to clients and into response,
