@@ -61,6 +61,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **JS SDK forwards top-level prompt-cache control.** `ChatOptions.cacheControl`
   now reaches the gateway as `cache_control`, allowing Anthropic callers to set
   a provider-native prompt-cache breakpoint from both `chat()` and `stream()`.
+- **Python SDK forwards top-level prompt-cache control.** `chat()` and
+  `stream()` — sync and async — accept `cache_control={...}` and forward it to
+  the gateway unchanged, matching the JS SDK and Anthropic's prompt-cache
+  breakpoint shape.
 - **Web chat surfaces provider token splits.** Assistant metadata now shows
   nonzero `cache_read_tokens`, `cache_write_tokens`, and `reasoning_tokens`
   alongside total tokens for both unary and streamed replies, matching the
