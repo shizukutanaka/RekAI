@@ -243,6 +243,11 @@ def _post_legacy(client: TestClient, **extra: object):
     assert resp.status_code == 200
 
 
+def test_think_reaches_provider(client: TestClient) -> None:
+    _post_legacy(client, think="high")
+    assert _CaptureProvider.last_request.think == "high"
+
+
 def test_legacy_functions_normalized_to_tools(client: TestClient) -> None:
     fn = {"name": "f", "description": "d", "parameters": {"type": "object"}}
     _post_legacy(client, functions=[fn], function_call={"name": "f"})

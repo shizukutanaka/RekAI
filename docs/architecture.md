@@ -197,7 +197,7 @@ requests that check the cooldown).
 provider works on the streaming path even without native support. The endpoint
 emits `data: {"delta": "..."}` events, then a final
 `data: {"usage": {...}, "cost_usd": ..., "estimated": true}` summary, then a
-terminating `data: [DONE]`. When Anthropic granular frames were streamed, the
+terminating `data: [DONE]`. When granular provider frames were streamed, the
 summary also repeats their completed `thinking_blocks`, `citations`,
 `extra_blocks`, and `extra_fields` so terminal-summary consumers (including the
 SDK `on_usage`/`onUsage` callbacks) do not have to reconstruct them;
@@ -429,6 +429,16 @@ unsupported. `stop` had the same gap across *all four* backends until the same
 week: `ChatCompletionsRequest`'s `extra="allow"` accepted it, and it reached
 none of them.
 
+Ollama's thinking switch is the same class of gap in the other direction:
+`/api/chat` has always accepted a top-level `think` (`true`/`false`, or a
+model-defined level string) and returned `message.thinking`, but RekAI had no
+field for it and dropped the trace. `ChatRequest.think` now forwards the switch
+verbatim (omitted when unset, so the model default stands), unary responses
+normalize `message.thinking` into `thinking_blocks`, streams emit
+`thinking_delta`, and assistant history echoes the thinking string back so
+thinking/tool-call follow-ups keep the reasoning context. Like Anthropic's
+`thinking`, it changes the answer and its cost, so it joins the cache keys.
+
 ## Idempotency
 
 A client can send an `Idempotency-Key` header (a unique id, e.g. a UUID) on
@@ -463,7 +473,7 @@ The cache key is a SHA-256 of a payload containing every `ChatRequest` field
 that can change the response: routing (`provider`, `model`), sampling
 (`temperature`, `max_tokens`, `stop`, `top_p`, `seed`, penalties, `logit_bias`),
 provider passthroughs (`service_tier`, `anthropic_beta`, `web_search_options`,
-`thinking`, `context_management`, `container`, `inference_geo`, `speed`,
+`thinking`, `think`, `context_management`, `container`, `inference_geo`, `speed`,
 `diagnostics`, `user_profile_id`, `mcp_servers`, `output_config`), conversation
 state (`messages`, `tools`, `tool_choice`, `parallel_tool_calls`), output
 contract (`response_format`), and prompt-cache breakpoints (`cache_control`,

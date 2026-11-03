@@ -131,6 +131,7 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         response_format=req.response_format,
         user=req.user,
         safety_identifier=req.safety_identifier,
+        think=req.think,
     )
 
 

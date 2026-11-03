@@ -122,6 +122,12 @@ class ChatRequest(BaseModel):
         "temperature=1 under thinking, so the compat layer defaults to that "
         "when the caller left temperature unset.",
     )
+    think: bool | str | None = Field(
+        default=None,
+        description="Ollama's `think` switch — true/false, or a model-defined "
+        "level string. Forwarded to Ollama only; other providers ignore it. "
+        "Changes the answer and its reasoning cost, so it joins the cache key.",
+    )
     context_management: dict[str, Any] | None = Field(
         default=None,
         description="Anthropic's `context_management` — context-editing rules "
@@ -324,6 +330,7 @@ class ChatCompletionsRequest(BaseModel):
     safety_identifier: str | None = None  # OpenAI's newer abuse-detection id
     n: int | None = None  # 400 if n > 1 (RekAI returns a single choice)
     provider: str | None = None  # RekAI extension: explicit provider override
+    think: bool | str | None = None  # RekAI extension: Ollama thinking switch
     # OpenAI's pre-tools function-calling API (deprecated since 0613 but still
     # emitted by older SDKs and codebases). Normalized to tools/tool_choice in
     # the compat layer; modern `tools` wins when both are sent.
