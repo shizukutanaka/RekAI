@@ -100,6 +100,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Gemini tool results can resolve the required function name.** OpenAI-style
+  tool-result messages normally carry only `tool_call_id`, but Gemini's
+  `functionResponse` requires `name`; RekAI now resolves it from the matching
+  prior assistant `tool_calls` entry, falls back to an explicit `name`, and
+  returns a readable 400 when neither is available instead of sending
+  `name: ""` upstream.
 - **Architecture docs now describe the full cache key.** The caching section
   listed only the original request fields even though `cache_key` and
   `semantic_bucket` already include sampling params, provider passthroughs,

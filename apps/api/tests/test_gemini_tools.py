@@ -7,6 +7,7 @@ import json
 import httpx
 import pytest
 
+from rekai.providers.base import ProviderError
 from rekai.providers.gemini import (
     GeminiProvider,
     _extract_tool_calls,
@@ -79,6 +80,39 @@ def test_translate_contents_round_trip() -> None:
     assert out[1]["role"] == "model"
     assert out[1]["parts"][0]["functionCall"]["args"] == {"city": "Tokyo"}
     assert out[2]["parts"][0]["functionResponse"]["name"] == "get_weather"
+
+
+def test_translate_contents_resolves_tool_result_name_from_call_id() -> None:
+    msgs = [
+        ChatMessage(role="user", content="weather and time?"),
+        ChatMessage(
+            role="assistant",
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "get_weather", "arguments": "{}"},
+                },
+                {
+                    "id": "c2",
+                    "type": "function",
+                    "function": {"name": "get_time", "arguments": "{}"},
+                },
+            ],
+        ),
+        ChatMessage(role="tool", tool_call_id="c2", content="12:00"),
+        ChatMessage(role="tool", tool_call_id="c1", content="sunny"),
+    ]
+    out = _translate_contents(msgs)
+    assert out[2]["parts"][0]["functionResponse"]["name"] == "get_time"
+    assert out[3]["parts"][0]["functionResponse"]["name"] == "get_weather"
+
+
+def test_translate_contents_tool_result_name_fallback_and_error() -> None:
+    named = _translate_contents([ChatMessage(role="tool", name="get_weather", content="sunny")])
+    assert named[0]["parts"][0]["functionResponse"]["name"] == "get_weather"
+    with pytest.raises(ProviderError, match="require the function name"):
+        _translate_contents([ChatMessage(role="tool", tool_call_id="missing", content="sunny")])
 
 
 def test_extract_tool_calls() -> None:

@@ -774,7 +774,10 @@ content blocks, and Anthropic's `tool_use` responses map back to OpenAI-style
 `tool_calls` — so a tools conversation is portable across OpenAI and Anthropic.
 **Gemini** is supported the same way (`functionDeclarations`/`functionCall`/
 `functionResponse` + `toolConfig`), so tool calling works uniformly across all
-three major cloud providers through one OpenAI-style API.
+three major cloud providers through one OpenAI-style API. Gemini requires the
+function name on `functionResponse`, so a tool-result message that only carries
+OpenAI's `tool_call_id` resolves its name from the matching prior assistant
+`tool_calls` entry (explicit `name` remains the fallback).
 
 `tool_choice: "none"` is translated distinctly from an unset `tool_choice` —
 OpenAI's `"none"` means "the tools are declared for context, but do not call

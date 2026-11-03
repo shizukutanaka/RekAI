@@ -21,7 +21,7 @@ from rekai.providers.base import (
     provider_http_error,
     trace_headers,
 )
-from rekai.schemas import ChatRequest, Usage
+from rekai.schemas import ChatMessage, ChatRequest, Usage
 
 # Gemini's finishReason vocabulary -> OpenAI's. Everything that is a safety or
 # policy stop maps to content_filter; MAX_TOKENS is the truncation case.
@@ -336,10 +336,39 @@ def _translate_tool_config(choice: object) -> dict | None:
     return {"functionCallingConfig": config}
 
 
-def _translate_contents(messages: list) -> list[dict]:
+def _tool_result_name(messages: list[ChatMessage], index: int, message: ChatMessage) -> str:
+    """Resolve the function name Gemini requires on a ``functionResponse``.
+
+    OpenAI tool-result messages normally carry only ``tool_call_id``; the
+    matching assistant ``tool_calls`` entry is the authoritative source for
+    the function name. An explicit ``name`` remains the fallback for callers
+    that don't round-trip the assistant tool-call message.
+    """
+    tool_call_id = message.tool_call_id
+    if tool_call_id:
+        for prior in reversed(messages[:index]):
+            if prior.role != "assistant":
+                continue
+            for call in prior.tool_calls or []:
+                if call.get("id") != tool_call_id:
+                    continue
+                function = call.get("function")
+                name = function.get("name") if isinstance(function, dict) else None
+                if isinstance(name, str) and name:
+                    return name
+    if message.name:
+        return message.name
+    raise ProviderError(
+        "Gemini tool results require the function name: send 'name' or a "
+        "matching prior assistant tool_calls entry.",
+        status_code=400,
+    )
+
+
+def _translate_contents(messages: list[ChatMessage]) -> list[dict]:
     """Map OpenAI-style messages (incl. tool calls/results) to Gemini contents."""
     out: list[dict] = []
-    for m in messages:
+    for index, m in enumerate(messages):
         if m.role == "system":
             continue
         if m.role == "tool":
@@ -349,7 +378,7 @@ def _translate_contents(messages: list) -> list[dict]:
                     "parts": [
                         {
                             "functionResponse": {
-                                "name": m.name or "",
+                                "name": _tool_result_name(messages, index, m),
                                 "response": {"result": m.content or ""},
                             }
                         }
