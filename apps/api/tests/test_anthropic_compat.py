@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from rekai import anthropic_compat
 from rekai.config import Settings
 from rekai.main import _anthropic_error_body, create_app
-from rekai.schemas import ChatResponse, Usage
+from rekai.schemas import AnthropicMessagesRequest, ChatResponse, Usage
 
 
 def _parse_sse(text: str) -> list[tuple[str, dict]]:
@@ -73,6 +73,17 @@ def test_system_prompt_block_list(client: TestClient) -> None:
         json=_payload(system=[{"type": "text", "text": "Be terse"}]),
     )
     assert resp.status_code == 200
+
+
+def test_top_level_cache_control_maps_to_chat_request() -> None:
+    req = AnthropicMessagesRequest(
+        model="claude-sonnet-4-6",
+        max_tokens=16,
+        cache_control={"type": "ephemeral"},
+        messages=[{"role": "user", "content": "hi"}],
+    )
+    chat = anthropic_compat.to_chat_request(req)
+    assert chat.cache_control == {"type": "ephemeral"}
 
 
 def test_max_tokens_required(client: TestClient) -> None:
