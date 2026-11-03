@@ -582,6 +582,7 @@ def test_stream_forwards_the_same_chat_request_options() -> None:
             user="u-1",
             safety_identifier="s-1",
             thinking={"type": "enabled", "budget_tokens": 16},
+            cache_control={"type": "ephemeral"},
             output_config={"effort": "low"},
             provider_key="sk-provider",
             gateway_key="sk-gateway",
@@ -607,6 +608,7 @@ def test_stream_forwards_the_same_chat_request_options() -> None:
     assert body["user"] == "u-1"
     assert body["safety_identifier"] == "s-1"
     assert body["thinking"] == {"type": "enabled", "budget_tokens": 16}
+    assert body["cache_control"] == {"type": "ephemeral"}
     assert body["output_config"] == {"effort": "low"}
     # Streaming is not idempotent or cached server-side, so those chat-only
     # knobs stay out of the payload.
@@ -1189,6 +1191,7 @@ def test_async_stream_forwards_chat_request_options() -> None:
                 tool_choice="auto",
                 stop=["END"],
                 service_tier="priority",
+                cache_control={"type": "ephemeral"},
                 output_config={"effort": "medium"},
             ):
                 pass
@@ -1199,6 +1202,7 @@ def test_async_stream_forwards_chat_request_options() -> None:
     assert body["tool_choice"] == "auto"
     assert body["stop"] == ["END"]
     assert body["service_tier"] == "priority"
+    assert body["cache_control"] == {"type": "ephemeral"}
     assert body["output_config"] == {"effort": "medium"}
 
 
@@ -1405,7 +1409,7 @@ def test_a_long_retry_after_returns_the_response_instead_of_sleeping():
     assert time.monotonic() - started < 5.0
 
 
-def test_chat_forwards_thinking() -> None:
+def test_chat_forwards_thinking_and_cache_control() -> None:
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -1429,8 +1433,10 @@ def test_chat_forwards_thinking() -> None:
         "claude-sonnet-4-6",
         [{"role": "user", "content": "hi"}],
         thinking={"type": "enabled", "budget_tokens": 256},
+        cache_control={"type": "ephemeral"},
     )
     assert captured["body"]["thinking"] == {"type": "enabled", "budget_tokens": 256}
+    assert captured["body"]["cache_control"] == {"type": "ephemeral"}
 
 
 def test_chat_forwards_output_config() -> None:
