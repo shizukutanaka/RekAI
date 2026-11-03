@@ -23,6 +23,9 @@ const client = new RekAIClient("http://localhost:8000");
 const res = await client.chat("echo", "Hello!");
 console.log(res.content);                 // "Echo: Hello!"
 console.log(res.provider, res.usage.total_tokens, res.cost_usd);
+// Prompt-cache and reasoning splits are optional on `usage` — absent means the
+// provider report carried no breakdown.
+console.log(res.usage.cache_read_tokens, res.usage.cache_write_tokens, res.usage.reasoning_tokens);
 
 // BYOK + a real provider
 await client.chat("gpt-4o-mini", [{ role: "user", content: "Write a haiku." }], {

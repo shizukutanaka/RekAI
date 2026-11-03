@@ -21,6 +21,9 @@ client = RekAIClient("http://localhost:8000")
 result = client.chat("echo", "Hello!")
 print(result.content)  # "Echo: Hello!"
 print(result.provider, result.usage["total_tokens"], result.cost_usd)
+# Prompt-cache and reasoning splits come back typed on ChatResult; None means
+# the gateway reported no breakdown (distinct from an explicit 0).
+print(result.cache_read_tokens, result.cache_write_tokens, result.reasoning_tokens)
 
 # BYOK + a real provider
 result = client.chat(

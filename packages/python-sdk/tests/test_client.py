@@ -46,7 +46,14 @@ def test_chat_returns_result() -> None:
                 "provider": "echo",
                 "model": "echo",
                 "content": "Echo: hi",
-                "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 2,
+                    "total_tokens": 3,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0,
+                    "reasoning_tokens": 0,
+                },
                 "cost_usd": 0.0,
                 "cached": False,
                 "fallback_used": False,
@@ -58,10 +65,95 @@ def test_chat_returns_result() -> None:
     assert isinstance(result, ChatResult)
     assert result.content == "Echo: hi"
     assert result.usage["total_tokens"] == 3
+    # The gateway's flat cache/reasoning breakdown is exposed as typed fields.
+    assert result.cache_read_tokens == 0
+    assert result.cache_write_tokens == 0
+    assert result.reasoning_tokens == 0
     # String message is normalized to a single user message.
     assert captured["body"]["messages"] == [{"role": "user", "content": "hi"}]
     assert captured["url"].endswith("/v1/chat")
     assert captured["key"] == "sk-x"
+
+
+def _chat_payload(**usage_overrides: object) -> dict:
+    usage = {
+        "prompt_tokens": 11,
+        "completion_tokens": 7,
+        "total_tokens": 18,
+        "cache_read_tokens": 4,
+        "cache_write_tokens": 5,
+        "reasoning_tokens": 3,
+    }
+    usage.update(usage_overrides)
+    return {
+        "id": "rekai-u",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "content": "ok",
+        "usage": usage,
+        "cost_usd": None,
+        "cached": False,
+        "fallback_used": False,
+    }
+
+
+def _result_with_usage(**usage_overrides: object) -> ChatResult:
+    payload = _chat_payload(**usage_overrides)
+    handler = lambda request: httpx.Response(200, json=payload)  # noqa: E731
+    return make_client(handler).chat("gpt-4o-mini", "hi")
+
+
+def test_chat_exposes_anthropic_style_cache_breakdown() -> None:
+    """Anthropic/OpenAI-routed calls report the split flat on the gateway."""
+    result = _result_with_usage()
+    assert result.cache_read_tokens == 4
+    assert result.cache_write_tokens == 5
+    assert result.reasoning_tokens == 3
+
+
+def test_chat_reads_openai_nested_details_when_flat_fields_absent() -> None:
+    """Upstream-shaped usage (prompt_tokens_details) still resolves."""
+    result = _result_with_usage(
+        cache_read_tokens=None,
+        cache_write_tokens=None,
+        reasoning_tokens=None,
+        prompt_tokens_details={"cached_tokens": 9},
+        completion_tokens_details={"reasoning_tokens": 6},
+    )
+    assert result.cache_read_tokens == 9
+    # There is no nested write analogue; the flat field stays unknown.
+    assert result.cache_write_tokens is None
+    assert result.reasoning_tokens == 6
+
+
+def test_chat_token_breakdown_absent_stays_none() -> None:
+    """A report with no breakdown fields at all must not invent zeros."""
+    payload = _chat_payload(
+        cache_read_tokens=None,
+        cache_write_tokens=None,
+        reasoning_tokens=None,
+        prompt_tokens_details=None,
+        completion_tokens_details=None,
+    )
+    handler = lambda request: httpx.Response(200, json=payload)  # noqa: E731
+    result = make_client(handler).chat("gpt-4o-mini", "hi")
+    assert result.cache_read_tokens is None
+    assert result.cache_write_tokens is None
+    assert result.reasoning_tokens is None
+
+
+def test_chat_zero_cache_is_distinct_from_absent() -> None:
+    """An explicit 0 (nothing was cached) must not collapse to None."""
+    payload = _chat_payload(
+        cache_read_tokens=0,
+        cache_write_tokens=0,
+        reasoning_tokens=0,
+    )
+    handler = lambda request: httpx.Response(200, json=payload)  # noqa: E731
+    result = make_client(handler).chat("gpt-4o-mini", "hi")
+    assert result.cache_read_tokens == 0
+    assert result.cache_write_tokens == 0
+    assert result.reasoning_tokens == 0
 
 
 def test_chat_passes_options() -> None:

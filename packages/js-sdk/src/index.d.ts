@@ -114,6 +114,13 @@ export interface Usage {
   total_tokens: number;
   /** Breakdown of completion_tokens spent on reasoning (o-series, Gemini thinking). */
   reasoning_tokens?: number;
+  /** Prompt tokens billed at the cached rate (Anthropic
+   * cache_read_tokens merged with OpenAI prompt_tokens_details.cached_tokens).
+   * Absent when the report carried no cache breakdown. */
+  cache_read_tokens?: number;
+  /** Prompt tokens billed for writing the prompt cache (Anthropic
+   * cache_creation_input_tokens). Absent when the report carried no breakdown. */
+  cache_write_tokens?: number;
 }
 
 export interface ChatResult {
