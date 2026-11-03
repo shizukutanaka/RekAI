@@ -109,6 +109,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   an upstream secret inside `extra_fields` to clients and into response,
   semantic, and idempotency stores. `_redact()` now applies the same recursive
   string-leaf scrub to that payload before any store sees it.
+- **OpenAI-compatible tool results lost `is_error`.** `/v1/chat/completions`
+  accepts RekAI's `is_error` extension on `role="tool"` messages, but the
+  compat translation dropped it before the internal pipeline — Anthropic then
+  replayed a failed `tool_result` as successful. The flag now reaches providers
+  that understand it.
 - **Architecture docs now describe the full cache key.** The caching section
   listed only the original request fields even though `cache_key` and
   `semantic_bucket` already include sampling params, provider passthroughs,
