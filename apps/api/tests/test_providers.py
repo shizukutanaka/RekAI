@@ -96,6 +96,25 @@ def test_openai_payload_completion_token_cap() -> None:
     assert "max_tokens" not in reasoning_payload
 
 
+def test_non_openai_providers_honor_completion_token_cap() -> None:
+    """A request carrying only `max_completion_tokens` must still be capped on
+    providers that only know `max_tokens`."""
+    from rekai.providers.ollama import _options
+
+    request = ChatRequest(
+        model="m",
+        messages=[ChatMessage(role="user", content="hi")],
+        max_completion_tokens=32,
+    )
+
+    anthropic_payload = AnthropicProvider()._build_payload(request, stream=False)
+    gemini_payload = GeminiProvider()._build_payload(request)
+
+    assert anthropic_payload["max_tokens"] == 32
+    assert gemini_payload["generationConfig"]["maxOutputTokens"] == 32
+    assert _options(request)["num_predict"] == 32
+
+
 def test_check_header_safe_accepts_printable_ascii() -> None:
     check_header_safe("x", "sk-ant-api03:AbC_123-tilde~")
     check_header_safe("x", "")  # empty stays allowed — only illegal chars are rejected

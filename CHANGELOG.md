@@ -73,7 +73,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   provider sends that field instead of the deprecated `max_tokens`, which
   o-series/GPT-5 reject. `/v1/chat/completions` keeps the two spellings
   distinct instead of collapsing them, and the cap joins the cache key and
-  semantic bucket.
+  semantic bucket. Anthropic, Gemini and Ollama fall back to
+  `max_completion_tokens` when `max_tokens` is unset, so the cap still applies.
 - **Web chat surfaces provider token splits.** Assistant metadata now shows
   nonzero `cache_read_tokens`, `cache_write_tokens`, and `reasoning_tokens`
   alongside total tokens for both unary and streamed replies, matching the
