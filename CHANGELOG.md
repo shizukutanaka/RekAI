@@ -100,6 +100,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Output redaction missed unary `extra_fields`.** Streamed message-level
+  extras were already scrubbed, but buffered `/v1/chat` responses could carry
+  an upstream secret inside `extra_fields` to clients and into response,
+  semantic, and idempotency stores. `_redact()` now applies the same recursive
+  string-leaf scrub to that payload before any store sees it.
 - **Architecture docs now describe the full cache key.** The caching section
   listed only the original request fields even though `cache_key` and
   `semantic_bucket` already include sampling params, provider passthroughs,
