@@ -65,6 +65,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `stream()` — sync and async — accept `cache_control={...}` and forward it to
   the gateway unchanged, matching the JS SDK and Anthropic's prompt-cache
   breakpoint shape.
+- **JS SDK forwards Anthropic output config.** `ChatOptions.outputConfig` now
+  reaches the gateway as `output_config`, so Anthropic callers can request
+  effort/format controls from both `chat()` and `stream()`.
 - **Web chat surfaces provider token splits.** Assistant metadata now shows
   nonzero `cache_read_tokens`, `cache_write_tokens`, and `reasoning_tokens`
   alongside total tokens for both unary and streamed replies, matching the

@@ -168,6 +168,8 @@ export class RekAIClient {
     // Provider-native prompt-cache breakpoint (Anthropic); OpenAI-compatible
     // providers ignore it while preserving the request shape.
     if (opts.cacheControl != null) payload.cache_control = opts.cacheControl;
+    // Anthropic output config (effort/format); forwarded verbatim upstream.
+    if (opts.outputConfig != null) payload.output_config = opts.outputConfig;
     return payload;
   }
 
