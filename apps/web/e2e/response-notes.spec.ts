@@ -70,6 +70,24 @@ test("an exact cache hit is still just 'cached'", async ({ page }) => {
   await expect(meta).not.toContainText("similar prompt");
 });
 
+test("provider token splits are shown when the API reports them", async ({ page }) => {
+  const meta = await stubChat(page, {
+    usage: {
+      prompt_tokens: 10,
+      completion_tokens: 5,
+      total_tokens: 15,
+      cache_read_tokens: 8,
+      cache_write_tokens: 2,
+      reasoning_tokens: 5,
+    },
+  });
+
+  await expect(meta).toContainText("15 tokens");
+  await expect(meta).toContainText("prompt cache read 8");
+  await expect(meta).toContainText("prompt cache write 2");
+  await expect(meta).toContainText("reasoning 5");
+});
+
 test("a redacted answer says so", async ({ page }) => {
   const meta = await stubChat(page, { redacted: ["aws_access_key", "github_pat"] });
 

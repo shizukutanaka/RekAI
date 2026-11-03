@@ -197,7 +197,12 @@ requests that check the cooldown).
 provider works on the streaming path even without native support. The endpoint
 emits `data: {"delta": "..."}` events, then a final
 `data: {"usage": {...}, "cost_usd": ..., "estimated": true}` summary, then a
-terminating `data: [DONE]`. Providers expose `stream_events()` yielding text
+terminating `data: [DONE]`. When Anthropic granular frames were streamed, the
+summary also repeats their completed `thinking_blocks`, `citations`,
+`extra_blocks`, and `extra_fields` so terminal-summary consumers (including the
+SDK `on_usage`/`onUsage` callbacks) do not have to reconstruct them;
+`content_blocks` is not synthesized because stream frames carry no upstream
+block index. Providers expose `stream_events()` yielding text
 deltas and an optional final provider-reported usage; when present it is used
 verbatim (`estimated: false`) — all five providers do this (echo exact; OpenAI
 via `stream_options`; Anthropic from `message_start`/`message_delta`; Gemini from
@@ -227,9 +232,10 @@ model string (split only when the prefix is a *registered* provider, so a custom
 backend's own slash-containing model ids are left intact). `top_p`, `seed`,
 `frequency_penalty`, `presence_penalty` and `logit_bias` are now first-class:
 typed on both request schemas and forwarded — OpenAI-compatible backends take
-all five, Anthropic `top_p`, Gemini `topP`, Ollama `top_p` + `seed` — and they
-participate in the cache key and semantic bucket. Other unknown OpenAI tuning
-params are still tolerated and ignored; `n > 1` is a 400. `response_format` is
+all five, Anthropic `top_p`, Gemini `topP` + `seed`, and Ollama `top_p` +
+`seed` — and they participate in the cache key and semantic bucket. Other
+unknown OpenAI tuning params are still tolerated and ignored; `n > 1` is a 400.
+`response_format` is
 part of the cache key too, so a JSON-mode request and a plain one never collide.
 
 ### Errors on the compatible endpoint
@@ -453,11 +459,18 @@ side for streamed requests.
 
 ## Caching
 
-The cache key is a SHA-256 of the `(provider, model, temperature, max_tokens,
-stop, messages, tools, tool_choice, response_format, cache_control)` tuple —
-every `ChatRequest` field that affects the response — so identical requests
-collapse to one upstream call and two requests differing in any of them never
-share an entry. Backends:
+The cache key is a SHA-256 of a payload containing every `ChatRequest` field
+that can change the response: routing (`provider`, `model`), sampling
+(`temperature`, `max_tokens`, `stop`, `top_p`, `seed`, penalties, `logit_bias`),
+provider passthroughs (`service_tier`, `anthropic_beta`, `web_search_options`,
+`thinking`, `context_management`, `container`, `inference_geo`, `speed`,
+`diagnostics`, `user_profile_id`, `mcp_servers`, `output_config`), conversation
+state (`messages`, `tools`, `tool_choice`, `parallel_tool_calls`), output
+contract (`response_format`), and prompt-cache breakpoints (`cache_control`)
+— so identical requests collapse to one upstream call and two requests
+differing in any of them never share an entry. Operational fields that do not
+change the answer (`cache`, `fallbacks`, `user`, `safety_identifier`, and
+stream-only `include_obfuscation`) stay out of the key. Backends:
 
 - **Redis** when `REKAI_REDIS_URL` is set (shared across processes/nodes).
 - **Memory** otherwise (per-process; great for local dev and tests).
@@ -493,13 +506,12 @@ Unlike the exact cache, **a semantic hit answers a prompt that was never sent**,
 so everything about it is deliberately conservative:
 
 - **Bucket.** `cache.semantic_bucket` is `cache_key`'s payload *minus*
-  `messages` — provider, model, temperature, `max_tokens`, `stop`, `tools`,
-  `tool_choice`, `response_format`, `cache_control` — plus the **client id**.
-  The message text is what the embedding compares; everything else must match
-  exactly. (Cross-tenant reuse would hand tenant B an answer to a question only
-  tenant A asked. The exact cache can share freely because a hit there requires
-  B to have sent the identical prompt itself — so the semantic cache trades hit
-  rate for isolation, on purpose.)
+  `messages` — the same response-affecting fields listed above, plus the
+  **client id**. The message text is what the embedding compares; everything
+  else must match exactly. (Cross-tenant reuse would hand tenant B an answer
+  to a question only tenant A asked. The exact cache can share freely because
+  a hit there requires B to have sent the identical prompt itself — so the
+  semantic cache trades hit rate for isolation, on purpose.)
 - **Bounds.** Process-local, FIFO, capped by `REKAI_SEMANTIC_CACHE_MAX_ENTRIES`,
   and entries expire after `REKAI_CACHE_TTL_SECONDS` like the exact cache's do.
 - **Cost.** The embedding call is a real upstream call the caller never asked
@@ -861,7 +873,11 @@ PEM private-key blocks) — the case where a provider echoes back something
 sensitive it was handed in a tool result or RAG context (OWASP LLM02). Matches
 are replaced with `[REDACTED:<pattern>]` and the response carries an
 `X-Redacted: <pattern1,pattern2,…>` header plus a `redacted: ["<pattern>", …]`
-field in the body. The scrub runs in `service.handle_chat` — **before** the
+field in the body. The same recursive scrub also covers structured response
+payloads that can carry provider text — thinking blocks, citation `cited_text`,
+server-tool/content blocks, tool-call arguments, and message-level
+`extra_fields` — not just the flat answer text. The scrub runs in
+`service.handle_chat` — **before** the
 response is written to the response cache, the semantic cache, or the
 `Idempotency-Key` store — so the raw secret is never persisted (which matters
 most with Redis, where it would otherwise sit in plaintext for the whole TTL),
