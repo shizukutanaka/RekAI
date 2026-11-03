@@ -51,6 +51,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **JS SDK forwards top-level prompt-cache control.** `ChatOptions.cacheControl`
   now reaches the gateway as `cache_control`, allowing Anthropic callers to set
   a provider-native prompt-cache breakpoint from both `chat()` and `stream()`.
+- **JS SDK forwards Anthropic output config.** `ChatOptions.outputConfig` now
+  reaches the gateway as `output_config`, so Anthropic callers can request
+  effort/format controls from both `chat()` and `stream()`.
 - **`REKAI_TRUSTED_PROXIES` — real client IP behind a reverse proxy.** Without
   it, every request arriving through a proxy or load balancer shares one
   rate-limit/budget bucket under the proxy's own address (Render's managed LB

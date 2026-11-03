@@ -103,6 +103,10 @@ export interface ChatOptions {
   /** Provider-native prompt-cache breakpoint (e.g. Anthropic's
    * `{type: "ephemeral"}`), passed through to the gateway. */
   cacheControl?: Record<string, unknown>;
+  /** Anthropic `output_config` — e.g. `{'effort': 'medium'}` or
+   * `{'format': {...}}` for structured output. Forwarded verbatim to Anthropic
+   * only; other providers ignore it. */
+  outputConfig?: Record<string, unknown>;
   /** Sent as the `Idempotency-Key` header so a retried request replays the
    * first response instead of re-processing. Auto-generated when omitted and
    * `maxRetries > 0`. */
