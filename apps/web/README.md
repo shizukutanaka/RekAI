@@ -20,7 +20,8 @@ Open http://localhost:3000.
   temperature slider, and a max-tokens cap. The conversation is saved to local
   storage and restored on reload (**Clear** wipes it); **Regenerate** re-runs the
   last turn for a fresh reply. Assistant bubbles show the provider, whether the
-  response was cached, token usage, and estimated cost.
+  response was cached, token usage (including prompt-cache and reasoning splits
+  when reported), and estimated cost.
 - **/embeddings** — turn text into vectors via `/v1/embeddings`. `echo` works
   keyless with deterministic vectors; pick a real embeddings model and set a
   key in Settings for the rest. One input per line; shows vector count,

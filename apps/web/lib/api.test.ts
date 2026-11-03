@@ -17,6 +17,7 @@ import {
   parseSSEFrame,
   redactionNote,
   thinkingText,
+  usageBreakdown,
 } from "./api";
 
 describe("formatCost", () => {
@@ -36,6 +37,30 @@ describe("formatCost", () => {
   it("uses 2 decimals for larger costs", () => {
     expect(formatCost(1.5)).toBe("$1.50");
     expect(formatCost(0.25)).toBe("$0.25");
+  });
+});
+
+describe("usageBreakdown", () => {
+  const base = { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 };
+
+  it("is empty when the provider reports no breakdown", () => {
+    expect(usageBreakdown(undefined)).toBe("");
+    expect(usageBreakdown(null)).toBe("");
+    expect(
+      usageBreakdown({ ...base, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0 }),
+    ).toBe("");
+  });
+
+  it("lists only the nonzero provider token splits", () => {
+    expect(
+      usageBreakdown({
+        ...base,
+        cache_read_tokens: 8,
+        cache_write_tokens: 2,
+        reasoning_tokens: 5,
+      }),
+    ).toBe("prompt cache read 8 · prompt cache write 2 · reasoning 5");
+    expect(usageBreakdown({ ...base, reasoning_tokens: 5 })).toBe("reasoning 5");
   });
 });
 
