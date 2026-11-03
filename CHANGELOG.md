@@ -52,9 +52,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `finish_reason` and `redacted` fields the gateway can already emit on native
   `/v1/chat/stream` summaries, so TypeScript callers don't have to cast to read
   why a stream stopped or which guardrail patterns were scrubbed.
+- **Native stream summaries repeat completed Anthropic blocks.**
+  `/v1/chat/stream` now includes `thinking_blocks`, `citations`,
+  `extra_blocks`, and `extra_fields` in the terminal summary when those
+  granular frames were streamed, giving SDK `on_usage`/`onUsage` consumers the
+  same structured payloads unary responses expose. `content_blocks` remains
+  granular-only because stream frames do not carry upstream block indexes.
 - **JS SDK forwards top-level prompt-cache control.** `ChatOptions.cacheControl`
   now reaches the gateway as `cache_control`, allowing Anthropic callers to set
   a provider-native prompt-cache breakpoint from both `chat()` and `stream()`.
+- **Web chat surfaces provider token splits.** Assistant metadata now shows
+  nonzero `cache_read_tokens`, `cache_write_tokens`, and `reasoning_tokens`
+  alongside total tokens for both unary and streamed replies, matching the
+  breakdowns already exposed by the SDKs.
 - **`REKAI_TRUSTED_PROXIES` — real client IP behind a reverse proxy.** Without
   it, every request arriving through a proxy or load balancer shares one
   rate-limit/budget bucket under the proxy's own address (Render's managed LB
@@ -104,11 +114,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Gemini requests ignored `seed`.** The gateway accepted OpenAI-style
+  `seed` and keyed it into the cache, but the Gemini provider dropped it
+  instead of sending `generationConfig.seed`; deterministic Gemini callers
+  now get the reproducibility the parameter promises.
 - **Output redaction missed unary `extra_fields`.** Streamed message-level
   extras were already scrubbed, but buffered `/v1/chat` responses could carry
   an upstream secret inside `extra_fields` to clients and into response,
   semantic, and idempotency stores. `_redact()` now applies the same recursive
   string-leaf scrub to that payload before any store sees it.
+- **OpenAI-compatible tool results lost `is_error`.** `/v1/chat/completions`
+  accepts RekAI's `is_error` extension on `role="tool"` messages, but the
+  compat translation dropped it before the internal pipeline — Anthropic then
+  replayed a failed `tool_result` as successful. The flag now reaches providers
+  that understand it.
 - **OpenAI/Ollama message payloads no longer leak RekAI-only fields.**
   `ChatMessage` carries provider-native replay metadata (`thinking_blocks`,
   `extra_blocks`, `content_blocks`, `cache_control`, `is_error`) for

@@ -107,6 +107,8 @@ class GeminiProvider(Provider):
             payload["generationConfig"]["stopSequences"] = request.stop
         if request.top_p is not None:
             payload["generationConfig"]["topP"] = request.top_p
+        if request.seed is not None:
+            payload["generationConfig"]["seed"] = request.seed
 
         # Best-effort structured output: OpenAI's response_format maps onto
         # Gemini's generationConfig. json_object -> JSON mime type; json_schema

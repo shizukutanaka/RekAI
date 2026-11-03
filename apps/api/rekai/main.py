@@ -1930,9 +1930,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ):
         """Stream a chat completion as Server-Sent Events.
 
-        Emits ``data: {"delta": "..."}`` events, then a final
-        ``data: {"usage": {...}, "cost_usd": ..., "estimated": true}`` summary,
-        then a terminating ``data: [DONE]``. Streaming responses are not cached
+        Emits ``data: {"delta": "..."}`` events, then a final summary carrying
+        usage/cost (and completed Anthropic block payloads when present), then a
+        terminating ``data: [DONE]``. Streaming responses are not cached
         and do not accept ``Idempotency-Key`` (unlike ``/v1/chat``) — a retried
         streaming request always re-runs; see docs/architecture.md.
         """
@@ -1952,6 +1952,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _stash_gen_ai_prestream(http_request, provider_name, request.model)
 
         async def event_source():
+            # Anthropic blocks are streamed as granular frames so clients can
+            # render them live; the summary repeats the completed forms for
+            # consumers that only read the terminal event (the SDKs' on_usage /
+            # onUsage callbacks). content_blocks stays out: stream frames do
+            # not carry upstream block indexes, so the exact interleaving cannot
+            # be reconstructed faithfully here.
+            thinking_parts: list[str] = []
+            thinking_signature: str | None = None
+            thinking_blocks: list[dict] = []
+            citations: list[dict] = []
+            extra_blocks: list[dict] = []
+            extra_fields: dict = {}
+
+            def close_thinking_block() -> None:
+                nonlocal thinking_signature
+                if not thinking_parts:
+                    thinking_signature = None
+                    return
+                block = {"type": "thinking", "thinking": "".join(thinking_parts)}
+                if thinking_signature is not None:
+                    block["signature"] = thinking_signature
+                thinking_blocks.append(block)
+                thinking_parts.clear()
+                thinking_signature = None
+
             async for ev in handle_chat_stream(
                 request,
                 x_provider_key,
@@ -1963,31 +1988,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 key_store,
             ):
                 if ev.delta is not None:
+                    close_thinking_block()
                     yield f"data: {json.dumps({'delta': ev.delta})}\n\n"
                 elif ev.refusal_delta is not None:
+                    close_thinking_block()
                     yield f"data: {json.dumps({'refusal': ev.refusal_delta})}\n\n"
                 elif ev.annotations is not None:
+                    close_thinking_block()
                     yield f"data: {json.dumps({'annotations': ev.annotations})}\n\n"
                 elif ev.thinking_delta is not None:
+                    thinking_parts.append(ev.thinking_delta)
                     yield f"data: {json.dumps({'thinking_delta': ev.thinking_delta})}\n\n"
                 elif ev.thinking_signature is not None:
+                    thinking_signature = ev.thinking_signature
+                    close_thinking_block()
                     yield f"data: {json.dumps({'thinking_signature': ev.thinking_signature})}\n\n"
                 elif ev.thinking_block is not None:
+                    close_thinking_block()
+                    thinking_blocks.append(ev.thinking_block)
                     yield f"data: {json.dumps({'thinking_block': ev.thinking_block})}\n\n"
                 elif ev.citation is not None:
+                    close_thinking_block()
+                    citations.append(ev.citation)
                     yield f"data: {json.dumps({'citation': ev.citation})}\n\n"
                 elif ev.extra_block_start is not None:
+                    close_thinking_block()
                     yield f"data: {json.dumps({'extra_block_start': ev.extra_block_start})}\n\n"
                 elif ev.extra_block_delta is not None:
+                    close_thinking_block()
                     yield f"data: {json.dumps({'extra_block_delta': ev.extra_block_delta})}\n\n"
                 elif ev.extra_block is not None:
+                    close_thinking_block()
+                    extra_blocks.append(ev.extra_block)
                     yield f"data: {json.dumps({'extra_block': ev.extra_block})}\n\n"
                 elif ev.extra_fields is not None:
+                    extra_fields.update(ev.extra_fields)
                     yield f"data: {json.dumps({'extra_fields': ev.extra_fields})}\n\n"
                 elif ev.error is not None:
                     payload = {"error": "provider_error", "detail": str(ev.error)}
                     yield f"data: {json.dumps(payload)}\n\n"
                 elif ev.summary is not None:
+                    close_thinking_block()
                     s = ev.summary
                     summary = {
                         "provider": s.provider,
@@ -2012,6 +2053,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         summary["annotations"] = s.annotations
                     if s.redacted:
                         summary["redacted"] = s.redacted
+                    if thinking_blocks:
+                        summary["thinking_blocks"] = thinking_blocks
+                    if citations:
+                        summary["citations"] = citations
+                    if extra_blocks:
+                        summary["extra_blocks"] = extra_blocks
+                    if extra_fields:
+                        summary["extra_fields"] = extra_fields
                     yield f"data: {json.dumps(summary)}\n\n"
             yield "data: [DONE]\n\n"
 
