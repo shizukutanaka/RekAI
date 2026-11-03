@@ -545,6 +545,108 @@ def test_stream_invokes_on_tool_calls() -> None:
     assert seen["tool_calls"][0]["id"] == "c1"
 
 
+def test_stream_forwards_the_same_chat_request_options() -> None:
+    """stream() must shape /v1/chat/stream like chat(), not a reduced subset."""
+    captured: dict = {}
+    sse = (
+        'data: {"delta": "Hi"}\n\n'
+        'data: {"provider":"echo","model":"echo","usage":{"total_tokens":2},'
+        '"cost_usd":0.0,"estimated":false}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        captured["headers"] = request.headers
+        return httpx.Response(200, text=sse)
+
+    tools = [{"type": "function", "function": {"name": "get_weather"}}]
+    chunks = list(
+        make_client(handler).stream(
+            "gpt-4o-mini",
+            [{"role": "user", "content": "weather?"}],
+            provider="openai",
+            max_tokens=64,
+            tools=tools,
+            tool_choice="auto",
+            parallel_tool_calls=False,
+            response_format={"type": "json_object"},
+            stop=["END"],
+            top_p=0.8,
+            seed=123,
+            frequency_penalty=0.1,
+            presence_penalty=-0.2,
+            logit_bias={"1": 2},
+            service_tier="priority",
+            web_search_options={"search_context_size": "low"},
+            user="u-1",
+            safety_identifier="s-1",
+            thinking={"type": "enabled", "budget_tokens": 16},
+            provider_key="sk-provider",
+            gateway_key="sk-gateway",
+        )
+    )
+
+    assert chunks == ["Hi"]
+    body = captured["body"]
+    assert body["provider"] == "openai"
+    assert body["max_tokens"] == 64
+    assert body["tools"] == tools
+    assert body["tool_choice"] == "auto"
+    assert body["parallel_tool_calls"] is False
+    assert body["response_format"] == {"type": "json_object"}
+    assert body["stop"] == ["END"]
+    assert body["top_p"] == 0.8
+    assert body["seed"] == 123
+    assert body["frequency_penalty"] == 0.1
+    assert body["presence_penalty"] == -0.2
+    assert body["logit_bias"] == {"1": 2}
+    assert body["service_tier"] == "priority"
+    assert body["web_search_options"] == {"search_context_size": "low"}
+    assert body["user"] == "u-1"
+    assert body["safety_identifier"] == "s-1"
+    assert body["thinking"] == {"type": "enabled", "budget_tokens": 16}
+    # Streaming is not idempotent or cached server-side, so those chat-only
+    # knobs stay out of the payload.
+    assert "fallbacks" not in body
+    assert "idempotency-key" not in captured["headers"]
+    assert captured["headers"]["x-provider-key"] == "sk-provider"
+    assert captured["headers"]["authorization"] == "Bearer sk-gateway"
+
+
+def test_chat_accepts_tool_and_thinking_message_round_trip() -> None:
+    """Message dicts must carry the fields an assistant/tool turn needs."""
+    captured: dict = {}
+    messages = [
+        {"role": "user", "content": "weather?"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "get_weather"}}],
+        },
+        {"role": "tool", "tool_call_id": "c1", "name": "get_weather", "content": "sunny"},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "provider": "echo",
+                "model": "echo",
+                "content": "ok",
+                "usage": {},
+                "cost_usd": None,
+                "cached": False,
+                "fallback_used": False,
+            },
+        )
+
+    make_client(handler).chat("echo", messages)
+    assert captured["body"]["messages"] == messages
+
+
 def test_stream_raises_on_error_event() -> None:
     sse = 'data: {"error": "provider_error", "detail": "boom"}\n\ndata: [DONE]\n\n'
 
@@ -1027,6 +1129,39 @@ def test_async_stream_invokes_on_tool_calls() -> None:
 
     asyncio.run(run())
     assert tool_calls and tool_calls[0]["function"]["name"] == "get_weather"
+
+
+def test_async_stream_forwards_chat_request_options() -> None:
+    captured: dict = {}
+    sse = (
+        'data: {"delta": "Hi"}\n\n'
+        'data: {"provider":"echo","model":"echo","usage":{"total_tokens":2},'
+        '"cost_usd":0.0,"estimated":false}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, text=sse)
+
+    async def run() -> None:
+        async with make_async_client(handler) as client:
+            async for _ in client.stream(
+                "echo",
+                "hi",
+                tools=[{"type": "function", "function": {"name": "get_weather"}}],
+                tool_choice="auto",
+                stop=["END"],
+                service_tier="priority",
+            ):
+                pass
+
+    asyncio.run(run())
+    body = captured["body"]
+    assert body["tools"][0]["function"]["name"] == "get_weather"
+    assert body["tool_choice"] == "auto"
+    assert body["stop"] == ["END"]
+    assert body["service_tier"] == "priority"
 
 
 def test_async_stream_raises_on_error_event() -> None:
