@@ -100,6 +100,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **OpenAI-compatible tool results lost `is_error`.** `/v1/chat/completions`
+  accepts RekAI's `is_error` extension on `role="tool"` messages, but the
+  compat translation dropped it before the internal pipeline — Anthropic then
+  replayed a failed `tool_result` as successful. The flag now reaches providers
+  that understand it.
 - **Architecture docs now describe the full cache key.** The caching section
   listed only the original request fields even though `cache_key` and
   `semantic_bucket` already include sampling params, provider passthroughs,
