@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from rekai import anthropic_compat
 from rekai.config import Settings
 from rekai.main import _anthropic_error_body, create_app
-from rekai.schemas import ChatResponse, Usage
+from rekai.schemas import AnthropicMessagesRequest, ChatResponse, Usage
 
 
 def _parse_sse(text: str) -> list[tuple[str, dict]]:
@@ -73,6 +73,43 @@ def test_system_prompt_block_list(client: TestClient) -> None:
         json=_payload(system=[{"type": "text", "text": "Be terse"}]),
     )
     assert resp.status_code == 200
+
+
+def test_system_block_cache_control_maps_to_system_blocks() -> None:
+    req = AnthropicMessagesRequest(
+        model="claude-sonnet-4-6",
+        max_tokens=16,
+        system=[
+            {"type": "text", "text": "shared"},
+            {
+                "type": "text",
+                "text": "tail",
+                "cache_control": {"type": "ephemeral"},
+            },
+        ],
+        messages=[{"role": "user", "content": "hi"}],
+    )
+    chat = anthropic_compat.to_chat_request(req)
+    # Anthropic keeps the original block boundaries for the cache prefix…
+    assert chat.system_blocks == [
+        {"type": "text", "text": "shared"},
+        {"type": "text", "text": "tail", "cache_control": {"type": "ephemeral"}},
+    ]
+    # …while other providers still get the historical flattened system message.
+    assert chat.messages[0].role == "system"
+    assert chat.messages[0].content == "shared\ntail"
+
+
+def test_system_block_list_without_cache_control_stays_flat() -> None:
+    req = AnthropicMessagesRequest(
+        model="claude-sonnet-4-6",
+        max_tokens=16,
+        system=[{"type": "text", "text": "a"}, {"type": "text", "text": "b"}],
+        messages=[{"role": "user", "content": "hi"}],
+    )
+    chat = anthropic_compat.to_chat_request(req)
+    assert chat.system_blocks is None
+    assert chat.messages[0].content == "a\nb"
 
 
 def test_max_tokens_required(client: TestClient) -> None:

@@ -203,6 +203,13 @@ class ChatRequest(BaseModel):
         "automatically and ignores it. Per-message placement is also supported "
         "via a message's own cache_control.",
     )
+    system_blocks: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Anthropic system prompt as content blocks, forwarded "
+        "verbatim to Anthropic only (used by /v1/messages when system is a "
+        "block list carrying cache_control). Other providers keep using the "
+        "flattened system message.",
+    )
     mcp_servers: list[dict[str, Any]] | None = Field(
         default=None,
         description="Anthropic MCP connector servers (forwarded verbatim to "

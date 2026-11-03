@@ -51,8 +51,10 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         "response_format": request.response_format,
         # Prompt-cache breakpoints change what the provider is asked to do (and
         # the cost breakdown we report back), so they key separately. Per-message
-        # cache_control already rides along in `messages` above.
+        # cache_control already rides along in `messages` above; system_blocks
+        # carries the same markers for /v1/messages block-list system prompts.
         "cache_control": request.cache_control,
+        "system_blocks": request.system_blocks,
         # Hosted web search changes what the answer is grounded on.
         # (include_obfuscation is excluded: it changes the streamed encoding,
         # not the content — and a cached body is never streamed.)
@@ -72,6 +74,30 @@ def cache_key(request: ChatRequest, provider: str) -> str:
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "rekai:chat:" + hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _system_cache_markers(system_blocks: list[dict] | None) -> list[dict] | None:
+    """Cache breakpoints in ``system_blocks`` without the prompt text.
+
+    ``semantic_bucket`` excludes message text because the embedding compares
+    it; ``system_blocks`` repeats that text as Anthropic block boundaries, so
+    only the marked positions may join the bucket. ``end`` is the cumulative
+    text length through the marked block — the prefix Anthropic would cache.
+    """
+    if not system_blocks:
+        return None
+    markers: list[dict] = []
+    position = 0
+    for block in system_blocks:
+        if not isinstance(block, dict):
+            continue
+        text = block.get("text")
+        if isinstance(text, str):
+            position += len(text)
+        cache_control = block.get("cache_control")
+        if cache_control:
+            markers.append({"cache_control": cache_control, "end": position})
+    return markers or None
 
 
 def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
@@ -109,6 +135,7 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
         "parallel_tool_calls": request.parallel_tool_calls,
         "response_format": request.response_format,
         "cache_control": request.cache_control,
+        "system_cache_markers": _system_cache_markers(request.system_blocks),
         "web_search_options": request.web_search_options,
         "thinking": request.thinking,
         "context_management": request.context_management,
