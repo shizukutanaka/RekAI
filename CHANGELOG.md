@@ -104,6 +104,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Gemini requests ignored `seed`.** The gateway accepted OpenAI-style
+  `seed` and keyed it into the cache, but the Gemini provider dropped it
+  instead of sending `generationConfig.seed`; deterministic Gemini callers
+  now get the reproducibility the parameter promises.
 - **Output redaction missed unary `extra_fields`.** Streamed message-level
   extras were already scrubbed, but buffered `/v1/chat` responses could carry
   an upstream secret inside `extra_fields` to clients and into response,
