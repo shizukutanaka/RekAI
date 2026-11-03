@@ -56,6 +56,23 @@ def test_max_completion_tokens_alias(client: TestClient) -> None:
     assert resp.status_code == 200
 
 
+def test_max_completion_tokens_stays_a_completion_cap() -> None:
+    """The compat layer must not collapse the two cap spellings: reasoning
+    models need `max_completion_tokens` forwarded, not rewritten to `max_tokens`."""
+    from rekai.openai_compat import to_chat_request
+    from rekai.schemas import ChatCompletionsRequest
+
+    req = ChatCompletionsRequest(
+        model="o3",
+        messages=[{"role": "user", "content": "hi"}],
+        max_completion_tokens=16,
+    )
+    chat = to_chat_request(req)
+
+    assert chat.max_completion_tokens == 16
+    assert chat.max_tokens is None
+
+
 def test_unknown_params_ignored(client: TestClient) -> None:
     resp = client.post(
         "/v1/chat/completions",
@@ -588,3 +605,19 @@ def test_parallel_tool_calls_keys_the_cache() -> None:
         parallel_tool_calls=False,
     )
     assert cache_key(plain, "openai") != cache_key(parallel_off, "openai")
+
+
+def test_max_completion_tokens_keys_the_cache() -> None:
+    from rekai.cache import cache_key, semantic_bucket
+    from rekai.schemas import ChatMessage, ChatRequest
+
+    plain = ChatRequest(model="m", messages=[ChatMessage(role="user", content="hi")])
+    capped = ChatRequest(
+        model="m",
+        messages=[ChatMessage(role="user", content="hi")],
+        max_completion_tokens=32,
+    )
+    assert cache_key(plain, "openai") != cache_key(capped, "openai")
+    assert semantic_bucket(plain, "openai", "client-1") != semantic_bucket(
+        capped, "openai", "client-1"
+    )

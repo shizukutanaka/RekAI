@@ -65,6 +65,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `stream()` — sync and async — accept `cache_control={...}` and forward it to
   the gateway unchanged, matching the JS SDK and Anthropic's prompt-cache
   breakpoint shape.
+- **OpenAI reasoning models can cap completions correctly.** `ChatRequest` and
+  the OpenAI provider now accept `max_completion_tokens`; when it is set, the
+  provider sends that field instead of the deprecated `max_tokens`, which
+  o-series/GPT-5 reject. `/v1/chat/completions` keeps the two spellings
+  distinct instead of collapsing them, and the cap joins the cache key and
+  semantic bucket.
 - **Web chat surfaces provider token splits.** Assistant metadata now shows
   nonzero `cache_read_tokens`, `cache_write_tokens`, and `reasoning_tokens`
   alongside total tokens for both unary and streamed replies, matching the

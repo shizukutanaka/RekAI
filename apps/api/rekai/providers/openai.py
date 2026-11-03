@@ -102,7 +102,11 @@ class OpenAIProvider(Provider):
             payload["stream_options"] = {"include_usage": True}
             if request.include_obfuscation is not None:
                 payload["stream_options"]["include_obfuscation"] = request.include_obfuscation
-        if request.max_tokens is not None:
+        if request.max_completion_tokens is not None:
+            # Reasoning models (o-series/GPT-5) reject deprecated `max_tokens`;
+            # when the caller names the newer cap, send only that spelling.
+            payload["max_completion_tokens"] = request.max_completion_tokens
+        elif request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
         if request.top_p is not None:
             payload["top_p"] = request.top_p

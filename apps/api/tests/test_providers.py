@@ -72,6 +72,30 @@ def test_openai_payload_uses_openai_message_shape() -> None:
     ]
 
 
+def test_openai_payload_completion_token_cap() -> None:
+    """`max_completion_tokens` is the reasoning-model spelling; when present it
+    must replace deprecated `max_tokens` upstream (o-series/GPT-5 reject it)."""
+    legacy = ChatRequest(
+        model="gpt-4o",
+        messages=[ChatMessage(role="user", content="hi")],
+        max_tokens=16,
+    )
+    reasoning = ChatRequest(
+        model="o3",
+        messages=[ChatMessage(role="user", content="hi")],
+        max_tokens=16,
+        max_completion_tokens=32,
+    )
+
+    legacy_payload = OpenAIProvider()._build_payload(legacy, stream=False)
+    reasoning_payload = OpenAIProvider()._build_payload(reasoning, stream=False)
+
+    assert legacy_payload["max_tokens"] == 16
+    assert "max_completion_tokens" not in legacy_payload
+    assert reasoning_payload["max_completion_tokens"] == 32
+    assert "max_tokens" not in reasoning_payload
+
+
 def test_check_header_safe_accepts_printable_ascii() -> None:
     check_header_safe("x", "sk-ant-api03:AbC_123-tilde~")
     check_header_safe("x", "")  # empty stays allowed — only illegal chars are rejected
