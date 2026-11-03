@@ -52,6 +52,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `finish_reason` and `redacted` fields the gateway can already emit on native
   `/v1/chat/stream` summaries, so TypeScript callers don't have to cast to read
   why a stream stopped or which guardrail patterns were scrubbed.
+- **Native stream summaries repeat completed Anthropic blocks.**
+  `/v1/chat/stream` now includes `thinking_blocks`, `citations`,
+  `extra_blocks`, and `extra_fields` in the terminal summary when those
+  granular frames were streamed, giving SDK `on_usage`/`onUsage` consumers the
+  same structured payloads unary responses expose. `content_blocks` remains
+  granular-only because stream frames do not carry upstream block indexes.
 - **JS SDK forwards top-level prompt-cache control.** `ChatOptions.cacheControl`
   now reaches the gateway as `cache_control`, allowing Anthropic callers to set
   a provider-native prompt-cache breakpoint from both `chat()` and `stream()`.

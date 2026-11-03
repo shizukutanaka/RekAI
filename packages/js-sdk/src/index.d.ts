@@ -45,6 +45,14 @@ export interface StreamSummary {
   /** Secret patterns scrubbed from the streamed output by the gateway's
    * output-redaction guardrail. Absent when redaction is off or found nothing. */
   redacted?: string[] | null;
+  /** Completed Anthropic thinking / redacted_thinking blocks, when the provider
+   * streamed them. Visible thinking is reconstructed from the deltas and its
+   * signature; `content_blocks` is intentionally not synthesized because the
+   * stream frames do not carry upstream block indexes. */
+  thinking_blocks?: Record<string, unknown>[];
+  citations?: Record<string, unknown>[];
+  extra_blocks?: Record<string, unknown>[];
+  extra_fields?: Record<string, unknown>;
 }
 
 export interface ChatOptions {
