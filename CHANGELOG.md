@@ -100,6 +100,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Architecture docs now describe the full cache key.** The caching section
+  listed only the original request fields even though `cache_key` and
+  `semantic_bucket` already include sampling params, provider passthroughs,
+  tool state, and cache controls; the docs now name the response-affecting
+  field groups and the operational fields deliberately excluded.
 - **Prepaid credits: three ledger edge cases** — `GET /admin/keys` now lists
   balances for credited *static* `REKAI_API_KEYS` keys too (it only iterated
   dynamic keys); the `add()` expiry prune now forfeits a dead key's balance
