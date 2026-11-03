@@ -48,6 +48,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sync and async — accept `output_config` and send it to the gateway as
   Anthropic's `output_config` (`effort`, structured-output `format`, ...),
   matching the provider passthrough already supported by `/v1/chat`.
+- **SDK stream callbacks expose extended-thinking deltas.** Python `stream()`
+  — sync and async — accepts `on_thinking`, and JS `stream()` accepts
+  `onThinking`, so `/v1/chat/stream`'s `thinking_delta` frames can drive live
+  reasoning UI instead of being dropped until the terminal `thinking_blocks`
+  summary. The deltas are never yielded as answer chunks.
 - **JS SDK stream summary typing.** `StreamSummary` now exposes the
   `finish_reason` and `redacted` fields the gateway can already emit on native
   `/v1/chat/stream` summaries, so TypeScript callers don't have to cast to read

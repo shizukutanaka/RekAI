@@ -75,7 +75,12 @@ before(async () => {
           ? ',"tool_calls":[{"id":"c1","type":"function",' +
             '"function":{"name":"get_weather","arguments":"{}"}}]'
           : "";
+        const thinking = raw.includes("__thinking__")
+          ? 'data: {"thinking_delta": "ponder"}\n\n' +
+            'data: {"thinking_delta": " more"}\n\n'
+          : "";
         const sse =
+          thinking +
           'data: {"delta": "Hello"}\n\n' +
           'data: {"delta": " world"}\n\n' +
           'data: {"provider":"echo","model":"echo",' +
@@ -251,6 +256,19 @@ test("stream reports usage via onUsage", async () => {
   assert.equal(summary.estimated, false);
   assert.equal(summary.finish_reason, "stop");
   assert.deepEqual(summary.redacted, ["secret-pattern"]);
+});
+
+test("stream reports thinking deltas via onThinking", async () => {
+  const client = new RekAIClient(baseUrl);
+  const thinking = [];
+  const chunks = [];
+  for await (const c of client.stream("echo", "__thinking__", {
+    onThinking: (t) => thinking.push(t),
+  })) {
+    chunks.push(c);
+  }
+  assert.equal(chunks.join(""), "Hello world");
+  assert.deepEqual(thinking, ["ponder", " more"]);
 });
 
 test("stream surfaces tool_calls via onToolCalls", async () => {

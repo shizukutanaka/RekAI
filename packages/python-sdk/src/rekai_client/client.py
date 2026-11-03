@@ -356,6 +356,8 @@ def _classify_stream_event(event: dict[str, Any]) -> tuple[str, Any]:
     """Map one decoded SSE event to ``(kind, value)`` for the stream loops."""
     if "delta" in event:
         return ("delta", event["delta"])
+    if "thinking_delta" in event:
+        return ("thinking", event["thinking_delta"])
     if "usage" in event:
         return ("usage", event)
     if "refusal" in event:
@@ -637,6 +639,7 @@ class RekAIClient:
         on_tool_calls: Callable[[list[dict[str, Any]]], None] | None = None,
         on_refusal: Callable[[str], None] | None = None,
         on_annotations: Callable[[list[dict[str, Any]]], None] | None = None,
+        on_thinking: Callable[[str], None] | None = None,
     ) -> Iterator[str]:
         """Yield response text chunks from the streaming endpoint.
 
@@ -647,6 +650,9 @@ class RekAIClient:
         If the model requested tool calls, they ride on that same summary under
         ``"tool_calls"``; ``on_tool_calls`` (when given) is called with just that
         list, so you don't have to dig them out of the usage summary yourself.
+
+        ``on_thinking`` receives extended-thinking text deltas as they stream;
+        they are never yielded as answer chunks.
         """
         payload = self._payload(
             model,
@@ -691,6 +697,9 @@ class RekAIClient:
                 kind, value = _classify_stream_event(decoded)
                 if kind == "delta":
                     yield value
+                elif kind == "thinking":
+                    if on_thinking is not None:
+                        on_thinking(value)
                 elif kind == "refusal":
                     if on_refusal is not None:
                         on_refusal(value)
@@ -978,14 +987,17 @@ class AsyncRekAIClient:
         on_tool_calls: Callable[[list[dict[str, Any]]], Awaitable[None] | None] | None = None,
         on_refusal: Callable[[str], Awaitable[None] | None] | None = None,
         on_annotations: Callable[[list[dict[str, Any]]], Awaitable[None] | None] | None = None,
+        on_thinking: Callable[[str], Awaitable[None] | None] | None = None,
     ) -> AsyncIterator[str]:
         """Yield response text chunks from the streaming endpoint.
 
         If ``on_usage`` is given, it is called once with the final usage summary
         when the server reports it. If the model requested tool calls (carried on
         that same summary under ``"tool_calls"``), ``on_tool_calls`` is called
-        with just that list. Either callback may be a plain callable or a
-        coroutine function (an awaitable return value is awaited).
+        with just that list. ``on_thinking`` receives extended-thinking text
+        deltas as they stream; they are never yielded as answer chunks. Either
+        callback may be a plain callable or a coroutine function (an awaitable
+        return value is awaited).
         """
         payload = _build_payload(
             model,
@@ -1034,6 +1046,11 @@ class AsyncRekAIClient:
                 kind, value = _classify_stream_event(decoded)
                 if kind == "delta":
                     yield value
+                elif kind == "thinking":
+                    if on_thinking is not None:
+                        maybe_t = on_thinking(value)
+                        if maybe_t is not None:
+                            await maybe_t
                 elif kind == "refusal":
                     if on_refusal is not None:
                         maybe_r = on_refusal(value)
