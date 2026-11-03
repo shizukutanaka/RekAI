@@ -21,6 +21,7 @@ import {
   sendChat,
   streamChat,
   thinkingText,
+  usageBreakdown,
 } from "@/lib/api";
 
 interface DisplayMessage extends ChatMessage {
@@ -28,6 +29,7 @@ interface DisplayMessage extends ChatMessage {
   provider?: string;
   cached?: boolean;
   tokens?: number;
+  tokenBreakdown?: string;
   cost?: number | null;
   streaming?: boolean;
   finishReason?: FinishReason;
@@ -348,6 +350,7 @@ export default function ChatPage() {
             streaming: false,
             provider: wasAborted ? `${served} · stopped` : streamError ? `${served} · error` : served,
             tokens: finalSummary?.usage.total_tokens,
+            tokenBreakdown: usageBreakdown(finalSummary?.usage),
             cost: finalSummary?.cost_usd ?? undefined,
             finishReason: finalSummary?.finish_reason,
             redacted: finalSummary?.redacted,
@@ -388,6 +391,7 @@ export default function ChatPage() {
             provider: res.provider,
             cached: res.cached,
             tokens: res.usage.total_tokens,
+            tokenBreakdown: usageBreakdown(res.usage),
             cost: res.cost_usd,
             finishReason: res.finish_reason,
             fallbackUsed: res.fallback_used,
@@ -605,6 +609,7 @@ export default function ChatPage() {
                   ? ` · ${cacheNote(m.cached, m.cacheSimilarity)}`
                   : ""}
                 {typeof m.tokens === "number" ? ` · ${m.tokens} tokens` : ""}
+                {m.tokenBreakdown ? ` · ${m.tokenBreakdown}` : ""}
                 {formatCost(m.cost) ? ` · ${formatCost(m.cost)}` : ""}
                 {m.fallbackUsed ? " · via fallback" : ""}
                 {finishNote(m.finishReason) ? ` · ${finishNote(m.finishReason)}` : ""}
