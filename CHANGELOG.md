@@ -36,6 +36,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (the JS client returns `usage` verbatim, so the data was already there —
   only the type was missing). No request or response shape changes; older
   servers simply leave the new fields unset.
+- **Python SDK streaming parity.** `stream()` — sync and async — now accepts the
+  same request-shaping options as `chat()` (`tools`/`tool_choice`/
+  `parallel_tool_calls`, `response_format`, `stop`, `top_p`, `seed`, penalties,
+  `logit_bias`, `service_tier`, `web_search_options`, `user`,
+  `safety_identifier`, and `thinking`) and forwards them to
+  `/v1/chat/stream`. Message dicts are also typed to carry tool/thinking
+  round-trip fields instead of only string values. Caching, fallbacks, and
+  idempotency remain non-streaming concerns and are not sent on this path.
 - **`REKAI_TRUSTED_PROXIES` — real client IP behind a reverse proxy.** Without
   it, every request arriving through a proxy or load balancer shares one
   rate-limit/budget bucket under the proxy's own address (Render's managed LB

@@ -38,7 +38,8 @@ result = client.chat(
 # upstream provider; this authenticates you to RekAI itself).
 client = RekAIClient("http://localhost:8000", gateway_key="sk-rekai-...")
 
-# Streaming (with optional usage/cost + tool-call callbacks)
+# Streaming accepts the same request-shaping options as chat() — including
+# tools/tool_choice — and reports usage/cost via callbacks.
 for chunk in client.stream(
     "echo",
     "stream me",
