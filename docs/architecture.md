@@ -472,8 +472,12 @@ state (`messages`, `tools`, `tool_choice`, `parallel_tool_calls`), output
 contract (`response_format`), and prompt-cache breakpoints (`cache_control`,
 `system_blocks`) — so identical requests collapse to one upstream call and two
 requests differing in any of them never share an entry. Operational fields that
-change the answer (`cache`, `fallbacks`, `user`, `safety_identifier`, and
-stream-only `include_obfuscation`) stay out of the key. Backends:
+do not change the answer (`cache`, `fallbacks`, `user`, `safety_identifier`,
+`prompt_cache_key`, and stream-only `include_obfuscation`) stay out of the key.
+`prompt_cache_key` still reaches OpenAI-compatible providers verbatim: OpenAI
+uses it to bucket similar prompts for upstream cache hits, while RekAI's own
+cache treats it like `user` — a routing/cost hint, not part of the request's
+response identity. Backends:
 
 - **Redis** when `REKAI_REDIS_URL` is set (shared across processes/nodes).
 - **Memory** otherwise (per-process; great for local dev and tests).

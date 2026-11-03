@@ -234,6 +234,13 @@ class ChatRequest(BaseModel):
         "end-user handle) — the successor to `user` on OpenAI-compatible "
         "providers. Forwarded verbatim; ignored elsewhere.",
     )
+    prompt_cache_key: str | None = Field(
+        default=None,
+        description="OpenAI's prompt-cache routing key (`prompt_cache_key`) — "
+        "a stable caller-chosen bucket for similar requests. Forwarded verbatim "
+        "to OpenAI/OpenAI-compatible providers only; like `user`, it is a "
+        "routing hint and does not join the cache key.",
+    )
 
     @field_validator("stop", mode="before")
     @classmethod
@@ -329,6 +336,7 @@ class ChatCompletionsRequest(BaseModel):
     response_format: dict[str, Any] | None = None
     user: str | None = None  # forwarded to the provider as its end-user id
     safety_identifier: str | None = None  # OpenAI's newer abuse-detection id
+    prompt_cache_key: str | None = None  # OpenAI's prompt-cache routing key
     n: int | None = None  # 400 if n > 1 (RekAI returns a single choice)
     provider: str | None = None  # RekAI extension: explicit provider override
     # OpenAI's pre-tools function-calling API (deprecated since 0613 but still

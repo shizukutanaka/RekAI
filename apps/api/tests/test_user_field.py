@@ -176,3 +176,43 @@ def test_openai_compat_maps_safety_identifier() -> None:
         safety_identifier="hash-9",
     )
     assert to_chat_request(req).safety_identifier == "hash-9"
+
+
+# --- prompt_cache_key --------------------------------------------------------
+# OpenAI's caller-chosen prompt-cache bucket. OpenAI-compatible providers take
+# it; other providers have no equivalent and must not receive it. Like `user`,
+# it steers upstream cache routing rather than the answer, so it stays out of
+# RekAI's exact and semantic cache keys.
+
+
+async def test_prompt_cache_key_reaches_openai(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    await OpenAIProvider().chat(_req(prompt_cache_key="tenant-a"), api_key="sk-x")
+    assert _Client.captured["prompt_cache_key"] == "tenant-a"
+
+
+async def test_prompt_cache_key_not_sent_to_anthropic(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    await AnthropicProvider().chat(_req(prompt_cache_key="tenant-a"), api_key="sk-x")
+    assert "prompt_cache_key" not in _Client.captured
+
+
+def test_openai_compat_maps_prompt_cache_key() -> None:
+    req = ChatCompletionsRequest(
+        model="m",
+        messages=[{"role": "user", "content": "hi"}],
+        prompt_cache_key="tenant-a",
+    )
+    assert to_chat_request(req).prompt_cache_key == "tenant-a"
+
+
+def test_prompt_cache_key_does_not_change_the_cache_key() -> None:
+    assert cache_key(_req(prompt_cache_key="a"), "openai") == cache_key(
+        _req(prompt_cache_key="b"), "openai"
+    )
+
+
+def test_prompt_cache_key_does_not_change_the_semantic_bucket() -> None:
+    a = semantic_bucket(_req(prompt_cache_key="a"), "openai", "client-1")
+    b = semantic_bucket(_req(prompt_cache_key="b"), "openai", "client-1")
+    assert a == b
