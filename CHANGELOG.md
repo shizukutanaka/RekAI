@@ -44,6 +44,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/v1/chat/stream`. Message dicts are also typed to carry tool/thinking
   round-trip fields instead of only string values. Caching, fallbacks, and
   idempotency remain non-streaming concerns and are not sent on this path.
+- **Python SDK forwards Anthropic output config.** `chat()` and `stream()` —
+  sync and async — accept `output_config` and send it to the gateway as
+  Anthropic's `output_config` (`effort`, structured-output `format`, ...),
+  matching the provider passthrough already supported by `/v1/chat`.
 - **JS SDK stream summary typing.** `StreamSummary` now exposes the
   `finish_reason` and `redacted` fields the gateway can already emit on native
   `/v1/chat/stream` summaries, so TypeScript callers don't have to cast to read
@@ -104,6 +108,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Output redaction missed unary `extra_fields`.** Streamed message-level
+  extras were already scrubbed, but buffered `/v1/chat` responses could carry
+  an upstream secret inside `extra_fields` to clients and into response,
+  semantic, and idempotency stores. `_redact()` now applies the same recursive
+  string-leaf scrub to that payload before any store sees it.
+- **Architecture docs now describe the full cache key.** The caching section
+  listed only the original request fields even though `cache_key` and
+  `semantic_bucket` already include sampling params, provider passthroughs,
+  tool state, and cache controls; the docs now name the response-affecting
+  field groups and the operational fields deliberately excluded.
 - **Prepaid credits: three ledger edge cases** — `GET /admin/keys` now lists
   balances for credited *static* `REKAI_API_KEYS` keys too (it only iterated
   dynamic keys); the `add()` expiry prune now forfeits a dead key's balance

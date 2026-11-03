@@ -293,6 +293,7 @@ def _build_payload(
     safety_identifier: str | None = None,
     thinking: dict[str, Any] | None = None,
     cache_control: dict[str, Any] | None = None,
+    output_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -338,6 +339,9 @@ def _build_payload(
         payload["thinking"] = thinking
     if cache_control is not None:
         payload["cache_control"] = cache_control
+    # Anthropic output config (effort/format); other providers ignore it.
+    if output_config is not None:
+        payload["output_config"] = output_config
     return payload
 
 
@@ -444,6 +448,7 @@ class RekAIClient:
         safety_identifier: str | None = None,
         thinking: dict[str, Any] | None = None,
         cache_control: dict[str, Any] | None = None,
+        output_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -469,6 +474,7 @@ class RekAIClient:
             safety_identifier,
             thinking,
             cache_control,
+            output_config,
         )
 
     @staticmethod
@@ -536,6 +542,7 @@ class RekAIClient:
         safety_identifier: str | None = None,
         thinking: dict[str, Any] | None = None,
         cache_control: dict[str, Any] | None = None,
+        output_config: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -586,6 +593,7 @@ class RekAIClient:
             safety_identifier,
             thinking,
             cache_control,
+            output_config,
         )
         headers = _build_headers(
             self._provider_key,
@@ -622,6 +630,7 @@ class RekAIClient:
         safety_identifier: str | None = None,
         thinking: dict[str, Any] | None = None,
         cache_control: dict[str, Any] | None = None,
+        output_config: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], None] | None = None,
@@ -663,6 +672,7 @@ class RekAIClient:
             safety_identifier=safety_identifier,
             thinking=thinking,
             cache_control=cache_control,
+            output_config=output_config,
         )
         with self._client.stream(
             "POST",
@@ -894,6 +904,7 @@ class AsyncRekAIClient:
         safety_identifier: str | None = None,
         thinking: dict[str, Any] | None = None,
         cache_control: dict[str, Any] | None = None,
+        output_config: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -923,6 +934,7 @@ class AsyncRekAIClient:
             safety_identifier,
             thinking,
             cache_control,
+            output_config,
         )
         headers = _build_headers(
             self._provider_key,
@@ -959,6 +971,7 @@ class AsyncRekAIClient:
         safety_identifier: str | None = None,
         thinking: dict[str, Any] | None = None,
         cache_control: dict[str, Any] | None = None,
+        output_config: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
@@ -998,6 +1011,7 @@ class AsyncRekAIClient:
             safety_identifier=safety_identifier,
             thinking=thinking,
             cache_control=cache_control,
+            output_config=output_config,
         )
         async with self._client.stream(
             "POST",

@@ -330,6 +330,13 @@ def _redact(response: ChatResponse, settings: Settings) -> ChatResponse:
             new_citations.append(citation)
         if changed:
             updates["citations"] = new_citations
+    # Message-level extras are provider payloads too — the streamed path already
+    # scrubbed them, so the buffered path must match before cache storage.
+    if response.extra_fields:
+        scrubbed_fields, found = _scrub_block_strings(response.extra_fields, extra)
+        if found:
+            updates["extra_fields"] = scrubbed_fields
+            hits += found
     # Server-tool blocks (search results, code-exec output, tool inputs) carry
     # free text too — scrub every string leaf in them, and in the verbatim
     # ordered array, with the same redactor. "signature" keys stay untouched:

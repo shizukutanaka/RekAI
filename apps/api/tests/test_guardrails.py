@@ -243,6 +243,38 @@ def _redacting_settings(**kw) -> Settings:
     )
 
 
+async def test_output_redaction_scrubs_extra_fields_before_storage(monkeypatch) -> None:
+    from rekai.providers.base import ProviderResult
+    from rekai.providers.echo import EchoProvider
+
+    secret = "sk-" + "i" * 30
+
+    async def fake_chat(self, request, api_key):
+        return ProviderResult(
+            content="safe",
+            model="echo",
+            extra_fields={
+                "context_management": {"note": f"the key was {secret}"},
+            },
+        )
+
+    monkeypatch.setattr(EchoProvider, "chat", fake_chat)
+    settings = _redacting_settings()
+    cache = MemoryCache()
+    request = ChatRequest(model="echo", messages=[ChatMessage(role="user", content="hi")])
+
+    result = await handle_chat(request, None, settings, cache)
+    assert result.extra_fields == {
+        "context_management": {"note": "the key was [REDACTED:openai_api_key]"}
+    }
+    assert result.redacted == ["openai_api_key"]
+
+    stored = await cache.get(cache_key(request, "echo"))
+    assert stored is not None
+    assert secret not in stored
+    assert "[REDACTED:openai_api_key]" in stored
+
+
 async def test_secret_never_reaches_the_response_cache() -> None:
     settings = _redacting_settings()
     cache = MemoryCache()
