@@ -582,6 +582,7 @@ def test_stream_forwards_the_same_chat_request_options() -> None:
             user="u-1",
             safety_identifier="s-1",
             thinking={"type": "enabled", "budget_tokens": 16},
+            output_config={"effort": "low"},
             provider_key="sk-provider",
             gateway_key="sk-gateway",
         )
@@ -606,6 +607,7 @@ def test_stream_forwards_the_same_chat_request_options() -> None:
     assert body["user"] == "u-1"
     assert body["safety_identifier"] == "s-1"
     assert body["thinking"] == {"type": "enabled", "budget_tokens": 16}
+    assert body["output_config"] == {"effort": "low"}
     # Streaming is not idempotent or cached server-side, so those chat-only
     # knobs stay out of the payload.
     assert "fallbacks" not in body
@@ -1038,6 +1040,40 @@ def test_async_chat_returns_result() -> None:
     assert captured["key"] == "sk-x"
 
 
+def test_async_chat_forwards_output_config() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "id": "rekai-1",
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-6",
+                "content": "ok",
+                "usage": {},
+                "cost_usd": None,
+                "cached": False,
+                "fallback_used": False,
+            },
+        )
+
+    async def run() -> None:
+        async with make_async_client(handler) as client:
+            await client.chat(
+                "claude-sonnet-4-6",
+                [{"role": "user", "content": "hi"}],
+                output_config={"effort": "low", "format": {"type": "json_object"}},
+            )
+
+    asyncio.run(run())
+    assert captured["body"]["output_config"] == {
+        "effort": "low",
+        "format": {"type": "json_object"},
+    }
+
+
 def test_async_chat_raises_on_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"error": "provider_error", "detail": "no key"})
@@ -1153,6 +1189,7 @@ def test_async_stream_forwards_chat_request_options() -> None:
                 tool_choice="auto",
                 stop=["END"],
                 service_tier="priority",
+                output_config={"effort": "medium"},
             ):
                 pass
 
@@ -1162,6 +1199,7 @@ def test_async_stream_forwards_chat_request_options() -> None:
     assert body["tool_choice"] == "auto"
     assert body["stop"] == ["END"]
     assert body["service_tier"] == "priority"
+    assert body["output_config"] == {"effort": "medium"}
 
 
 def test_async_stream_raises_on_error_event() -> None:
@@ -1393,3 +1431,34 @@ def test_chat_forwards_thinking() -> None:
         thinking={"type": "enabled", "budget_tokens": 256},
     )
     assert captured["body"]["thinking"] == {"type": "enabled", "budget_tokens": 256}
+
+
+def test_chat_forwards_output_config() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "id": "x",
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-6",
+                "content": "ok",
+                "usage": {},
+                "cost_usd": None,
+                "cached": False,
+                "fallback_used": False,
+            },
+        )
+
+    client = make_client(handler)
+    client.chat(
+        "claude-sonnet-4-6",
+        [{"role": "user", "content": "hi"}],
+        output_config={"effort": "low", "format": {"type": "json_object"}},
+    )
+    assert captured["body"]["output_config"] == {
+        "effort": "low",
+        "format": {"type": "json_object"},
+    }
