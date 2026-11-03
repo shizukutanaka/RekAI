@@ -433,6 +433,10 @@ class _AnthropicMessagesBase(BaseModel):
     # Anthropic's output config, verbatim ({'effort': ...}, {'format': ...}).
     # Same swallow-by-extra=allow hazard.
     output_config: dict[str, Any] | None = None
+    # Anthropic's automatic prompt-cache breakpoint, verbatim
+    # ({'type': 'ephemeral'}). Maps onto ChatRequest.cache_control, which
+    # Anthropic honors on the final cacheable block; other providers ignore it.
+    cache_control: dict[str, Any] | None = None
     provider: str | None = None  # RekAI extension: explicit provider override
 
 
