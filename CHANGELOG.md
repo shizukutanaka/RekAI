@@ -128,6 +128,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   compat translation dropped it before the internal pipeline — Anthropic then
   replayed a failed `tool_result` as successful. The flag now reaches providers
   that understand it.
+- **OpenAI/Ollama message payloads no longer leak RekAI-only fields.**
+  `ChatMessage` carries provider-native replay metadata (`thinking_blocks`,
+  `extra_blocks`, `content_blocks`, `cache_control`, `is_error`) for
+  multi-turn fidelity, but OpenAI/Ollama serialized the whole internal model,
+  sending those keys — including `is_error: false` — upstream. Both providers
+  now whitelist the OpenAI-shaped message fields on chat and streaming paths.
 - **Architecture docs now describe the full cache key.** The caching section
   listed only the original request fields even though `cache_key` and
   `semantic_bucket` already include sampling params, provider passthroughs,
@@ -188,16 +194,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   validated against the real Gemini charset before the URL is built; invalid
   ids get a 400. The qualified `models/<id>` form is also normalized on all
   three call paths (chat/stream previously produced `models/models/<id>`).
-- **Input scans read only `content` while providers forward the whole
-  message** — `REKAI_INPUT_SECRETS_ENABLED` and the prompt-injection
-  guardrail collected text from `ChatMessage.content` alone, but the
-  OpenAI/Ollama serializers send each message's full `model_dump` upstream:
+- **Input scans read only `content` while providers could forward more than
+  plain text** — `REKAI_INPUT_SECRETS_ENABLED` and the prompt-injection
+  guardrail collected text from `ChatMessage.content` alone, but provider
+  serializers can forward more than the text field; OpenAI/Ollama then sent
+  each message's full `model_dump` upstream:
   a credential in `extra_blocks`, `content_blocks`, or a `tool_calls`
   argument shipped to the provider with no flag and no block (verified live:
   same request 403s in `content`, 200s in `extra_blocks`). Both scans now
   collect every string leaf of the serialized message — the injection scan
   keeps its user/tool role scope; input secrets keep every role, matching
-  what actually leaves the process (`signature` integrity blobs excepted,
+  what can leave the process across provider serializers (`signature`
+  integrity blobs excepted,
   same as the output scrubber, so replayed signed blocks can't
   false-positive). Same change wires the missing input-secret scan into the
   `POST /v1/messages` streaming path — the only surface that ran the

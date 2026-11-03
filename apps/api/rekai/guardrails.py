@@ -337,11 +337,11 @@ def scan_messages(messages: Iterable[_HasRoleContent], enabled: bool) -> str | N
     through the user's own text. System/assistant text is the operator's and the
     model's own output and is not scanned.
 
-    Every string field on the scanned roles is covered — ``content``,
-    ``content_blocks``/``extra_blocks``/``tool_calls`` leaves and all — because
-    the OpenAI/Ollama serializers forward a message's whole ``model_dump``
-    verbatim, so scanning ``content`` alone let smuggled text ride a field the
-    control claimed to cover.
+    Every string field on the scanned roles is covered — ``content``, tool
+    metadata, ``content_blocks``/``extra_blocks`` leaves and all — because
+    provider serializers can forward more than plain text (OpenAI tool
+    metadata, Anthropic replay blocks), so scanning ``content`` alone could
+    let smuggled text ride a field the control claimed to cover.
     """
     if not enabled:
         return None
