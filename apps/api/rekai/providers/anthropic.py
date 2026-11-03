@@ -20,7 +20,7 @@ from rekai.providers.base import (
     provider_http_error,
     trace_headers,
 )
-from rekai.schemas import ChatRequest, Usage
+from rekai.schemas import ChatMessage, ChatRequest, Usage
 
 logger = get_logger("rekai.providers.anthropic")
 
@@ -91,6 +91,39 @@ def _finish_reason(raw: object, *, emulating_json: bool) -> FinishReason | None:
     return reason
 
 
+def _system_blocks_from_messages(system_messages: list[ChatMessage]) -> list[dict]:
+    """Emit system prompts as Anthropic text blocks when a breakpoint is set.
+
+    Each marked message closes a block, so its ``cache_control`` caches the
+    prefix through that message; the ``"\\n\\n"`` separator belongs to the block
+    that follows it, keeping the concatenated text identical to the historical
+    string form.
+    """
+    blocks: list[dict] = []
+    current = ""
+    open_block = False
+    need_sep = False
+    for m in system_messages:
+        content = m.content or ""
+        if need_sep:
+            current = "\n\n" + content
+            need_sep = False
+        elif open_block:
+            current += "\n\n" + content
+        else:
+            current = content
+        open_block = True
+        # An empty message has no text to hang the breakpoint on.
+        if m.cache_control and m.content:
+            blocks.append({"type": "text", "text": current, "cache_control": m.cache_control})
+            current = ""
+            open_block = False
+            need_sep = True
+    if open_block or not blocks:
+        blocks.append({"type": "text", "text": current})
+    return blocks
+
+
 class AnthropicProvider(Provider):
     name = "anthropic"
     requires_key = True
@@ -115,7 +148,8 @@ class AnthropicProvider(Provider):
     def _build_payload(self, request: ChatRequest, *, stream: bool) -> dict:
         settings = current_settings()
         # Anthropic takes system prompts as a top-level field, not in `messages`.
-        system_parts = [m.content or "" for m in request.messages if m.role == "system"]
+        system_messages = [m for m in request.messages if m.role == "system"]
+        system_parts = [m.content or "" for m in system_messages]
         chat_messages = _translate_messages(request.messages)
         if not chat_messages:
             raise ProviderError("Anthropic requires at least one user/assistant message.", 400)
@@ -137,8 +171,17 @@ class AnthropicProvider(Provider):
         # equivalents — those stay RekAI-side rather than erroring upstream.
         if request.top_p is not None:
             payload["top_p"] = request.top_p
-        if system_parts:
-            payload["system"] = "\n\n".join(system_parts)
+        if request.system_blocks:
+            # /v1/messages block-list system prompts keep their exact block
+            # boundaries when a cache breakpoint is present.
+            payload["system"] = request.system_blocks
+        elif system_parts:
+            # Empty content can't be a text block (minLength 1); only non-empty
+            # marked messages justify the block form.
+            if any(m.cache_control and m.content for m in system_messages):
+                payload["system"] = _system_blocks_from_messages(system_messages)
+            else:
+                payload["system"] = "\n\n".join(system_parts)
         # Structured output: Anthropic has no `response_format`, but forcing a
         # single-tool call is the documented way to get a schema-shaped object
         # out of it. See _structured_output_schema.

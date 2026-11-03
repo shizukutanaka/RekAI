@@ -7,6 +7,7 @@ from rekai.providers.base import (
     ProviderError,
     ProviderResult,
     check_header_safe,
+    openai_chat_message,
     parse_retry_after,
     provider_http_error,
 )
@@ -14,6 +15,61 @@ from rekai.providers.echo import EchoProvider
 from rekai.providers.gemini import GeminiProvider
 from rekai.providers.openai import OpenAIProvider
 from rekai.schemas import ChatMessage, ChatRequest, Usage
+
+
+def test_openai_chat_message_whitelists_wire_fields() -> None:
+    assistant = ChatMessage(
+        role="assistant",
+        content="done",
+        name="bot",
+        tool_calls=[{"id": "t1", "type": "function", "function": {"name": "f"}}],
+        cache_control={"type": "ephemeral"},
+        is_error=True,
+        thinking_blocks=[{"type": "thinking", "thinking": "secret plan"}],
+        extra_blocks=[{"type": "server_tool_use"}],
+        content_blocks=[{"type": "text", "text": "done"}],
+    )
+    tool = ChatMessage(
+        role="tool",
+        content="boom",
+        tool_call_id="t1",
+        is_error=True,
+    )
+
+    assert openai_chat_message(assistant) == {
+        "role": "assistant",
+        "content": "done",
+        "name": "bot",
+        "tool_calls": [{"id": "t1", "type": "function", "function": {"name": "f"}}],
+    }
+    assert openai_chat_message(tool) == {
+        "role": "tool",
+        "content": "boom",
+        "tool_call_id": "t1",
+    }
+
+
+def test_openai_payload_uses_openai_message_shape() -> None:
+    request = ChatRequest(
+        model="gpt-4o",
+        messages=[
+            ChatMessage(role="user", content="hi", cache_control={"type": "ephemeral"}),
+            ChatMessage(
+                role="assistant",
+                content="thinking-heavy answer",
+                thinking_blocks=[{"type": "thinking", "thinking": "hidden"}],
+                extra_blocks=[{"type": "server_tool_use"}],
+                content_blocks=[{"type": "text", "text": "thinking-heavy answer"}],
+            ),
+        ],
+    )
+
+    payload = OpenAIProvider()._build_payload(request, stream=False)
+
+    assert payload["messages"] == [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "thinking-heavy answer"},
+    ]
 
 
 def test_check_header_safe_accepts_printable_ascii() -> None:

@@ -51,6 +51,30 @@ def _flatten_system(system: str | list[dict[str, Any]] | None) -> str | None:
     return "\n".join(t for t in texts if t) or None
 
 
+def _system_blocks(system: str | list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """Anthropic ``system`` block list with prompt-cache breakpoints intact.
+
+    Returns ``None`` for the plain string form and for block lists with no
+    ``cache_control`` — those keep the historical flattened ``system`` string.
+    Once a block is marked, block boundaries are cache prefixes, so the array
+    is forwarded verbatim (text/cache_control only) instead of being joined.
+    """
+    if not isinstance(system, list):
+        return None
+    blocks = [
+        {
+            "type": "text",
+            "text": block["text"],
+            **({"cache_control": block["cache_control"]} if block.get("cache_control") else {}),
+        }
+        for block in system
+        if isinstance(block, dict) and block.get("type") == "text" and block.get("text")
+    ]
+    if not any(block.get("cache_control") for block in blocks):
+        return None
+    return blocks or None
+
+
 def _flatten_content(
     content: str | list[AnthropicContentBlock], role: str
 ) -> tuple[str | None, list[dict], list[ChatMessage], list[dict], list[dict], list[dict]]:
@@ -250,6 +274,7 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
         diagnostics=req.diagnostics,
         user_profile_id=req.user_profile_id,
         mcp_servers=req.mcp_servers,
+        system_blocks=_system_blocks(req.system),
         user=req.metadata.user_id if req.metadata else None,
         output_config=req.output_config,
     )

@@ -17,7 +17,7 @@ from typing import Literal
 
 import httpx
 
-from rekai.schemas import ChatRequest, Usage
+from rekai.schemas import ChatMessage, ChatRequest, Usage
 from rekai.tracing import current_traceparent, current_tracestate
 
 
@@ -39,6 +39,26 @@ def trace_headers() -> dict[str, str]:
     if tracestate:
         headers["tracestate"] = tracestate
     return headers
+
+
+def openai_chat_message(message: ChatMessage) -> dict:
+    """Serialize one message to the OpenAI chat shape shared by OpenAI/Ollama.
+
+    ``ChatMessage`` also carries provider-native replay fields
+    (``thinking_blocks``/``extra_blocks``/``content_blocks``, ``cache_control``,
+    ``is_error``). Dumping the model wholesale leaked those keys upstream;
+    whitelist only what OpenAI-style APIs define.
+    """
+    payload: dict = {"role": message.role}
+    if message.content is not None:
+        payload["content"] = message.content
+    if message.name is not None:
+        payload["name"] = message.name
+    if message.tool_calls is not None:
+        payload["tool_calls"] = message.tool_calls
+    if message.tool_call_id is not None:
+        payload["tool_call_id"] = message.tool_call_id
+    return payload
 
 
 class ProviderError(Exception):

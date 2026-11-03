@@ -466,9 +466,9 @@ provider passthroughs (`service_tier`, `anthropic_beta`, `web_search_options`,
 `thinking`, `context_management`, `container`, `inference_geo`, `speed`,
 `diagnostics`, `user_profile_id`, `mcp_servers`, `output_config`), conversation
 state (`messages`, `tools`, `tool_choice`, `parallel_tool_calls`), output
-contract (`response_format`), and prompt-cache breakpoints (`cache_control`)
-— so identical requests collapse to one upstream call and two requests
-differing in any of them never share an entry. Operational fields that do not
+contract (`response_format`), and prompt-cache breakpoints (`cache_control`,
+`system_blocks`) — so identical requests collapse to one upstream call and two
+requests differing in any of them never share an entry. Operational fields that
 change the answer (`cache`, `fallbacks`, `user`, `safety_identifier`, and
 stream-only `include_obfuscation`) stay out of the key. Backends:
 
@@ -905,10 +905,11 @@ kilobytes it needs.
 `REKAI_INPUT_SECRETS_ENABLED=true` runs the same pattern set the other way —
 against the **request**, not the response. A user pasting `sk-…` into a chat
 prompt otherwise ships that key to the upstream provider. It scans every
-string field of every message role — not just `content`, since the
-OpenAI/Ollama serializers forward a message's whole `model_dump` upstream,
-so text hidden in `extra_blocks`/`content_blocks` or a `tool_calls`
-argument would otherwise ride a field the check claimed to cover — on all
+string field of every message role — not just `content`, since provider
+serializers can forward more than the text field (OpenAI tool metadata and
+Anthropic replay blocks) — so text hidden in `extra_blocks`/`content_blocks`
+or a `tool_calls` argument cannot ride a field the check claimed to cover —
+on all
 four chat surfaces (`/v1/chat`, `/v1/chat/stream`, `/v1/chat/completions`,
 `/v1/messages`, streaming included), plus text inputs on `/v1/embeddings`
 and `/v1/moderations`. It shares `REKAI_GUARDRAILS_ACTION`

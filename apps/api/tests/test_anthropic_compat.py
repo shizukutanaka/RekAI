@@ -75,6 +75,43 @@ def test_system_prompt_block_list(client: TestClient) -> None:
     assert resp.status_code == 200
 
 
+def test_system_block_cache_control_maps_to_system_blocks() -> None:
+    req = AnthropicMessagesRequest(
+        model="claude-sonnet-4-6",
+        max_tokens=16,
+        system=[
+            {"type": "text", "text": "shared"},
+            {
+                "type": "text",
+                "text": "tail",
+                "cache_control": {"type": "ephemeral"},
+            },
+        ],
+        messages=[{"role": "user", "content": "hi"}],
+    )
+    chat = anthropic_compat.to_chat_request(req)
+    # Anthropic keeps the original block boundaries for the cache prefix…
+    assert chat.system_blocks == [
+        {"type": "text", "text": "shared"},
+        {"type": "text", "text": "tail", "cache_control": {"type": "ephemeral"}},
+    ]
+    # …while other providers still get the historical flattened system message.
+    assert chat.messages[0].role == "system"
+    assert chat.messages[0].content == "shared\ntail"
+
+
+def test_system_block_list_without_cache_control_stays_flat() -> None:
+    req = AnthropicMessagesRequest(
+        model="claude-sonnet-4-6",
+        max_tokens=16,
+        system=[{"type": "text", "text": "a"}, {"type": "text", "text": "b"}],
+        messages=[{"role": "user", "content": "hi"}],
+    )
+    chat = anthropic_compat.to_chat_request(req)
+    assert chat.system_blocks is None
+    assert chat.messages[0].content == "a\nb"
+
+
 def test_top_level_cache_control_maps_to_chat_request() -> None:
     req = AnthropicMessagesRequest(
         model="claude-sonnet-4-6",
