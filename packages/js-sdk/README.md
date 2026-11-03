@@ -56,6 +56,11 @@ const res = await client.chat("gpt-4o-mini", "weather in Tokyo?", {
 });
 console.log(res.tool_calls); // the model's requested tool calls, if any
 
+// Anthropic prompt-cache breakpoint (forwarded as `cache_control`)
+await client.chat("claude-sonnet-4-6", "stable instructions", {
+  cacheControl: { type: "ephemeral" },
+});
+
 // Structured output (OpenAI/OpenAI-compatible natively, Gemini best-effort)
 await client.chat("gpt-4o-mini", "Return JSON with a 'city' field for Tokyo.", {
   responseFormat: { type: "json_object" },

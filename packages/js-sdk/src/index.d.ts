@@ -100,6 +100,9 @@ export interface ChatOptions {
    * `{type: "enabled", budget_tokens: 1024}` — forwarded verbatim to Anthropic
    * upstreams. Thinking blocks come back on `ChatResult.thinking_blocks`. */
   thinking?: Record<string, unknown>;
+  /** Provider-native prompt-cache breakpoint (e.g. Anthropic's
+   * `{type: "ephemeral"}`), passed through to the gateway. */
+  cacheControl?: Record<string, unknown>;
   /** Sent as the `Idempotency-Key` header so a retried request replays the
    * first response instead of re-processing. Auto-generated when omitted and
    * `maxRetries > 0`. */
