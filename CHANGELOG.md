@@ -22,6 +22,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Admin page: grant and view prepaid USD credit per key (initial credit on add,
   top-up form, balances in the key lists); top-ups to an unknown or expired key
   return 404 instead of crediting an orphan balance.
+- **SDKs expose prompt-cache and reasoning token breakdowns.** The gateway has
+  reported `cache_read_tokens`, `cache_write_tokens`, and `reasoning_tokens`
+  inside `usage` on every `/v1/chat` and `/v1/chat/stream` summary for a while
+  (used for Anthropic/OpenAI prompt-cache pricing); both clients surfaced only
+  `total_tokens`, so a caller couldn't attribute cost to cache hits or
+  reasoning. The Python `ChatResult` now carries typed
+  `cache_read_tokens` / `cache_write_tokens` / `reasoning_tokens` — `None` when
+  the report has no breakdown, distinct from an explicit `0` — preferring the
+  gateway's flat fields and falling back to OpenAI's nested
+  `prompt_tokens_details.cached_tokens` / `completion_tokens_details`.
+  The JS `Usage` type gains optional `cache_read_tokens` / `cache_write_tokens`
+  (the JS client returns `usage` verbatim, so the data was already there —
+  only the type was missing). No request or response shape changes; older
+  servers simply leave the new fields unset.
 - **`REKAI_TRUSTED_PROXIES` — real client IP behind a reverse proxy.** Without
   it, every request arriving through a proxy or load balancer shares one
   rate-limit/budget bucket under the proxy's own address (Render's managed LB

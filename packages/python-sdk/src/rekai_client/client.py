@@ -86,15 +86,31 @@ class ChatResult:
     #: The service tier that actually handled the call when ``service_tier``
     #: was "auto". None for other providers.
     service_tier: str | None = None
+    #: Prompt tokens billed at the cached rate (Anthropic
+    #: ``cache_read_tokens`` / OpenAI ``prompt_tokens_details.cached_tokens``
+    #: merged). None when the report carried no cache breakdown — e.g. a
+    #: server older than the field, or a provider without prompt caching.
+    cache_read_tokens: int | None = None
+    #: Prompt tokens billed for *writing* the cache (Anthropic
+    #: ``cache_creation_input_tokens``). None under the same conditions as
+    #: ``cache_read_tokens``.
+    cache_write_tokens: int | None = None
+    #: Completion tokens the model spent reasoning before answering
+    #: (``usage.reasoning_tokens``, the OpenAI ``completion_tokens_details``
+    #: split). None when unreported.
+    reasoning_tokens: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ChatResult:
+        usage = data.get("usage") or {}
+        details = usage.get("prompt_tokens_details") or {}
+        completion_details = usage.get("completion_tokens_details") or {}
         return cls(
             id=data["id"],
             provider=data["provider"],
             model=data["model"],
             content=data["content"],
-            usage=data.get("usage", {}),
+            usage=usage,
             cost_usd=data.get("cost_usd"),
             cached=data.get("cached", False),
             fallback_used=data.get("fallback_used", False),
@@ -113,7 +129,27 @@ class ChatResult:
             created=data.get("created", 0),
             system_fingerprint=data.get("system_fingerprint"),
             service_tier=data.get("service_tier"),
+            cache_read_tokens=cls._token_breakdown(
+                usage.get("cache_read_tokens"), details.get("cached_tokens")
+            ),
+            cache_write_tokens=usage.get("cache_write_tokens"),
+            reasoning_tokens=cls._token_breakdown(
+                usage.get("reasoning_tokens"), completion_details.get("reasoning_tokens")
+            ),
         )
+
+    @staticmethod
+    def _token_breakdown(flat: object, nested: object) -> int | None:
+        """Prefer the gateway's flat field; fall back to OpenAI's nested detail.
+
+        ``None`` stays ``None`` (no report) while an explicit ``0`` — an
+        un-cached call — must stay ``0`` so callers can tell "no cache" from
+        "old server".
+        """
+        for value in (flat, nested):
+            if isinstance(value, int) and not isinstance(value, bool):
+                return value
+        return None
 
 
 @dataclass
