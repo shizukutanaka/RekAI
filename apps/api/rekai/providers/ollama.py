@@ -20,7 +20,7 @@ from rekai.providers.base import (
     provider_http_error,
     trace_headers,
 )
-from rekai.schemas import ChatRequest, Usage
+from rekai.schemas import ChatMessage, ChatRequest, Usage
 
 logger = get_logger("rekai.providers.ollama")
 
@@ -28,8 +28,10 @@ logger = get_logger("rekai.providers.ollama")
 def _warn_unsupported_fields(request: ChatRequest) -> None:
     """Log the request fields this provider can't honor, rather than dropping
     them without a trace."""
-    if request.tools is not None:
-        logger.debug("ignoring tools: not wired up for the ollama provider")
+    if isinstance(request.tool_choice, dict) or request.tool_choice == "required":
+        logger.debug("ignoring tool_choice: not supported by the ollama provider")
+    if request.parallel_tool_calls is False:
+        logger.debug("ignoring parallel_tool_calls: not supported by the ollama provider")
 
 
 def _options(request: ChatRequest) -> dict:
@@ -75,6 +77,126 @@ def _response_format(request: ChatRequest) -> str | dict | None:
     return None
 
 
+def _arguments_object(arguments: object) -> dict:
+    """Normalize OpenAI's string arguments back to Ollama's object form."""
+    if isinstance(arguments, dict):
+        return arguments
+    if isinstance(arguments, str):
+        try:
+            parsed = json.loads(arguments)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _arguments_json(arguments: object) -> str:
+    """Normalize Ollama's object arguments to OpenAI's string form."""
+    if isinstance(arguments, dict):
+        return json.dumps(arguments)
+    if isinstance(arguments, str):
+        try:
+            parsed = json.loads(arguments)
+        except json.JSONDecodeError:
+            return arguments
+        if isinstance(parsed, dict):
+            return json.dumps(parsed)
+        return arguments
+    return "{}"
+
+
+def _ollama_history_tool_call(tool_call: dict, index: int) -> dict:
+    function = tool_call.get("function")
+    fn = function if isinstance(function, dict) else {}
+    name = fn.get("name") or tool_call.get("name") or ""
+    return {
+        "type": "function",
+        "function": {
+            "index": index,
+            "name": name,
+            "arguments": _arguments_object(fn.get("arguments", tool_call.get("arguments", {}))),
+        },
+    }
+
+
+def _ollama_messages(messages: list[ChatMessage]) -> list[dict]:
+    """Serialize RekAI messages to Ollama's native tool-calling shape.
+
+    Ollama matches tool results by ``tool_name`` rather than OpenAI's
+    ``tool_call_id``, and its assistant ``tool_calls`` carry object arguments.
+    Resolve call ids to names from the preceding assistant turn so a normal
+    OpenAI-shaped history still round-trips.
+    """
+    tool_names: dict[str, str] = {}
+    for message in messages:
+        if message.role != "assistant" or not message.tool_calls:
+            continue
+        for tool_call in message.tool_calls:
+            if not isinstance(tool_call, dict):
+                continue
+            function = tool_call.get("function")
+            fn = function if isinstance(function, dict) else {}
+            call_id = tool_call.get("id")
+            name = fn.get("name") or tool_call.get("name")
+            if call_id and name:
+                tool_names[str(call_id)] = str(name)
+
+    out: list[dict] = []
+    for message in messages:
+        if message.role == "tool":
+            name = (
+                message.name
+                or tool_names.get(message.tool_call_id or "")
+                or message.tool_call_id
+                or "tool"
+            )
+            out.append({"role": "tool", "tool_name": name, "content": message.content or ""})
+            continue
+        if message.role == "assistant" and message.tool_calls:
+            payload: dict = {"role": "assistant"}
+            if message.content is not None:
+                payload["content"] = message.content
+            payload["tool_calls"] = [
+                _ollama_history_tool_call(tool_call, index)
+                for index, tool_call in enumerate(message.tool_calls)
+                if isinstance(tool_call, dict)
+            ]
+            out.append(payload)
+            continue
+        out.append(openai_chat_message(message))
+    return out
+
+
+def _request_tools(request: ChatRequest) -> list[dict] | None:
+    if request.tool_choice == "none":
+        return None
+    return request.tools
+
+
+def _extract_ollama_tool_calls(raw: object) -> list[dict] | None:
+    """Ollama ``message.tool_calls`` -> OpenAI-style ``tool_calls``."""
+    if not isinstance(raw, list):
+        return None
+    calls: list[dict] = []
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            continue
+        function = item.get("function")
+        fn = function if isinstance(function, dict) else item
+        name = fn.get("name") or item.get("name") or ""
+        calls.append(
+            {
+                "id": f"call_{name or 'fn'}_{i}",
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": _arguments_json(fn.get("arguments", item.get("arguments", {}))),
+                },
+            }
+        )
+    return calls or None
+
+
 def _finish_reason(raw: object) -> FinishReason | None:
     """Map Ollama's ``done_reason`` onto the normalized vocabulary.
 
@@ -96,10 +218,13 @@ class OllamaProvider(Provider):
         _warn_unsupported_fields(request)
         payload: dict = {
             "model": request.model,
-            "messages": [openai_chat_message(m) for m in request.messages],
+            "messages": _ollama_messages(request.messages),
             "stream": False,
             "options": _options(request),
         }
+        tools = _request_tools(request)
+        if tools:
+            payload["tools"] = tools
         fmt = _response_format(request)
         if fmt is not None:
             payload["format"] = fmt
@@ -116,13 +241,18 @@ class OllamaProvider(Provider):
             raise provider_http_error("Ollama", resp.status_code, resp.text, resp.headers)
 
         data = resp.json()
-        content = data.get("message", {}).get("content", "")
+        message = data.get("message") or {}
+        content = message.get("content") or ""
+        tool_calls = _extract_ollama_tool_calls(message.get("tool_calls"))
         finish_reason = _finish_reason(data.get("done_reason"))
+        if tool_calls and finish_reason == "stop":
+            finish_reason = "tool_calls"
         prompt_tokens = data.get("prompt_eval_count", 0)
         completion_tokens = data.get("eval_count", 0)
         return ProviderResult(
             content=content,
             model=data.get("model", request.model),
+            tool_calls=tool_calls,
             usage=Usage(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
@@ -175,14 +305,18 @@ class OllamaProvider(Provider):
         _warn_unsupported_fields(request)
         payload: dict = {
             "model": request.model,
-            "messages": [openai_chat_message(m) for m in request.messages],
+            "messages": _ollama_messages(request.messages),
             "stream": True,
             "options": _options(request),
         }
+        tools = _request_tools(request)
+        if tools:
+            payload["tools"] = tools
         fmt = _response_format(request)
         if fmt is not None:
             payload["format"] = fmt
         url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
+        tool_calls_acc: list[dict] = []
         try:
             client = self._client(settings.request_timeout_seconds)
             async with client.stream("POST", url, json=payload, headers=trace_headers()) as resp:
@@ -194,41 +328,50 @@ class OllamaProvider(Provider):
                     )
                 async for line in resp.aiter_lines():
                     event = _parse_ollama_ndjson_event(line)
-                    if event is not None:
-                        yield event
+                    if event is None:
+                        continue
+                    if event.tool_calls:
+                        tool_calls_acc.extend(event.tool_calls)
+                        event.tool_calls = None
+                    if tool_calls_acc and event.finish_reason == "stop":
+                        event.finish_reason = "tool_calls"
+                    if event.delta is None and event.usage is None and event.finish_reason is None:
+                        continue
+                    yield event
         except httpx.HTTPError as exc:
             raise ProviderError(
                 f"Ollama streaming request failed (is it running at "
                 f"{settings.ollama_base_url}?): {exc}"
             ) from exc
+        if tool_calls_acc:
+            yield StreamEvent(tool_calls=tool_calls_acc)
 
 
 def _parse_ollama_ndjson_event(line: str) -> StreamEvent | None:
-    """Parse one Ollama NDJSON line into a text delta or a final usage event."""
+    """Parse one Ollama NDJSON line into deltas, tool calls, and final usage."""
     if not line.strip():
         return None
     try:
         chunk = json.loads(line)
     except json.JSONDecodeError:
         return None
-    content = chunk.get("message", {}).get("content")
-    if content:
-        return StreamEvent(delta=content)
-    if chunk.get("done"):
+    message = chunk.get("message") or {}
+    content = message.get("content")
+    tool_calls = _extract_ollama_tool_calls(message.get("tool_calls"))
+    done = bool(chunk.get("done"))
+    usage: Usage | None = None
+    finish_reason: FinishReason | None = None
+    if done:
         prompt_tokens = chunk.get("prompt_eval_count", 0)
         completion_tokens = chunk.get("eval_count", 0)
         finish_reason = _finish_reason(chunk.get("done_reason"))
-        if prompt_tokens or completion_tokens or finish_reason:
-            return StreamEvent(
-                usage=(
-                    Usage(
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=completion_tokens,
-                        total_tokens=prompt_tokens + completion_tokens,
-                    )
-                    if prompt_tokens or completion_tokens
-                    else None
-                ),
-                finish_reason=finish_reason,
+        if prompt_tokens or completion_tokens:
+            usage = Usage(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=prompt_tokens + completion_tokens,
             )
-    return None
+    delta = content if content else None
+    if delta is None and tool_calls is None and usage is None and finish_reason is None:
+        return None
+    return StreamEvent(delta=delta, tool_calls=tool_calls, usage=usage, finish_reason=finish_reason)

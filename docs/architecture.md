@@ -325,7 +325,7 @@ says why it stopped and RekAI normalizes the four vocabularies onto OpenAI's:
 |---|---|---|---|---|
 | `stop` | `stop` | `end_turn`, `stop_sequence` | `STOP` | `stop` |
 | `length` | `length` | `max_tokens` | `MAX_TOKENS` | `length` |
-| `tool_calls` | `tool_calls` | `tool_use` | *(inferred from parts)* | — |
+| `tool_calls` | `tool_calls` | `tool_use` | *(inferred from parts)* | *(inferred from tool_calls)* |
 | `content_filter` | `content_filter` | `refusal` | `SAFETY`, `RECITATION`, … | — |
 
 `length` is the one that matters: it means the answer was **cut off by
@@ -770,8 +770,9 @@ providers that support them (OpenAI and OpenAI-compatible backends). The model's
 fields (`tool_calls`, `tool_call_id`, `name`) and `content` is optional, so a
 full tools conversation can be replayed. Providers without tool support ignore
 these fields. For **streaming**, tool calls are assembled and returned in the
-final summary event's `tool_calls` for all three providers (OpenAI/Anthropic
-deltas accumulated by index; Gemini `functionCall` parts collected).
+final summary event's `tool_calls` for every tool-capable provider (OpenAI/
+Anthropic deltas accumulated by index; Gemini `functionCall` parts collected;
+Ollama `tool_calls` chunks gathered).
 
 Tools work natively on **Anthropic** too: OpenAI-style `tools`/`tool_choice` are
 translated to Anthropic's `tools`/`input_schema`/`tool_choice`, assistant
@@ -781,6 +782,15 @@ content blocks, and Anthropic's `tool_use` responses map back to OpenAI-style
 **Gemini** is supported the same way (`functionDeclarations`/`functionCall`/
 `functionResponse` + `toolConfig`), so tool calling works uniformly across all
 three major cloud providers through one OpenAI-style API.
+
+**Ollama** speaks the same OpenAI-style `tools` contract over its native
+`/api/chat`: `tools` are forwarded, assistant `tool_calls` history is rewritten
+to Ollama's object-argument shape, and `role="tool"` results are matched by
+`tool_name` (resolved from the preceding assistant call id when the client only
+sent OpenAI's `tool_call_id`). Ollama has no `tool_choice` equivalent for
+`required` or a named function, and no `parallel_tool_calls` switch; those stay
+RekAI-side with a debug log, while `tool_choice: "none"` suppresses tool
+forwarding for that request.
 
 `tool_choice: "none"` is translated distinctly from an unset `tool_choice` —
 OpenAI's `"none"` means "the tools are declared for context, but do not call
