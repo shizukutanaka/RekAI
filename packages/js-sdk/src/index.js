@@ -165,6 +165,9 @@ export class RekAIClient {
     // Anthropic extended thinking ({type:"enabled",budget_tokens}) — Anthropic
     // upstreams only; thinking blocks come back on ChatResult.thinking_blocks.
     if (opts.thinking != null) payload.thinking = opts.thinking;
+    // Provider-native prompt-cache breakpoint (Anthropic); OpenAI-compatible
+    // providers ignore it while preserving the request shape.
+    if (opts.cacheControl != null) payload.cache_control = opts.cacheControl;
     return payload;
   }
 
