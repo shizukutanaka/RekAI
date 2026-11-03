@@ -12,7 +12,8 @@ question" has to be conservative:
 
 * Entries are scoped to a ``bucket`` (see :func:`rekai.cache.semantic_bucket`)
   covering provider, model, sampling params, tools, ``response_format``,
-  ``cache_control`` — and the **requesting client**. Cross-client reuse would
+  ``cache_control`` / system-block cache markers — and the **requesting
+  client**. Cross-client reuse would
   hand tenant B an answer to a prompt only tenant A asked; the exact cache can
   share freely because a hit there requires B to have sent the identical prompt
   itself.

@@ -460,9 +460,9 @@ provider passthroughs (`service_tier`, `anthropic_beta`, `web_search_options`,
 `thinking`, `context_management`, `container`, `inference_geo`, `speed`,
 `diagnostics`, `user_profile_id`, `mcp_servers`, `output_config`), conversation
 state (`messages`, `tools`, `tool_choice`, `parallel_tool_calls`), output
-contract (`response_format`), and prompt-cache breakpoints (`cache_control`)
-— so identical requests collapse to one upstream call and two requests
-differing in any of them never share an entry. Operational fields that do not
+contract (`response_format`), and prompt-cache breakpoints (`cache_control`,
+`system_blocks`) — so identical requests collapse to one upstream call and two
+requests differing in any of them never share an entry. Operational fields that
 change the answer (`cache`, `fallbacks`, `user`, `safety_identifier`, and
 stream-only `include_obfuscation`) stay out of the key. Backends:
 

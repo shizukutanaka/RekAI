@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import httpx
 
-from rekai.cache import cache_key
+from rekai.cache import cache_key, semantic_bucket
 from rekai.pricing import estimate_cost
 from rekai.providers.anthropic import AnthropicProvider
 from rekai.providers.openai import OpenAIProvider, _parse_openai_sse_event
@@ -95,6 +95,88 @@ async def test_per_message_cache_control_is_passed_through(monkeypatch) -> None:
     assert msgs[0]["content"][-1]["cache_control"] == {"type": "ephemeral"}
     # The unmarked message keeps its plain string content.
     assert msgs[1]["content"] == "question"
+
+
+async def test_system_message_cache_control_emits_system_blocks(monkeypatch) -> None:
+    captured: dict = {}
+    _fake_post(monkeypatch, captured, _ANTHROPIC_REPLY)
+
+    await AnthropicProvider().chat(
+        ChatRequest(
+            model="claude-sonnet-4-6",
+            messages=[
+                ChatMessage(role="system", content="shared"),
+                ChatMessage(
+                    role="system",
+                    content="tail",
+                    cache_control={"type": "ephemeral"},
+                ),
+                ChatMessage(role="user", content="hi"),
+            ],
+        ),
+        api_key="k",
+    )
+    # The marked system message closes a text block; the "\n\n" separator stays
+    # inside it so the concatenated prompt matches the old joined string.
+    assert captured["json"]["system"] == [
+        {
+            "type": "text",
+            "text": "shared\n\ntail",
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+    assert [m["role"] for m in captured["json"]["messages"]] == ["user"]
+
+
+async def test_system_message_cache_control_splits_at_each_marker(monkeypatch) -> None:
+    captured: dict = {}
+    _fake_post(monkeypatch, captured, _ANTHROPIC_REPLY)
+
+    await AnthropicProvider().chat(
+        ChatRequest(
+            model="claude-sonnet-4-6",
+            messages=[
+                ChatMessage(
+                    role="system",
+                    content="stable",
+                    cache_control={"type": "ephemeral"},
+                ),
+                ChatMessage(role="system", content="middle"),
+                ChatMessage(role="system", content="tail"),
+                ChatMessage(role="user", content="hi"),
+            ],
+        ),
+        api_key="k",
+    )
+    # The marked prefix closes a block; the unmarked tail stays plain, and the
+    # concatenated text still equals the old "\n\n".join(system_parts) form.
+    assert captured["json"]["system"] == [
+        {"type": "text", "text": "stable", "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": "\n\nmiddle\n\ntail"},
+    ]
+
+
+async def test_system_blocks_are_forwarded_verbatim(monkeypatch) -> None:
+    captured: dict = {}
+    _fake_post(monkeypatch, captured, _ANTHROPIC_REPLY)
+    blocks = [
+        {"type": "text", "text": "shared", "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": "tail"},
+    ]
+
+    await AnthropicProvider().chat(
+        ChatRequest(
+            model="claude-sonnet-4-6",
+            messages=[
+                ChatMessage(role="system", content="shared\ntail"),
+                ChatMessage(role="user", content="hi"),
+            ],
+            system_blocks=blocks,
+        ),
+        api_key="k",
+    )
+    # /v1/messages block-list system prompts keep their exact cache prefix.
+    assert captured["json"]["system"] == blocks
 
 
 async def test_no_cache_control_leaves_payload_unchanged(monkeypatch) -> None:
@@ -220,3 +302,43 @@ def test_cache_control_keys_separately() -> None:
     )
     assert cache_key(base, "openai") != cache_key(marked, "openai")
     assert cache_key(base, "openai") != cache_key(per_message, "openai")
+
+
+def test_system_blocks_key_separately() -> None:
+    base = ChatRequest(model="claude-sonnet-4-6", messages=[ChatMessage(role="user", content="hi")])
+    marked = ChatRequest(
+        model="claude-sonnet-4-6",
+        messages=[ChatMessage(role="user", content="hi")],
+        system_blocks=[{"type": "text", "text": "shared", "cache_control": {"type": "ephemeral"}}],
+    )
+    assert cache_key(base, "anthropic") != cache_key(marked, "anthropic")
+    assert semantic_bucket(base, "anthropic", "client-1") != semantic_bucket(
+        marked, "anthropic", "client-1"
+    )
+
+
+def test_semantic_bucket_uses_system_markers_not_text() -> None:
+    base_messages = [ChatMessage(role="user", content="hi")]
+    cc = {"type": "ephemeral"}
+    first = ChatRequest(
+        model="claude-sonnet-4-6",
+        messages=base_messages,
+        system_blocks=[
+            {"type": "text", "text": "aaaa", "cache_control": cc},
+            {"type": "text", "text": "bbbb"},
+        ],
+    )
+    # Same marker position/shape, different system text: exact cache still keys
+    # separately, but semantic cache lets the embedding compare the prompt.
+    second = ChatRequest(
+        model="claude-sonnet-4-6",
+        messages=base_messages,
+        system_blocks=[
+            {"type": "text", "text": "xxxx", "cache_control": cc},
+            {"type": "text", "text": "yyyy"},
+        ],
+    )
+    assert cache_key(first, "anthropic") != cache_key(second, "anthropic")
+    assert semantic_bucket(first, "anthropic", "client-1") == semantic_bucket(
+        second, "anthropic", "client-1"
+    )
