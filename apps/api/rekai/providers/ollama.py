@@ -344,6 +344,14 @@ class OllamaProvider(Provider):
                 f"{settings.ollama_base_url}?): {exc}"
             ) from exc
         if tool_calls_acc:
+            # Ollama has no call ids; synthesize them across the whole stream —
+            # per-chunk indices would collide when the same function is called
+            # from more than one NDJSON event.
+            for index, tool_call in enumerate(tool_calls_acc):
+                function = tool_call.get("function")
+                fn = function if isinstance(function, dict) else {}
+                name = fn.get("name") or tool_call.get("name") or "fn"
+                tool_call["id"] = f"call_{name}_{index}"
             yield StreamEvent(tool_calls=tool_calls_acc)
 
 

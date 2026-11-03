@@ -361,6 +361,10 @@ class StreamingToolFakeClient:
                     '"arguments": {"city": "Tokyo"}}}]}, "done": false}'
                 )
                 yield (
+                    '{"message": {"tool_calls": [{"function": {"name": "get_weather", '
+                    '"arguments": {"city": "Seoul"}}}]}, "done": false}'
+                )
+                yield (
                     '{"done": true, "prompt_eval_count": 1, "eval_count": 1, "done_reason": "stop"}'
                 )
 
@@ -417,8 +421,12 @@ async def test_streaming_returns_tool_calls(monkeypatch) -> None:
     assert any(ev.finish_reason == "tool_calls" for ev in events)
     tool_event = events[-1]
     assert tool_event.tool_calls is not None
+    assert len(tool_event.tool_calls) == 2
+    assert tool_event.tool_calls[0]["id"] == "call_get_weather_0"
+    assert tool_event.tool_calls[1]["id"] == "call_get_weather_1"
     assert tool_event.tool_calls[0]["function"]["name"] == "get_weather"
     assert json.loads(tool_event.tool_calls[0]["function"]["arguments"]) == {"city": "Tokyo"}
+    assert json.loads(tool_event.tool_calls[1]["function"]["arguments"]) == {"city": "Seoul"}
 
 
 async def test_no_max_tokens_leaves_ollamas_own_default_alone(monkeypatch) -> None:
