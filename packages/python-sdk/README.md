@@ -70,6 +70,9 @@ res = client.chat(
     response_format={"type": "json_object"},
 )
 
+# Anthropic output config (effort / structured-output format; Anthropic only)
+client.chat("claude-sonnet-4-6", "answer tersely", output_config={"effort": "low"})
+
 # Embeddings (echo works keyless; OpenAI-compatible call the real API)
 emb = client.embeddings("echo", ["hello", "world"])
 print(len(emb.embeddings), emb.usage["total_tokens"], emb.cached)
