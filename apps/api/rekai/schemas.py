@@ -71,7 +71,7 @@ class ChatRequest(BaseModel):
     seed: int | None = Field(
         default=None,
         description="Deterministic-sampling seed, as OpenAI's `seed`. Forwarded to "
-        "providers that support it (OpenAI/OpenAI-compatible, Ollama).",
+        "providers that support it (OpenAI/OpenAI-compatible, Gemini, Ollama).",
     )
     frequency_penalty: float | None = Field(
         default=None,
