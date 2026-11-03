@@ -6,6 +6,7 @@ provider); this exercises OllamaProvider directly."""
 
 from __future__ import annotations
 
+import json
 import logging
 
 import httpx
@@ -53,6 +54,27 @@ class FakeClient:
         )
 
 
+class ToolCallFakeClient(FakeClient):
+    async def post(self, url, json, headers):
+        ToolCallFakeClient.captured = {"url": url, "json": json}
+        return FakeResponse(
+            {
+                "model": "llama3",
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {"function": {"name": "get_weather", "arguments": {"city": "Tokyo"}}}
+                    ],
+                },
+                "prompt_eval_count": 4,
+                "eval_count": 3,
+                "done": True,
+                "done_reason": "stop",
+            }
+        )
+
+
 async def test_chat_parses_response(monkeypatch) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
     req = ChatRequest(model="llama3", messages=[ChatMessage(role="user", content="hi")])
@@ -96,19 +118,72 @@ async def test_chat_network_error_wrapped(monkeypatch) -> None:
         await OllamaProvider().chat(req, api_key=None)
 
 
-async def test_tools_are_logged_not_forwarded(monkeypatch, caplog) -> None:
+async def test_tools_are_forwarded_and_history_translated(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    req = ChatRequest(
+        model="llama3",
+        messages=[
+            ChatMessage(role="user", content="weather?"),
+            ChatMessage(
+                role="assistant",
+                tool_calls=[
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": '{"city":"Tokyo"}'},
+                    }
+                ],
+            ),
+            ChatMessage(role="tool", content="22C", tool_call_id="call_1"),
+        ],
+        tools=[WEATHER_TOOL],
+    )
+    await OllamaProvider().chat(req, api_key=None)
+    payload = FakeClient.captured["json"]
+    assert payload["tools"] == [WEATHER_TOOL]
+    assert payload["messages"] == [
+        {"role": "user", "content": "weather?"},
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "type": "function",
+                    "function": {
+                        "index": 0,
+                        "name": "get_weather",
+                        "arguments": {"city": "Tokyo"},
+                    },
+                }
+            ],
+        },
+        {"role": "tool", "tool_name": "get_weather", "content": "22C"},
+    ]
+
+
+async def test_tool_choice_none_suppresses_tools(monkeypatch) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
     req = ChatRequest(
         model="llama3",
         messages=[ChatMessage(role="user", content="weather?")],
         tools=[WEATHER_TOOL],
+        tool_choice="none",
     )
-    with caplog.at_level(logging.DEBUG, logger="rekai.providers.ollama"):
-        await OllamaProvider().chat(req, api_key=None)
-    # tools are still not wired up for Ollama; assert they're dropped with a
-    # trace rather than mistranslated.
+    await OllamaProvider().chat(req, api_key=None)
     assert "tools" not in FakeClient.captured["json"]
-    assert any("ignoring tools" in r.message for r in caplog.records)
+
+
+async def test_chat_returns_tool_calls(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", ToolCallFakeClient)
+    req = ChatRequest(
+        model="llama3",
+        messages=[ChatMessage(role="user", content="weather?")],
+        tools=[WEATHER_TOOL],
+    )
+    result = await OllamaProvider().chat(req, api_key=None)
+    assert result.finish_reason == "tool_calls"
+    assert result.tool_calls is not None
+    assert result.tool_calls[0]["function"]["name"] == "get_weather"
+    assert json.loads(result.tool_calls[0]["function"]["arguments"]) == {"city": "Tokyo"}
 
 
 # --- structured output -------------------------------------------------------
@@ -182,24 +257,24 @@ def _req_with_provider_native_message_fields() -> ChatRequest:
     )
 
 
-_EXPECTED_OPENAI_MESSAGES = [
+_EXPECTED_OLLAMA_MESSAGES = [
     {"role": "user", "content": "hi"},
     {"role": "assistant", "content": "answer"},
-    {"role": "tool", "content": "boom", "tool_call_id": "t1"},
+    {"role": "tool", "tool_name": "t1", "content": "boom"},
 ]
 
 
 async def test_chat_drops_provider_native_message_fields(monkeypatch) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
     await OllamaProvider().chat(_req_with_provider_native_message_fields(), api_key=None)
-    assert FakeClient.captured["json"]["messages"] == _EXPECTED_OPENAI_MESSAGES
+    assert FakeClient.captured["json"]["messages"] == _EXPECTED_OLLAMA_MESSAGES
 
 
 async def test_streaming_drops_provider_native_message_fields(monkeypatch) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", StreamingFakeClient)
     req = _req_with_provider_native_message_fields()
     _ = [ev async for ev in OllamaProvider().stream_events(req, api_key=None)]
-    assert StreamingFakeClient.captured["json"]["messages"] == _EXPECTED_OPENAI_MESSAGES
+    assert StreamingFakeClient.captured["json"]["messages"] == _EXPECTED_OLLAMA_MESSAGES
 
 
 async def test_no_unsupported_fields_no_log(monkeypatch, caplog) -> None:
@@ -266,6 +341,46 @@ class StreamingFakeClient:
         return _Ctx()
 
 
+class StreamingToolFakeClient:
+    """Captures the streaming payload; replays a tool-call chunk and final usage."""
+
+    captured: dict = {}
+
+    def __init__(self, *a, **k) -> None:
+        pass
+
+    def stream(self, method, url, json=None, headers=None):
+        StreamingToolFakeClient.captured = {"url": url, "json": json}
+
+        class _Resp:
+            status_code = 200
+
+            async def aiter_lines(self):
+                yield (
+                    '{"message": {"tool_calls": [{"function": {"name": "get_weather", '
+                    '"arguments": {"city": "Tokyo"}}}]}, "done": false}'
+                )
+                yield (
+                    '{"message": {"tool_calls": [{"function": {"name": "get_weather", '
+                    '"arguments": {"city": "Seoul"}}}]}, "done": false}'
+                )
+                yield (
+                    '{"done": true, "prompt_eval_count": 1, "eval_count": 1, "done_reason": "stop"}'
+                )
+
+            async def aread(self) -> bytes:
+                return b""
+
+        class _Ctx:
+            async def __aenter__(self):
+                return _Resp()
+
+            async def __aexit__(self, *a):
+                return False
+
+        return _Ctx()
+
+
 async def test_max_tokens_is_sent_as_num_predict(monkeypatch) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
     await OllamaProvider().chat(
@@ -292,6 +407,26 @@ async def test_streaming_sends_num_predict_too(monkeypatch) -> None:
     deltas = [ev.delta async for ev in OllamaProvider().stream_events(req, api_key=None)]
     assert "hi" in deltas
     assert StreamingFakeClient.captured["json"]["options"]["num_predict"] == 16
+
+
+async def test_streaming_returns_tool_calls(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", StreamingToolFakeClient)
+    req = ChatRequest(
+        model="llama3",
+        messages=[ChatMessage(role="user", content="weather?")],
+        tools=[WEATHER_TOOL],
+    )
+    events = [ev async for ev in OllamaProvider().stream_events(req, api_key=None)]
+    assert StreamingToolFakeClient.captured["json"]["tools"] == [WEATHER_TOOL]
+    assert any(ev.finish_reason == "tool_calls" for ev in events)
+    tool_event = events[-1]
+    assert tool_event.tool_calls is not None
+    assert len(tool_event.tool_calls) == 2
+    assert tool_event.tool_calls[0]["id"] == "call_get_weather_0"
+    assert tool_event.tool_calls[1]["id"] == "call_get_weather_1"
+    assert tool_event.tool_calls[0]["function"]["name"] == "get_weather"
+    assert json.loads(tool_event.tool_calls[0]["function"]["arguments"]) == {"city": "Tokyo"}
+    assert json.loads(tool_event.tool_calls[1]["function"]["arguments"]) == {"city": "Seoul"}
 
 
 async def test_no_max_tokens_leaves_ollamas_own_default_alone(monkeypatch) -> None:

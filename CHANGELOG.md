@@ -121,6 +121,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Ollama dropped tool calls.** The provider accepted `tools` but logged and
+  discarded them, so local tool-calling models could never return
+  `tool_calls`. Ollama's native `/api/chat` now receives OpenAI-style `tools`,
+  assistant/tool history is translated to Ollama's `tool_name` +
+  object-arguments shape, streamed `tool_calls` chunks are assembled into the
+  terminal summary, and `finish_reason` becomes `tool_calls` when the model
+  stops to call a tool.
 - **Gemini requests ignored `seed`.** The gateway accepted OpenAI-style
   `seed` and keyed it into the cache, but the Gemini provider dropped it
   instead of sending `generationConfig.seed`; deterministic Gemini callers
