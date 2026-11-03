@@ -123,6 +123,57 @@ def test_top_level_cache_control_maps_to_chat_request() -> None:
     assert chat.cache_control == {"type": "ephemeral"}
 
 
+def test_user_text_block_cache_control_maps_to_content_blocks() -> None:
+    req = AnthropicMessagesRequest(
+        model="claude-sonnet-4-6",
+        max_tokens=16,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "shared"},
+                    {
+                        "type": "text",
+                        "text": "tail",
+                        "cache_control": {"type": "ephemeral"},
+                    },
+                ],
+            }
+        ],
+    )
+    chat = anthropic_compat.to_chat_request(req)
+    assert chat.messages[0].content == "shared\ntail"
+    assert chat.messages[0].content_blocks == [
+        {"type": "text", "text": "shared"},
+        {"type": "text", "text": "tail", "cache_control": {"type": "ephemeral"}},
+    ]
+
+
+def test_tool_result_block_cache_control_maps_to_tool_message() -> None:
+    req = AnthropicMessagesRequest(
+        model="claude-sonnet-4-6",
+        max_tokens=16,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_1",
+                        "content": "sunny",
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+            }
+        ],
+    )
+    chat = anthropic_compat.to_chat_request(req)
+    tool_message = chat.messages[-1]
+    assert tool_message.role == "tool"
+    assert tool_message.tool_call_id == "toolu_1"
+    assert tool_message.cache_control == {"type": "ephemeral"}
+
+
 def test_max_tokens_required(client: TestClient) -> None:
     # Anthropic requires max_tokens; a 422 must still come back in *their*
     # envelope so the SDK's error handling parses it.

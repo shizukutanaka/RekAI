@@ -650,50 +650,41 @@ def _translate_messages(messages: list) -> list[dict]:
             if m.is_error:
                 block["is_error"] = True
             out.append({"role": "user", "content": [block]})
-        elif m.role == "assistant" and (
-            m.tool_calls or m.thinking_blocks or m.extra_blocks or m.content_blocks
-        ):
-            # The verbatim ordered array wins when present — it replays the
-            # exact sequence upstream emitted (interleaved text/tool-trace),
-            # which the flattened thinking→extra→text→tool_use reconstruction
-            # can't reproduce.
-            if m.content_blocks:
-                # Copy the blocks: _apply_cache_control below (or a caller's
-                # own later edit) must not mutate the verbatim history the
-                # client asked to replay unchanged.
-                out.append(
+        elif m.content_blocks and m.role in ("user", "assistant"):
+            # The verbatim ordered array wins when present — for assistant it
+            # replays the exact sequence upstream emitted (interleaved
+            # text/tool-trace), and for user text-only turns it preserves
+            # per-block cache breakpoints. Copy the blocks: _apply_cache_control
+            # below (or a caller's own later edit) must not mutate the verbatim
+            # history the client asked to replay unchanged.
+            out.append({"role": m.role, "content": [dict(b) for b in m.content_blocks]})
+        elif m.role == "assistant" and (m.tool_calls or m.thinking_blocks or m.extra_blocks):
+            blocks: list[dict] = []
+            # Thinking blocks must precede every other block in an assistant
+            # turn (Anthropic's contract) — echoed verbatim.
+            if m.thinking_blocks:
+                blocks.extend(m.thinking_blocks)
+            # Server-tool trace (server_tool_use, tool-result blocks) sits
+            # between thinking and the answer text, matching upstream order.
+            if m.extra_blocks:
+                blocks.extend(m.extra_blocks)
+            if m.content:
+                blocks.append({"type": "text", "text": m.content})
+            for tc in m.tool_calls or []:
+                fn = tc.get("function", {})
+                try:
+                    args = json.loads(fn.get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                blocks.append(
                     {
-                        "role": "assistant",
-                        "content": [dict(b) for b in m.content_blocks],
+                        "type": "tool_use",
+                        "id": tc.get("id", ""),
+                        "name": fn.get("name", ""),
+                        "input": args,
                     }
                 )
-            else:
-                blocks: list[dict] = []
-                # Thinking blocks must precede every other block in an
-                # assistant turn (Anthropic's contract) — echoed verbatim.
-                if m.thinking_blocks:
-                    blocks.extend(m.thinking_blocks)
-                # Server-tool trace (server_tool_use, tool-result blocks) sits
-                # between thinking and the answer text, matching upstream order.
-                if m.extra_blocks:
-                    blocks.extend(m.extra_blocks)
-                if m.content:
-                    blocks.append({"type": "text", "text": m.content})
-                for tc in m.tool_calls or []:
-                    fn = tc.get("function", {})
-                    try:
-                        args = json.loads(fn.get("arguments") or "{}")
-                    except json.JSONDecodeError:
-                        args = {}
-                    blocks.append(
-                        {
-                            "type": "tool_use",
-                            "id": tc.get("id", ""),
-                            "name": fn.get("name", ""),
-                            "input": args,
-                        }
-                    )
-                out.append({"role": "assistant", "content": blocks})
+            out.append({"role": "assistant", "content": blocks})
         else:
             out.append({"role": m.role, "content": m.content or ""})
         _apply_cache_control(out[-1], getattr(m, "cache_control", None))
