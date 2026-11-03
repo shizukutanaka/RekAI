@@ -867,7 +867,11 @@ PEM private-key blocks) — the case where a provider echoes back something
 sensitive it was handed in a tool result or RAG context (OWASP LLM02). Matches
 are replaced with `[REDACTED:<pattern>]` and the response carries an
 `X-Redacted: <pattern1,pattern2,…>` header plus a `redacted: ["<pattern>", …]`
-field in the body. The scrub runs in `service.handle_chat` — **before** the
+field in the body. The same recursive scrub also covers structured response
+payloads that can carry provider text — thinking blocks, citation `cited_text`,
+server-tool/content blocks, tool-call arguments, and message-level
+`extra_fields` — not just the flat answer text. The scrub runs in
+`service.handle_chat` — **before** the
 response is written to the response cache, the semantic cache, or the
 `Idempotency-Key` store — so the raw secret is never persisted (which matters
 most with Redis, where it would otherwise sit in plaintext for the whole TTL),
