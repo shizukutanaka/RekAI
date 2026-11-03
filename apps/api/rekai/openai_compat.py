@@ -116,6 +116,7 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         # deprecated max_tokens, so the provider must see which one was sent.
         max_tokens=req.max_tokens,
         max_completion_tokens=req.max_completion_tokens,
+        reasoning_effort=req.reasoning_effort,
         stop=stop,
         top_p=req.top_p,
         seed=req.seed,

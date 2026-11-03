@@ -73,6 +73,20 @@ def test_max_completion_tokens_stays_a_completion_cap() -> None:
     assert chat.max_tokens is None
 
 
+def test_reasoning_effort_maps_to_chat_request() -> None:
+    from rekai.openai_compat import to_chat_request
+    from rekai.schemas import ChatCompletionsRequest
+
+    req = ChatCompletionsRequest(
+        model="o3",
+        messages=[{"role": "user", "content": "hi"}],
+        reasoning_effort="low",
+    )
+    chat = to_chat_request(req)
+
+    assert chat.reasoning_effort == "low"
+
+
 def test_unknown_params_ignored(client: TestClient) -> None:
     resp = client.post(
         "/v1/chat/completions",
@@ -620,4 +634,20 @@ def test_max_completion_tokens_keys_the_cache() -> None:
     assert cache_key(plain, "openai") != cache_key(capped, "openai")
     assert semantic_bucket(plain, "openai", "client-1") != semantic_bucket(
         capped, "openai", "client-1"
+    )
+
+
+def test_reasoning_effort_keys_the_cache() -> None:
+    from rekai.cache import cache_key, semantic_bucket
+    from rekai.schemas import ChatMessage, ChatRequest
+
+    plain = ChatRequest(model="m", messages=[ChatMessage(role="user", content="hi")])
+    effort = ChatRequest(
+        model="m",
+        messages=[ChatMessage(role="user", content="hi")],
+        reasoning_effort="low",
+    )
+    assert cache_key(plain, "openai") != cache_key(effort, "openai")
+    assert semantic_bucket(plain, "openai", "client-1") != semantic_bucket(
+        effort, "openai", "client-1"
     )

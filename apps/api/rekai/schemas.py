@@ -61,6 +61,14 @@ class ChatRequest(BaseModel):
         "including reasoning tokens. Forwarded to OpenAI/OpenAI-compatible providers "
         "only; o-series/GPT-5 reject the deprecated `max_tokens` spelling.",
     )
+    reasoning_effort: str | None = Field(
+        default=None,
+        description="OpenAI's reasoning-model effort (`reasoning_effort`) — "
+        "'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max', "
+        "model-dependent. Forwarded verbatim to OpenAI/OpenAI-compatible "
+        "providers only; not enum-validated so newer values stay "
+        "forward-compatible.",
+    )
     stop: list[str] | None = Field(
         default=None,
         description="Sequences that stop generation, as OpenAI's `stop`. A bare "
@@ -313,6 +321,7 @@ class ChatCompletionsRequest(BaseModel):
     temperature: float | None = None
     max_tokens: int | None = Field(default=None, ge=1)
     max_completion_tokens: int | None = Field(default=None, ge=1)
+    reasoning_effort: str | None = None
     top_p: float | None = Field(default=None, gt=0.0, le=1.0)
     seed: int | None = None
     frequency_penalty: float | None = Field(default=None, ge=-2.0, le=2.0)

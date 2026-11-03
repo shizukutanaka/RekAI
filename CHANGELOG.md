@@ -75,6 +75,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   distinct instead of collapsing them, and the cap joins the cache key and
   semantic bucket. Anthropic, Gemini and Ollama fall back to
   `max_completion_tokens` when `max_tokens` is unset, so the cap still applies.
+- **OpenAI reasoning effort reaches OpenAI-compatible providers.** `ChatRequest`
+  and `/v1/chat/completions` now accept `reasoning_effort` and forward it
+  verbatim (`none` … `max`, model-dependent) instead of silently dropping the
+  field. It changes reasoning-token spend and the answer, so it joins the exact
+  and semantic cache keys.
 - **Web chat surfaces provider token splits.** Assistant metadata now shows
   nonzero `cache_read_tokens`, `cache_write_tokens`, and `reasoning_tokens`
   alongside total tokens for both unary and streamed replies, matching the
