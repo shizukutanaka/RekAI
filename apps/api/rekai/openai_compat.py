@@ -117,6 +117,7 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         max_tokens=req.max_tokens,
         max_completion_tokens=req.max_completion_tokens,
         verbosity=req.verbosity,
+        reasoning_effort=req.reasoning_effort,
         stop=stop,
         top_p=req.top_p,
         seed=req.seed,

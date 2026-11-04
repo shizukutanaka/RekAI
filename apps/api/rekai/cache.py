@@ -32,6 +32,8 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         "max_completion_tokens": request.max_completion_tokens,
         # Verbosity changes the answer's length and style.
         "verbosity": request.verbosity,
+        # Reasoning effort changes both the answer and its token spend.
+        "reasoning_effort": request.reasoning_effort,
         "stop": request.stop,
         # Sampling params change the answer too — a `seed=42` reply must not
         # serve a `seed=1` request.
@@ -130,6 +132,7 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
         "max_completion_tokens": request.max_completion_tokens,
         # Verbosity changes the answer's length and style.
         "verbosity": request.verbosity,
+        "reasoning_effort": request.reasoning_effort,
         "stop": request.stop,
         "top_p": request.top_p,
         "seed": request.seed,

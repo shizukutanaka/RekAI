@@ -112,6 +112,10 @@ class OpenAIProvider(Provider):
             # Verbosity changes answer length/style, so it must reach the same
             # OpenAI-compatible upstreams that accept the documented values.
             payload["verbosity"] = request.verbosity
+        if request.reasoning_effort is not None:
+            # Reasoning models accept this spelling directly; other providers
+            # never see it because each has its own payload builder.
+            payload["reasoning_effort"] = request.reasoning_effort
         if request.top_p is not None:
             payload["top_p"] = request.top_p
         if request.seed is not None:

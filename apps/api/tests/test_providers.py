@@ -111,6 +111,21 @@ def test_openai_payload_verbosity() -> None:
     assert concise_payload["verbosity"] == "low"
 
 
+def test_openai_payload_reasoning_effort() -> None:
+    plain = ChatRequest(model="gpt-4o", messages=[ChatMessage(role="user", content="hi")])
+    effort = ChatRequest(
+        model="o3",
+        messages=[ChatMessage(role="user", content="hi")],
+        reasoning_effort="low",
+    )
+
+    plain_payload = OpenAIProvider()._build_payload(plain, stream=False)
+    effort_payload = OpenAIProvider()._build_payload(effort, stream=False)
+
+    assert "reasoning_effort" not in plain_payload
+    assert effort_payload["reasoning_effort"] == "low"
+
+
 def test_non_openai_providers_honor_completion_token_cap() -> None:
     """A request carrying only `max_completion_tokens` must still be capped on
     providers that only know `max_tokens`."""
