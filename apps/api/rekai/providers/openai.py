@@ -108,6 +108,10 @@ class OpenAIProvider(Provider):
             payload["max_completion_tokens"] = request.max_completion_tokens
         elif request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
+        if request.verbosity is not None:
+            # Verbosity changes answer length/style, so it must reach the same
+            # OpenAI-compatible upstreams that accept the documented values.
+            payload["verbosity"] = request.verbosity
         if request.top_p is not None:
             payload["top_p"] = request.top_p
         if request.seed is not None:
