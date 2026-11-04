@@ -419,7 +419,10 @@ so the backend's own default stands rather than being overridden by a value
 RekAI invented. OpenAI's reasoning-model spelling `max_completion_tokens` stays
 distinct from `max_tokens`: when it is set, the OpenAI provider sends only that
 field because o-series/GPT-5 reject the deprecated `max_tokens`; other providers
-use `max_tokens`, falling back to `max_completion_tokens` when only that is set. OpenAI's other accepted shape for `stop` — a bare string
+use `max_tokens`, falling back to `max_completion_tokens` when only that is set.
+OpenAI's `verbosity` is forwarded verbatim to OpenAI-compatible providers only;
+it changes the answer's length and style, so it joins the cache key and semantic
+bucket. OpenAI's other accepted shape for `stop` — a bare string
 instead of a list — is normalized once, in `ChatRequest`'s own validator,
 rather than trusting every payload builder to widen it.
 
@@ -464,7 +467,7 @@ side for streamed requests.
 
 The cache key is a SHA-256 of a payload containing every `ChatRequest` field
 that can change the response: routing (`provider`, `model`), sampling
-(`temperature`, `max_tokens`, `max_completion_tokens`, `stop`, `top_p`, `seed`, penalties, `logit_bias`),
+(`temperature`, `max_tokens`, `max_completion_tokens`, `verbosity`, `stop`, `top_p`, `seed`, penalties, `logit_bias`),
 provider passthroughs (`service_tier`, `anthropic_beta`, `web_search_options`,
 `thinking`, `context_management`, `container`, `inference_geo`, `speed`,
 `diagnostics`, `user_profile_id`, `mcp_servers`, `output_config`), conversation
