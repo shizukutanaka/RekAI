@@ -33,8 +33,9 @@ class ChatMessage(BaseModel):
     # requires the tool-trace preserved in multi-turn context; providers
     # without the concept drop them.
     extra_blocks: list[dict[str, Any]] | None = None
-    # Ordered verbatim Anthropic content array for an assistant turn —
-    # preserved so a later request echoes the exact upstream sequence.
+    # Ordered verbatim Anthropic content array for an assistant turn, or a
+    # user turn made only of text blocks — preserved so a later request echoes
+    # the exact upstream sequence and per-block cache breakpoints survive.
     content_blocks: list[dict[str, Any]] | None = None
 
 

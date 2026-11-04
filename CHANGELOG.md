@@ -132,6 +132,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reasoning-summaries parts with `thought: true`; RekAI now excludes those
   parts from unary `content` and streamed text deltas while still reporting
   `thoughtsTokenCount` as `usage.reasoning_tokens`.
+- **Anthropic block-level cache breakpoints survived only on system prompts.**
+  `/v1/messages` now preserves `cache_control` on user text blocks (via ordered
+  `content_blocks`) and on `tool_result` blocks, so explicit prompt-cache
+  breakpoints inside message content reach Anthropic instead of being
+  flattened away.
 - **Ollama dropped tool calls.** The provider accepted `tools` but logged and
   discarded them, so local tool-calling models could never return
   `tool_calls`. Ollama's native `/api/chat` now receives OpenAI-style `tools`,

@@ -75,6 +75,12 @@ def _system_blocks(system: str | list[dict[str, Any]] | None) -> list[dict[str, 
     return blocks or None
 
 
+def _block_cache_control(block: AnthropicContentBlock) -> dict[str, Any] | None:
+    """The block's verbatim ``cache_control`` breakpoint, when it has one."""
+    value = block.model_dump(exclude_unset=True).get("cache_control")
+    return value if isinstance(value, dict) else None
+
+
 def _flatten_content(
     content: str | list[AnthropicContentBlock], role: str
 ) -> tuple[str | None, list[dict], list[ChatMessage], list[dict], list[dict], list[dict]]:
@@ -94,10 +100,11 @@ def _flatten_content(
       web_search_tool_result, mcp_*, code_execution, ...) is kept verbatim in
       ``extra_blocks`` — Anthropic requires the server-tool trace echoed back
       in multi-turn context, and unknown types stay forward-compatible.
-    - ``content_blocks`` — the whole ordered array verbatim (assistant turns
-      only): the sequence the caller sent, preserved so an echoed turn
-      replays interleaved text/tool-trace in its original order rather than
-      the flattened reconstruction.
+    - ``content_blocks`` — the whole ordered array verbatim (assistant turns,
+      and user turns made only of text blocks that carry cache breakpoints):
+      the sequence the caller sent, preserved so an echoed turn replays
+      interleaved text/tool-trace in its original order and cache markers keep
+      their block positions rather than the flattened reconstruction.
     - on a user turn anything else (image/document blocks) is a readable 400
       rather than a silent drop — same rule the OpenAI layer applies to
       non-text parts.
@@ -163,6 +170,7 @@ def _flatten_content(
                     content=body or "",
                     tool_call_id=block.tool_use_id,
                     is_error=block.is_error,
+                    cache_control=_block_cache_control(block),
                 )
             )
         elif role == "assistant":
@@ -174,8 +182,20 @@ def _flatten_content(
                 "turns) thinking and server-tool blocks.",
                 status_code=400,
             )
+    # Assistant turns keep the whole ordered array (thinking/tool-trace order
+    # matters there). User turns keep it only when every block is text and at
+    # least one carries a cache breakpoint: mixed tool_result turns are still
+    # flattened because tool results become their own role="tool" messages,
+    # and unmarked text arrays have no block boundary left to preserve.
     ordered = (
-        [block.model_dump(exclude_unset=True) for block in content] if role == "assistant" else []
+        [block.model_dump(exclude_unset=True) for block in content]
+        if role == "assistant"
+        or (
+            role == "user"
+            and all(b.type == "text" for b in content)
+            and any(_block_cache_control(b) for b in content)
+        )
+        else []
     )
     return (
         "\n".join(texts) if texts else None,
