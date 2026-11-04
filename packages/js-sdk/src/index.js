@@ -215,7 +215,8 @@ export class RekAIClient {
    * model requested tool calls (carried on that same summary under
    * `tool_calls`), `opts.onToolCalls` is called with just that list.
    * Refusal text (the model declining) arrives via `opts.onRefusal` and in the
-   * final summary's `refusal` field.
+   * final summary's `refusal` field. Extended-thinking text deltas arrive via
+   * `opts.onThinking` (never yielded as answer chunks).
    * @param {string} model
    * @param {string|Array<{role:string,content:string}>} messages
    * @param {object} [opts]
@@ -274,6 +275,7 @@ export class RekAIClient {
             continue;
           }
           if (event.delta) yield event.delta;
+          else if (event.thinking_delta) opts.onThinking?.(event.thinking_delta);
           else if (event.usage) {
             opts.onUsage?.(event);
             if (event.tool_calls) opts.onToolCalls?.(event.tool_calls);

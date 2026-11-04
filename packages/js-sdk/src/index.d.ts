@@ -125,6 +125,9 @@ export interface ChatOptions {
   onRefusal?: (text: string) => void;
   /** Called with citations etc. (e.g. web-search url_citation entries). */
   onAnnotations?: (annotations: Record<string, unknown>[]) => void;
+  /** Called with each streamed extended-thinking text delta. Answer chunks
+   * still arrive only through the generator; thinking stays separate. */
+  onThinking?: (text: string) => void;
 }
 
 export interface Usage {

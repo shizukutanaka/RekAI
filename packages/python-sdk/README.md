@@ -39,12 +39,14 @@ result = client.chat(
 client = RekAIClient("http://localhost:8000", gateway_key="sk-rekai-...")
 
 # Streaming accepts the same request-shaping options as chat() — including
-# tools/tool_choice — and reports usage/cost via callbacks.
+# tools/tool_choice — and reports usage/cost via callbacks. Extended-thinking
+# text arrives separately through on_thinking (never as answer chunks).
 for chunk in client.stream(
     "echo",
     "stream me",
     on_usage=lambda s: print("\n", s),
     on_tool_calls=lambda calls: print("tools:", calls),  # fired if the model calls tools
+    on_thinking=lambda t: print(t, end="", flush=True),  # reasoning, when enabled
 ):
     print(chunk, end="", flush=True)
 
