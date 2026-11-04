@@ -151,11 +151,13 @@ test("chat forwards options and BYOK header", async () => {
   await client.chat("gpt-4o-mini", [{ role: "user", content: "hi" }], {
     provider: "openai",
     maxTokens: 64,
+    maxCompletionTokens: 128,
     fallbacks: [{ provider: "echo" }],
     providerKey: "sk-override",
   });
   assert.equal(lastRequest.body.provider, "openai");
   assert.equal(lastRequest.body.max_tokens, 64);
+  assert.equal(lastRequest.body.max_completion_tokens, 128);
   assert.deepEqual(lastRequest.body.fallbacks, [{ provider: "echo" }]);
   assert.equal(lastRequest.headers["x-provider-key"], "sk-override");
 });

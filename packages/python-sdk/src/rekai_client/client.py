@@ -294,6 +294,7 @@ def _build_payload(
     thinking: dict[str, Any] | None = None,
     cache_control: dict[str, Any] | None = None,
     output_config: dict[str, Any] | None = None,
+    max_completion_tokens: int | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -305,6 +306,8 @@ def _build_payload(
         payload["provider"] = provider
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
+    if max_completion_tokens is not None:
+        payload["max_completion_tokens"] = max_completion_tokens
     if fallbacks is not None:
         payload["fallbacks"] = fallbacks
     if tools is not None:
@@ -451,6 +454,7 @@ class RekAIClient:
         thinking: dict[str, Any] | None = None,
         cache_control: dict[str, Any] | None = None,
         output_config: dict[str, Any] | None = None,
+        max_completion_tokens: int | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -477,6 +481,7 @@ class RekAIClient:
             thinking,
             cache_control,
             output_config,
+            max_completion_tokens=max_completion_tokens,
         )
 
     @staticmethod
@@ -526,6 +531,7 @@ class RekAIClient:
         provider: str | None = None,
         temperature: float = 0.7,
         max_tokens: int | None = None,
+        max_completion_tokens: int | None = None,
         cache: bool = True,
         fallbacks: list[dict[str, Any]] | None = None,
         tools: list[dict[str, Any]] | None = None,
@@ -596,6 +602,7 @@ class RekAIClient:
             thinking,
             cache_control,
             output_config,
+            max_completion_tokens=max_completion_tokens,
         )
         headers = _build_headers(
             self._provider_key,
@@ -616,6 +623,7 @@ class RekAIClient:
         provider: str | None = None,
         temperature: float = 0.7,
         max_tokens: int | None = None,
+        max_completion_tokens: int | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any | None = None,
         parallel_tool_calls: bool | None = None,
@@ -679,6 +687,7 @@ class RekAIClient:
             thinking=thinking,
             cache_control=cache_control,
             output_config=output_config,
+            max_completion_tokens=max_completion_tokens,
         )
         with self._client.stream(
             "POST",
@@ -895,6 +904,7 @@ class AsyncRekAIClient:
         provider: str | None = None,
         temperature: float = 0.7,
         max_tokens: int | None = None,
+        max_completion_tokens: int | None = None,
         cache: bool = True,
         fallbacks: list[dict[str, Any]] | None = None,
         tools: list[dict[str, Any]] | None = None,
@@ -944,6 +954,7 @@ class AsyncRekAIClient:
             thinking,
             cache_control,
             output_config,
+            max_completion_tokens=max_completion_tokens,
         )
         headers = _build_headers(
             self._provider_key,
@@ -964,6 +975,7 @@ class AsyncRekAIClient:
         provider: str | None = None,
         temperature: float = 0.7,
         max_tokens: int | None = None,
+        max_completion_tokens: int | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: Any | None = None,
         parallel_tool_calls: bool | None = None,
@@ -1024,6 +1036,7 @@ class AsyncRekAIClient:
             thinking=thinking,
             cache_control=cache_control,
             output_config=output_config,
+            max_completion_tokens=max_completion_tokens,
         )
         async with self._client.stream(
             "POST",
