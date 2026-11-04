@@ -174,6 +174,66 @@ def test_tool_result_block_cache_control_maps_to_tool_message() -> None:
     assert tool_message.cache_control == {"type": "ephemeral"}
 
 
+def test_tool_result_only_user_turn_has_no_empty_user_message() -> None:
+    req = AnthropicMessagesRequest(
+        model="claude-sonnet-4-6",
+        max_tokens=16,
+        messages=[
+            {"role": "user", "content": "weather?"},
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": "get_weather",
+                        "input": {"city": "Tokyo"},
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "sunny"}],
+            },
+        ],
+    )
+    chat = anthropic_compat.to_chat_request(req)
+    assert [m.role for m in chat.messages] == ["user", "assistant", "tool"]
+    assert chat.messages[-1].tool_call_id == "toolu_1"
+
+
+def test_tool_result_precedes_trailing_user_text() -> None:
+    req = AnthropicMessagesRequest(
+        model="claude-sonnet-4-6",
+        max_tokens=16,
+        messages=[
+            {"role": "user", "content": "weather?"},
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": "get_weather",
+                        "input": {"city": "Tokyo"},
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "toolu_1", "content": "sunny"},
+                    {"type": "text", "text": "also check tomorrow"},
+                ],
+            },
+        ],
+    )
+    chat = anthropic_compat.to_chat_request(req)
+    assert [m.role for m in chat.messages] == ["user", "assistant", "tool", "user"]
+    assert chat.messages[-2].role == "tool"
+    assert chat.messages[-1].content == "also check tomorrow"
+
+
 def test_max_tokens_required(client: TestClient) -> None:
     # Anthropic requires max_tokens; a 422 must still come back in *their*
     # envelope so the SDK's error handling parses it.

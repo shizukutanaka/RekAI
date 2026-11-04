@@ -128,6 +128,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Anthropic tool-result turns kept their required order.** `/v1/messages`
+  now emits `tool_result` blocks before any trailing user text and no longer
+  leaves an empty `user` message for tool-result-only turns, matching
+  Anthropic's "tool results first in the user turn" contract.
 - **Gemini thought summaries no longer leak into answers.** Gemini can mark
   reasoning-summaries parts with `thought: true`; RekAI now excludes those
   parts from unary `content` and streamed text deltas while still reporting

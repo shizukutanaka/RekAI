@@ -285,8 +285,10 @@ SDK appends `v1/messages` itself) works unmodified:
 - **Requests** translate Anthropic's vocabulary into `ChatRequest`: `system`
   (string or text-block list) becomes the system message, `tool_use` blocks on
   an assistant turn become OpenAI-shaped `tool_calls`, `tool_result` blocks
-  become `role="tool"` messages, and `tool_choice` `{type: auto|none|any|tool}`
-  maps to `auto`/`none`/`required`/named function. `thinking` config and
+  become `role="tool"` messages ahead of any remaining user text (with no
+  empty user placeholder for tool-result-only turns), and `tool_choice`
+  `{type: auto|none|any|tool}` maps to `auto`/`none`/`required`/named function.
+  `thinking` config and
   assistant `thinking`/`redacted_thinking` blocks ride verbatim to Anthropic
   (which requires them echoed back in multi-turn thinking); non-text blocks
   RekAI cannot carry (images, documents) are a readable 400, never a silent
