@@ -182,12 +182,14 @@ def test_chat_passes_options() -> None:
         provider="openai",
         max_tokens=64,
         max_completion_tokens=128,
+        prompt_cache_key="cache-1",
         fallbacks=[{"provider": "echo"}],
     )
     body = captured["body"]
     assert body["provider"] == "openai"
     assert body["max_tokens"] == 64
     assert body["max_completion_tokens"] == 128
+    assert body["prompt_cache_key"] == "cache-1"
     assert body["fallbacks"] == [{"provider": "echo"}]
 
 
@@ -616,6 +618,7 @@ def test_stream_forwards_the_same_chat_request_options() -> None:
             web_search_options={"search_context_size": "low"},
             user="u-1",
             safety_identifier="s-1",
+            prompt_cache_key="cache-1",
             thinking={"type": "enabled", "budget_tokens": 16},
             cache_control={"type": "ephemeral"},
             output_config={"effort": "low"},
@@ -643,6 +646,7 @@ def test_stream_forwards_the_same_chat_request_options() -> None:
     assert body["web_search_options"] == {"search_context_size": "low"}
     assert body["user"] == "u-1"
     assert body["safety_identifier"] == "s-1"
+    assert body["prompt_cache_key"] == "cache-1"
     assert body["thinking"] == {"type": "enabled", "budget_tokens": 16}
     assert body["cache_control"] == {"type": "ephemeral"}
     assert body["output_config"] == {"effort": "low"}
@@ -1072,6 +1076,7 @@ def test_async_chat_returns_result() -> None:
                 "hi",
                 provider_key="sk-x",
                 max_completion_tokens=16,
+                prompt_cache_key="cache-1",
             )
 
     result = asyncio.run(run())
@@ -1080,6 +1085,7 @@ def test_async_chat_returns_result() -> None:
     assert result.usage["total_tokens"] == 3
     assert captured["body"]["messages"] == [{"role": "user", "content": "hi"}]
     assert captured["body"]["max_completion_tokens"] == 16
+    assert captured["body"]["prompt_cache_key"] == "cache-1"
     assert captured["url"].endswith("/v1/chat")
     assert captured["key"] == "sk-x"
 
@@ -1267,6 +1273,7 @@ def test_async_stream_forwards_chat_request_options() -> None:
                 service_tier="priority",
                 cache_control={"type": "ephemeral"},
                 output_config={"effort": "medium"},
+                prompt_cache_key="cache-1",
             ):
                 pass
 
@@ -1279,6 +1286,7 @@ def test_async_stream_forwards_chat_request_options() -> None:
     assert body["service_tier"] == "priority"
     assert body["cache_control"] == {"type": "ephemeral"}
     assert body["output_config"] == {"effort": "medium"}
+    assert body["prompt_cache_key"] == "cache-1"
 
 
 def test_async_stream_raises_on_error_event() -> None:

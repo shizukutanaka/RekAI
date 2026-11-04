@@ -295,6 +295,7 @@ def _build_payload(
     cache_control: dict[str, Any] | None = None,
     output_config: dict[str, Any] | None = None,
     max_completion_tokens: int | None = None,
+    prompt_cache_key: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -338,6 +339,8 @@ def _build_payload(
         payload["user"] = user
     if safety_identifier is not None:
         payload["safety_identifier"] = safety_identifier
+    if prompt_cache_key is not None:
+        payload["prompt_cache_key"] = prompt_cache_key
     if thinking is not None:
         payload["thinking"] = thinking
     if cache_control is not None:
@@ -455,6 +458,7 @@ class RekAIClient:
         cache_control: dict[str, Any] | None = None,
         output_config: dict[str, Any] | None = None,
         max_completion_tokens: int | None = None,
+        prompt_cache_key: str | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -482,6 +486,7 @@ class RekAIClient:
             cache_control,
             output_config,
             max_completion_tokens=max_completion_tokens,
+            prompt_cache_key=prompt_cache_key,
         )
 
     @staticmethod
@@ -551,6 +556,7 @@ class RekAIClient:
         thinking: dict[str, Any] | None = None,
         cache_control: dict[str, Any] | None = None,
         output_config: dict[str, Any] | None = None,
+        prompt_cache_key: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -603,6 +609,7 @@ class RekAIClient:
             cache_control,
             output_config,
             max_completion_tokens=max_completion_tokens,
+            prompt_cache_key=prompt_cache_key,
         )
         headers = _build_headers(
             self._provider_key,
@@ -641,6 +648,7 @@ class RekAIClient:
         thinking: dict[str, Any] | None = None,
         cache_control: dict[str, Any] | None = None,
         output_config: dict[str, Any] | None = None,
+        prompt_cache_key: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], None] | None = None,
@@ -688,6 +696,7 @@ class RekAIClient:
             cache_control=cache_control,
             output_config=output_config,
             max_completion_tokens=max_completion_tokens,
+            prompt_cache_key=prompt_cache_key,
         )
         with self._client.stream(
             "POST",
@@ -924,6 +933,7 @@ class AsyncRekAIClient:
         thinking: dict[str, Any] | None = None,
         cache_control: dict[str, Any] | None = None,
         output_config: dict[str, Any] | None = None,
+        prompt_cache_key: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -955,6 +965,7 @@ class AsyncRekAIClient:
             cache_control,
             output_config,
             max_completion_tokens=max_completion_tokens,
+            prompt_cache_key=prompt_cache_key,
         )
         headers = _build_headers(
             self._provider_key,
@@ -993,6 +1004,7 @@ class AsyncRekAIClient:
         thinking: dict[str, Any] | None = None,
         cache_control: dict[str, Any] | None = None,
         output_config: dict[str, Any] | None = None,
+        prompt_cache_key: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
@@ -1037,6 +1049,7 @@ class AsyncRekAIClient:
             cache_control=cache_control,
             output_config=output_config,
             max_completion_tokens=max_completion_tokens,
+            prompt_cache_key=prompt_cache_key,
         )
         async with self._client.stream(
             "POST",

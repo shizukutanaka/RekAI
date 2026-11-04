@@ -152,12 +152,14 @@ test("chat forwards options and BYOK header", async () => {
     provider: "openai",
     maxTokens: 64,
     maxCompletionTokens: 128,
+    promptCacheKey: "tenant-a",
     fallbacks: [{ provider: "echo" }],
     providerKey: "sk-override",
   });
   assert.equal(lastRequest.body.provider, "openai");
   assert.equal(lastRequest.body.max_tokens, 64);
   assert.equal(lastRequest.body.max_completion_tokens, 128);
+  assert.equal(lastRequest.body.prompt_cache_key, "tenant-a");
   assert.deepEqual(lastRequest.body.fallbacks, [{ provider: "echo" }]);
   assert.equal(lastRequest.headers["x-provider-key"], "sk-override");
 });
