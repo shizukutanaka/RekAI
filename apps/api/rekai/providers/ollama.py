@@ -162,6 +162,12 @@ def _ollama_messages(messages: list[ChatMessage]) -> list[dict]:
                 for index, tool_call in enumerate(message.tool_calls)
                 if isinstance(tool_call, dict)
             ]
+            _set_message_thinking(payload, message)
+            out.append(payload)
+            continue
+        if message.role == "assistant":
+            payload = openai_chat_message(message)
+            _set_message_thinking(payload, message)
             out.append(payload)
             continue
         out.append(openai_chat_message(message))
@@ -172,6 +178,40 @@ def _request_tools(request: ChatRequest) -> list[dict] | None:
     if request.tool_choice == "none":
         return None
     return request.tools
+
+
+def _request_think(request: ChatRequest) -> bool | str | None:
+    """Ollama's top-level ``think`` value, or None to leave the model default."""
+    think = request.think
+    if think is None or (isinstance(think, str) and not think):
+        return None
+    return think
+
+
+def _apply_request_think(payload: dict, request: ChatRequest) -> None:
+    think = _request_think(request)
+    if think is not None:
+        payload["think"] = think
+
+
+def _message_thinking(message: ChatMessage) -> str | None:
+    """Ollama's assistant ``thinking`` string from normalized thinking blocks."""
+    if not message.thinking_blocks:
+        return None
+    parts: list[str] = []
+    for block in message.thinking_blocks:
+        if not isinstance(block, dict) or block.get("type") != "thinking":
+            continue
+        text = block.get("thinking")
+        if isinstance(text, str) and text:
+            parts.append(text)
+    return "\n".join(parts) or None
+
+
+def _set_message_thinking(payload: dict, message: ChatMessage) -> None:
+    thinking = _message_thinking(message)
+    if thinking is not None:
+        payload["thinking"] = thinking
 
 
 def _extract_ollama_tool_calls(raw: object) -> list[dict] | None:
@@ -229,6 +269,7 @@ class OllamaProvider(Provider):
         fmt = _response_format(request)
         if fmt is not None:
             payload["format"] = fmt
+        _apply_request_think(payload, request)
         url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
         try:
             client = self._client(settings.request_timeout_seconds)
@@ -245,6 +286,12 @@ class OllamaProvider(Provider):
         message = data.get("message") or {}
         content = message.get("content") or ""
         tool_calls = _extract_ollama_tool_calls(message.get("tool_calls"))
+        thinking = message.get("thinking")
+        thinking_blocks = (
+            [{"type": "thinking", "thinking": thinking}]
+            if isinstance(thinking, str) and thinking
+            else None
+        )
         finish_reason = _finish_reason(data.get("done_reason"))
         if tool_calls and finish_reason == "stop":
             finish_reason = "tool_calls"
@@ -260,6 +307,7 @@ class OllamaProvider(Provider):
                 total_tokens=prompt_tokens + completion_tokens,
             ),
             finish_reason=finish_reason,
+            thinking_blocks=thinking_blocks,
         )
 
     async def embed(
@@ -316,6 +364,7 @@ class OllamaProvider(Provider):
         fmt = _response_format(request)
         if fmt is not None:
             payload["format"] = fmt
+        _apply_request_think(payload, request)
         url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
         tool_calls_acc: list[dict] = []
         try:
@@ -336,7 +385,12 @@ class OllamaProvider(Provider):
                         event.tool_calls = None
                     if tool_calls_acc and event.finish_reason == "stop":
                         event.finish_reason = "tool_calls"
-                    if event.delta is None and event.usage is None and event.finish_reason is None:
+                    if (
+                        event.delta is None
+                        and event.thinking_delta is None
+                        and event.usage is None
+                        and event.finish_reason is None
+                    ):
                         continue
                     yield event
         except httpx.HTTPError as exc:
@@ -357,7 +411,7 @@ class OllamaProvider(Provider):
 
 
 def _parse_ollama_ndjson_event(line: str) -> StreamEvent | None:
-    """Parse one Ollama NDJSON line into deltas, tool calls, and final usage."""
+    """Parse one Ollama NDJSON line into deltas, thinking, tool calls, usage."""
     if not line.strip():
         return None
     try:
@@ -366,6 +420,8 @@ def _parse_ollama_ndjson_event(line: str) -> StreamEvent | None:
         return None
     message = chunk.get("message") or {}
     content = message.get("content")
+    thinking = message.get("thinking")
+    thinking_delta = thinking if isinstance(thinking, str) and thinking else None
     tool_calls = _extract_ollama_tool_calls(message.get("tool_calls"))
     done = bool(chunk.get("done"))
     usage: Usage | None = None
@@ -381,6 +437,18 @@ def _parse_ollama_ndjson_event(line: str) -> StreamEvent | None:
                 total_tokens=prompt_tokens + completion_tokens,
             )
     delta = content if content else None
-    if delta is None and tool_calls is None and usage is None and finish_reason is None:
+    if (
+        delta is None
+        and thinking_delta is None
+        and tool_calls is None
+        and usage is None
+        and finish_reason is None
+    ):
         return None
-    return StreamEvent(delta=delta, tool_calls=tool_calls, usage=usage, finish_reason=finish_reason)
+    return StreamEvent(
+        delta=delta,
+        thinking_delta=thinking_delta,
+        tool_calls=tool_calls,
+        usage=usage,
+        finish_reason=finish_reason,
+    )

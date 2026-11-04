@@ -149,6 +149,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   object-arguments shape, streamed `tool_calls` chunks are assembled into the
   terminal summary, and `finish_reason` becomes `tool_calls` when the model
   stops to call a tool.
+- **Ollama dropped thinking traces.** Ollama's `/api/chat` supports a top-level
+  `think` switch and returns `message.thinking`, but RekAI neither forwarded the
+  switch nor surfaced the trace. `ChatRequest.think` now maps to Ollama's
+  `think` (true/false or a model-defined level), unary responses expose the
+  trace as `thinking_blocks`, streams emit `thinking_delta`, assistant history
+  echoes the thinking string for tool-call continuity, and `think` joins the
+  exact/semantic cache keys.
 - **Gemini requests ignored `seed`.** The gateway accepted OpenAI-style
   `seed` and keyed it into the cache, but the Gemini provider dropped it
   instead of sending `generationConfig.seed`; deterministic Gemini callers
