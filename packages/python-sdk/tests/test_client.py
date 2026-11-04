@@ -516,6 +516,38 @@ def test_stream_summary_with_refusal_still_reaches_on_usage() -> None:
     assert refusals == ["I can't help"]
 
 
+def test_stream_invokes_on_thinking() -> None:
+    sse = (
+        'data: {"thinking_delta": "ponder"}\n\n'
+        'data: {"thinking_delta": " more"}\n\n'
+        'data: {"delta": "Hi"}\n\n'
+        'data: {"provider":"echo","model":"echo","usage":{"total_tokens":2},'
+        '"cost_usd":0.0,"estimated":false,'
+        '"thinking_blocks":[{"type":"thinking","thinking":"ponder more",'
+        '"signature":"sig"}]}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=sse)
+
+    client = make_client(handler)
+    seen: dict = {}
+    thinking: list[str] = []
+    chunks = list(
+        client.stream(
+            "echo",
+            "hi",
+            on_usage=lambda s: seen.update(s),
+            on_thinking=thinking.append,
+        )
+    )
+    assert chunks == ["Hi"]
+    assert thinking == ["ponder", " more"]
+    assert seen["usage"]["total_tokens"] == 2
+    assert seen["thinking_blocks"][0]["thinking"] == "ponder more"
+
+
 def test_stream_invokes_on_tool_calls() -> None:
     sse = (
         'data: {"delta": "Hi"}\n\n'
@@ -1140,6 +1172,37 @@ def test_async_stream_awaits_coroutine_on_usage() -> None:
 
     asyncio.run(run())
     assert seen["usage"]["total_tokens"] == 2
+
+
+def test_async_stream_awaits_coroutine_on_thinking() -> None:
+    sse = (
+        'data: {"thinking_delta": "ponder"}\n\n'
+        'data: {"thinking_delta": " more"}\n\n'
+        'data: {"delta": "Hi"}\n\n'
+        'data: {"provider":"echo","model":"echo","usage":{"total_tokens":2},'
+        '"cost_usd":0.0,"estimated":false}\n\n'
+        "data: [DONE]\n\n"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=sse)
+
+    thinking: list[str] = []
+
+    async def run() -> list[str]:
+        chunks: list[str] = []
+
+        async def on_thinking(text: str) -> None:
+            thinking.append(text)
+
+        async with make_async_client(handler) as client:
+            async for chunk in client.stream("echo", "hi", on_thinking=on_thinking):
+                chunks.append(chunk)
+        return chunks
+
+    chunks = asyncio.run(run())
+    assert chunks == ["Hi"]
+    assert thinking == ["ponder", " more"]
 
 
 def test_async_stream_invokes_on_tool_calls() -> None:
