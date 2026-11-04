@@ -74,6 +74,52 @@ async def test_chat_parses_response(monkeypatch) -> None:
     assert ":generateContent" in captured["url"]
 
 
+async def test_chat_omits_gemini_thought_parts(monkeypatch) -> None:
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {"text": "quiet reasoning", "thought": True},
+                                {"text": "Hello "},
+                                {"text": "world"},
+                            ]
+                        }
+                    }
+                ],
+                "usageMetadata": {
+                    "promptTokenCount": 3,
+                    "candidatesTokenCount": 2,
+                    "totalTokenCount": 5,
+                    "thoughtsTokenCount": 4,
+                },
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json, headers):
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+
+    result = await GeminiProvider().chat(_req(), api_key="g-key")
+
+    assert result.content == "Hello world"
+    assert result.usage.reasoning_tokens == 4
+
+
 async def test_chat_propagates_http_error(monkeypatch) -> None:
     class FakeResponse:
         status_code = 429
@@ -189,7 +235,11 @@ class _GeminiStreamClient:
             status_code = 200
 
             async def aiter_lines(self):
-                yield 'data: {"candidates":[{"content":{"parts":[{"text":"Hello "}]}}]}'
+                yield (
+                    'data: {"candidates":[{"content":{"parts":'
+                    '[{"text":"quiet reasoning","thought":true},'
+                    '{"text":"Hello "}]}}]}'
+                )
                 yield (
                     'data: {"candidates":[{"content":{"parts":'
                     '[{"functionCall":{"name":"lookup","args":{"id":1}}}]}}]}'
