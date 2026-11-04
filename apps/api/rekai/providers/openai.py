@@ -108,6 +108,14 @@ class OpenAIProvider(Provider):
             payload["max_completion_tokens"] = request.max_completion_tokens
         elif request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
+        if request.verbosity is not None:
+            # Verbosity changes answer length/style, so it must reach the same
+            # OpenAI-compatible upstreams that accept the documented values.
+            payload["verbosity"] = request.verbosity
+        if request.reasoning_effort is not None:
+            # Reasoning models accept this spelling directly; other providers
+            # never see it because each has its own payload builder.
+            payload["reasoning_effort"] = request.reasoning_effort
         if request.top_p is not None:
             payload["top_p"] = request.top_p
         if request.seed is not None:

@@ -12,6 +12,7 @@ import logging
 import httpx
 import pytest
 
+from rekai.cache import cache_key, semantic_bucket
 from rekai.providers.base import ProviderError
 from rekai.providers.ollama import OllamaProvider, _parse_ollama_ndjson_event
 from rekai.schemas import ChatMessage, ChatRequest
@@ -66,6 +67,24 @@ class ToolCallFakeClient(FakeClient):
                     "tool_calls": [
                         {"function": {"name": "get_weather", "arguments": {"city": "Tokyo"}}}
                     ],
+                },
+                "prompt_eval_count": 4,
+                "eval_count": 3,
+                "done": True,
+                "done_reason": "stop",
+            }
+        )
+
+
+class ThinkingFakeClient(FakeClient):
+    async def post(self, url, json, headers):
+        return FakeResponse(
+            {
+                "model": "llama3",
+                "message": {
+                    "role": "assistant",
+                    "content": "answer",
+                    "thinking": "reasoning",
                 },
                 "prompt_eval_count": 4,
                 "eval_count": 3,
@@ -133,6 +152,7 @@ async def test_tools_are_forwarded_and_history_translated(monkeypatch) -> None:
                         "function": {"name": "get_weather", "arguments": '{"city":"Tokyo"}'},
                     }
                 ],
+                thinking_blocks=[{"type": "thinking", "thinking": "check weather"}],
             ),
             ChatMessage(role="tool", content="22C", tool_call_id="call_1"),
         ],
@@ -145,6 +165,7 @@ async def test_tools_are_forwarded_and_history_translated(monkeypatch) -> None:
         {"role": "user", "content": "weather?"},
         {
             "role": "assistant",
+            "thinking": "check weather",
             "tool_calls": [
                 {
                     "type": "function",
@@ -184,6 +205,71 @@ async def test_chat_returns_tool_calls(monkeypatch) -> None:
     assert result.tool_calls is not None
     assert result.tool_calls[0]["function"]["name"] == "get_weather"
     assert json.loads(result.tool_calls[0]["function"]["arguments"]) == {"city": "Tokyo"}
+
+
+# --- thinking -----------------------------------------------------------------
+#
+# Ollama's `/api/chat` takes a top-level `think` (true/false or a model-defined
+# level) and returns `message.thinking`. RekAI normalizes that trace into the
+# same thinking_blocks shape the streaming summary already aggregates, and
+# echoes it back on assistant history so tool-call follow-ups keep the model's
+# reasoning context.
+
+
+@pytest.mark.parametrize("think,expected", [(True, True), (False, False), ("high", "high")])
+async def test_think_is_forwarded(monkeypatch, think, expected) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    req = ChatRequest(
+        model="llama3",
+        messages=[ChatMessage(role="user", content="hi")],
+        think=think,
+    )
+    await OllamaProvider().chat(req, api_key=None)
+    assert FakeClient.captured["json"]["think"] == expected
+
+
+async def test_think_absent_leaves_model_default(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    req = ChatRequest(model="llama3", messages=[ChatMessage(role="user", content="hi")])
+    await OllamaProvider().chat(req, api_key=None)
+    assert "think" not in FakeClient.captured["json"]
+
+
+async def test_chat_returns_thinking_blocks(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", ThinkingFakeClient)
+    req = ChatRequest(model="llama3", messages=[ChatMessage(role="user", content="hi")])
+    result = await OllamaProvider().chat(req, api_key=None)
+    assert result.content == "answer"
+    assert result.thinking_blocks == [{"type": "thinking", "thinking": "reasoning"}]
+
+
+async def test_assistant_thinking_is_echoed(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    req = ChatRequest(
+        model="llama3",
+        messages=[
+            ChatMessage(role="user", content="hi"),
+            ChatMessage(
+                role="assistant",
+                content="answer",
+                thinking_blocks=[{"type": "thinking", "thinking": "plan"}],
+            ),
+        ],
+    )
+    await OllamaProvider().chat(req, api_key=None)
+    assert FakeClient.captured["json"]["messages"] == [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "answer", "thinking": "plan"},
+    ]
+
+
+def test_think_changes_cache_key_and_semantic_bucket() -> None:
+    base = ChatRequest(model="llama3", messages=[ChatMessage(role="user", content="hi")])
+    enabled = base.model_copy(update={"think": True})
+    assert cache_key(base, "ollama") != cache_key(enabled, "ollama")
+    assert semantic_bucket(base, "ollama", "client-1") != semantic_bucket(
+        enabled, "ollama", "client-1"
+    )
 
 
 # --- structured output -------------------------------------------------------
@@ -248,7 +334,7 @@ def _req_with_provider_native_message_fields() -> ChatRequest:
             ChatMessage(
                 role="assistant",
                 content="answer",
-                thinking_blocks=[{"type": "thinking", "thinking": "hidden"}],
+                thinking_blocks=[{"type": "redacted_thinking", "data": "opaque"}],
                 extra_blocks=[{"type": "server_tool_use"}],
                 content_blocks=[{"type": "text", "text": "answer"}],
             ),
@@ -298,6 +384,14 @@ def test_parse_ndjson_event_final_usage() -> None:
     assert event is not None
     assert event.usage is not None
     assert event.usage.total_tokens == 7
+
+
+def test_parse_ndjson_event_thinking() -> None:
+    line = '{"message": {"thinking": "hmm"}, "done": false}'
+    event = _parse_ollama_ndjson_event(line)
+    assert event is not None
+    assert event.delta is None
+    assert event.thinking_delta == "hmm"
 
 
 # --- max_tokens ---------------------------------------------------------------
@@ -381,6 +475,40 @@ class StreamingToolFakeClient:
         return _Ctx()
 
 
+class StreamingThinkingFakeClient:
+    """Captures the streaming payload; replays thinking, content, and usage."""
+
+    captured: dict = {}
+
+    def __init__(self, *a, **k) -> None:
+        pass
+
+    def stream(self, method, url, json=None, headers=None):
+        StreamingThinkingFakeClient.captured = {"url": url, "json": json}
+
+        class _Resp:
+            status_code = 200
+
+            async def aiter_lines(self):
+                yield '{"message": {"thinking": "hmm"}, "done": false}'
+                yield '{"message": {"content": "hi"}, "done": false}'
+                yield (
+                    '{"done": true, "prompt_eval_count": 1, "eval_count": 1, "done_reason": "stop"}'
+                )
+
+            async def aread(self) -> bytes:
+                return b""
+
+        class _Ctx:
+            async def __aenter__(self):
+                return _Resp()
+
+            async def __aexit__(self, *a):
+                return False
+
+        return _Ctx()
+
+
 async def test_max_tokens_is_sent_as_num_predict(monkeypatch) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
     await OllamaProvider().chat(
@@ -427,6 +555,19 @@ async def test_streaming_returns_tool_calls(monkeypatch) -> None:
     assert tool_event.tool_calls[0]["function"]["name"] == "get_weather"
     assert json.loads(tool_event.tool_calls[0]["function"]["arguments"]) == {"city": "Tokyo"}
     assert json.loads(tool_event.tool_calls[1]["function"]["arguments"]) == {"city": "Seoul"}
+
+
+async def test_streaming_returns_thinking_delta(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", StreamingThinkingFakeClient)
+    req = ChatRequest(
+        model="llama3",
+        messages=[ChatMessage(role="user", content="hi")],
+        think=True,
+    )
+    events = [ev async for ev in OllamaProvider().stream_events(req, api_key=None)]
+    assert StreamingThinkingFakeClient.captured["json"]["think"] is True
+    assert any(ev.thinking_delta == "hmm" for ev in events)
+    assert any(ev.delta == "hi" for ev in events)
 
 
 async def test_no_max_tokens_leaves_ollamas_own_default_alone(monkeypatch) -> None:

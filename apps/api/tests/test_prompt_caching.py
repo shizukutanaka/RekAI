@@ -179,6 +179,39 @@ async def test_system_blocks_are_forwarded_verbatim(monkeypatch) -> None:
     assert captured["json"]["system"] == blocks
 
 
+async def test_message_block_cache_controls_reach_anthropic_payload(monkeypatch) -> None:
+    captured: dict = {}
+    _fake_post(monkeypatch, captured, _ANTHROPIC_REPLY)
+    user_blocks = [
+        {"type": "text", "text": "shared"},
+        {"type": "text", "text": "tail", "cache_control": {"type": "ephemeral"}},
+    ]
+
+    await AnthropicProvider().chat(
+        ChatRequest(
+            model="claude-sonnet-4-6",
+            messages=[
+                ChatMessage(role="user", content="shared\ntail", content_blocks=user_blocks),
+                ChatMessage(
+                    role="tool",
+                    content="sunny",
+                    tool_call_id="toolu_1",
+                    cache_control={"type": "ephemeral"},
+                ),
+            ],
+        ),
+        api_key="k",
+    )
+    messages = captured["json"]["messages"]
+    # User text blocks keep the caller's boundaries and breakpoint positions.
+    assert messages[0]["role"] == "user"
+    assert messages[0]["content"] == user_blocks
+    # A marked tool_result keeps its breakpoint on the translated user block.
+    tool_result = messages[1]["content"][0]
+    assert tool_result["type"] == "tool_result"
+    assert tool_result["cache_control"] == {"type": "ephemeral"}
+
+
 async def test_no_cache_control_leaves_payload_unchanged(monkeypatch) -> None:
     captured: dict = {}
     _fake_post(monkeypatch, captured, _ANTHROPIC_REPLY)
