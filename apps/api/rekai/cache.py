@@ -30,6 +30,8 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         "temperature": request.temperature,
         "max_tokens": request.max_tokens,
         "max_completion_tokens": request.max_completion_tokens,
+        # Verbosity changes the answer's length and style.
+        "verbosity": request.verbosity,
         # Reasoning effort changes both the answer and its token spend.
         "reasoning_effort": request.reasoning_effort,
         "stop": request.stop,
@@ -64,6 +66,8 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         "web_search_options": request.web_search_options,
         # Extended thinking changes both the content and its cost.
         "thinking": request.thinking,
+        # Ollama's `think` switch changes the trace and the cost the same way.
+        "think": request.think,
         # Remaining real Anthropic fields — each shapes the answer or its cost.
         "context_management": request.context_management,
         "container": request.container,
@@ -126,6 +130,8 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
         "temperature": request.temperature,
         "max_tokens": request.max_tokens,
         "max_completion_tokens": request.max_completion_tokens,
+        # Verbosity changes the answer's length and style.
+        "verbosity": request.verbosity,
         "reasoning_effort": request.reasoning_effort,
         "stop": request.stop,
         "top_p": request.top_p,
@@ -143,6 +149,7 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
         "system_cache_markers": _system_cache_markers(request.system_blocks),
         "web_search_options": request.web_search_options,
         "thinking": request.thinking,
+        "think": request.think,
         "context_management": request.context_management,
         "container": request.container,
         "inference_geo": request.inference_geo,

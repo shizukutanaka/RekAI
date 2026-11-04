@@ -33,8 +33,9 @@ class ChatMessage(BaseModel):
     # requires the tool-trace preserved in multi-turn context; providers
     # without the concept drop them.
     extra_blocks: list[dict[str, Any]] | None = None
-    # Ordered verbatim Anthropic content array for an assistant turn —
-    # preserved so a later request echoes the exact upstream sequence.
+    # Ordered verbatim Anthropic content array for an assistant turn, or a
+    # user turn made only of text blocks — preserved so a later request echoes
+    # the exact upstream sequence and per-block cache breakpoints survive.
     content_blocks: list[dict[str, Any]] | None = None
 
 
@@ -60,6 +61,13 @@ class ChatRequest(BaseModel):
         description="OpenAI's reasoning-model completion cap (`max_completion_tokens`), "
         "including reasoning tokens. Forwarded to OpenAI/OpenAI-compatible providers "
         "only; o-series/GPT-5 reject the deprecated `max_tokens` spelling.",
+    )
+    verbosity: str | None = Field(
+        default=None,
+        description="OpenAI's response verbosity (`verbosity`) — 'low' | 'medium' | "
+        "'high', model-dependent. Forwarded verbatim to OpenAI/OpenAI-compatible "
+        "providers only; not enum-validated so newer values stay "
+        "forward-compatible.",
     )
     reasoning_effort: str | None = Field(
         default=None,
@@ -136,6 +144,12 @@ class ChatRequest(BaseModel):
         "to Anthropic only; other providers ignore it. Anthropic requires "
         "temperature=1 under thinking, so the compat layer defaults to that "
         "when the caller left temperature unset.",
+    )
+    think: bool | str | None = Field(
+        default=None,
+        description="Ollama's `think` switch — true/false, or a model-defined "
+        "level string. Forwarded to Ollama only; other providers ignore it. "
+        "Changes the answer and its reasoning cost, so it joins the cache key.",
     )
     context_management: dict[str, Any] | None = Field(
         default=None,
@@ -321,6 +335,7 @@ class ChatCompletionsRequest(BaseModel):
     temperature: float | None = None
     max_tokens: int | None = Field(default=None, ge=1)
     max_completion_tokens: int | None = Field(default=None, ge=1)
+    verbosity: str | None = None
     reasoning_effort: str | None = None
     top_p: float | None = Field(default=None, gt=0.0, le=1.0)
     seed: int | None = None
@@ -340,6 +355,7 @@ class ChatCompletionsRequest(BaseModel):
     safety_identifier: str | None = None  # OpenAI's newer abuse-detection id
     n: int | None = None  # 400 if n > 1 (RekAI returns a single choice)
     provider: str | None = None  # RekAI extension: explicit provider override
+    think: bool | str | None = None  # RekAI extension: Ollama thinking switch
     # OpenAI's pre-tools function-calling API (deprecated since 0613 but still
     # emitted by older SDKs and codebases). Normalized to tools/tool_choice in
     # the compat layer; modern `tools` wins when both are sent.

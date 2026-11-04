@@ -73,6 +73,20 @@ def test_max_completion_tokens_stays_a_completion_cap() -> None:
     assert chat.max_tokens is None
 
 
+def test_verbosity_maps_to_chat_request() -> None:
+    from rekai.openai_compat import to_chat_request
+    from rekai.schemas import ChatCompletionsRequest
+
+    req = ChatCompletionsRequest(
+        model="gpt-5",
+        messages=[{"role": "user", "content": "hi"}],
+        verbosity="low",
+    )
+    chat = to_chat_request(req)
+
+    assert chat.verbosity == "low"
+
+
 def test_reasoning_effort_maps_to_chat_request() -> None:
     from rekai.openai_compat import to_chat_request
     from rekai.schemas import ChatCompletionsRequest
@@ -272,6 +286,11 @@ def _post_legacy(client: TestClient, **extra: object):
         },
     )
     assert resp.status_code == 200
+
+
+def test_think_reaches_provider(client: TestClient) -> None:
+    _post_legacy(client, think="high")
+    assert _CaptureProvider.last_request.think == "high"
 
 
 def test_legacy_functions_normalized_to_tools(client: TestClient) -> None:
@@ -634,6 +653,22 @@ def test_max_completion_tokens_keys_the_cache() -> None:
     assert cache_key(plain, "openai") != cache_key(capped, "openai")
     assert semantic_bucket(plain, "openai", "client-1") != semantic_bucket(
         capped, "openai", "client-1"
+    )
+
+
+def test_verbosity_keys_the_cache() -> None:
+    from rekai.cache import cache_key, semantic_bucket
+    from rekai.schemas import ChatMessage, ChatRequest
+
+    plain = ChatRequest(model="m", messages=[ChatMessage(role="user", content="hi")])
+    verbose = ChatRequest(
+        model="m",
+        messages=[ChatMessage(role="user", content="hi")],
+        verbosity="high",
+    )
+    assert cache_key(plain, "openai") != cache_key(verbose, "openai")
+    assert semantic_bucket(plain, "openai", "client-1") != semantic_bucket(
+        verbose, "openai", "client-1"
     )
 
 

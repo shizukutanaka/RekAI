@@ -75,6 +75,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   distinct instead of collapsing them, and the cap joins the cache key and
   semantic bucket. Anthropic, Gemini and Ollama fall back to
   `max_completion_tokens` when `max_tokens` is unset, so the cap still applies.
+- **OpenAI verbosity reaches OpenAI-compatible providers.** `ChatRequest` and
+  `/v1/chat/completions` now accept `verbosity` and forward it verbatim
+  (`low` / `medium` / `high`, model-dependent) instead of silently dropping the
+  field. It changes the answer's length and style, so it joins the exact and
+  semantic cache keys.
 - **OpenAI reasoning effort reaches OpenAI-compatible providers.** `ChatRequest`
   and `/v1/chat/completions` now accept `reasoning_effort` and forward it
   verbatim (`none` … `max`, model-dependent) instead of silently dropping the
@@ -133,6 +138,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Gemini thought summaries no longer leak into answers.** Gemini can mark
+  reasoning-summaries parts with `thought: true`; RekAI now excludes those
+  parts from unary `content` and streamed text deltas while still reporting
+  `thoughtsTokenCount` as `usage.reasoning_tokens`.
+- **Anthropic block-level cache breakpoints survived only on system prompts.**
+  `/v1/messages` now preserves `cache_control` on user text blocks (via ordered
+  `content_blocks`) and on `tool_result` blocks, so explicit prompt-cache
+  breakpoints inside message content reach Anthropic instead of being
+  flattened away.
 - **Ollama dropped tool calls.** The provider accepted `tools` but logged and
   discarded them, so local tool-calling models could never return
   `tool_calls`. Ollama's native `/api/chat` now receives OpenAI-style `tools`,
@@ -140,6 +154,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   object-arguments shape, streamed `tool_calls` chunks are assembled into the
   terminal summary, and `finish_reason` becomes `tool_calls` when the model
   stops to call a tool.
+- **Ollama dropped thinking traces.** Ollama's `/api/chat` supports a top-level
+  `think` switch and returns `message.thinking`, but RekAI neither forwarded the
+  switch nor surfaced the trace. `ChatRequest.think` now maps to Ollama's
+  `think` (true/false or a model-defined level), unary responses expose the
+  trace as `thinking_blocks`, streams emit `thinking_delta`, assistant history
+  echoes the thinking string for tool-call continuity, and `think` joins the
+  exact/semantic cache keys.
 - **Gemini requests ignored `seed`.** The gateway accepted OpenAI-style
   `seed` and keyed it into the cache, but the Gemini provider dropped it
   instead of sending `generationConfig.seed`; deterministic Gemini callers
