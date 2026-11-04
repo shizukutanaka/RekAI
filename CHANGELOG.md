@@ -153,6 +153,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **OpenAI-compatible chat now honors RekAI `cache` and `fallbacks`.**
+  `/v1/chat/completions` accepted those RekAI extensions via `extra="allow"`
+  but silently dropped them, so `"cache": false` could still cache and a
+  request-level fallback chain never ran. Both now map into `ChatRequest` and
+  behave like `/v1/chat`.
 - **Gemini thought summaries no longer leak into answers.** Gemini can mark
   reasoning-summaries parts with `thought: true`; RekAI now excludes those
   parts from unary `content` and streamed text deltas while still reporting

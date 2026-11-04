@@ -229,7 +229,10 @@ covers it.
 Two RekAI extensions select a provider (OpenAI's schema has no provider field):
 an optional `provider` body field, or an OpenRouter-style `"<provider>/<model>"`
 model string (split only when the prefix is a *registered* provider, so a custom
-backend's own slash-containing model ids are left intact). `top_p`, `seed`,
+backend's own slash-containing model ids are left intact). RekAI's own request
+controls `cache` and `fallbacks` are accepted here too, so OpenAI-SDK callers
+get the same per-request cache opt-out and fallback chain as `/v1/chat`.
+`top_p`, `seed`,
 `frequency_penalty`, `presence_penalty` and `logit_bias` are now first-class:
 typed on both request schemas and forwarded — OpenAI-compatible backends take
 all five, Anthropic `top_p`, Gemini `topP` + `seed`, and Ollama `top_p` +

@@ -363,6 +363,12 @@ class ChatCompletionsRequest(BaseModel):
     prompt_cache_key: str | None = None  # OpenAI's prompt-cache routing key
     n: int | None = None  # 400 if n > 1 (RekAI returns a single choice)
     provider: str | None = None  # RekAI extension: explicit provider override
+    # RekAI extensions for the shared pipeline: `cache` opts this request out
+    # of the content cache, and `fallbacks` overrides the server default chain.
+    # Both are RekAI vocabulary, not OpenAI's — named here so extra="allow"
+    # doesn't silently drop them.
+    cache: bool = True
+    fallbacks: list[FallbackTarget] | None = None
     think: bool | str | None = None  # RekAI extension: Ollama thinking switch
     # OpenAI's pre-tools function-calling API (deprecated since 0613 but still
     # emitted by older SDKs and codebases). Normalized to tools/tool_choice in

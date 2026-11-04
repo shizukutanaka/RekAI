@@ -101,6 +101,40 @@ def test_reasoning_effort_maps_to_chat_request() -> None:
     assert chat.reasoning_effort == "low"
 
 
+def test_cache_and_fallbacks_map_to_chat_request() -> None:
+    """`cache`/`fallbacks` are RekAI extensions, but extra="allow" used to
+    accept and silently drop them — a `cache: false` request still cached."""
+    from rekai.openai_compat import to_chat_request
+    from rekai.schemas import ChatCompletionsRequest
+
+    req = ChatCompletionsRequest(
+        model="m",
+        messages=[{"role": "user", "content": "hi"}],
+        cache=False,
+        fallbacks=[{"provider": "echo", "model": "echo-large"}],
+    )
+    chat = to_chat_request(req)
+
+    assert chat.cache is False
+    assert [(target.provider, target.model) for target in chat.fallbacks or []] == [
+        ("echo", "echo-large")
+    ]
+
+
+def test_cache_and_fallbacks_defaults_match_native_chat() -> None:
+    from rekai.openai_compat import to_chat_request
+    from rekai.schemas import ChatCompletionsRequest
+
+    req = ChatCompletionsRequest(
+        model="m",
+        messages=[{"role": "user", "content": "hi"}],
+    )
+    chat = to_chat_request(req)
+
+    assert chat.cache is True
+    assert chat.fallbacks is None
+
+
 def test_unknown_params_ignored(client: TestClient) -> None:
     resp = client.post(
         "/v1/chat/completions",
@@ -291,6 +325,19 @@ def _post_legacy(client: TestClient, **extra: object):
 def test_think_reaches_provider(client: TestClient) -> None:
     _post_legacy(client, think="high")
     assert _CaptureProvider.last_request.think == "high"
+
+
+def test_cache_and_fallbacks_reach_provider_pipeline(client: TestClient) -> None:
+    _post_legacy(
+        client,
+        cache=False,
+        fallbacks=[{"provider": "echo", "model": "echo-large"}],
+    )
+    req = _CaptureProvider.last_request
+    assert req.cache is False
+    assert [(target.provider, target.model) for target in req.fallbacks or []] == [
+        ("echo", "echo-large")
+    ]
 
 
 def test_legacy_functions_normalized_to_tools(client: TestClient) -> None:
