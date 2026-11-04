@@ -215,7 +215,8 @@ class ChatRequest(BaseModel):
         default=None,
         description="OpenAI's parallel_tool_calls — whether the model may emit "
         "several tool calls in one turn. Forwarded to providers that support it "
-        "(OpenAI/OpenAI-compatible); ignored by others.",
+        "(OpenAI/OpenAI-compatible, and Anthropic as "
+        "tool_choice.disable_parallel_tool_use); ignored by others.",
     )
     response_format: dict[str, Any] | None = Field(
         default=None,

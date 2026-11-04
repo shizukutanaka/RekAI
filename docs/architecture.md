@@ -804,6 +804,10 @@ content blocks, and Anthropic's `tool_use` responses map back to OpenAI-style
 **Gemini** is supported the same way (`functionDeclarations`/`functionCall`/
 `functionResponse` + `toolConfig`), so tool calling works uniformly across all
 three major cloud providers through one OpenAI-style API.
+`parallel_tool_calls=False` maps to Anthropic's
+`tool_choice.disable_parallel_tool_use`; when `tool_choice` is unset, RekAI
+sends `{"type": "auto", "disable_parallel_tool_use": true}` rather than
+omitting the choice and losing the restriction.
 
 **Ollama** speaks the same OpenAI-style `tools` contract over its native
 `/api/chat`: `tools` are forwarded, assistant `tool_calls` history is rewritten

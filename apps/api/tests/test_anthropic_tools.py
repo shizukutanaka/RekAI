@@ -288,6 +288,23 @@ async def test_parallel_tool_calls_false_reaches_anthropic_tool_choice(monkeypat
     }
 
 
+async def test_parallel_tool_calls_false_without_tool_choice_reaches_anthropic(
+    monkeypatch,
+) -> None:
+    captured = _capture_anthropic(monkeypatch)
+    req = ChatRequest(
+        model="claude-sonnet-4-6",
+        messages=[ChatMessage(role="user", content="hi")],
+        tools=[OPENAI_TOOL],
+        parallel_tool_calls=False,
+    )
+    await AnthropicProvider().chat(req, api_key="sk-ant")
+    assert captured["payload"]["tool_choice"] == {
+        "type": "auto",
+        "disable_parallel_tool_use": True,
+    }
+
+
 async def test_parallel_tool_calls_unset_sends_no_flag(monkeypatch) -> None:
     captured = _capture_anthropic(monkeypatch)
     req = ChatRequest(

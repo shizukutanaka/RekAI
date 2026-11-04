@@ -143,6 +143,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Anthropic kept parallel tool calls enabled when `tool_choice` was unset.**
+  `parallel_tool_calls=False` now emits Anthropic's
+  `{"type": "auto", "disable_parallel_tool_use": true}` even without an
+  explicit `tool_choice`, instead of dropping the restriction.
 - **Gemini thought summaries no longer leak into answers.** Gemini can mark
   reasoning-summaries parts with `thought: true`; RekAI now excludes those
   parts from unary `content` and streamed text deltas while still reporting

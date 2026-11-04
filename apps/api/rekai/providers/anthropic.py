@@ -206,6 +206,14 @@ class AnthropicProvider(Provider):
         if request.tools:
             payload["tools"] = _translate_tools(request.tools)
             choice = _translate_tool_choice(request.tool_choice)
+            if (
+                choice is None
+                and request.tool_choice is None
+                and request.parallel_tool_calls is False
+            ):
+                # Anthropic carries the switch only inside tool_choice; an
+                # omitted choice defaults to auto, so make it explicit here.
+                choice = {"type": "auto"}
             if choice is not None:
                 # OpenAI's request-level parallel_tool_calls=False is
                 # Anthropic's tool_choice.disable_parallel_tool_use.
