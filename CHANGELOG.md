@@ -116,6 +116,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stream redactor can only hold back a secret whose start it recognizes, so a
   custom pattern without one would leak its head mid-stream. Malformed
   entries are skipped like the other env parsers.
+- **OpenAI `prompt_cache_key` reaches OpenAI-compatible providers.** `ChatRequest`
+  and `/v1/chat/completions` now accept `prompt_cache_key` and forward it
+  verbatim, so callers can bucket similar prompts for upstream prompt-cache
+  hits. It is a routing/cost hint rather than a response-shaping field, so it
+  stays out of RekAI's exact and semantic cache keys.
 
 ### Changed
 - **Provider HTTP clients now cap the connect phase at 5s** (httpx's default,
