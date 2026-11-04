@@ -298,7 +298,8 @@ def _extract_text(data: dict) -> str:
     if not candidates:
         return ""
     parts = candidates[0].get("content", {}).get("parts", [])
-    return "".join(p.get("text", "") for p in parts)
+    # `thought: true` parts are reasoning summaries, not answer text.
+    return "".join(p.get("text", "") for p in parts if not p.get("thought"))
 
 
 # --- OpenAI <-> Gemini tool translation -------------------------------------

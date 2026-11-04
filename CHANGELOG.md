@@ -128,6 +128,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **Gemini thought summaries no longer leak into answers.** Gemini can mark
+  reasoning-summaries parts with `thought: true`; RekAI now excludes those
+  parts from unary `content` and streamed text deltas while still reporting
+  `thoughtsTokenCount` as `usage.reasoning_tokens`.
 - **Ollama dropped tool calls.** The provider accepted `tools` but logged and
   discarded them, so local tool-calling models could never return
   `tool_calls`. Ollama's native `/api/chat` now receives OpenAI-style `tools`,
