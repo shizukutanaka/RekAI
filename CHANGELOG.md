@@ -131,6 +131,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   verbatim, so callers can bucket similar prompts for upstream prompt-cache
   hits. It is a routing/cost hint rather than a response-shaping field, so it
   stays out of RekAI's exact and semantic cache keys.
+- **SDKs forward OpenAI `prompt_cache_key`.** Python `chat()`/`stream()`
+  (sync and async) accept `prompt_cache_key`, and JS
+  `ChatOptions.promptCacheKey` maps to it, completing SDK parity with the
+  gateway field above.
 
 ### Changed
 - **Provider HTTP clients now cap the connect phase at 5s** (httpx's default,

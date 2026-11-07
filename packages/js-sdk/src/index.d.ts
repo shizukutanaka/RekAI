@@ -107,6 +107,10 @@ export interface ChatOptions {
   /** OpenAI's newer hashed abuse-detection identifier (successor to `user`).
    * OpenAI-compatible providers only. */
   safetyIdentifier?: string;
+  /** OpenAI's prompt-cache routing key (`prompt_cache_key`) — a stable
+   * caller-chosen bucket for similar prompts. OpenAI-compatible providers
+   * only; a routing/cost hint, never a RekAI cache key. */
+  promptCacheKey?: string;
   /** Anthropic extended thinking config, e.g.
    * `{type: "enabled", budget_tokens: 1024}` — forwarded verbatim to Anthropic
    * upstreams. Thinking blocks come back on `ChatResult.thinking_blocks`. */
