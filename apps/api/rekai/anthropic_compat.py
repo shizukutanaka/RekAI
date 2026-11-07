@@ -247,17 +247,25 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
         messages.append(ChatMessage(role="system", content=system))
     for m in req.messages:
         text, tool_calls, tool_msgs, thinking, extra, ordered = _flatten_content(m.content, m.role)
-        messages.append(
-            ChatMessage(
-                role=m.role,
-                content=text,
-                tool_calls=tool_calls or None,
-                thinking_blocks=thinking or None,
-                extra_blocks=extra or None,
-                content_blocks=ordered or None,
-            )
+        message = ChatMessage(
+            role=m.role,
+            content=text,
+            tool_calls=tool_calls or None,
+            thinking_blocks=thinking or None,
+            extra_blocks=extra or None,
+            content_blocks=ordered or None,
         )
-        messages.extend(tool_msgs)
+        if m.role == "user" and tool_msgs:
+            # Anthropic puts tool_result blocks first in the user turn, with any
+            # text after them. The internal tool messages therefore precede the
+            # remaining user text; a tool_result-only turn has no user text and
+            # must not leave an empty user message before the tool result.
+            messages.extend(tool_msgs)
+            if text is not None or ordered:
+                messages.append(message)
+        else:
+            messages.append(message)
+            messages.extend(tool_msgs)
     # Anthropic requires temperature=1 when extended thinking is enabled; a
     # caller who left it unset expects Anthropic's own default, not ours.
     thinking_enabled = isinstance(req.thinking, dict) and req.thinking.get("type") == "enabled"
