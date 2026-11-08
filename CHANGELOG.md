@@ -148,6 +148,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (sync and async) accept `mcp_servers`, and JS `ChatOptions.mcpServers` maps
   to it, so SDK callers can use Anthropic's server-side tool connector already
   supported by `/v1/chat` without hand-writing gateway requests.
+- **Blank `model` values rejected on `/v1/chat/completions`.** OpenAI requires
+  a model name, but an empty or whitespace-only string previously reached the
+  pipeline and could be billed as a successful call; it now returns
+  `invalid_request_error` before routing.
 
 ### Changed
 - **Provider HTTP clients now cap the connect phase at 5s** (httpx's default,
