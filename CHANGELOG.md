@@ -7,6 +7,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Gemini `safety_settings` passthrough.** Native and OpenAI-compatible chat
+  requests can send Gemini `safetySettings` (category + threshold entries)
+  instead of having the field swallowed by `extra="allow"`. The setting joins
+  RekAI's cache keys because upstream safety blocking changes the response.
 - **Prepaid credit balances — sellable metered access.** `POST /admin/keys`
   now accepts `credit_usd`, and a new `POST /admin/keys/{key}/credits` route
   tops up any key's USD balance (static `REKAI_API_KEYS` entries included).

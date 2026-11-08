@@ -487,7 +487,8 @@ The cache key is a SHA-256 of a payload containing every `ChatRequest` field
 that can change the response: routing (`provider`, `model`), sampling
 (`temperature`, `max_tokens`, `max_completion_tokens`, `verbosity`, `reasoning_effort`, `stop`, `top_p`, `seed`, penalties, `logit_bias`),
 provider passthroughs (`service_tier`, `anthropic_beta`, `anthropic_fallbacks`,
-`web_search_options`, `thinking`, `think`, `context_management`, `container`,
+`web_search_options`, `thinking`, `think`, `safety_settings`,
+`context_management`, `container`,
 `inference_geo`, `speed`, `diagnostics`, `user_profile_id`, `mcp_servers`,
 `output_config`), conversation
 state (`messages`, `tools`, `tool_choice`, `parallel_tool_calls`), output
