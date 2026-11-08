@@ -134,6 +134,13 @@ class ChatRequest(BaseModel):
         "user location, etc. for models with hosted web search. Forwarded "
         "verbatim to OpenAI-compatible providers only.",
     )
+    prediction: dict[str, Any] | None = Field(
+        default=None,
+        description="OpenAI's `prediction` object ({'type': 'content', 'content': ...}) "
+        "for Predicted Outputs — known output text that lowers latency when "
+        "regenerating a mostly unchanged document. Forwarded verbatim to "
+        "OpenAI/OpenAI-compatible providers only; ignored elsewhere.",
+    )
     anthropic_beta: str | None = Field(
         default=None,
         description="Anthropic `anthropic-beta` header value (comma-joined "
@@ -364,6 +371,7 @@ class ChatCompletionsRequest(BaseModel):
     stop: str | list[str] | None = None
     service_tier: str | None = None
     web_search_options: dict[str, Any] | None = None
+    prediction: dict[str, Any] | None = None  # OpenAI Predicted Outputs config
     stream: bool = False
     stream_options: StreamOptions | None = None
     tools: list[dict[str, Any]] | None = None

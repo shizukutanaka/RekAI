@@ -128,6 +128,7 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         logit_bias=req.logit_bias,
         service_tier=req.service_tier,
         web_search_options=req.web_search_options,
+        prediction=req.prediction,
         include_obfuscation=(
             req.stream_options.include_obfuscation if req.stream_options else None
         ),

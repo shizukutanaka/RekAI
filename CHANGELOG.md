@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`/v1/chat/completions` forwards OpenAI `prediction`.** Predicted Outputs
+  let callers pass known output text to reduce latency when regenerating a
+  mostly unchanged document. The field was previously swallowed by
+  `extra="allow"`; it now reaches OpenAI/OpenAI-compatible providers and joins
+  both cache keys because different predictions produce different responses.
 - **Prepaid credit balances — sellable metered access.** `POST /admin/keys`
   now accepts `credit_usd`, and a new `POST /admin/keys/{key}/credits` route
   tops up any key's USD balance (static `REKAI_API_KEYS` entries included).

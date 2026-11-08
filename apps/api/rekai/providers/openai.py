@@ -140,6 +140,8 @@ class OpenAIProvider(Provider):
             payload["response_format"] = request.response_format
         if request.web_search_options is not None:
             payload["web_search_options"] = request.web_search_options
+        if request.prediction is not None:
+            payload["prediction"] = request.prediction
         if request.user is not None:
             # OpenAI's abuse-detection end-user id.
             payload["user"] = request.user
