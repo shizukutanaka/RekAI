@@ -162,6 +162,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (sync and async) accept `mcp_servers`, and JS `ChatOptions.mcpServers` maps
   to it, so SDK callers can use Anthropic's server-side tool connector already
   supported by `/v1/chat` without hand-writing gateway requests.
+- **Anthropic-compatible endpoints require a non-blank `model`.**
+  `/v1/messages` and `/v1/messages/count_tokens` previously accepted `""` or
+  whitespace-only model names; request validation now rejects them in
+  Anthropic's error envelope.
 - **`/v1/chat/completions` rejected only `n > 1`.** `n=0` and negative values
   were silently ignored even though RekAI always returns one choice; now any
   value other than `1` is a readable `invalid_request_error`.
