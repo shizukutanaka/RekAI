@@ -305,6 +305,7 @@ def to_chat_request(req: AnthropicMessagesRequest) -> ChatRequest:
         system_blocks=_system_blocks(req.system),
         user=req.metadata.user_id if req.metadata else None,
         output_config=req.output_config,
+        anthropic_fallbacks=req.fallbacks,
     )
 
 

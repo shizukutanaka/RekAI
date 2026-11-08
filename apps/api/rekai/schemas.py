@@ -137,6 +137,14 @@ class ChatRequest(BaseModel):
         "header; forwarded upstream so beta-gated features work. In the "
         "cache key — beta flags can change the response.",
     )
+    anthropic_fallbacks: str | list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Anthropic's server-side refusal fallback (`fallbacks`) — "
+        "'default' or an ordered list of fallback entries. This is Anthropic's "
+        "own retry policy, distinct from RekAI's `fallbacks` provider chain. "
+        "Forwarded verbatim to Anthropic only; the required beta flag is added "
+        "automatically.",
+    )
     thinking: dict[str, Any] | None = Field(
         default=None,
         description="Anthropic's `thinking` config — e.g. {'type': 'enabled', "
@@ -462,8 +470,9 @@ class _AnthropicMessagesBase(BaseModel):
     # 'budget_tokens': N}). Declared so it isn't swallowed by extra=allow.
     thinking: dict[str, Any] | None = None
     # Remaining real Anthropic request fields — verbatim, same
-    # swallow-by-extra=allow hazard. (`fallbacks` is deliberately absent:
-    # RekAI's own extension uses that name with different semantics.)
+    # swallow-by-extra=allow hazard. `fallbacks` is declared on
+    # AnthropicMessagesRequest instead because count_tokens has no generation
+    # for Anthropic to fall back from.
     context_management: dict[str, Any] | None = None
     container: dict[str, Any] | str | None = None
     inference_geo: str | None = None
@@ -485,6 +494,10 @@ class AnthropicMessagesRequest(_AnthropicMessagesBase):
     OpenAI) and stays required here — an SDK caller always sends it."""
 
     max_tokens: int = Field(..., ge=1)
+    # Anthropic's server-side refusal fallback: 'default' or a list of
+    # fallback entries. Kept out of the shared base because count_tokens has
+    # no generation to fall back from.
+    fallbacks: str | list[dict[str, Any]] | None = None
 
 
 class AnthropicCountTokensRequest(_AnthropicMessagesBase):

@@ -123,6 +123,18 @@ def test_top_level_cache_control_maps_to_chat_request() -> None:
     assert chat.cache_control == {"type": "ephemeral"}
 
 
+def test_anthropic_fallbacks_map_to_distinct_chat_field() -> None:
+    req = AnthropicMessagesRequest(
+        model="claude-sonnet-4-6",
+        max_tokens=16,
+        fallbacks="default",
+        messages=[{"role": "user", "content": "hi"}],
+    )
+    chat = anthropic_compat.to_chat_request(req)
+    assert chat.anthropic_fallbacks == "default"
+    assert chat.fallbacks is None
+
+
 def test_user_text_block_cache_control_maps_to_content_blocks() -> None:
     req = AnthropicMessagesRequest(
         model="claude-sonnet-4-6",
@@ -419,6 +431,45 @@ def test_stream_event_sequence(client: TestClient) -> None:
     delta = next(d for e, d in events if e == "message_delta")
     assert delta["delta"]["stop_reason"] == "end_turn"
     assert delta["usage"]["output_tokens"] > 0
+
+
+def test_stream_message_start_uses_reported_model(client: TestClient, monkeypatch) -> None:
+    from rekai.providers.base import StreamEvent
+    from rekai.providers.echo import EchoProvider
+
+    async def fake_stream_events(self, request, api_key):
+        yield StreamEvent(model="echo-fallback")
+        yield StreamEvent(delta="Echo: hello world")
+        yield StreamEvent(
+            usage=Usage(prompt_tokens=2, completion_tokens=3, total_tokens=5),
+            finish_reason="stop",
+            model="echo-fallback",
+        )
+
+    monkeypatch.setattr(EchoProvider, "stream_events", fake_stream_events)
+    resp = client.post("/v1/messages", json=_payload(stream=True))
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    assert events[0][0] == "message_start"
+    assert events[0][1]["message"]["model"] == "echo-fallback"
+
+
+def test_messages_route_forwards_anthropic_fallbacks(client: TestClient, monkeypatch) -> None:
+    from rekai.providers.echo import EchoProvider
+
+    captured: dict = {}
+    original = EchoProvider.chat
+
+    async def spy(self, request, api_key):
+        captured["anthropic_fallbacks"] = request.anthropic_fallbacks
+        captured["fallbacks"] = request.fallbacks
+        return await original(self, request, api_key)
+
+    monkeypatch.setattr(EchoProvider, "chat", spy)
+    resp = client.post("/v1/messages", json=_payload(fallbacks="default"))
+    assert resp.status_code == 200
+    assert captured["anthropic_fallbacks"] == "default"
+    assert captured["fallbacks"] is None
 
 
 def test_stream_error_arrives_as_error_event(client: TestClient) -> None:

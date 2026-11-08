@@ -292,7 +292,10 @@ SDK appends `v1/messages` itself) works unmodified:
   assistant `thinking`/`redacted_thinking` blocks ride verbatim to Anthropic
   (which requires them echoed back in multi-turn thinking); non-text blocks
   RekAI cannot carry (images, documents) are a readable 400, never a silent
-  drop. `max_tokens` stays required, as upstream. A RekAI `provider`
+  drop. `fallbacks` is Anthropic's server-side refusal fallback, not RekAI's
+  provider chain: it is forwarded verbatim, RekAI adds the required beta flag,
+  and the serving model is propagated through unary and stream responses.
+  `max_tokens` stays required, as upstream. A RekAI `provider`
   extension field is accepted alongside model-prefix routing.
 - **Responses** translate back to Anthropic's `type: "message"` shape with
   `stop_reason` mapped (`stop`→`end_turn`, `length`→`max_tokens`,
@@ -482,9 +485,10 @@ side for streamed requests.
 The cache key is a SHA-256 of a payload containing every `ChatRequest` field
 that can change the response: routing (`provider`, `model`), sampling
 (`temperature`, `max_tokens`, `max_completion_tokens`, `verbosity`, `reasoning_effort`, `stop`, `top_p`, `seed`, penalties, `logit_bias`),
-provider passthroughs (`service_tier`, `anthropic_beta`, `web_search_options`,
-`thinking`, `think`, `context_management`, `container`, `inference_geo`, `speed`,
-`diagnostics`, `user_profile_id`, `mcp_servers`, `output_config`), conversation
+provider passthroughs (`service_tier`, `anthropic_beta`, `anthropic_fallbacks`,
+`web_search_options`, `thinking`, `think`, `context_management`, `container`,
+`inference_geo`, `speed`, `diagnostics`, `user_profile_id`, `mcp_servers`,
+`output_config`), conversation
 state (`messages`, `tools`, `tool_choice`, `parallel_tool_calls`), output
 contract (`response_format`), and prompt-cache breakpoints (`cache_control`,
 `system_blocks`) — so identical requests collapse to one upstream call and two

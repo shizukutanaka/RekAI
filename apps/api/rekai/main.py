@@ -2362,6 +2362,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # message_start emits lazily so extras arriving on upstream's own
             # message_start (container, ...) merge into the same skeleton.
             started = False
+            stream_model = chat_request.model
             # Content blocks are indexed in order: thinking blocks (0..n, each
             # closed by its signature_delta), then the text block, then tool_use.
             open_block: str | None = None  # "thinking" | "text" | "extra"
@@ -2379,10 +2380,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 client_id,
                 key_store,
             ):
+                if ev.model is not None:
+                    stream_model = ev.model
                 if not started:
-                    yield anthropic_compat.ev_message_start(
-                        msg_id, chat_request.model, ev.extra_fields
-                    )
+                    yield anthropic_compat.ev_message_start(msg_id, stream_model, ev.extra_fields)
                     started = True
                     if ev.extra_fields is not None:
                         continue

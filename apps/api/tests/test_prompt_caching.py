@@ -39,6 +39,7 @@ def _fake_post(monkeypatch, captured: dict, payload: dict) -> None:
 
         async def post(self, url, json, headers):
             captured["json"] = json
+            captured["headers"] = headers
             return FakeResponse()
 
     monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
@@ -223,6 +224,25 @@ async def test_no_cache_control_leaves_payload_unchanged(monkeypatch) -> None:
     assert captured["json"]["messages"][-1]["content"] == "hi"
 
 
+async def test_anthropic_fallbacks_forwarded_with_required_beta(monkeypatch) -> None:
+    captured: dict = {}
+    _fake_post(monkeypatch, captured, _ANTHROPIC_REPLY)
+
+    await AnthropicProvider().chat(
+        ChatRequest(
+            model="claude-sonnet-4-6",
+            messages=[ChatMessage(role="user", content="hi")],
+            anthropic_fallbacks="default",
+            anthropic_beta="interleaved-thinking-2025-05-14",
+        ),
+        api_key="k",
+    )
+    assert captured["json"]["fallbacks"] == "default"
+    beta = captured["headers"]["anthropic-beta"].split(",")
+    assert "interleaved-thinking-2025-05-14" in beta
+    assert "server-side-fallback-2026-07-01" in beta
+
+
 # --- response-side accounting ------------------------------------------------
 
 
@@ -347,6 +367,15 @@ def test_system_blocks_key_separately() -> None:
     assert cache_key(base, "anthropic") != cache_key(marked, "anthropic")
     assert semantic_bucket(base, "anthropic", "client-1") != semantic_bucket(
         marked, "anthropic", "client-1"
+    )
+
+
+def test_anthropic_fallbacks_key_the_cache() -> None:
+    base = ChatRequest(model="claude-sonnet-4-6", messages=[ChatMessage(role="user", content="hi")])
+    fallback = base.model_copy(update={"anthropic_fallbacks": "default"})
+    assert cache_key(base, "anthropic") != cache_key(fallback, "anthropic")
+    assert semantic_bucket(base, "anthropic", "client-1") != semantic_bucket(
+        fallback, "anthropic", "client-1"
     )
 
 
