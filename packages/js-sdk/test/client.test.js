@@ -546,6 +546,13 @@ test("chat forwards output config", async () => {
   });
 });
 
+test("chat forwards MCP connector servers", async () => {
+  const client = new RekAIClient(baseUrl);
+  const servers = [{ type: "url", url: "https://mcp.example", name: "docs" }];
+  await client.chat("claude-sonnet-4-6", "search the docs", { mcpServers: servers });
+  assert.deepEqual(lastRequest.body.mcp_servers, servers);
+});
+
 // --- Request timeout ----------------------------------------------------------
 // fetch has no built-in timeout: without `timeout`, a hung connection parked
 // chat()/stream() forever. The Python SDK bounds every call at 60s; this client

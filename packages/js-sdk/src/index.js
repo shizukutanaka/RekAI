@@ -173,6 +173,8 @@ export class RekAIClient {
     if (opts.cacheControl != null) payload.cache_control = opts.cacheControl;
     // Anthropic output config (effort/format); forwarded verbatim upstream.
     if (opts.outputConfig != null) payload.output_config = opts.outputConfig;
+    // Anthropic MCP connector servers; forwarded verbatim upstream.
+    if (opts.mcpServers != null) payload.mcp_servers = opts.mcpServers;
     return payload;
   }
 
