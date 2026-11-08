@@ -19,9 +19,10 @@ from rekai.providers.base import (
     StreamEvent,
     check_header_safe,
     provider_http_error,
+    text_embedding_inputs,
     trace_headers,
 )
-from rekai.schemas import ChatRequest, Usage
+from rekai.schemas import ChatRequest, EmbeddingInputs, Usage
 
 # Gemini's finishReason vocabulary -> OpenAI's. Everything that is a safety or
 # policy stop maps to content_filter; MAX_TOKENS is the truncation case.
@@ -180,7 +181,7 @@ class GeminiProvider(Provider):
 
     async def embed(
         self,
-        inputs: list[str],
+        inputs: EmbeddingInputs,
         model: str,
         api_key: str | None,
         *,
@@ -190,6 +191,7 @@ class GeminiProvider(Provider):
     ) -> EmbeddingResult:
         settings = current_settings()
         key = self._resolve_key(api_key)
+        texts = text_embedding_inputs(inputs, self.name)
         # Gemini wants the fully-qualified model name in each request.
         qualified = f"models/{_safe_model_id(model)}"
         per_request: dict = {"model": qualified}
@@ -197,7 +199,7 @@ class GeminiProvider(Provider):
         if dimensions is not None:
             per_request["outputDimensionality"] = dimensions
         payload = {
-            "requests": [{**per_request, "content": {"parts": [{"text": text}]}} for text in inputs]
+            "requests": [{**per_request, "content": {"parts": [{"text": text}]}} for text in texts]
         }
         url = f"{settings.gemini_base_url.rstrip('/')}/{qualified}:batchEmbedContents"
         try:

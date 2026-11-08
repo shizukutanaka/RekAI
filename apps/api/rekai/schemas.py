@@ -12,6 +12,12 @@ Role = Literal["system", "user", "assistant", "tool"]
 # into FastAPI's RequestValidationError details, unlike a ValueError in ctx.
 ModelName = Annotated[str, Field(min_length=1, pattern=r"\S")]
 
+# OpenAI's embeddings `input` union: text, a text batch, one tokenized input,
+# or a batch of tokenized inputs. `list[int]` is one input, not a token batch.
+TokenArray = Annotated[list[Annotated[int, Field(ge=0)]], Field(min_length=1)]
+EmbeddingInput = str | list[str] | TokenArray | list[TokenArray]
+EmbeddingInputs = list[str | TokenArray]
+
 
 class ChatMessage(BaseModel):
     role: Role
@@ -672,7 +678,10 @@ class EmbeddingsRequest(BaseModel):
     model: ModelName = Field(
         ..., description="Embedding model, e.g. 'text-embedding-3-small' or 'echo'."
     )
-    input: str | list[str] = Field(..., description="A string or list of strings to embed.")
+    input: EmbeddingInput = Field(
+        ...,
+        description="A string, list of strings, token array, or list of token arrays to embed.",
+    )
     provider: str | None = Field(default=None, description="Force a provider (else routed).")
     cache: bool = Field(default=True)
     dimensions: int | None = Field(

@@ -1395,7 +1395,10 @@ Two deliberate limits:
 
 `POST /v1/embeddings` mirrors the chat path: route → cache → `provider.embed()`.
 It accepts a string or list of strings, returns one vector per input, and is
-cached (keyed by provider/model/inputs). Echo returns deterministic hash-based
+cached (keyed by provider/model/inputs). OpenAI's tokenized input shapes are
+accepted too: `list[int]` is one input and `list[list[int]]` is a batch; only
+OpenAI-compatible providers receive them, while text-only providers return 422.
+Echo returns deterministic hash-based
 vectors so the endpoint works with no key; OpenAI and OpenAI-compatible backends
 call the real `/embeddings` API, **Ollama** calls its local `/api/embed`
 (keyless, e.g. `nomic-embed-text`), and **Gemini** uses `:batchEmbedContents`

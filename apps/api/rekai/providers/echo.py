@@ -17,8 +17,9 @@ from rekai.providers.base import (
     ProviderError,
     ProviderResult,
     StreamEvent,
+    text_embedding_inputs,
 )
-from rekai.schemas import ChatRequest, Usage
+from rekai.schemas import ChatRequest, EmbeddingInputs, Usage
 
 _EMBED_DIM = 16
 
@@ -91,7 +92,7 @@ class EchoProvider(Provider):
 
     async def embed(
         self,
-        inputs: list[str],
+        inputs: EmbeddingInputs,
         model: str,
         api_key: str | None,
         *,
@@ -104,18 +105,19 @@ class EchoProvider(Provider):
                 f"echo's pseudo-embeddings cap at {_MAX_ECHO_DIM} dimensions.",
                 status_code=400,
             )
+        texts = text_embedding_inputs(inputs, self.name)
         dim = dimensions or _EMBED_DIM
-        if len(inputs) * dim > _MAX_ECHO_FLOATS:
+        if len(texts) * dim > _MAX_ECHO_FLOATS:
             raise ProviderError(
                 f"echo embeds at most {_MAX_ECHO_FLOATS} floats per request "
-                f"(requested {len(inputs)} inputs × {dim} dimensions).",
+                f"(requested {len(texts)} inputs × {dim} dimensions).",
                 status_code=400,
             )
-        tokens = sum(_count_tokens(t) for t in inputs)
+        tokens = sum(_count_tokens(t) for t in texts)
         return EmbeddingResult(
             # `encoding_format` stays unhonored: the API response is JSON
             # floats either way, so there is no base64 for echo to emit.
-            embeddings=[_embed_text(t, dim) for t in inputs],
+            embeddings=[_embed_text(t, dim) for t in texts],
             model=model,
             usage=Usage(prompt_tokens=tokens, total_tokens=tokens),
         )

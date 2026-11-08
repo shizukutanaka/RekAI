@@ -1791,7 +1791,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Ahead of any stored-response short circuit — a replayed or cached
         # entry written before a provider's cap existed must not bypass it.
         check_embeddings_dimensions(request, config)
-        input_texts = [request.input] if isinstance(request.input, str) else request.input
+        input_texts = guardrails.string_leaves(request.input)
         leaked = _input_secrets_response(input_texts, config, response)
         if leaked is not None:
             return leaked

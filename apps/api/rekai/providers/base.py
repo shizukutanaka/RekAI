@@ -17,7 +17,7 @@ from typing import Literal
 
 import httpx
 
-from rekai.schemas import ChatMessage, ChatRequest, Usage
+from rekai.schemas import ChatMessage, ChatRequest, EmbeddingInputs, Usage
 from rekai.tracing import current_traceparent, current_tracestate
 
 
@@ -256,6 +256,16 @@ class StreamEvent:
     extra_fields: dict | None = None
 
 
+def text_embedding_inputs(inputs: EmbeddingInputs, provider_name: str) -> list[str]:
+    """Return text inputs or reject OpenAI token arrays for text-only providers."""
+    if all(isinstance(item, str) for item in inputs):
+        return [item for item in inputs if isinstance(item, str)]
+    raise ProviderError(
+        f"{provider_name} embeddings require text input; OpenAI token arrays are unsupported.",
+        status_code=422,
+    )
+
+
 class Provider(ABC):
     """Base class for all providers."""
 
@@ -264,6 +274,10 @@ class Provider(ABC):
 
     #: Whether this provider requires an API key (server-side or BYOK).
     requires_key: bool = True
+
+    #: Whether ``embed()`` accepts token-array inputs (OpenAI's ``list[int]`` /
+    #: ``list[list[int]]`` shapes). Text-only providers leave this false.
+    supports_token_embeddings: bool = False
 
     #: Largest ``dimensions`` value this provider will embed — enforced before
     #: the embeddings cache lookup and idempotent replay, since both serve
@@ -379,7 +393,7 @@ class Provider(ABC):
 
     async def embed(
         self,
-        inputs: list[str],
+        inputs: EmbeddingInputs,
         model: str,
         api_key: str | None,
         *,
