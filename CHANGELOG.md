@@ -169,6 +169,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and async) accept `reasoning_effort` and `verbosity`, and JS
   `ChatOptions.reasoningEffort` / `verbosity` map to the gateway fields
   already forwarded to OpenAI-compatible providers.
+- **Blank `model` values rejected on `/v1/chat/completions`.** OpenAI requires
+  a model name, but an empty or whitespace-only string previously reached the
+  pipeline and could be billed as a successful call; it now returns
+  `invalid_request_error` before routing.
 
 ### Changed
 - **Provider HTTP clients now cap the connect phase at 5s** (httpx's default,
