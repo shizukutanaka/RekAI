@@ -135,6 +135,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (sync and async) accept `prompt_cache_key`, and JS
   `ChatOptions.promptCacheKey` maps to it, completing SDK parity with the
   gateway field above.
+- **SDKs forward Anthropic MCP connector servers.** Python `chat()`/`stream()`
+  (sync and async) accept `mcp_servers`, and JS `ChatOptions.mcpServers` maps
+  to it, so SDK callers can use Anthropic's server-side tool connector already
+  supported by `/v1/chat` without hand-writing gateway requests.
 
 ### Changed
 - **Provider HTTP clients now cap the connect phase at 5s** (httpx's default,

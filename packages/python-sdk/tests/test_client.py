@@ -622,6 +622,7 @@ def test_stream_forwards_the_same_chat_request_options() -> None:
             thinking={"type": "enabled", "budget_tokens": 16},
             cache_control={"type": "ephemeral"},
             output_config={"effort": "low"},
+            mcp_servers=[{"type": "url", "url": "https://mcp.example", "name": "docs"}],
             provider_key="sk-provider",
             gateway_key="sk-gateway",
         )
@@ -650,6 +651,7 @@ def test_stream_forwards_the_same_chat_request_options() -> None:
     assert body["thinking"] == {"type": "enabled", "budget_tokens": 16}
     assert body["cache_control"] == {"type": "ephemeral"}
     assert body["output_config"] == {"effort": "low"}
+    assert body["mcp_servers"] == [{"type": "url", "url": "https://mcp.example", "name": "docs"}]
     # Streaming is not idempotent or cached server-side, so those chat-only
     # knobs stay out of the payload.
     assert "fallbacks" not in body
@@ -1115,6 +1117,7 @@ def test_async_chat_forwards_output_config() -> None:
                 "claude-sonnet-4-6",
                 [{"role": "user", "content": "hi"}],
                 output_config={"effort": "low", "format": {"type": "json_object"}},
+                mcp_servers=[{"type": "url", "url": "https://mcp.example", "name": "docs"}],
             )
 
     asyncio.run(run())
@@ -1122,6 +1125,9 @@ def test_async_chat_forwards_output_config() -> None:
         "effort": "low",
         "format": {"type": "json_object"},
     }
+    assert captured["body"]["mcp_servers"] == [
+        {"type": "url", "url": "https://mcp.example", "name": "docs"}
+    ]
 
 
 def test_async_chat_raises_on_error() -> None:
@@ -1273,6 +1279,7 @@ def test_async_stream_forwards_chat_request_options() -> None:
                 service_tier="priority",
                 cache_control={"type": "ephemeral"},
                 output_config={"effort": "medium"},
+                mcp_servers=[{"type": "url", "url": "https://mcp.example", "name": "docs"}],
                 prompt_cache_key="cache-1",
             ):
                 pass
@@ -1286,6 +1293,7 @@ def test_async_stream_forwards_chat_request_options() -> None:
     assert body["service_tier"] == "priority"
     assert body["cache_control"] == {"type": "ephemeral"}
     assert body["output_config"] == {"effort": "medium"}
+    assert body["mcp_servers"] == [{"type": "url", "url": "https://mcp.example", "name": "docs"}]
     assert body["prompt_cache_key"] == "cache-1"
 
 
@@ -1492,7 +1500,7 @@ def test_a_long_retry_after_returns_the_response_instead_of_sleeping():
     assert time.monotonic() - started < 5.0
 
 
-def test_chat_forwards_thinking_and_cache_control() -> None:
+def test_chat_forwards_anthropic_request_options() -> None:
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -1517,9 +1525,13 @@ def test_chat_forwards_thinking_and_cache_control() -> None:
         [{"role": "user", "content": "hi"}],
         thinking={"type": "enabled", "budget_tokens": 256},
         cache_control={"type": "ephemeral"},
+        mcp_servers=[{"type": "url", "url": "https://mcp.example", "name": "docs"}],
     )
     assert captured["body"]["thinking"] == {"type": "enabled", "budget_tokens": 256}
     assert captured["body"]["cache_control"] == {"type": "ephemeral"}
+    assert captured["body"]["mcp_servers"] == [
+        {"type": "url", "url": "https://mcp.example", "name": "docs"}
+    ]
 
 
 def test_chat_forwards_output_config() -> None:

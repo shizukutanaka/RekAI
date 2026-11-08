@@ -122,6 +122,9 @@ export interface ChatOptions {
    * `{'format': {...}}` for structured output. Forwarded verbatim to Anthropic
    * only; other providers ignore it. */
   outputConfig?: Record<string, unknown>;
+  /** Anthropic MCP connector servers (`mcp_servers`), forwarded verbatim to
+   * Anthropic only; other providers ignore them. */
+  mcpServers?: Record<string, unknown>[];
   /** Sent as the `Idempotency-Key` header so a retried request replays the
    * first response instead of re-processing. Auto-generated when omitted and
    * `maxRetries > 0`. */
