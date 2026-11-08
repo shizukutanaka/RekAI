@@ -30,6 +30,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   name the served model on every frame, but RekAI discarded it and kept the
   requested model; subsequent chunks now propagate the provider-reported
   model (the initial role chunk still precedes upstream metadata).
+- **Ollama streams report the upstream model.** Ollama names the served model
+  on every NDJSON frame, but RekAI's parser discarded it; stream accounting
+  and summaries now use the reported model like unary responses.
+- **Gemini reports the served `modelVersion`.** Unary responses and stream
+  summaries previously echoed the requested id; they now propagate the exact
+  model version reported upstream.
 - **SDKs expose prompt-cache and reasoning token breakdowns.** The gateway has
   reported `cache_read_tokens`, `cache_write_tokens`, and `reasoning_tokens`
   inside `usage` on every `/v1/chat` and `/v1/chat/stream` summary for a while
