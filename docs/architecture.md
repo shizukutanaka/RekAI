@@ -1395,9 +1395,12 @@ Two deliberate limits:
 
 `POST /v1/embeddings` mirrors the chat path: route → cache → `provider.embed()`.
 It accepts a string or list of strings, returns one vector per input, and is
-cached (keyed by provider/model/inputs). Echo returns deterministic hash-based
-vectors so the endpoint works with no key; OpenAI and OpenAI-compatible backends
-call the real `/embeddings` API, **Ollama** calls its local `/api/embed`
+cached (keyed by provider/model/inputs plus `dimensions`/`encoding_format`).
+Echo returns deterministic hash-based vectors so the endpoint works with no key;
+OpenAI and OpenAI-compatible backends call the real `/embeddings` API.
+`encoding_format="base64"` is forwarded upstream and decoded back into the
+public float-vector response, so callers and cache entries keep the same JSON
+shape regardless of wire format. **Ollama** calls its local `/api/embed`
 (keyless, e.g. `nomic-embed-text`), and **Gemini** uses `:batchEmbedContents`
 (e.g. `text-embedding-004`, via `provider="gemini"`). Providers opt in by
 overriding `embed()`. `/v1/models` tags every entry with a `type`
