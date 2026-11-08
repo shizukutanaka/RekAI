@@ -164,7 +164,7 @@ class GeminiProvider(Provider):
         completion_tokens = meta.get("candidatesTokenCount", 0)
         return ProviderResult(
             content=content,
-            model=request.model,
+            model=data.get("modelVersion") or request.model,
             tool_calls=tool_calls,
             finish_reason=_finish_reason(data, tool_calls),
             usage=Usage(
@@ -229,6 +229,7 @@ class GeminiProvider(Provider):
             f"{_safe_model_id(request.model)}:streamGenerateContent?alt=sse"
         )
         last_usage: dict | None = None
+        served_model: str | None = None
         finish_reason: FinishReason | None = None
         # Gemini streams a functionCall complete within a chunk; collect across chunks.
         tool_calls: list[dict] = []
@@ -253,6 +254,8 @@ class GeminiProvider(Provider):
                         chunk = json.loads(data)
                     except json.JSONDecodeError:
                         continue
+                    if isinstance(chunk.get("modelVersion"), str):
+                        served_model = chunk["modelVersion"]
                     text = _extract_text(chunk)
                     if text:
                         yield StreamEvent(delta=text)
@@ -271,10 +274,11 @@ class GeminiProvider(Provider):
             for i, call in enumerate(tool_calls):
                 call["id"] = f"call_{call['function']['name'] or 'fn'}_{i}"
             yield StreamEvent(tool_calls=tool_calls)
-        if last_usage is not None or finish_reason is not None:
+        if last_usage is not None or finish_reason is not None or served_model is not None:
             prompt_tokens = (last_usage or {}).get("promptTokenCount", 0)
             completion_tokens = (last_usage or {}).get("candidatesTokenCount", 0)
             yield StreamEvent(
+                model=served_model,
                 usage=(
                     Usage(
                         prompt_tokens=prompt_tokens,

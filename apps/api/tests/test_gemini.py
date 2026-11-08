@@ -30,6 +30,7 @@ async def test_chat_parses_response(monkeypatch) -> None:
 
         def json(self) -> dict:
             return {
+                "modelVersion": "gemini-1.5-flash-001",
                 "candidates": [{"content": {"parts": [{"text": "Hello "}, {"text": "world"}]}}],
                 "usageMetadata": {
                     "promptTokenCount": 3,
@@ -64,6 +65,7 @@ async def test_chat_parses_response(monkeypatch) -> None:
     result = await GeminiProvider().chat(_req(messages=msgs, max_tokens=32), api_key="g-key")
 
     assert result.content == "Hello world"
+    assert result.model == "gemini-1.5-flash-001"
     assert result.usage.total_tokens == 5
     # system prompt hoisted, assistant mapped to role "model".
     assert captured["json"]["systemInstruction"]["parts"][0]["text"] == "be terse"
@@ -246,7 +248,8 @@ class _GeminiStreamClient:
                 )
                 yield "data: not-json"
                 yield (
-                    'data: {"candidates":[{"content":{"parts":[{"text":"world"}]},'
+                    'data: {"modelVersion":"gemini-1.5-flash-001",'
+                    '"candidates":[{"content":{"parts":[{"text":"world"}]},'
                     '"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,'
                     '"candidatesTokenCount":3,"totalTokenCount":8}}'
                 )
@@ -271,6 +274,7 @@ async def test_gemini_stream_events_yields_deltas_usage_and_tool_calls(monkeypat
     assert deltas == ["Hello ", "world"]
     usage = next(e.usage for e in events if e.usage)
     assert usage.total_tokens == 8
+    assert next(e.model for e in events if e.model) == "gemini-1.5-flash-001"
     calls = next(e.tool_calls for e in events if e.tool_calls)
     assert calls[0]["function"]["name"] == "lookup"
     finish = next(e.finish_reason for e in events if e.finish_reason)
