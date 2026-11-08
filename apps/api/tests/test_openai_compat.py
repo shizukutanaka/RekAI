@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from rekai.config import Settings
@@ -115,10 +116,11 @@ def test_unknown_params_ignored(client: TestClient) -> None:
     assert resp.status_code == 200
 
 
-def test_n_greater_than_one_rejected(client: TestClient) -> None:
+@pytest.mark.parametrize("n", [0, -1, 2])
+def test_n_other_than_one_rejected(client: TestClient, n: int) -> None:
     resp = client.post(
         "/v1/chat/completions",
-        json={"model": "echo", "messages": [{"role": "user", "content": "hi"}], "n": 2},
+        json={"model": "echo", "messages": [{"role": "user", "content": "hi"}], "n": n},
     )
     assert resp.status_code == 400
     assert resp.json()["error"]["type"] == "invalid_request_error"
