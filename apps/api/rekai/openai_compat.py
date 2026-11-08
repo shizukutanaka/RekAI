@@ -122,6 +122,7 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         reasoning_effort=req.reasoning_effort,
         stop=stop,
         top_p=req.top_p,
+        top_k=req.top_k,
         seed=req.seed,
         frequency_penalty=req.frequency_penalty,
         presence_penalty=req.presence_penalty,

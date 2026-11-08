@@ -38,6 +38,7 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         # Sampling params change the answer too — a `seed=42` reply must not
         # serve a `seed=1` request.
         "top_p": request.top_p,
+        "top_k": request.top_k,
         "seed": request.seed,
         "frequency_penalty": request.frequency_penalty,
         "presence_penalty": request.presence_penalty,
@@ -139,6 +140,7 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
         "reasoning_effort": request.reasoning_effort,
         "stop": request.stop,
         "top_p": request.top_p,
+        "top_k": request.top_k,
         "seed": request.seed,
         "frequency_penalty": request.frequency_penalty,
         "presence_penalty": request.presence_penalty,
