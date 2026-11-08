@@ -163,6 +163,13 @@ class ChatRequest(BaseModel):
         "level string. Forwarded to Ollama only; other providers ignore it. "
         "Changes the answer and its reasoning cost, so it joins the cache key.",
     )
+    ollama_options: dict[str, Any] | None = Field(
+        default=None,
+        description="Ollama's per-request `options` object (num_ctx, top_k, "
+        "min_p, repeat_penalty, num_thread, ...). Merged after RekAI's shared "
+        "option mapping, so an explicit ollama_options value wins; forwarded "
+        "to Ollama only and included in the cache key.",
+    )
     context_management: dict[str, Any] | None = Field(
         default=None,
         description="Anthropic's `context_management` — context-editing rules "
@@ -376,6 +383,7 @@ class ChatCompletionsRequest(BaseModel):
     n: int | None = None  # 400 unless n is omitted or 1 (RekAI returns one choice)
     provider: str | None = None  # RekAI extension: explicit provider override
     think: bool | str | None = None  # RekAI extension: Ollama thinking switch
+    ollama_options: dict[str, Any] | None = None  # Ollama `options` passthrough
     # OpenAI's pre-tools function-calling API (deprecated since 0613 but still
     # emitted by older SDKs and codebases). Normalized to tools/tool_choice in
     # the compat layer; modern `tools` wins when both are sent.

@@ -13,9 +13,10 @@ import httpx
 import pytest
 
 from rekai.cache import cache_key, semantic_bucket
+from rekai.openai_compat import to_chat_request
 from rekai.providers.base import ProviderError
 from rekai.providers.ollama import OllamaProvider, _parse_ollama_ndjson_event
-from rekai.schemas import ChatMessage, ChatRequest
+from rekai.schemas import ChatCompletionsRequest, ChatMessage, ChatRequest
 
 WEATHER_TOOL = {
     "type": "function",
@@ -581,3 +582,48 @@ async def test_no_max_tokens_leaves_ollamas_own_default_alone(monkeypatch) -> No
     options = FakeClient.captured["json"]["options"]
     assert "num_predict" not in options
     assert options["temperature"] == pytest.approx(0.7)
+
+
+async def test_ollama_options_reach_ollama_and_can_override(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    await OllamaProvider().chat(
+        ChatRequest(
+            model="llama3",
+            messages=[ChatMessage(role="user", content="hi")],
+            max_tokens=32,
+            ollama_options={"num_ctx": 8192, "top_k": 20, "min_p": 0.05, "num_predict": 16},
+        ),
+        api_key=None,
+    )
+    options = FakeClient.captured["json"]["options"]
+    assert options["num_ctx"] == 8192
+    assert options["top_k"] == 20
+    assert options["min_p"] == 0.05
+    # The provider-native object is the explicit escape hatch and wins over the
+    # shared max_tokens → num_predict mapping.
+    assert options["num_predict"] == 16
+
+
+def test_openai_compat_maps_ollama_options() -> None:
+    req = ChatCompletionsRequest(
+        model="llama3",
+        messages=[{"role": "user", "content": "hi"}],
+        ollama_options={"num_ctx": 8192, "repeat_penalty": 1.1},
+    )
+    assert to_chat_request(req).ollama_options == {
+        "num_ctx": 8192,
+        "repeat_penalty": 1.1,
+    }
+
+
+def test_ollama_options_change_the_cache_key() -> None:
+    base = ChatRequest(model="m", messages=[ChatMessage(role="user", content="hi")])
+    tuned = ChatRequest(
+        model="m",
+        messages=[ChatMessage(role="user", content="hi")],
+        ollama_options={"num_ctx": 8192},
+    )
+    assert cache_key(base, "ollama") != cache_key(tuned, "ollama")
+    assert semantic_bucket(base, "ollama", "client-1") != semantic_bucket(
+        tuned, "ollama", "client-1"
+    )
