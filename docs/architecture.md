@@ -499,7 +499,9 @@ do not change the answer (`cache`, `fallbacks`, `user`, `safety_identifier`,
 `prompt_cache_key` still reaches OpenAI-compatible providers verbatim: OpenAI
 uses it to bucket similar prompts for upstream cache hits, while RekAI's own
 cache treats it like `user` — a routing/cost hint, not part of the request's
-response identity. Backends:
+response identity. OpenAI `store`/`metadata` are bookkeeping side effects rather
+than response identity too, but requests carrying them bypass both cache layers
+entirely so a hit cannot skip the upstream record. Backends:
 
 - **Redis** when `REKAI_REDIS_URL` is set (shared across processes/nodes).
 - **Memory** otherwise (per-process; great for local dev and tests).

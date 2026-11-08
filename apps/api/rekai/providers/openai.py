@@ -149,6 +149,10 @@ class OpenAIProvider(Provider):
             # OpenAI buckets similar prompts for cache hits by this key; it does
             # not change the answer, so RekAI's own cache keys ignore it.
             payload["prompt_cache_key"] = request.prompt_cache_key
+        if request.store is not None:
+            payload["store"] = request.store
+        if request.metadata is not None:
+            payload["metadata"] = request.metadata
         return payload
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:

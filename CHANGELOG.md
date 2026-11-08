@@ -7,6 +7,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`/v1/chat/completions` forwards OpenAI `store` and `metadata`.** These
+  bookkeeping fields previously disappeared inside `extra="allow"`, so a
+  request could not ask OpenAI to retain a completion or attach searchable
+  labels. They now reach OpenAI/OpenAI-compatible providers, and requests
+  carrying them bypass RekAI's exact/semantic response caches so a cache hit
+  cannot silently skip the upstream record.
 - **Prepaid credit balances — sellable metered access.** `POST /admin/keys`
   now accepts `credit_usd`, and a new `POST /admin/keys/{key}/credits` route
   tops up any key's USD balance (static `REKAI_API_KEYS` entries included).

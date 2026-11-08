@@ -216,3 +216,62 @@ def test_prompt_cache_key_does_not_change_the_semantic_bucket() -> None:
     a = semantic_bucket(_req(prompt_cache_key="a"), "openai", "client-1")
     b = semantic_bucket(_req(prompt_cache_key="b"), "openai", "client-1")
     assert a == b
+
+
+# --- store / metadata --------------------------------------------------------
+# OpenAI's bookkeeping fields have provider-side effects (retain the completion
+# and attach searchable labels). They are not answer-shaping fields, but a
+# RekAI cache hit would silently skip that bookkeeping, so requests carrying
+# them bypass both cache layers.
+
+
+async def test_store_and_metadata_reach_openai(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    await OpenAIProvider().chat(_req(store=True, metadata={"tenant": "a"}), api_key="sk-x")
+    assert _Client.captured["store"] is True
+    assert _Client.captured["metadata"] == {"tenant": "a"}
+
+
+async def test_store_and_metadata_not_sent_to_anthropic(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    await AnthropicProvider().chat(_req(store=True, metadata={"tenant": "a"}), api_key="sk-x")
+    assert "store" not in _Client.captured
+    assert _Client.captured.get("metadata") is None
+
+
+def test_openai_compat_maps_store_and_metadata() -> None:
+    req = ChatCompletionsRequest(
+        model="m",
+        messages=[{"role": "user", "content": "hi"}],
+        store=True,
+        metadata={"tenant": "a"},
+    )
+    chat = to_chat_request(req)
+    assert chat.store is True
+    assert chat.metadata == {"tenant": "a"}
+    assert chat.cache is False
+
+
+async def test_store_bypasses_the_response_cache(monkeypatch) -> None:
+    from rekai.cache import MemoryCache
+    from rekai.config import Settings
+    from rekai.providers.base import ProviderResult
+    from rekai.providers.echo import EchoProvider
+    from rekai.service import handle_chat
+
+    calls = 0
+
+    async def counted_chat(self, request, api_key):
+        nonlocal calls
+        calls += 1
+        return ProviderResult(content="ok", model="echo")
+
+    monkeypatch.setattr(EchoProvider, "chat", counted_chat)
+    request = _req(model="echo", store=True)
+    settings = Settings(environment="test", default_provider="echo")
+    cache = MemoryCache()
+    first = await handle_chat(request, None, settings, cache)
+    second = await handle_chat(request, None, settings, cache)
+    assert calls == 2
+    assert first.cached is False
+    assert second.cached is False

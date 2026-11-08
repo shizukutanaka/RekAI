@@ -131,7 +131,9 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         include_obfuscation=(
             req.stream_options.include_obfuscation if req.stream_options else None
         ),
-        cache=True,
+        # `store`/`metadata` are upstream bookkeeping side effects, not answer
+        # shaping — a RekAI cache hit must not silently skip them.
+        cache=req.store is None and req.metadata is None,
         tools=tools,
         tool_choice=tool_choice,
         parallel_tool_calls=req.parallel_tool_calls,
@@ -140,6 +142,8 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         safety_identifier=req.safety_identifier,
         think=req.think,
         prompt_cache_key=req.prompt_cache_key,
+        store=req.store,
+        metadata=req.metadata,
     )
 
 
