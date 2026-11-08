@@ -50,8 +50,13 @@ await client.chat("gpt-4o-mini", "hi", {
 // Stop sequences (a string or an array; forwarded to whichever provider you call)
 await client.chat("gpt-4o-mini", "Count to ten.", { stop: ["5", "six"] });
 
-// OpenAI reasoning models: cap completion tokens, including reasoning
-await client.chat("o3", "hi", { provider: "openai", maxCompletionTokens: 512 });
+// OpenAI reasoning models: cap completion tokens and control effort/verbosity
+await client.chat("o3", "hi", {
+  provider: "openai",
+  maxCompletionTokens: 512,
+  reasoningEffort: "high",
+  verbosity: "low",
+});
 
 // OpenAI prompt-cache routing key (a cost hint, not RekAI's cache key)
 await client.chat("gpt-4o-mini", "hi", { provider: "openai", promptCacheKey: "tenant-a" });
