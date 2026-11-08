@@ -148,6 +148,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (sync and async) accept `mcp_servers`, and JS `ChatOptions.mcpServers` maps
   to it, so SDK callers can use Anthropic's server-side tool connector already
   supported by `/v1/chat` without hand-writing gateway requests.
+- **Anthropic-compatible endpoints require a non-blank `model`.**
+  `/v1/messages` and `/v1/messages/count_tokens` previously accepted `""` or
+  whitespace-only model names; request validation now rejects them in
+  Anthropic's error envelope.
 
 ### Changed
 - **Provider HTTP clients now cap the connect phase at 5s** (httpx's default,
