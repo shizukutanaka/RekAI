@@ -22,6 +22,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Admin page: grant and view prepaid USD credit per key (initial credit on add,
   top-up form, balances in the key lists); top-ups to an unknown or expired key
   return 404 instead of crediting an orphan balance.
+- **Ollama streams report the upstream model.** Ollama names the served model
+  on every NDJSON frame, but RekAI's parser discarded it; stream accounting
+  and summaries now use the reported model like unary responses.
 - **SDKs expose prompt-cache and reasoning token breakdowns.** The gateway has
   reported `cache_read_tokens`, `cache_write_tokens`, and `reasoning_tokens`
   inside `usage` on every `/v1/chat` and `/v1/chat/stream` summary for a while
