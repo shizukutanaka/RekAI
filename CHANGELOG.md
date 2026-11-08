@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`/v1/chat/completions` forwards OpenAI prompt-cache controls.** The newer
+  `prompt_cache_options` (`mode`/`ttl`) and deprecated `prompt_cache_retention`
+  reach OpenAI/OpenAI-compatible providers instead of being swallowed by
+  `extra="allow"`. Both join RekAI's cache keys because they change the
+  upstream cache-write work and measured cost for an identical prompt.
 - **Prepaid credit balances — sellable metered access.** `POST /admin/keys`
   now accepts `credit_usd`, and a new `POST /admin/keys/{key}/credits` route
   tops up any key's USD balance (static `REKAI_API_KEYS` entries included).

@@ -275,6 +275,20 @@ class ChatRequest(BaseModel):
         "to OpenAI/OpenAI-compatible providers only; like `user`, it is a "
         "routing hint and does not join the cache key.",
     )
+    prompt_cache_options: dict[str, Any] | None = Field(
+        default=None,
+        description="OpenAI's `prompt_cache_options` ({'mode': 'explicit', "
+        "'ttl': '12h'}) — controls upstream prompt-cache breakpoints and "
+        "minimum lifetime. Forwarded verbatim to OpenAI-compatible providers "
+        "only; it changes upstream cache behavior and billing, so it joins the "
+        "cache key.",
+    )
+    prompt_cache_retention: str | None = Field(
+        default=None,
+        description="OpenAI's deprecated `prompt_cache_retention` "
+        "('in_memory' | '24h'). Forwarded verbatim to OpenAI-compatible "
+        "providers only; newer callers should use `prompt_cache_options.ttl`.",
+    )
 
     @field_validator("stop", mode="before")
     @classmethod
@@ -373,6 +387,8 @@ class ChatCompletionsRequest(BaseModel):
     user: str | None = None  # forwarded to the provider as its end-user id
     safety_identifier: str | None = None  # OpenAI's newer abuse-detection id
     prompt_cache_key: str | None = None  # OpenAI's prompt-cache routing key
+    prompt_cache_options: dict[str, Any] | None = None  # breakpoint mode and TTL
+    prompt_cache_retention: str | None = None  # deprecated; use options.ttl
     n: int | None = None  # 400 unless n is omitted or 1 (RekAI returns one choice)
     provider: str | None = None  # RekAI extension: explicit provider override
     think: bool | str | None = None  # RekAI extension: Ollama thinking switch
