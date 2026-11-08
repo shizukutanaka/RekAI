@@ -1367,8 +1367,10 @@ async def _handle_embeddings(
     _check_embedding_dimensions(provider_name, provider, request.dimensions)
 
     inputs = [request.input] if isinstance(request.input, str) else list(request.input)
-    if not inputs:
+    if not inputs or any(not item for item in inputs):
         raise ProviderError("'input' must not be empty.", status_code=422)
+    if len(inputs) > 2048:
+        raise ProviderError("'input' supports at most 2048 items.", status_code=422)
 
     use_cache = settings.cache_enabled and request.cache
     key = embedding_cache_key(

@@ -390,6 +390,7 @@ class OllamaProvider(Provider):
                         and event.thinking_delta is None
                         and event.usage is None
                         and event.finish_reason is None
+                        and event.model is None
                     ):
                         continue
                     yield event
@@ -437,15 +438,18 @@ def _parse_ollama_ndjson_event(line: str) -> StreamEvent | None:
                 total_tokens=prompt_tokens + completion_tokens,
             )
     delta = content if content else None
+    model = chunk.get("model")
     if (
         delta is None
         and thinking_delta is None
         and tool_calls is None
         and usage is None
         and finish_reason is None
+        and model is None
     ):
         return None
     return StreamEvent(
+        model=model if isinstance(model, str) else None,
         delta=delta,
         thinking_delta=thinking_delta,
         tool_calls=tool_calls,
