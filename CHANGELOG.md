@@ -22,6 +22,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Admin page: grant and view prepaid USD credit per key (initial credit on add,
   top-up form, balances in the key lists); top-ups to an unknown or expired key
   return 404 instead of crediting an orphan balance.
+- **`/v1/chat/completions` streams report the upstream model.** OpenAI chunks
+  name the served model on every frame, but RekAI discarded it and kept the
+  requested model; subsequent chunks now propagate the provider-reported
+  model (the initial role chunk still precedes upstream metadata).
 - **Ollama streams report the upstream model.** Ollama names the served model
   on every NDJSON frame, but RekAI's parser discarded it; stream accounting
   and summaries now use the reported model like unary responses.

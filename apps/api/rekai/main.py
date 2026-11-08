@@ -2194,10 +2194,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         include_usage = request.stream_options is not None and request.stream_options.include_usage
 
         async def event_source():
+            stream_model = model
+
             def sse(obj: dict) -> str:
                 return f"data: {json.dumps(obj)}\n\n"
 
-            yield sse(openai_compat.chunk_first(chunk_id, created, model))
+            yield sse(openai_compat.chunk_first(chunk_id, created, stream_model))
             finish_reason = "stop"
             seen_fingerprint: str | None = None
             seen_tier: str | None = None
@@ -2211,6 +2213,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 client_id,
                 key_store,
             ):
+                if ev.model is not None:
+                    stream_model = ev.model
                 if ev.system_fingerprint is not None:
                     seen_fingerprint = ev.system_fingerprint
                 if ev.service_tier is not None:
@@ -2220,7 +2224,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         openai_compat.chunk_delta(
                             chunk_id,
                             created,
-                            model,
+                            stream_model,
                             ev.delta,
                             system_fingerprint=seen_fingerprint,
                             service_tier=seen_tier,
@@ -2228,11 +2232,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     )
                 elif ev.refusal_delta is not None:
                     yield sse(
-                        openai_compat.chunk_refusal(chunk_id, created, model, ev.refusal_delta)
+                        openai_compat.chunk_refusal(
+                            chunk_id, created, stream_model, ev.refusal_delta
+                        )
                     )
                 elif ev.annotations is not None:
                     yield sse(
-                        openai_compat.chunk_annotations(chunk_id, created, model, ev.annotations)
+                        openai_compat.chunk_annotations(
+                            chunk_id, created, stream_model, ev.annotations
+                        )
                     )
                 elif ev.error is not None:
                     yield sse(openai_compat.openai_error(ev.error.status_code, str(ev.error)))
@@ -2249,7 +2257,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             openai_compat.chunk_tool_calls(
                                 chunk_id,
                                 created,
-                                model,
+                                stream_model,
                                 ev.summary.tool_calls,
                                 system_fingerprint=seen_fingerprint,
                                 service_tier=seen_tier,
@@ -2259,7 +2267,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         openai_compat.chunk_finish(
                             chunk_id,
                             created,
-                            model,
+                            stream_model,
                             finish_reason,
                             system_fingerprint=seen_fingerprint,
                             service_tier=seen_tier,
@@ -2270,7 +2278,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             openai_compat.chunk_usage(
                                 chunk_id,
                                 created,
-                                model,
+                                stream_model,
                                 ev.summary.usage,
                                 system_fingerprint=seen_fingerprint,
                                 service_tier=seen_tier,
