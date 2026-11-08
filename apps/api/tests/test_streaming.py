@@ -292,11 +292,13 @@ async def test_echo_stream_events_reports_exact_usage() -> None:
 
 def test_openai_sse_event_parses_usage() -> None:
     line = (
-        'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":7,"total_tokens":12}}'
+        'data: {"model":"gpt-4o-mini-2024-07-18","choices":[],'
+        '"usage":{"prompt_tokens":5,"completion_tokens":7,"total_tokens":12}}'
     )
     event = _parse_openai_sse_event(line)
     assert event is not None and event.usage is not None
     assert event.usage.total_tokens == 12
+    assert event.model == "gpt-4o-mini-2024-07-18"
     # A delta line yields a delta event, not usage.
     delta_event = _parse_openai_sse_event('data: {"choices":[{"delta":{"content":"Hi"}}]}')
     assert delta_event is not None and delta_event.delta == "Hi" and delta_event.usage is None
@@ -305,10 +307,14 @@ def test_openai_sse_event_parses_usage() -> None:
 def test_ollama_ndjson_event_parses_usage() -> None:
     from rekai.providers.ollama import _parse_ollama_ndjson_event
 
-    line = '{"message":{"content":""},"done":true,"prompt_eval_count":4,"eval_count":6}'
+    line = (
+        '{"model":"llama3.2:latest","message":{"content":""},'
+        '"done":true,"prompt_eval_count":4,"eval_count":6}'
+    )
     event = _parse_ollama_ndjson_event(line)
     assert event is not None and event.usage is not None
     assert event.usage.total_tokens == 10
+    assert event.model == "llama3.2:latest"
 
 
 # --- OpenAI native streaming with mocked HTTP -------------------------------

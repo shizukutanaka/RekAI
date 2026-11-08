@@ -466,6 +466,7 @@ class _CachedProvider(Provider):
 
     async def stream_events(self, request, api_key):  # type: ignore[no-untyped-def]
         result = await self.chat(request, api_key)
+        yield StreamEvent(model="served-model")
         yield StreamEvent(delta=result.content)
         yield StreamEvent(usage=result.usage, finish_reason="stop")
 
@@ -505,6 +506,8 @@ def test_stream_usage_chunk_carries_prompt_tokens_details(client: TestClient) ->
         },
     )
     chunks = [json.loads(p) for p in _parse_sse(resp.text) if p != "[DONE]"]
+    assert chunks[0]["model"] == "m"  # role chunk precedes upstream metadata
+    assert all(c["model"] == "served-model" for c in chunks[1:])
     usage_chunk = next(c for c in chunks if c.get("usage"))
     assert usage_chunk["usage"]["prompt_tokens_details"] == {"cached_tokens": 900}
 
