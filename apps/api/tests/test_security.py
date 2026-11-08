@@ -677,6 +677,34 @@ def test_model_acl_applies_to_anthropic_compat_streaming() -> None:
     assert stream.json()["error"]["type"] == "permission_error"
 
 
+def test_model_acl_denies_models_reached_through_anthropic_fallbacks() -> None:
+    client = TestClient(create_app(_acl_settings()))
+    headers = {"Authorization": "Bearer sk-acl"}
+    body = {"model": "echo", "max_tokens": 16, "messages": [{"role": "user", "content": "hi"}]}
+    assert client.post("/v1/messages", json=body, headers=headers).status_code == 200
+    for fallbacks in ([{"model": "claude-opus-4-1"}], "default", [{}]):
+        resp = client.post("/v1/messages", json={**body, "fallbacks": fallbacks}, headers=headers)
+        assert resp.status_code == 403, fallbacks
+        assert resp.json()["error"]["type"] == "permission_error"
+    chat = client.post(
+        "/v1/chat",
+        json={
+            "model": "echo",
+            "messages": [{"role": "user", "content": "hi"}],
+            "anthropic_fallbacks": [{"model": "claude-opus-4-1"}],
+        },
+        headers=headers,
+    )
+    assert chat.status_code == 403
+    assert chat.json()["error"] == "model_not_allowed"
+    allowed = client.post(
+        "/v1/messages",
+        json={**body, "fallbacks": [{"model": "echo"}]},
+        headers=headers,
+    )
+    assert allowed.status_code == 200
+
+
 def test_client_budget_override_beats_global_default() -> None:
     settings = Settings(
         environment="test",

@@ -530,12 +530,25 @@ def _model_acl_denied(http_request: Request, models: list[str]) -> JSONResponse 
     return None
 
 
+_ANTHROPIC_DEFAULT_FALLBACK = "anthropic-fallback:default"
+
+
 def _acl_models(request: ChatRequest | EmbeddingsRequest | ModerationRequest) -> list[str]:
     """Every model the request could route to: its own plus per-fallback
     overrides (a fallback without an explicit model inherits request.model)."""
     models = [request.model]
     for target in getattr(request, "fallbacks", None) or []:
         models.append(target.model or request.model)
+    # Anthropic's server-side refusal fallback can serve the reply from a
+    # substitute model. "default" (or an entry without a model) lets Anthropic
+    # pick it, so a restricted key cannot vouch for it — fail closed.
+    anthropic_fallbacks = getattr(request, "anthropic_fallbacks", None)
+    if isinstance(anthropic_fallbacks, list):
+        for entry in anthropic_fallbacks:
+            model = entry.get("model") if isinstance(entry, dict) else None
+            models.append(model if isinstance(model, str) else _ANTHROPIC_DEFAULT_FALLBACK)
+    elif anthropic_fallbacks is not None:
+        models.append(_ANTHROPIC_DEFAULT_FALLBACK)
     return models
 
 
