@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Role = Literal["system", "user", "assistant", "tool"]
+
+# At least one non-whitespace character. Field constraints serialize cleanly
+# into FastAPI's RequestValidationError details, unlike a ValueError in ctx.
+ModelName = Annotated[str, Field(min_length=1, pattern=r"\S")]
 
 
 class ChatMessage(BaseModel):
@@ -47,7 +51,7 @@ class FallbackTarget(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    model: str = Field(..., description="Model name, e.g. 'gpt-4o-mini' or 'echo'.")
+    model: ModelName = Field(..., description="Model name, e.g. 'gpt-4o-mini' or 'echo'.")
     messages: list[ChatMessage] = Field(..., min_length=1)
     provider: str | None = Field(
         default=None,
@@ -665,7 +669,9 @@ class ChatResponse(BaseModel):
 
 
 class EmbeddingsRequest(BaseModel):
-    model: str = Field(..., description="Embedding model, e.g. 'text-embedding-3-small' or 'echo'.")
+    model: ModelName = Field(
+        ..., description="Embedding model, e.g. 'text-embedding-3-small' or 'echo'."
+    )
     input: str | list[str] = Field(..., description="A string or list of strings to embed.")
     provider: str | None = Field(default=None, description="Force a provider (else routed).")
     cache: bool = Field(default=True)
@@ -710,7 +716,7 @@ class ModerationRequest(BaseModel):
         description="Text to classify: a string, a list of strings, or OpenAI's "
         "content-part list (`{'type': 'text'|'image_url', ...}`) — forwarded verbatim.",
     )
-    model: str = Field(
+    model: ModelName = Field(
         default="omni-moderation-latest",
         description="Moderation model; OpenAI's own default when omitted.",
     )
