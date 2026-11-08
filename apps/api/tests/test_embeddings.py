@@ -53,6 +53,20 @@ def test_embeddings_cached_on_second_call(client: TestClient) -> None:
     assert first.json()["embeddings"] == second.json()["embeddings"]
 
 
+@pytest.mark.parametrize("input_value", ["", [], [""], ["valid", ""]])
+def test_embeddings_rejects_empty_input(client: TestClient, input_value: str | list[str]) -> None:
+    resp = client.post("/v1/embeddings", json={"model": "echo", "input": input_value})
+    assert resp.status_code == 422
+
+
+def test_embeddings_rejects_more_than_2048_inputs(client: TestClient) -> None:
+    resp = client.post(
+        "/v1/embeddings",
+        json={"model": "echo", "input": ["x"] * 2049},
+    )
+    assert resp.status_code == 422
+
+
 def test_embeddings_unsupported_provider(client: TestClient) -> None:
     # ollama is reachable in routing but has no embed() override here -> 400.
     resp = client.post(

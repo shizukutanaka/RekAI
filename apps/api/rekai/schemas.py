@@ -373,7 +373,7 @@ class ChatCompletionsRequest(BaseModel):
     user: str | None = None  # forwarded to the provider as its end-user id
     safety_identifier: str | None = None  # OpenAI's newer abuse-detection id
     prompt_cache_key: str | None = None  # OpenAI's prompt-cache routing key
-    n: int | None = None  # 400 if n > 1 (RekAI returns a single choice)
+    n: int | None = None  # 400 unless n is omitted or 1 (RekAI returns one choice)
     provider: str | None = None  # RekAI extension: explicit provider override
     think: bool | str | None = None  # RekAI extension: Ollama thinking switch
     # OpenAI's pre-tools function-calling API (deprecated since 0613 but still

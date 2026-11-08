@@ -81,9 +81,9 @@ def _resolve_provider_and_model(req: ChatCompletionsRequest) -> tuple[str | None
 
 def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
     """Translate an OpenAI ChatCompletions request into RekAI's ChatRequest."""
-    if req.n is not None and req.n > 1:
+    if req.n is not None and req.n != 1:
         raise ProviderError(
-            "RekAI returns a single choice; 'n' > 1 is not supported.",
+            "RekAI returns a single choice; 'n' must be 1.",
             status_code=400,
         )
     provider, model = _resolve_provider_and_model(req)
