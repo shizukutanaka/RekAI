@@ -22,6 +22,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Admin page: grant and view prepaid USD credit per key (initial credit on add,
   top-up form, balances in the key lists); top-ups to an unknown or expired key
   return 404 instead of crediting an orphan balance.
+- **`/v1/embeddings` validates empty and oversized inputs.** OpenAI rejects an
+  empty input string, empty arrays or empty array members, and more than 2,048
+  array items; RekAI now rejects the same shapes before routing, cache lookup,
+  or provider billing.
 - **SDKs expose prompt-cache and reasoning token breakdowns.** The gateway has
   reported `cache_read_tokens`, `cache_write_tokens`, and `reasoning_tokens`
   inside `usage` on every `/v1/chat` and `/v1/chat/stream` summary for a while
