@@ -4,8 +4,8 @@
 They were accepted on the OpenAI-compatible surface via `extra="allow"` and
 then *dropped* — a caller asking for `seed=42` got a 200 that silently ignored
 it. Each provider forwards only what it natively supports: OpenAI-compatible
-backends take all five, Anthropic takes `top_p`, Gemini and Ollama take
-`top_p` and `seed` (under their own names).
+backends take all five, Anthropic takes `top_p`, Gemini takes `topP`, `seed`,
+and both penalties (under their own names), and Ollama takes `top_p` and `seed`.
 """
 
 from __future__ import annotations
@@ -121,11 +121,15 @@ async def test_other_providers_forward_what_they_support(
         assert field not in sent and field not in container
 
 
-async def test_gemini_forwards_top_p_and_seed(monkeypatch) -> None:
+async def test_gemini_forwards_supported_tuning_params(monkeypatch) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", _Client)
     await GeminiProvider().chat(_REQ, api_key="sk-x")
-    assert _Client.captured["generationConfig"]["topP"] == 0.9
-    assert _Client.captured["generationConfig"]["seed"] == 42
+    generation = _Client.captured["generationConfig"]
+    assert generation["topP"] == 0.9
+    assert generation["seed"] == 42
+    assert generation["frequencyPenalty"] == 0.5
+    assert generation["presencePenalty"] == -0.5
+    assert "logit_bias" not in generation
 
 
 @pytest.mark.parametrize(
@@ -147,7 +151,9 @@ async def test_no_tuning_params_sends_no_keys(monkeypatch, provider, api_key, co
         "topP",
         "seed",
         "frequency_penalty",
+        "frequencyPenalty",
         "presence_penalty",
+        "presencePenalty",
         "logit_bias",
     } & set(sent)
 
