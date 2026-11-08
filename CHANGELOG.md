@@ -22,6 +22,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Admin page: grant and view prepaid USD credit per key (initial credit on add,
   top-up form, balances in the key lists); top-ups to an unknown or expired key
   return 404 instead of crediting an orphan balance.
+- **`/v1/chat/completions` streams report the upstream model.** OpenAI chunks
+  name the served model on every frame, but RekAI discarded it and kept the
+  requested model; subsequent chunks now propagate the provider-reported
+  model (the initial role chunk still precedes upstream metadata).
+- **Ollama streams report the upstream model.** Ollama names the served model
+  on every NDJSON frame, but RekAI's parser discarded it; stream accounting
+  and summaries now use the reported model like unary responses.
+- **Gemini reports the served `modelVersion`.** Unary responses and stream
+  summaries previously echoed the requested id; they now propagate the exact
+  model version reported upstream.
 - **SDKs expose prompt-cache and reasoning token breakdowns.** The gateway has
   reported `cache_read_tokens`, `cache_write_tokens`, and `reasoning_tokens`
   inside `usage` on every `/v1/chat` and `/v1/chat/stream` summary for a while
@@ -152,6 +162,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/v1/messages` and `/v1/messages/count_tokens` previously accepted `""` or
   whitespace-only model names; request validation now rejects them in
   Anthropic's error envelope.
+- **`/v1/chat/completions` rejected only `n > 1`.** `n=0` and negative values
+  were silently ignored even though RekAI always returns one choice; now any
+  value other than `1` is a readable `invalid_request_error`.
 
 ### Changed
 - **Provider HTTP clients now cap the connect phase at 5s** (httpx's default,
