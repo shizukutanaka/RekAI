@@ -26,6 +26,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   empty input string, empty arrays or empty array members, and more than 2,048
   array items; RekAI now rejects the same shapes before routing, cache lookup,
   or provider billing.
+- **`/v1/chat/completions` streams report the upstream model.** OpenAI chunks
+  name the served model on every frame, but RekAI discarded it and kept the
+  requested model; subsequent chunks now propagate the provider-reported
+  model (the initial role chunk still precedes upstream metadata).
 - **SDKs expose prompt-cache and reasoning token breakdowns.** The gateway has
   reported `cache_read_tokens`, `cache_write_tokens`, and `reasoning_tokens`
   inside `usage` on every `/v1/chat` and `/v1/chat/stream` summary for a while

@@ -335,6 +335,8 @@ def _parse_openai_sse_event(line: str) -> StreamEvent | None:
     except json.JSONDecodeError:
         return None
     meta = {}
+    if (model := chunk.get("model")) is not None:
+        meta["model"] = model
     if (fp := chunk.get("system_fingerprint")) is not None:
         meta["system_fingerprint"] = fp
     if (tier := chunk.get("service_tier")) is not None:
