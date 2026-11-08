@@ -294,6 +294,7 @@ def _build_payload(
     thinking: dict[str, Any] | None = None,
     cache_control: dict[str, Any] | None = None,
     output_config: dict[str, Any] | None = None,
+    mcp_servers: list[dict[str, Any]] | None = None,
     max_completion_tokens: int | None = None,
     prompt_cache_key: str | None = None,
 ) -> dict[str, Any]:
@@ -348,6 +349,9 @@ def _build_payload(
     # Anthropic output config (effort/format); other providers ignore it.
     if output_config is not None:
         payload["output_config"] = output_config
+    # Anthropic MCP connector servers; other providers ignore them.
+    if mcp_servers is not None:
+        payload["mcp_servers"] = mcp_servers
     return payload
 
 
@@ -457,6 +461,7 @@ class RekAIClient:
         thinking: dict[str, Any] | None = None,
         cache_control: dict[str, Any] | None = None,
         output_config: dict[str, Any] | None = None,
+        mcp_servers: list[dict[str, Any]] | None = None,
         max_completion_tokens: int | None = None,
         prompt_cache_key: str | None = None,
     ) -> dict[str, Any]:
@@ -485,6 +490,7 @@ class RekAIClient:
             thinking,
             cache_control,
             output_config,
+            mcp_servers=mcp_servers,
             max_completion_tokens=max_completion_tokens,
             prompt_cache_key=prompt_cache_key,
         )
@@ -556,6 +562,7 @@ class RekAIClient:
         thinking: dict[str, Any] | None = None,
         cache_control: dict[str, Any] | None = None,
         output_config: dict[str, Any] | None = None,
+        mcp_servers: list[dict[str, Any]] | None = None,
         prompt_cache_key: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
@@ -608,6 +615,7 @@ class RekAIClient:
             thinking,
             cache_control,
             output_config,
+            mcp_servers=mcp_servers,
             max_completion_tokens=max_completion_tokens,
             prompt_cache_key=prompt_cache_key,
         )
@@ -648,6 +656,7 @@ class RekAIClient:
         thinking: dict[str, Any] | None = None,
         cache_control: dict[str, Any] | None = None,
         output_config: dict[str, Any] | None = None,
+        mcp_servers: list[dict[str, Any]] | None = None,
         prompt_cache_key: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
@@ -695,6 +704,7 @@ class RekAIClient:
             thinking=thinking,
             cache_control=cache_control,
             output_config=output_config,
+            mcp_servers=mcp_servers,
             max_completion_tokens=max_completion_tokens,
             prompt_cache_key=prompt_cache_key,
         )
@@ -933,6 +943,7 @@ class AsyncRekAIClient:
         thinking: dict[str, Any] | None = None,
         cache_control: dict[str, Any] | None = None,
         output_config: dict[str, Any] | None = None,
+        mcp_servers: list[dict[str, Any]] | None = None,
         prompt_cache_key: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
@@ -964,6 +975,7 @@ class AsyncRekAIClient:
             thinking,
             cache_control,
             output_config,
+            mcp_servers=mcp_servers,
             max_completion_tokens=max_completion_tokens,
             prompt_cache_key=prompt_cache_key,
         )
@@ -1004,6 +1016,7 @@ class AsyncRekAIClient:
         thinking: dict[str, Any] | None = None,
         cache_control: dict[str, Any] | None = None,
         output_config: dict[str, Any] | None = None,
+        mcp_servers: list[dict[str, Any]] | None = None,
         prompt_cache_key: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
@@ -1048,6 +1061,7 @@ class AsyncRekAIClient:
             thinking=thinking,
             cache_control=cache_control,
             output_config=output_config,
+            mcp_servers=mcp_servers,
             max_completion_tokens=max_completion_tokens,
             prompt_cache_key=prompt_cache_key,
         )

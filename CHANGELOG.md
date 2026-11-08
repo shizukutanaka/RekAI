@@ -142,6 +142,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   RekAI's provider/model `fallbacks` chain. Unary and streamed responses
   report the model Anthropic actually used, including after a refusal
   handoff, and the field joins the exact and semantic cache keys.
+- **SDKs forward Anthropic MCP connector servers.** Python `chat()`/`stream()`
+  (sync and async) accept `mcp_servers`, and JS `ChatOptions.mcpServers` maps
+  to it, so SDK callers can use Anthropic's server-side tool connector already
+  supported by `/v1/chat` without hand-writing gateway requests.
 
 ### Changed
 - **Provider HTTP clients now cap the connect phase at 5s** (httpx's default,
@@ -195,6 +199,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `seed` and keyed it into the cache, but the Gemini provider dropped it
   instead of sending `generationConfig.seed`; deterministic Gemini callers
   now get the reproducibility the parameter promises.
+- **Gemini requests ignored repetition penalties.** `frequency_penalty` and
+  `presence_penalty` were typed, cached, and documented as supported tuning
+  params but never reached Gemini; they now map to
+  `generationConfig.frequencyPenalty` / `presencePenalty`.
 - **Anthropic system-prompt cache breakpoints were dropped.** `/v1/messages`
   accepts `system` as text blocks carrying `cache_control`, but RekAI flattened
   the list into a plain string before calling Anthropic, so the cache prefix was

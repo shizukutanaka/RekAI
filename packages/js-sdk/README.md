@@ -73,6 +73,11 @@ await client.chat("claude-sonnet-4-6", "answer tersely", {
   outputConfig: { effort: "low" },
 });
 
+// Anthropic MCP connector (server-side tools; Anthropic only)
+await client.chat("claude-sonnet-4-6", "search the docs", {
+  mcpServers: [{ type: "url", url: "https://mcp.example", name: "docs" }],
+});
+
 // Structured output (OpenAI/OpenAI-compatible natively, Gemini best-effort)
 await client.chat("gpt-4o-mini", "Return JSON with a 'city' field for Tokyo.", {
   responseFormat: { type: "json_object" },

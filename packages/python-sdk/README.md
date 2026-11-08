@@ -81,6 +81,13 @@ client.chat("claude-sonnet-4-6", "stable instructions", cache_control={"type": "
 # Anthropic output config (effort / structured-output format; Anthropic only)
 client.chat("claude-sonnet-4-6", "answer tersely", output_config={"effort": "low"})
 
+# Anthropic MCP connector (server-side tools; Anthropic only)
+client.chat(
+    "claude-sonnet-4-6",
+    "search the docs",
+    mcp_servers=[{"type": "url", "url": "https://mcp.example", "name": "docs"}],
+)
+
 # Embeddings (echo works keyless; OpenAI-compatible call the real API)
 emb = client.embeddings("echo", ["hello", "world"])
 print(len(emb.embeddings), emb.usage["total_tokens"], emb.cached)
