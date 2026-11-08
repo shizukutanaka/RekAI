@@ -56,8 +56,15 @@ client.chat("gpt-4o-mini", "hi", fallbacks=[{"provider": "echo", "model": "echo"
 # Stop sequences (a bare string or a list; forwarded to whichever provider you call)
 client.chat("gpt-4o-mini", "Count to ten.", stop=["5", "six"])
 
-# OpenAI reasoning models: cap completion tokens, including reasoning
-client.chat("o3", "hi", provider="openai", max_completion_tokens=512)
+# OpenAI reasoning models: cap completion tokens and control effort/verbosity
+client.chat(
+    "o3",
+    "hi",
+    provider="openai",
+    max_completion_tokens=512,
+    reasoning_effort="high",
+    verbosity="low",
+)
 
 # Tool / function calling (OpenAI-compatible)
 res = client.chat(

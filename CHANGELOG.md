@@ -148,6 +148,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (sync and async) accept `mcp_servers`, and JS `ChatOptions.mcpServers` maps
   to it, so SDK callers can use Anthropic's server-side tool connector already
   supported by `/v1/chat` without hand-writing gateway requests.
+- **SDKs expose OpenAI response controls.** Python `chat()`/`stream()` (sync
+  and async) accept `reasoning_effort` and `verbosity`, and JS
+  `ChatOptions.reasoningEffort` / `verbosity` map to the gateway fields
+  already forwarded to OpenAI-compatible providers.
 
 ### Changed
 - **Provider HTTP clients now cap the connect phase at 5s** (httpx's default,
