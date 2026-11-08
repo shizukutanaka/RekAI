@@ -241,6 +241,11 @@ class AnthropicProvider(Provider):
         # Output config (effort/format) too — Anthropic's own vocabulary.
         if request.output_config is not None:
             payload["output_config"] = request.output_config
+        # Anthropic's server-side refusal fallback. Distinct from RekAI's
+        # `fallbacks` provider chain: this asks Anthropic to retry a declined
+        # request on a substitute model inside the same Messages call.
+        if request.anthropic_fallbacks is not None:
+            payload["fallbacks"] = request.anthropic_fallbacks
         if stream:
             payload["stream"] = True
         return payload
@@ -268,11 +273,20 @@ class AnthropicProvider(Provider):
         # Anthropic takes the user profile as a header, not a body field.
         if request is not None and request.user_profile_id is not None:
             headers["anthropic-user-profile-id"] = request.user_profile_id
+        # Beta-gated Anthropic features need their flag set to survive the
+        # compat hop — merge caller flags with the ones RekAI adds because a
+        # request field requires them.
+        required_betas: list[str] = []
         # Anthropic's MCP connector is a beta: mcp_servers is rejected without it.
         if request is not None and request.mcp_servers:
+            required_betas.append("mcp-client-2025-11-20")
+        if request is not None and request.anthropic_fallbacks is not None:
+            required_betas.append("server-side-fallback-2026-07-01")
+        if required_betas:
             flags = [f.strip() for f in (beta or "").split(",") if f.strip()]
-            if "mcp-client-2025-11-20" not in flags:
-                flags.append("mcp-client-2025-11-20")
+            for flag in required_betas:
+                if flag not in flags:
+                    flags.append(flag)
             headers["anthropic-beta"] = ",".join(flags)
         return headers
 
@@ -401,6 +415,7 @@ class AnthropicProvider(Provider):
         # start block + accumulated input_json, keyed by block index.
         extra_blocks: dict[int, dict] = {}
         extra_json: dict[int, str] = {}
+        reported_model: str | None = None
         try:
             client = self._client(settings.request_timeout_seconds)
             async with client.stream(
@@ -442,9 +457,18 @@ class AnthropicProvider(Provider):
                             # server_tool_use, web_search_tool_result, mcp_*,
                             # code_execution, and anything new: pass through.
                             idx = event.get("index", 0)
+                            block_model = None
+                            if block.get("type") == "fallback":
+                                # Server-side fallback marks the model handoff;
+                                # `to.model` is the model that continues.
+                                to = block.get("to")
+                                to_model = to.get("model") if isinstance(to, dict) else None
+                                if isinstance(to_model, str):
+                                    reported_model = to_model
+                                    block_model = to_model
                             extra_blocks[idx] = dict(block)
                             extra_json[idx] = ""
-                            yield StreamEvent(extra_block_start=block)
+                            yield StreamEvent(extra_block_start=block, model=block_model)
                     elif etype == "content_block_delta":
                         delta = event.get("delta", {})
                         text = delta.get("text")
@@ -500,9 +524,12 @@ class AnthropicProvider(Provider):
                             yield StreamEvent(extra_block=block)
                     elif etype == "message_start":
                         msg = event.get("message", {})
+                        reported = msg.get("model")
+                        if isinstance(reported, str):
+                            reported_model = reported
                         extras = _response_extras(msg)
-                        if extras:
-                            yield StreamEvent(extra_fields=extras)
+                        if reported_model is not None or extras is not None:
+                            yield StreamEvent(model=reported_model, extra_fields=extras)
                         usage = msg.get("usage", {})
                         input_tokens = usage.get("input_tokens", input_tokens)
                         output_tokens = usage.get("output_tokens", output_tokens)
@@ -546,6 +573,7 @@ class AnthropicProvider(Provider):
                 ),
                 finish_reason=finish_reason,
                 service_tier=service_tier,
+                model=reported_model,
                 stop_sequence=stop_sequence,
             )
 

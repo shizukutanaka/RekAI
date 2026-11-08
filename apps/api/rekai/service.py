@@ -83,10 +83,11 @@ class StreamSummary:
 class ChatStreamEvent:
     """One event from :func:`handle_chat_stream`.
 
-    Exactly one field is set: a text ``delta``, a terminal ``error``, or the
-    terminal ``summary``. The transport layer decides how to serialize each
-    (native SSE vs OpenAI-compatible chunks), so the pipeline stays format-
-    agnostic and is shared by both streaming endpoints.
+    Exactly one payload field is set: a text ``delta``, a terminal ``error``,
+    or the terminal ``summary``. Provider metadata may accompany it (or arrive
+    alone). The transport layer decides how to serialize each (native SSE vs
+    OpenAI-compatible chunks), so the pipeline stays format-agnostic and is
+    shared by both streaming endpoints.
     """
 
     delta: str | None = None
@@ -99,6 +100,9 @@ class ChatStreamEvent:
     # may arrive alone on the role-announcement chunk.
     system_fingerprint: str | None = None
     service_tier: str | None = None
+    # The model that actually produced this stream when the provider reports
+    # it — Anthropic server-side refusal fallback can switch models mid-stream.
+    model: str | None = None
     # Anthropic extended-thinking pieces — a thinking_delta chunk, the block's
     # closing signature, or a whole redacted_thinking block.
     thinking_delta: str | None = None
@@ -256,6 +260,7 @@ async def _verify_semantic_hit(
             "response_format": None,
             "cache_control": None,
             "fallbacks": None,
+            "anthropic_fallbacks": None,
             "cache": False,
         }
     )
@@ -987,6 +992,7 @@ async def _handle_chat_stream(
     extra_delta_shapes: dict[str, str] = {}
     extra_hits: list[str] = []
     stream = provider.stream_events(request, api_key)
+    reported_model: str | None = None
     try:
         seen_fingerprint: str | None = None
         seen_tier: str | None = None
@@ -995,6 +1001,44 @@ async def _handle_chat_stream(
                 seen_fingerprint = event.system_fingerprint
             if event.service_tier is not None:
                 seen_tier = event.service_tier
+            handled_extra_fields = False
+            if event.model is not None:
+                reported_model = event.model
+                has_payload = any(
+                    value is not None
+                    for value in (
+                        event.delta,
+                        event.refusal_delta,
+                        event.annotations,
+                        event.thinking_delta,
+                        event.thinking_signature,
+                        event.thinking_block,
+                        event.citation,
+                        event.extra_block_start,
+                        event.extra_block_delta,
+                        event.extra_block,
+                        event.usage,
+                        event.tool_calls,
+                        event.finish_reason,
+                        event.stop_sequence,
+                    )
+                )
+                if event.extra_fields is not None:
+                    # Anthropic's message_start carries the model and
+                    # message-level extras in one event; keep them together so
+                    # /v1/messages can emit its message_start with both.
+                    yield ChatStreamEvent(
+                        model=event.model,
+                        extra_fields=_scrub_if(
+                            event.extra_fields,
+                            redaction_on,
+                            extra_hits,
+                            [(n, p) for n, _, p in custom],
+                        ),
+                    )
+                    handled_extra_fields = True
+                elif not has_payload:
+                    yield ChatStreamEvent(model=event.model)
             if event.delta:
                 if thinking_redactor is not None:
                     tail = thinking_redactor.flush()
@@ -1126,7 +1170,7 @@ async def _handle_chat_stream(
                         [(n, p) for n, _, p in custom],
                     )
                 )
-            if event.extra_fields is not None:
+            if event.extra_fields is not None and not handled_extra_fields:
                 yield ChatStreamEvent(
                     extra_fields=_scrub_if(
                         event.extra_fields,
@@ -1199,7 +1243,7 @@ async def _handle_chat_stream(
                 settings,
                 client_id,
                 provider_name,
-                request.model,
+                reported_model or request.model,
                 request.user,
                 Usage(
                     prompt_tokens=prompt_tokens,
@@ -1228,7 +1272,13 @@ async def _handle_chat_stream(
                 total_tokens=prompt_tokens + completion_tokens,
             )
         cost_usd = await _record_stream_accounting(
-            settings, client_id, provider_name, request.model, request.user, usage, key_store
+            settings,
+            client_id,
+            provider_name,
+            reported_model or request.model,
+            request.user,
+            usage,
+            key_store,
         )
         tool_call_hits: list[str] = []
         if redaction_on and reported_tool_calls is not None:
@@ -1240,7 +1290,7 @@ async def _handle_chat_stream(
         yield ChatStreamEvent(
             summary=StreamSummary(
                 provider=provider_name,
-                model=request.model,
+                model=reported_model or request.model,
                 usage=usage,
                 cost_usd=cost_usd,
                 estimated=estimated,

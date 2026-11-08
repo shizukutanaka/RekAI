@@ -177,6 +177,40 @@ async def test_anthropic_stream_events_assembles_tool_calls(monkeypatch) -> None
     assert tool_calls[0]["function"]["arguments"] == '{"city":"Tokyo"}'
 
 
+async def test_anthropic_stream_events_track_fallback_model(monkeypatch) -> None:
+    from tests.test_streaming import _FakeClient
+
+    lines = [
+        'data: {"type":"message_start","message":{"model":"claude-a",'
+        '"usage":{"input_tokens":1,"output_tokens":0}}}',
+        'data: {"type":"content_block_start","index":0,'
+        '"content_block":{"type":"fallback","from":{"model":"claude-a"},'
+        '"to":{"model":"claude-b"},"trigger":{"type":"refusal","category":"cyber"}}}',
+        'data: {"type":"content_block_stop","index":0}',
+        'data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}',
+        'data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ok"}}',
+        'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},'
+        '"usage":{"output_tokens":1}}',
+        'data: {"type":"message_stop"}',
+    ]
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: _FakeClient(lines))
+
+    req = ChatRequest(
+        model="claude-a",
+        messages=[ChatMessage(role="user", content="hi")],
+        anthropic_fallbacks="default",
+    )
+    events = [e async for e in AnthropicProvider().stream_events(req, api_key="sk-ant")]
+    assert events[0].model == "claude-a"
+    fallback_start = next(
+        e.extra_block_start
+        for e in events
+        if e.extra_block_start and e.extra_block_start.get("type") == "fallback"
+    )
+    assert fallback_start["to"]["model"] == "claude-b"
+    assert events[-1].model == "claude-b"
+
+
 async def test_anthropic_chat_tool_choice_none_forbids_tool_use(monkeypatch) -> None:
     """tool_choice="none" must reach Anthropic as an explicit refusal to call a
     tool, not as an omitted field.

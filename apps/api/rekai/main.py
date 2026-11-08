@@ -530,12 +530,25 @@ def _model_acl_denied(http_request: Request, models: list[str]) -> JSONResponse 
     return None
 
 
+_ANTHROPIC_DEFAULT_FALLBACK = "anthropic-fallback:default"
+
+
 def _acl_models(request: ChatRequest | EmbeddingsRequest | ModerationRequest) -> list[str]:
     """Every model the request could route to: its own plus per-fallback
     overrides (a fallback without an explicit model inherits request.model)."""
     models = [request.model]
     for target in getattr(request, "fallbacks", None) or []:
         models.append(target.model or request.model)
+    # Anthropic's server-side refusal fallback can serve the reply from a
+    # substitute model. "default" (or an entry without a model) lets Anthropic
+    # pick it, so a restricted key cannot vouch for it — fail closed.
+    anthropic_fallbacks = getattr(request, "anthropic_fallbacks", None)
+    if isinstance(anthropic_fallbacks, list):
+        for entry in anthropic_fallbacks:
+            model = entry.get("model") if isinstance(entry, dict) else None
+            models.append(model if isinstance(model, str) else _ANTHROPIC_DEFAULT_FALLBACK)
+    elif anthropic_fallbacks is not None:
+        models.append(_ANTHROPIC_DEFAULT_FALLBACK)
     return models
 
 
@@ -2362,6 +2375,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # message_start emits lazily so extras arriving on upstream's own
             # message_start (container, ...) merge into the same skeleton.
             started = False
+            stream_model = chat_request.model
             # Content blocks are indexed in order: thinking blocks (0..n, each
             # closed by its signature_delta), then the text block, then tool_use.
             open_block: str | None = None  # "thinking" | "text" | "extra"
@@ -2379,10 +2393,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 client_id,
                 key_store,
             ):
+                if ev.model is not None:
+                    stream_model = ev.model
                 if not started:
-                    yield anthropic_compat.ev_message_start(
-                        msg_id, chat_request.model, ev.extra_fields
-                    )
+                    yield anthropic_compat.ev_message_start(msg_id, stream_model, ev.extra_fields)
                     started = True
                     if ev.extra_fields is not None:
                         continue

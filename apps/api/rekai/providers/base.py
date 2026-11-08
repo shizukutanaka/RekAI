@@ -229,6 +229,9 @@ class StreamEvent:
     # carries no delta) — see ProviderResult for what they mean.
     system_fingerprint: str | None = None
     service_tier: str | None = None
+    # The model that actually produced this stream when the provider reports
+    # it — Anthropic server-side refusal fallback can switch models mid-stream.
+    model: str | None = None
     stop_sequence: str | None = None
     # OpenAI streams refusal text as `delta.refusal` chunks, separate from
     # `delta.content` — kept apart for the same reason as ProviderResult.

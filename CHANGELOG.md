@@ -135,6 +135,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (sync and async) accept `prompt_cache_key`, and JS
   `ChatOptions.promptCacheKey` maps to it, completing SDK parity with the
   gateway field above.
+- **Anthropic server-side refusal fallback reaches Anthropic.** `/v1/messages`
+  now accepts Anthropic's beta `fallbacks` field (`"default"` or ordered
+  fallback entries), forwards it verbatim, adds the required
+  `server-side-fallback-2026-07-01` beta flag, and keeps it distinct from
+  RekAI's provider/model `fallbacks` chain. Unary and streamed responses
+  report the model Anthropic actually used, including after a refusal
+  handoff, and the field joins the exact and semantic cache keys. Substitute
+  models it names count against a key's `REKAI_KEY_MODELS` allowlist, and a
+  restricted key cannot use `"default"` (Anthropic picks the model).
 - **SDKs forward Anthropic MCP connector servers.** Python `chat()`/`stream()`
   (sync and async) accept `mcp_servers`, and JS `ChatOptions.mcpServers` maps
   to it, so SDK callers can use Anthropic's server-side tool connector already

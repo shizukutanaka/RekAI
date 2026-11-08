@@ -60,6 +60,21 @@ class UsageReportingProvider(_StreamOnlyProvider):
         yield StreamEvent(usage=Usage(prompt_tokens=5, completion_tokens=2, total_tokens=7))
 
 
+class ModelReportingProvider(_StreamOnlyProvider):
+    """Reports the model that actually served the stream."""
+
+    name = "svc-model-reporting"
+    requires_key = False
+
+    async def stream_events(self, request, api_key):
+        yield StreamEvent(model="actual-model")
+        yield StreamEvent(delta="ok")
+        yield StreamEvent(
+            usage=Usage(prompt_tokens=5, completion_tokens=2, total_tokens=7),
+            model="actual-model",
+        )
+
+
 class ToolCallingStreamProvider(_StreamOnlyProvider):
     name = "svc-tool-calling"
     requires_key = False
@@ -152,6 +167,25 @@ async def test_provider_reported_usage_used_verbatim() -> None:
     summary = next(e.summary for e in events if e.summary is not None)
     assert summary.estimated is False
     assert summary.usage == Usage(prompt_tokens=5, completion_tokens=2, total_tokens=7)
+
+
+async def test_stream_summary_uses_reported_model() -> None:
+    provider = ModelReportingProvider()
+    register_provider(provider)
+    events = [
+        e
+        async for e in handle_chat_stream(
+            _req(provider="svc-model-reporting"),
+            None,
+            _settings(),
+            NullCache(),
+            "svc-model-reporting",
+            provider,
+            "client-a",
+        )
+    ]
+    summary = next(e.summary for e in events if e.summary is not None)
+    assert summary.model == "actual-model"
 
 
 async def test_tool_calls_surfaced_in_summary() -> None:

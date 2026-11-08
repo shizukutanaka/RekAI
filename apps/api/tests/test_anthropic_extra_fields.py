@@ -9,9 +9,10 @@ request with no error. Each is now declared, mapped, sent verbatim upstream,
 and part of the cache keys. OpenAI, Gemini, and Ollama have no such fields —
 they must never receive them.
 
-Anthropic's own `fallbacks` is deliberately *not* forwarded: RekAI's extension
-uses the same name with different semantics (provider fallback targets vs
-Anthropic's model fallbacks), so forwarding would misroute.
+Anthropic's own `fallbacks` is forwarded under a distinct internal field:
+RekAI's extension uses the same inbound name with different semantics
+(provider fallback targets vs Anthropic's model fallbacks), so the compat
+layer maps it to `anthropic_fallbacks` instead of RekAI's `fallbacks`.
 """
 
 from __future__ import annotations
@@ -157,16 +158,18 @@ def test_compat_maps_field(field: str, value: object) -> None:
 
 
 def test_anthropic_fallbacks_is_not_misread_as_rekai_fallbacks() -> None:
-    """Anthropic's `fallbacks` is a list of model names; RekAI's is provider
+    """Anthropic's `fallbacks` names substitute models; RekAI's is provider
     fallback targets. A client sending Anthropic-shaped fallbacks must not get
     it silently validated into RekAI's routing extension."""
+    fallbacks = [{"model": "claude-haiku-4-5"}]
     req = AnthropicMessagesRequest.model_validate(
         {
             "model": "claude-sonnet-4-6",
             "max_tokens": 2000,
-            "fallbacks": ["claude-haiku-4-5"],
+            "fallbacks": fallbacks,
             "messages": [{"role": "user", "content": "hi"}],
         }
     )
     chat_req = to_chat_request(req)
     assert chat_req.fallbacks is None
+    assert chat_req.anthropic_fallbacks == fallbacks

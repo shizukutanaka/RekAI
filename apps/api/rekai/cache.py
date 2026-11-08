@@ -46,6 +46,10 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         # Beta flags change what the provider is asked to do (e.g.
         # interleaved thinking changes the streamed shape).
         "anthropic_beta": request.anthropic_beta,
+        # Anthropic's server-side refusal fallback can change the serving
+        # model — a declined-then-answered response must not satisfy a request
+        # that did not ask for the fallback.
+        "anthropic_fallbacks": request.anthropic_fallbacks,
         "messages": [m.model_dump() for m in request.messages],
         "tools": request.tools,
         "tool_choice": request.tool_choice,
@@ -141,6 +145,8 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
         "logit_bias": request.logit_bias,
         "service_tier": request.service_tier,
         "anthropic_beta": request.anthropic_beta,
+        # Same reason as cache_key: the fallback can change the serving model.
+        "anthropic_fallbacks": request.anthropic_fallbacks,
         "tools": request.tools,
         "tool_choice": request.tool_choice,
         "parallel_tool_calls": request.parallel_tool_calls,
