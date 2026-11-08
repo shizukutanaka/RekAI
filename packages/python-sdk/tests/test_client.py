@@ -615,6 +615,8 @@ def test_stream_forwards_the_same_chat_request_options() -> None:
             presence_penalty=-0.2,
             logit_bias={"1": 2},
             service_tier="priority",
+            reasoning_effort="high",
+            verbosity="low",
             web_search_options={"search_context_size": "low"},
             user="u-1",
             safety_identifier="s-1",
@@ -644,6 +646,8 @@ def test_stream_forwards_the_same_chat_request_options() -> None:
     assert body["presence_penalty"] == -0.2
     assert body["logit_bias"] == {"1": 2}
     assert body["service_tier"] == "priority"
+    assert body["reasoning_effort"] == "high"
+    assert body["verbosity"] == "low"
     assert body["web_search_options"] == {"search_context_size": "low"}
     assert body["user"] == "u-1"
     assert body["safety_identifier"] == "s-1"
@@ -1079,6 +1083,8 @@ def test_async_chat_returns_result() -> None:
                 provider_key="sk-x",
                 max_completion_tokens=16,
                 prompt_cache_key="cache-1",
+                reasoning_effort="medium",
+                verbosity="high",
             )
 
     result = asyncio.run(run())
@@ -1088,6 +1094,8 @@ def test_async_chat_returns_result() -> None:
     assert captured["body"]["messages"] == [{"role": "user", "content": "hi"}]
     assert captured["body"]["max_completion_tokens"] == 16
     assert captured["body"]["prompt_cache_key"] == "cache-1"
+    assert captured["body"]["reasoning_effort"] == "medium"
+    assert captured["body"]["verbosity"] == "high"
     assert captured["url"].endswith("/v1/chat")
     assert captured["key"] == "sk-x"
 

@@ -156,6 +156,9 @@ export class RekAIClient {
     if (opts.presencePenalty != null) payload.presence_penalty = opts.presencePenalty;
     if (opts.logitBias != null) payload.logit_bias = opts.logitBias;
     if (opts.serviceTier != null) payload.service_tier = opts.serviceTier;
+    // OpenAI reasoning-model controls; OpenAI-compatible providers only.
+    if (opts.reasoningEffort != null) payload.reasoning_effort = opts.reasoningEffort;
+    if (opts.verbosity != null) payload.verbosity = opts.verbosity;
     // OpenAI's hosted web-search config; OpenAI-compatible providers only.
     if (opts.webSearchOptions != null) payload.web_search_options = opts.webSearchOptions;
     // The providers' end-user id for abuse detection (OpenAI `user`,
