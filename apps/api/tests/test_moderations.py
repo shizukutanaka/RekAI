@@ -9,6 +9,7 @@ result so the surface works keyless.
 from __future__ import annotations
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from rekai.providers.echo import EchoProvider
@@ -95,6 +96,13 @@ def test_moderations_validation_error_uses_openai_envelope(client: TestClient) -
     error = resp.json()["error"]
     assert "input" in error["message"]
     assert error["param"] == "input"
+
+
+@pytest.mark.parametrize("model", ["", "   "])
+def test_moderations_rejects_blank_model(client: TestClient, model: str) -> None:
+    resp = client.post("/v1/moderations", json={"input": "x", "model": model})
+    assert resp.status_code == 422
+    assert resp.json()["error"]["param"] == "model"
 
 
 async def test_moderation_reaches_openai_verbatim(monkeypatch) -> None:

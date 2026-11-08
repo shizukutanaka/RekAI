@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -63,6 +64,15 @@ def test_chat_unknown_provider(client: TestClient) -> None:
 
 def test_chat_validation_error(client: TestClient) -> None:
     resp = client.post("/v1/chat", json={"model": "echo", "messages": []})
+    assert resp.status_code == 422
+
+
+@pytest.mark.parametrize("model", ["", "   "])
+def test_chat_rejects_blank_model(client: TestClient, model: str) -> None:
+    resp = client.post(
+        "/v1/chat",
+        json={"model": model, "messages": [{"role": "user", "content": "hi"}]},
+    )
     assert resp.status_code == 422
 
 

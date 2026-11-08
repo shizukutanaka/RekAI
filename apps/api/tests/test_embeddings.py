@@ -38,6 +38,12 @@ def test_embeddings_endpoint_list_input(client: TestClient) -> None:
     assert len(resp.json()["embeddings"]) == 3
 
 
+@pytest.mark.parametrize("model", ["", "   "])
+def test_embeddings_rejects_blank_model(client: TestClient, model: str) -> None:
+    resp = client.post("/v1/embeddings", json={"model": model, "input": "hi"})
+    assert resp.status_code == 422
+
+
 def test_embeddings_cached_on_second_call(client: TestClient) -> None:
     payload = {"model": "echo", "input": "cache this embedding"}
     first = client.post("/v1/embeddings", json=payload)
