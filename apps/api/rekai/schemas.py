@@ -453,7 +453,7 @@ class _AnthropicMessagesBase(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    model: str
+    model: str = Field(..., min_length=1, pattern=r"\S")
     messages: list[AnthropicMessage] = Field(..., min_length=1)
     system: str | list[dict[str, Any]] | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=1.0)

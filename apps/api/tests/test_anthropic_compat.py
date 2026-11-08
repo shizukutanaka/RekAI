@@ -260,6 +260,16 @@ def test_max_tokens_required(client: TestClient) -> None:
     assert "max_tokens" in body["error"]["message"]
 
 
+@pytest.mark.parametrize("model", ["", "   "])
+def test_blank_model_rejected(client: TestClient, model: str) -> None:
+    resp = client.post("/v1/messages", json=_payload(model=model))
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["type"] == "error"
+    assert body["error"]["type"] == "invalid_request_error"
+    assert "model" in body["error"]["message"]
+
+
 def test_multi_block_content(client: TestClient) -> None:
     resp = client.post(
         "/v1/messages",
@@ -586,6 +596,19 @@ def test_count_tokens_errors_in_anthropic_envelope(client: TestClient) -> None:
     body = resp.json()
     assert body["type"] == "error"
     assert body["error"]["type"] == "invalid_request_error"
+
+
+@pytest.mark.parametrize("model", ["", "   "])
+def test_count_tokens_rejects_blank_model(client: TestClient, model: str) -> None:
+    resp = client.post(
+        "/v1/messages/count_tokens",
+        json=_payload(model=model),
+    )
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["type"] == "error"
+    assert body["error"]["type"] == "invalid_request_error"
+    assert "model" in body["error"]["message"]
 
 
 def test_count_tokens_includes_tool_use_and_tool_result_blocks(

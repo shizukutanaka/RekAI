@@ -166,6 +166,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/v1/embeddings`, and `/v1/moderations` previously accepted `""` or
   whitespace-only model names and could meter/bill a successful call under an
   empty model; request validation now rejects them.
+- **Anthropic-compatible endpoints require a non-blank `model`.**
+  `/v1/messages` and `/v1/messages/count_tokens` previously accepted `""` or
+  whitespace-only model names; request validation now rejects them in
+  Anthropic's error envelope.
 - **`/v1/chat/completions` rejected only `n > 1`.** `n=0` and negative values
   were silently ignored even though RekAI always returns one choice; now any
   value other than `1` is a readable `invalid_request_error`.
@@ -173,6 +177,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and async) accept `reasoning_effort` and `verbosity`, and JS
   `ChatOptions.reasoningEffort` / `verbosity` map to the gateway fields
   already forwarded to OpenAI-compatible providers.
+- **Blank `model` values rejected on `/v1/chat/completions`.** OpenAI requires
+  a model name, but an empty or whitespace-only string previously reached the
+  pipeline and could be billed as a successful call; it now returns
+  `invalid_request_error` before routing.
 
 ### Changed
 - **Provider HTTP clients now cap the connect phase at 5s** (httpx's default,
