@@ -297,6 +297,8 @@ def _build_payload(
     mcp_servers: list[dict[str, Any]] | None = None,
     max_completion_tokens: int | None = None,
     prompt_cache_key: str | None = None,
+    reasoning_effort: str | None = None,
+    verbosity: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -334,6 +336,11 @@ def _build_payload(
         payload["logit_bias"] = logit_bias
     if service_tier is not None:
         payload["service_tier"] = service_tier
+    # OpenAI reasoning-model controls; forwarded verbatim by OpenAI-compatible providers.
+    if reasoning_effort is not None:
+        payload["reasoning_effort"] = reasoning_effort
+    if verbosity is not None:
+        payload["verbosity"] = verbosity
     if web_search_options is not None:
         payload["web_search_options"] = web_search_options
     if user is not None:
@@ -464,6 +471,8 @@ class RekAIClient:
         mcp_servers: list[dict[str, Any]] | None = None,
         max_completion_tokens: int | None = None,
         prompt_cache_key: str | None = None,
+        reasoning_effort: str | None = None,
+        verbosity: str | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -493,6 +502,8 @@ class RekAIClient:
             mcp_servers=mcp_servers,
             max_completion_tokens=max_completion_tokens,
             prompt_cache_key=prompt_cache_key,
+            reasoning_effort=reasoning_effort,
+            verbosity=verbosity,
         )
 
     @staticmethod
@@ -564,6 +575,8 @@ class RekAIClient:
         output_config: dict[str, Any] | None = None,
         mcp_servers: list[dict[str, Any]] | None = None,
         prompt_cache_key: str | None = None,
+        reasoning_effort: str | None = None,
+        verbosity: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -618,6 +631,8 @@ class RekAIClient:
             mcp_servers=mcp_servers,
             max_completion_tokens=max_completion_tokens,
             prompt_cache_key=prompt_cache_key,
+            reasoning_effort=reasoning_effort,
+            verbosity=verbosity,
         )
         headers = _build_headers(
             self._provider_key,
@@ -658,6 +673,8 @@ class RekAIClient:
         output_config: dict[str, Any] | None = None,
         mcp_servers: list[dict[str, Any]] | None = None,
         prompt_cache_key: str | None = None,
+        reasoning_effort: str | None = None,
+        verbosity: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], None] | None = None,
@@ -707,6 +724,8 @@ class RekAIClient:
             mcp_servers=mcp_servers,
             max_completion_tokens=max_completion_tokens,
             prompt_cache_key=prompt_cache_key,
+            reasoning_effort=reasoning_effort,
+            verbosity=verbosity,
         )
         with self._client.stream(
             "POST",
@@ -945,6 +964,8 @@ class AsyncRekAIClient:
         output_config: dict[str, Any] | None = None,
         mcp_servers: list[dict[str, Any]] | None = None,
         prompt_cache_key: str | None = None,
+        reasoning_effort: str | None = None,
+        verbosity: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -978,6 +999,8 @@ class AsyncRekAIClient:
             mcp_servers=mcp_servers,
             max_completion_tokens=max_completion_tokens,
             prompt_cache_key=prompt_cache_key,
+            reasoning_effort=reasoning_effort,
+            verbosity=verbosity,
         )
         headers = _build_headers(
             self._provider_key,
@@ -1018,6 +1041,8 @@ class AsyncRekAIClient:
         output_config: dict[str, Any] | None = None,
         mcp_servers: list[dict[str, Any]] | None = None,
         prompt_cache_key: str | None = None,
+        reasoning_effort: str | None = None,
+        verbosity: str | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
@@ -1064,6 +1089,8 @@ class AsyncRekAIClient:
             mcp_servers=mcp_servers,
             max_completion_tokens=max_completion_tokens,
             prompt_cache_key=prompt_cache_key,
+            reasoning_effort=reasoning_effort,
+            verbosity=verbosity,
         )
         async with self._client.stream(
             "POST",

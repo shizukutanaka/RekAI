@@ -126,6 +126,16 @@ def test_n_other_than_one_rejected(client: TestClient, n: int) -> None:
     assert resp.json()["error"]["type"] == "invalid_request_error"
 
 
+@pytest.mark.parametrize("model", ["", "   "])
+def test_blank_model_rejected(client: TestClient, model: str) -> None:
+    resp = client.post(
+        "/v1/chat/completions",
+        json={"model": model, "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["type"] == "invalid_request_error"
+
+
 def test_content_parts_flattened(client: TestClient) -> None:
     resp = client.post(
         "/v1/chat/completions",

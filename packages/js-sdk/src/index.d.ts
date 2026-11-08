@@ -98,6 +98,12 @@ export interface ChatOptions {
    * 'scale'). Forwarded to OpenAI-compatible providers only.
    */
   serviceTier?: string;
+  /** OpenAI's `reasoning_effort` (e.g. "low" | "medium" | "high"), forwarded
+   * verbatim to OpenAI-compatible providers only. */
+  reasoningEffort?: string;
+  /** OpenAI's `verbosity` output-length control (e.g. "low" | "medium" |
+   * "high"), forwarded verbatim to OpenAI-compatible providers only. */
+  verbosity?: string;
   /** OpenAI's `web_search_options` — hosted web-search config (context size,
    * user location). OpenAI-compatible providers only. */
   webSearchOptions?: Record<string, unknown>;

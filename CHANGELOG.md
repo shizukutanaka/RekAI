@@ -22,6 +22,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Admin page: grant and view prepaid USD credit per key (initial credit on add,
   top-up form, balances in the key lists); top-ups to an unknown or expired key
   return 404 instead of crediting an orphan balance.
+- **`/v1/embeddings` validates empty and oversized inputs.** OpenAI rejects an
+  empty input string, empty arrays or empty array members, and more than 2,048
+  array items; RekAI now rejects the same shapes before routing, cache lookup,
+  or provider billing.
 - **`/v1/chat/completions` streams report the upstream model.** OpenAI chunks
   name the served model on every frame, but RekAI discarded it and kept the
   requested model; subsequent chunks now propagate the provider-reported
@@ -165,6 +169,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`/v1/chat/completions` rejected only `n > 1`.** `n=0` and negative values
   were silently ignored even though RekAI always returns one choice; now any
   value other than `1` is a readable `invalid_request_error`.
+- **SDKs expose OpenAI response controls.** Python `chat()`/`stream()` (sync
+  and async) accept `reasoning_effort` and `verbosity`, and JS
+  `ChatOptions.reasoningEffort` / `verbosity` map to the gateway fields
+  already forwarded to OpenAI-compatible providers.
+- **Blank `model` values rejected on `/v1/chat/completions`.** OpenAI requires
+  a model name, but an empty or whitespace-only string previously reached the
+  pipeline and could be billed as a successful call; it now returns
+  `invalid_request_error` before routing.
 
 ### Changed
 - **Provider HTTP clients now cap the connect phase at 5s** (httpx's default,
