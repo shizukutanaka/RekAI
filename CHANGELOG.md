@@ -7,6 +7,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **Embeddings model selection keeps duplicate ids provider-specific.** Like
+  chat, the embeddings selector now sends the provider attached to the chosen
+  catalog entry instead of silently routing to the first matching model id.
 - **Chat model selection keeps duplicate ids provider-specific.** Providers can
   advertise the same model id; the selector now sends the provider attached to
   the chosen entry instead of silently routing to the first matching id.
