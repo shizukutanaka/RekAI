@@ -153,6 +153,8 @@ test("chat forwards options and BYOK header", async () => {
     maxTokens: 64,
     maxCompletionTokens: 128,
     promptCacheKey: "tenant-a",
+    store: false,
+    metadata: { trace: "sdk-test" },
     reasoningEffort: "high",
     verbosity: "low",
     fallbacks: [{ provider: "echo" }],
@@ -162,6 +164,8 @@ test("chat forwards options and BYOK header", async () => {
   assert.equal(lastRequest.body.max_tokens, 64);
   assert.equal(lastRequest.body.max_completion_tokens, 128);
   assert.equal(lastRequest.body.prompt_cache_key, "tenant-a");
+  assert.equal(lastRequest.body.store, false);
+  assert.deepEqual(lastRequest.body.metadata, { trace: "sdk-test" });
   assert.equal(lastRequest.body.reasoning_effort, "high");
   assert.equal(lastRequest.body.verbosity, "low");
   assert.deepEqual(lastRequest.body.fallbacks, [{ provider: "echo" }]);

@@ -299,6 +299,8 @@ def _build_payload(
     prompt_cache_key: str | None = None,
     reasoning_effort: str | None = None,
     verbosity: str | None = None,
+    store: bool | None = None,
+    metadata: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -349,6 +351,10 @@ def _build_payload(
         payload["safety_identifier"] = safety_identifier
     if prompt_cache_key is not None:
         payload["prompt_cache_key"] = prompt_cache_key
+    if store is not None:
+        payload["store"] = store
+    if metadata is not None:
+        payload["metadata"] = metadata
     if thinking is not None:
         payload["thinking"] = thinking
     if cache_control is not None:
@@ -473,6 +479,8 @@ class RekAIClient:
         prompt_cache_key: str | None = None,
         reasoning_effort: str | None = None,
         verbosity: str | None = None,
+        store: bool | None = None,
+        metadata: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -504,6 +512,8 @@ class RekAIClient:
             prompt_cache_key=prompt_cache_key,
             reasoning_effort=reasoning_effort,
             verbosity=verbosity,
+            store=store,
+            metadata=metadata,
         )
 
     @staticmethod
@@ -577,6 +587,8 @@ class RekAIClient:
         prompt_cache_key: str | None = None,
         reasoning_effort: str | None = None,
         verbosity: str | None = None,
+        store: bool | None = None,
+        metadata: dict[str, str] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -592,7 +604,9 @@ class RekAIClient:
 
         ``parallel_tool_calls`` mirrors OpenAI's flag — whether the model may
         emit several tool calls in one turn — forwarded to providers that
-        support it.
+        support it. OpenAI bookkeeping ``store``/``metadata`` is forwarded too;
+        the gateway bypasses its own cache when either is present so the
+        upstream side effect is not skipped.
 
         ``top_p``/``seed``/``frequency_penalty``/``presence_penalty``/
         ``logit_bias`` mirror OpenAI's tuning params; providers forward the
@@ -633,6 +647,8 @@ class RekAIClient:
             prompt_cache_key=prompt_cache_key,
             reasoning_effort=reasoning_effort,
             verbosity=verbosity,
+            store=store,
+            metadata=metadata,
         )
         headers = _build_headers(
             self._provider_key,
@@ -675,6 +691,8 @@ class RekAIClient:
         prompt_cache_key: str | None = None,
         reasoning_effort: str | None = None,
         verbosity: str | None = None,
+        store: bool | None = None,
+        metadata: dict[str, str] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], None] | None = None,
@@ -726,6 +744,8 @@ class RekAIClient:
             prompt_cache_key=prompt_cache_key,
             reasoning_effort=reasoning_effort,
             verbosity=verbosity,
+            store=store,
+            metadata=metadata,
         )
         with self._client.stream(
             "POST",
@@ -966,6 +986,8 @@ class AsyncRekAIClient:
         prompt_cache_key: str | None = None,
         reasoning_effort: str | None = None,
         verbosity: str | None = None,
+        store: bool | None = None,
+        metadata: dict[str, str] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -1001,6 +1023,8 @@ class AsyncRekAIClient:
             prompt_cache_key=prompt_cache_key,
             reasoning_effort=reasoning_effort,
             verbosity=verbosity,
+            store=store,
+            metadata=metadata,
         )
         headers = _build_headers(
             self._provider_key,
@@ -1043,6 +1067,8 @@ class AsyncRekAIClient:
         prompt_cache_key: str | None = None,
         reasoning_effort: str | None = None,
         verbosity: str | None = None,
+        store: bool | None = None,
+        metadata: dict[str, str] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
@@ -1091,6 +1117,8 @@ class AsyncRekAIClient:
             prompt_cache_key=prompt_cache_key,
             reasoning_effort=reasoning_effort,
             verbosity=verbosity,
+            store=store,
+            metadata=metadata,
         )
         async with self._client.stream(
             "POST",

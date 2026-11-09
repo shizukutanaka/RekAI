@@ -168,6 +168,11 @@ export class RekAIClient {
     if (opts.safetyIdentifier != null) payload.safety_identifier = opts.safetyIdentifier;
     // OpenAI's prompt-cache routing key; a cost/routing hint, never a cache key.
     if (opts.promptCacheKey != null) payload.prompt_cache_key = opts.promptCacheKey;
+    // OpenAI bookkeeping: retaining `store`d completions and searchable
+    // `metadata` are upstream side effects, so the gateway disables its own
+    // response cache when either is present.
+    if (opts.store != null) payload.store = opts.store;
+    if (opts.metadata != null) payload.metadata = opts.metadata;
     // Anthropic extended thinking ({type:"enabled",budget_tokens}) — Anthropic
     // upstreams only; thinking blocks come back on ChatResult.thinking_blocks.
     if (opts.thinking != null) payload.thinking = opts.thinking;
