@@ -117,6 +117,12 @@ export interface ChatOptions {
    * caller-chosen bucket for similar prompts. OpenAI-compatible providers
    * only; a routing/cost hint, never a RekAI cache key. */
   promptCacheKey?: string;
+  /** OpenAI's `store` — retain the completion upstream for evals/distillation.
+   * Requests carrying it bypass RekAI's cache so the side effect is not skipped. */
+  store?: boolean;
+  /** OpenAI's request `metadata` map, forwarded to OpenAI-compatible providers.
+   * Like `store`, it bypasses RekAI's cache so upstream bookkeeping is recorded. */
+  metadata?: Record<string, string>;
   /** Anthropic extended thinking config, e.g.
    * `{type: "enabled", budget_tokens: 1024}` — forwarded verbatim to Anthropic
    * upstreams. Thinking blocks come back on `ChatResult.thinking_blocks`. */
