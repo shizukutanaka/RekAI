@@ -153,6 +153,8 @@ test("chat forwards options and BYOK header", async () => {
     maxTokens: 64,
     maxCompletionTokens: 128,
     promptCacheKey: "tenant-a",
+    store: false,
+    metadata: { trace: "sdk-test" },
     reasoningEffort: "high",
     verbosity: "low",
     prediction: { type: "content", content: "expected" },
@@ -163,6 +165,8 @@ test("chat forwards options and BYOK header", async () => {
   assert.equal(lastRequest.body.max_tokens, 64);
   assert.equal(lastRequest.body.max_completion_tokens, 128);
   assert.equal(lastRequest.body.prompt_cache_key, "tenant-a");
+  assert.equal(lastRequest.body.store, false);
+  assert.deepEqual(lastRequest.body.metadata, { trace: "sdk-test" });
   assert.equal(lastRequest.body.reasoning_effort, "high");
   assert.equal(lastRequest.body.verbosity, "low");
   assert.deepEqual(lastRequest.body.prediction, { type: "content", content: "expected" });
@@ -311,6 +315,12 @@ test("embeddings returns vectors and forwards options", async () => {
   assert.equal(result.cost_usd, 0.0);
   assert.deepEqual(lastRequest.body, { model: "echo", input: ["a", "b"], cache: true, provider: "echo" });
   assert.equal(lastRequest.headers["x-provider-key"], "sk-e");
+});
+
+test("embeddings forwards token-array input", async () => {
+  const client = new RekAIClient(baseUrl);
+  await client.embeddings("text-embedding-3-small", [[1, 2], [3, 4]], { provider: "openai" });
+  assert.deepEqual(lastRequest.body.input, [[1, 2], [3, 4]]);
 });
 
 test("embeddings accepts a string input", async () => {

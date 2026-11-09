@@ -61,6 +61,9 @@ await client.chat("o3", "hi", {
 // OpenAI prompt-cache routing key (a cost hint, not RekAI's cache key)
 await client.chat("gpt-4o-mini", "hi", { provider: "openai", promptCacheKey: "tenant-a" });
 
+// OpenAI bookkeeping: retain the completion upstream and attach searchable metadata
+await client.chat("gpt-4o-mini", "hi", { store: true, metadata: { trace: "smoke" } });
+
 // Tool / function calling (OpenAI-compatible)
 const res = await client.chat("gpt-4o-mini", "weather in Tokyo?", {
   tools: [{ type: "function", function: { name: "get_weather" } }],

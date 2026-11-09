@@ -82,6 +82,9 @@ res = client.chat(
     response_format={"type": "json_object"},
 )
 
+# OpenAI bookkeeping: retain the completion upstream and attach searchable metadata
+client.chat("gpt-4o-mini", "hi", store=True, metadata={"trace": "smoke"})
+
 # OpenAI Predicted Outputs: lower latency when regenerating a mostly unchanged document
 client.chat(
     "gpt-4o-mini",

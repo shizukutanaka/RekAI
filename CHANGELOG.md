@@ -7,6 +7,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **SDKs forward OpenAI bookkeeping.** Python and JavaScript `chat()`/`stream()`
+  now expose `store`/`metadata`, matching `/v1/chat`'s upstream bookkeeping and
+  cache-bypass behavior.
 - **SDKs forward OpenAI `prediction`.** Python and JavaScript `chat()`/`stream()`
   now expose Predicted Outputs (`{'type': 'content', 'content': ...}` /
   `{type: 'content', content: ...}`), matching the gateway's OpenAI passthrough.
@@ -62,6 +65,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   one tokenized input and `input: list[list[int]]` is a tokenized batch, matching
   OpenAI's API; OpenAI-compatible providers forward them, while text-only
   providers return a clear 422 instead of mishandling token ids.
+- **SDKs accept OpenAI tokenized embeddings.** Python and JavaScript
+  `embeddings()` typings now cover `list[int]`/`number[]` and
+  `list[list[int]]`/`number[][]` alongside text input.
 - **`/v1/chat/completions` streams report the upstream model.** OpenAI chunks
   name the served model on every frame, but RekAI discarded it and kept the
   requested model; subsequent chunks now propagate the provider-reported
