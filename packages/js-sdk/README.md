@@ -38,6 +38,7 @@ for await (const chunk of client.stream("echo", "stream me", {
   onUsage: (s) => console.log("\n", s),
   onToolCalls: (calls) => console.log("tools:", calls), // fired if the model calls tools
   onThinking: (t) => process.stdout.write(`[thinking] ${t}`), // extended thinking only
+  includeObfuscation: true, // OpenAI stream_options.include_obfuscation
 })) {
   process.stdout.write(chunk);
 }

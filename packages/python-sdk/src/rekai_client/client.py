@@ -299,6 +299,7 @@ def _build_payload(
     prompt_cache_key: str | None = None,
     reasoning_effort: str | None = None,
     verbosity: str | None = None,
+    include_obfuscation: bool | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -341,6 +342,8 @@ def _build_payload(
         payload["reasoning_effort"] = reasoning_effort
     if verbosity is not None:
         payload["verbosity"] = verbosity
+    if include_obfuscation is not None:
+        payload["include_obfuscation"] = include_obfuscation
     if web_search_options is not None:
         payload["web_search_options"] = web_search_options
     if user is not None:
@@ -473,6 +476,7 @@ class RekAIClient:
         prompt_cache_key: str | None = None,
         reasoning_effort: str | None = None,
         verbosity: str | None = None,
+        include_obfuscation: bool | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -504,6 +508,7 @@ class RekAIClient:
             prompt_cache_key=prompt_cache_key,
             reasoning_effort=reasoning_effort,
             verbosity=verbosity,
+            include_obfuscation=include_obfuscation,
         )
 
     @staticmethod
@@ -577,6 +582,7 @@ class RekAIClient:
         prompt_cache_key: str | None = None,
         reasoning_effort: str | None = None,
         verbosity: str | None = None,
+        include_obfuscation: bool | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -633,6 +639,7 @@ class RekAIClient:
             prompt_cache_key=prompt_cache_key,
             reasoning_effort=reasoning_effort,
             verbosity=verbosity,
+            include_obfuscation=include_obfuscation,
         )
         headers = _build_headers(
             self._provider_key,
@@ -675,6 +682,7 @@ class RekAIClient:
         prompt_cache_key: str | None = None,
         reasoning_effort: str | None = None,
         verbosity: str | None = None,
+        include_obfuscation: bool | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], None] | None = None,
@@ -726,6 +734,7 @@ class RekAIClient:
             prompt_cache_key=prompt_cache_key,
             reasoning_effort=reasoning_effort,
             verbosity=verbosity,
+            include_obfuscation=include_obfuscation,
         )
         with self._client.stream(
             "POST",
@@ -966,6 +975,7 @@ class AsyncRekAIClient:
         prompt_cache_key: str | None = None,
         reasoning_effort: str | None = None,
         verbosity: str | None = None,
+        include_obfuscation: bool | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -1001,6 +1011,7 @@ class AsyncRekAIClient:
             prompt_cache_key=prompt_cache_key,
             reasoning_effort=reasoning_effort,
             verbosity=verbosity,
+            include_obfuscation=include_obfuscation,
         )
         headers = _build_headers(
             self._provider_key,
@@ -1043,6 +1054,7 @@ class AsyncRekAIClient:
         prompt_cache_key: str | None = None,
         reasoning_effort: str | None = None,
         verbosity: str | None = None,
+        include_obfuscation: bool | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
@@ -1091,6 +1103,7 @@ class AsyncRekAIClient:
             prompt_cache_key=prompt_cache_key,
             reasoning_effort=reasoning_effort,
             verbosity=verbosity,
+            include_obfuscation=include_obfuscation,
         )
         async with self._client.stream(
             "POST",

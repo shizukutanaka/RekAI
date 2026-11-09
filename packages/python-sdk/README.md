@@ -47,6 +47,7 @@ for chunk in client.stream(
     on_usage=lambda s: print("\n", s),
     on_tool_calls=lambda calls: print("tools:", calls),  # fired if the model calls tools
     on_thinking=lambda t: print(t, end="", flush=True),  # reasoning, when enabled
+    include_obfuscation=True,  # OpenAI stream_options.include_obfuscation
 ):
     print(chunk, end="", flush=True)
 
