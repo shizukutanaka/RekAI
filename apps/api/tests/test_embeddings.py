@@ -83,6 +83,32 @@ def test_embeddings_rejects_more_than_2048_inputs(client: TestClient) -> None:
     assert resp.status_code == 422
 
 
+def test_embeddings_rejects_over_8192_tokens_per_array(client: TestClient) -> None:
+    resp = client.post(
+        "/v1/embeddings",
+        json={
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+            "input": [1] * 8193,
+        },
+    )
+    assert resp.status_code == 422
+    assert "8192 tokens each" in resp.json()["detail"]
+
+
+def test_embeddings_rejects_over_300k_tokens(client: TestClient) -> None:
+    resp = client.post(
+        "/v1/embeddings",
+        json={
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+            "input": [[1] * 8_000] * 38,
+        },
+    )
+    assert resp.status_code == 422
+    assert "300000 tokens" in resp.json()["detail"]
+
+
 def test_embeddings_unsupported_provider(client: TestClient) -> None:
     # ollama is reachable in routing but has no embed() override here -> 400.
     resp = client.post(

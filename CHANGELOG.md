@@ -14,6 +14,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **OpenAI `logit_bias` bounds are validated.** `/v1/chat` and
   `/v1/chat/completions` now reject bias values outside OpenAI's -100..100
   range before routing.
+- **`/v1/embeddings` validates OpenAI token budgets.** Tokenized inputs now
+  reject arrays over 8,192 tokens and batches over 300,000 total tokens before
+  routing, matching OpenAI's published limits instead of waiting for an upstream
+  rejection.
 - **SDKs forward OpenAI bookkeeping.** Python and JavaScript `chat()`/`stream()`
   now expose `store`/`metadata`, matching `/v1/chat`'s upstream bookkeeping and
   cache-bypass behavior.
