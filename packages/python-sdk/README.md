@@ -57,6 +57,9 @@ client.chat("gpt-4o-mini", "hi", fallbacks=[{"provider": "echo", "model": "echo"
 # Stop sequences (a bare string or a list; forwarded to whichever provider you call)
 client.chat("gpt-4o-mini", "Count to ten.", stop=["5", "six"])
 
+# Top-k sampling for Gemini/Ollama (ignored by OpenAI/Anthropic)
+client.chat("gemini-2.5-flash", "hi", provider="gemini", top_k=20)
+
 # OpenAI reasoning models: cap completion tokens and control effort/verbosity
 client.chat(
     "o3",

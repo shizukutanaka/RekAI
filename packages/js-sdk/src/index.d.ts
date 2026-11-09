@@ -88,6 +88,9 @@ export interface ChatOptions {
   parallelToolCalls?: boolean;
   /** Nucleus sampling, as OpenAI's `top_p`. */
   topP?: number;
+  /** Top-k sampling for Gemini (`topK`) and Ollama (`top_k`);
+   * OpenAI/Anthropic ignore it. */
+  topK?: number;
   /** Deterministic-sampling seed, as OpenAI's `seed`. */
   seed?: number;
   /** Token-frequency penalty (-2..2), as OpenAI's `frequency_penalty`. */

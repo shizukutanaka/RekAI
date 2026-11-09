@@ -154,6 +154,8 @@ export class RekAIClient {
     if (opts.prediction != null) payload.prediction = opts.prediction;
     if (opts.stop != null) payload.stop = opts.stop;
     if (opts.topP != null) payload.top_p = opts.topP;
+    // Top-k sampling for Gemini/Ollama; OpenAI/Anthropic ignore it.
+    if (opts.topK != null) payload.top_k = opts.topK;
     if (opts.seed != null) payload.seed = opts.seed;
     if (opts.frequencyPenalty != null) payload.frequency_penalty = opts.frequencyPenalty;
     if (opts.presencePenalty != null) payload.presence_penalty = opts.presencePenalty;

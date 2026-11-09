@@ -23,6 +23,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   now uses a placeholder instead of exposing a secret in rendered page text.
 
 ### Added
+- **SDKs forward `top_k` sampling.** Python and JavaScript `chat()`/`stream()`
+  now expose `top_k`/`topK`, matching the gateway's Gemini (`topK`) and Ollama
+  (`top_k`) passthrough.
 - **OpenAI `logit_bias` bounds are validated.** `/v1/chat` and
   `/v1/chat/completions` now reject bias values outside OpenAI's -100..100
   range before routing.
