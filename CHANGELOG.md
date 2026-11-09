@@ -49,6 +49,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   empty input string, empty arrays or empty array members, and more than 2,048
   array items; RekAI now rejects the same shapes before routing, cache lookup,
   or provider billing.
+- **`/v1/embeddings` accepts OpenAI tokenized inputs.** `input: list[int]` is
+  one tokenized input and `input: list[list[int]]` is a tokenized batch, matching
+  OpenAI's API; OpenAI-compatible providers forward them, while text-only
+  providers return a clear 422 instead of mishandling token ids.
 - **`/v1/chat/completions` streams report the upstream model.** OpenAI chunks
   name the served model on every frame, but RekAI discarded it and kept the
   requested model; subsequent chunks now propagate the provider-reported

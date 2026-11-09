@@ -18,9 +18,10 @@ from rekai.providers.base import (
     StreamEvent,
     openai_chat_message,
     provider_http_error,
+    text_embedding_inputs,
     trace_headers,
 )
-from rekai.schemas import ChatMessage, ChatRequest, Usage
+from rekai.schemas import ChatMessage, ChatRequest, EmbeddingInputs, Usage
 
 logger = get_logger("rekai.providers.ollama")
 
@@ -319,7 +320,7 @@ class OllamaProvider(Provider):
 
     async def embed(
         self,
-        inputs: list[str],
+        inputs: EmbeddingInputs,
         model: str,
         api_key: str | None,
         *,
@@ -328,11 +329,12 @@ class OllamaProvider(Provider):
         user: str | None = None,
     ) -> EmbeddingResult:
         settings = current_settings()
+        texts = text_embedding_inputs(inputs, self.name)
         url = f"{settings.ollama_base_url.rstrip('/')}/api/embed"
         try:
             client = self._client(settings.request_timeout_seconds)
             resp = await client.post(
-                url, json={"model": model, "input": inputs}, headers=trace_headers()
+                url, json={"model": model, "input": texts}, headers=trace_headers()
             )
         except httpx.HTTPError as exc:
             raise ProviderError(

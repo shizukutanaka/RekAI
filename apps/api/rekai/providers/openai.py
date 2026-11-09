@@ -24,7 +24,7 @@ from rekai.providers.base import (
     provider_http_error,
     trace_headers,
 )
-from rekai.schemas import ChatRequest, Usage
+from rekai.schemas import ChatRequest, EmbeddingInputs, Usage
 
 _OPENAI_FINISH_REASONS = {"stop", "length", "tool_calls", "content_filter"}
 
@@ -63,6 +63,7 @@ def _embedding(raw: object) -> list[float]:
 
 class OpenAIProvider(Provider):
     name = "openai"
+    supports_token_embeddings = True
     requires_key = True
 
     # --- overridable hooks (subclassed for OpenAI-compatible backends) -----
@@ -262,7 +263,7 @@ class OpenAIProvider(Provider):
 
     async def embed(
         self,
-        inputs: list[str],
+        inputs: EmbeddingInputs,
         model: str,
         api_key: str | None,
         *,

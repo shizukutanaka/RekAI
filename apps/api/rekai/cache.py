@@ -189,7 +189,7 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
 def embedding_cache_key(
     provider: str,
     model: str,
-    inputs: list[str],
+    inputs: list[str | list[int]],
     *,
     dimensions: int | None = None,
     encoding_format: str | None = None,

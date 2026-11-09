@@ -41,6 +41,19 @@ def test_embeddings_endpoint_list_input(client: TestClient) -> None:
     assert len(resp.json()["embeddings"]) == 3
 
 
+@pytest.mark.parametrize("input_value", [[1, 2, 3], [[1, 2], [3, 4]]])
+def test_embeddings_token_arrays_require_openai(client: TestClient, input_value) -> None:
+    resp = client.post("/v1/embeddings", json={"model": "echo", "input": input_value})
+    assert resp.status_code == 422
+    assert "token arrays are unsupported" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize("input_value", [[[-1]], [[1], []], [[1], ["x"]]])
+def test_embeddings_rejects_invalid_token_arrays(client: TestClient, input_value) -> None:
+    resp = client.post("/v1/embeddings", json={"model": "echo", "input": input_value})
+    assert resp.status_code == 422
+
+
 @pytest.mark.parametrize("model", ["", "   "])
 def test_embeddings_rejects_blank_model(client: TestClient, model: str) -> None:
     resp = client.post("/v1/embeddings", json={"model": model, "input": "hi"})
@@ -129,6 +142,39 @@ async def test_openai_lists_embedding_models() -> None:
 async def test_default_provider_raises_for_embeddings() -> None:
     with pytest.raises(ProviderError):
         await OpenAIProvider().embed(["hi"], "text-embedding-3-small", api_key=None)
+
+
+async def test_openai_embeddings_forward_token_arrays(monkeypatch) -> None:
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {
+                "model": "text-embedding-3-small",
+                "data": [{"index": 0, "embedding": [0.1, 0.2]}],
+                "usage": {"prompt_tokens": 3, "total_tokens": 3},
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json, headers):
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    result = await OpenAIProvider().embed([[1, 2, 3]], "text-embedding-3-small", api_key="sk-test")
+    assert result.embeddings == [[0.1, 0.2]]
+    assert captured["json"]["input"] == [[1, 2, 3]]
 
 
 async def test_openai_embeddings_parsed(monkeypatch) -> None:
