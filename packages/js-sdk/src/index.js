@@ -149,6 +149,9 @@ export class RekAIClient {
     if (opts.toolChoice != null) payload.tool_choice = opts.toolChoice;
     if (opts.parallelToolCalls != null) payload.parallel_tool_calls = opts.parallelToolCalls;
     if (opts.responseFormat != null) payload.response_format = opts.responseFormat;
+    // OpenAI Predicted Outputs ({type:"content",content:...}); providers that
+    // do not support it ignore the field.
+    if (opts.prediction != null) payload.prediction = opts.prediction;
     if (opts.stop != null) payload.stop = opts.stop;
     if (opts.topP != null) payload.top_p = opts.topP;
     if (opts.seed != null) payload.seed = opts.seed;

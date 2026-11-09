@@ -91,6 +91,11 @@ await client.chat("gpt-4o-mini", "Return JSON with a 'city' field for Tokyo.", {
   responseFormat: { type: "json_object" },
 });
 
+// OpenAI Predicted Outputs: lower latency when regenerating a mostly unchanged document
+await client.chat("gpt-4o-mini", "Update the year in this report", {
+  prediction: { type: "content", content: "The report was written in 2025." },
+});
+
 // Embeddings (echo works keyless; OpenAI-compatible call the real API)
 const emb = await client.embeddings("echo", ["hello", "world"]);
 console.log(emb.embeddings.length, emb.usage.total_tokens, emb.cached);
