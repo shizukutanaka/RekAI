@@ -20,6 +20,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   now uses a placeholder instead of exposing a secret in rendered page text.
 
 ### Added
+- **OpenAI `logit_bias` bounds are validated.** `/v1/chat` and
+  `/v1/chat/completions` now reject bias values outside OpenAI's -100..100
+  range before routing.
 - **OpenAI `metadata` bounds are validated.** `/v1/chat` and
   `/v1/chat/completions` now reject metadata over 16 pairs, keys over 64
   characters, or values over 512 characters before routing, matching OpenAI's
