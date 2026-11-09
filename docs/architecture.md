@@ -485,7 +485,7 @@ side for streamed requests.
 
 The cache key is a SHA-256 of a payload containing every `ChatRequest` field
 that can change the response: routing (`provider`, `model`), sampling
-(`temperature`, `max_tokens`, `max_completion_tokens`, `verbosity`, `reasoning_effort`, `stop`, `top_p`, `seed`, penalties, `logit_bias`),
+(`temperature`, `max_tokens`, `max_completion_tokens`, `verbosity`, `reasoning_effort`, `stop`, `top_p`, `top_k`, `seed`, penalties, `logit_bias`),
 provider passthroughs (`service_tier`, `anthropic_beta`, `anthropic_fallbacks`,
 `web_search_options`, `prediction`, `prompt_cache_options`, `prompt_cache_retention`,
 `thinking`, `think`, `safety_settings`, `context_management`, `container`,

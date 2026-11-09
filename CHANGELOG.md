@@ -21,6 +21,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reach OpenAI/OpenAI-compatible providers instead of being swallowed by
   `extra="allow"`. Both join RekAI's cache keys because they change the
   upstream cache-write work and measured cost for an identical prompt.
+- **Gemini/Ollama `top_k` sampling.** Native and OpenAI-compatible chat
+  requests now forward `top_k` to Gemini (`topK`) and Ollama (`options.top_k`),
+  and the value joins cache identity. OpenAI and Anthropic do not receive it;
+  Anthropic's deprecated native `top_k` is intentionally not reintroduced.
 - **Prepaid credit balances — sellable metered access.** `POST /admin/keys`
   now accepts `credit_usd`, and a new `POST /admin/keys/{key}/credits` route
   tops up any key's USD balance (static `REKAI_API_KEYS` entries included).

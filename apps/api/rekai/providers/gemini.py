@@ -108,6 +108,8 @@ class GeminiProvider(Provider):
             payload["generationConfig"]["stopSequences"] = request.stop
         if request.top_p is not None:
             payload["generationConfig"]["topP"] = request.top_p
+        if request.top_k is not None:
+            payload["generationConfig"]["topK"] = request.top_k
         if request.seed is not None:
             payload["generationConfig"]["seed"] = request.seed
         if request.frequency_penalty is not None:

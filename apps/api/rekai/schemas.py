@@ -95,6 +95,13 @@ class ChatRequest(BaseModel):
         description="Nucleus sampling, as OpenAI's `top_p`. Forwarded to providers that "
         "support it (OpenAI/OpenAI-compatible, Anthropic, Gemini, Ollama).",
     )
+    top_k: int | None = Field(
+        default=None,
+        ge=1,
+        description="Top-k sampling. Forwarded to providers that support it "
+        "(Gemini's `topK`, Ollama's `top_k`); ignored by OpenAI/Anthropic. "
+        "Anthropic's deprecated native `top_k` is intentionally not used.",
+    )
     seed: int | None = Field(
         default=None,
         description="Deterministic-sampling seed, as OpenAI's `seed`. Forwarded to "
@@ -384,6 +391,7 @@ class ChatCompletionsRequest(BaseModel):
     verbosity: str | None = None
     reasoning_effort: str | None = None
     top_p: float | None = Field(default=None, gt=0.0, le=1.0)
+    top_k: int | None = Field(default=None, ge=1)
     seed: int | None = None
     frequency_penalty: float | None = Field(default=None, ge=-2.0, le=2.0)
     presence_penalty: float | None = Field(default=None, ge=-2.0, le=2.0)
