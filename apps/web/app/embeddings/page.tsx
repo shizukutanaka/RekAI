@@ -19,6 +19,8 @@ quarterly revenue grew`;
 export default function EmbeddingsPage() {
   const [model, setModel] = useState("echo");
   const [models, setModels] = useState<ModelInfo[]>([]);
+  // Index into models, not just a model id: providers can advertise the same id.
+  const [modelIndex, setModelIndex] = useState<number | null>(null);
   const [text, setText] = useState(SAMPLE);
   const [result, setResult] = useState<EmbeddingsResponse | null>(null);
   const [error, setError] = useState("");
@@ -39,8 +41,9 @@ export default function EmbeddingsPage() {
     [text],
   );
 
+  const selectedModel = modelIndex == null ? undefined : models[modelIndex];
   // The provider the selected model routes to (from /v1/models), if known.
-  const selectedProvider = models.find((m) => m.id === model)?.provider;
+  const selectedProvider = selectedModel?.provider ?? models.find((m) => m.id === model)?.provider;
 
   async function run() {
     setLoading(true);
@@ -96,9 +99,17 @@ export default function EmbeddingsPage() {
       <div className="field">
         <label htmlFor="model">Model</label>
         {models.length ? (
-          <select id="model" value={model} onChange={(e) => setModel(e.target.value)}>
-            {models.map((m) => (
-              <option key={`${m.provider}:${m.id}`} value={m.id}>
+          <select
+            id="model"
+            value={modelIndex ?? models.findIndex((m) => m.id === model)}
+            onChange={(e) => {
+              const index = Number(e.target.value);
+              setModelIndex(index);
+              setModel(models[index].id);
+            }}
+          >
+            {models.map((m, index) => (
+              <option key={`${m.provider}:${m.id}`} value={index}>
                 {m.id} ({m.provider})
               </option>
             ))}
@@ -107,7 +118,10 @@ export default function EmbeddingsPage() {
           <input
             id="model"
             value={model}
-            onChange={(e) => setModel(e.target.value)}
+            onChange={(e) => {
+              setModel(e.target.value);
+              setModelIndex(null);
+            }}
             placeholder="echo"
           />
         )}
