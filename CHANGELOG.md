@@ -6,6 +6,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Settings no longer echoes the saved gateway key.** The OpenAI SDK example
+  now uses a placeholder instead of exposing a secret in rendered page text.
+
 ### Added
 - **Gemini `safety_settings` passthrough.** Native and OpenAI-compatible chat
   requests can send Gemini `safetySettings` (category + threshold entries)
