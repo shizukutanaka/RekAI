@@ -6,10 +6,23 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Settings no longer echoes the saved gateway key.** The OpenAI SDK example
+  now uses a placeholder instead of exposing a secret in rendered page text.
+
 ### Added
 - **OpenAI `logit_bias` bounds are validated.** `/v1/chat` and
   `/v1/chat/completions` now reject bias values outside OpenAI's -100..100
   range before routing.
+- **SDKs forward OpenAI bookkeeping.** Python and JavaScript `chat()`/`stream()`
+  now expose `store`/`metadata`, matching `/v1/chat`'s upstream bookkeeping and
+  cache-bypass behavior.
+- **SDKs forward OpenAI `prediction`.** Python and JavaScript `chat()`/`stream()`
+  now expose Predicted Outputs (`{'type': 'content', 'content': ...}` /
+  `{type: 'content', content: ...}`), matching the gateway's OpenAI passthrough.
+- **SDKs forward OpenAI stream obfuscation.** Python and JavaScript `stream()`
+  now expose `include_obfuscation`/`includeObfuscation`, matching the
+  gateway's `stream_options.include_obfuscation` passthrough.
 - **Gemini `safety_settings` passthrough.** Native and OpenAI-compatible chat
   requests can send Gemini `safetySettings` (category + threshold entries)
   instead of having the field swallowed by `extra="allow"`. The setting joins
@@ -62,6 +75,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   one tokenized input and `input: list[list[int]]` is a tokenized batch, matching
   OpenAI's API; OpenAI-compatible providers forward them, while text-only
   providers return a clear 422 instead of mishandling token ids.
+- **SDKs accept OpenAI tokenized embeddings.** Python and JavaScript
+  `embeddings()` typings now cover `list[int]`/`number[]` and
+  `list[list[int]]`/`number[][]` alongside text input.
 - **`/v1/chat/completions` streams report the upstream model.** OpenAI chunks
   name the served model on every frame, but RekAI discarded it and kept the
   requested model; subsequent chunks now propagate the provider-reported

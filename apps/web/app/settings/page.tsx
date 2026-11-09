@@ -129,7 +129,7 @@ export default function SettingsPage() {
 
 client = OpenAI(
     base_url="${API_URL}/v1",
-    api_key="${gatewayKey.trim() || "unused-on-echo"}",  # your RekAI gateway key
+    api_key="sk-rekai-...",  # your RekAI gateway key
 )
 client.chat.completions.create(
     model="echo",

@@ -73,3 +73,19 @@ test("Settings page documents the OpenAI SDK drop-in base URL", async ({ page })
   await expect(section.locator("pre")).toContainText(`${API_URL}/v1`);
   await expect(section.locator("pre")).toContainText("client.chat.completions.create");
 });
+
+test("Settings page does not render the saved gateway key in the SDK example", async ({
+  page,
+}) => {
+  await page.goto("/settings");
+  await page.evaluate(() => {
+    window.localStorage.setItem("rekai.gatewayKey", "sk-rekai-secret-should-stay-hidden");
+  });
+  await page.reload();
+
+  const snippet = page.locator(".field", {
+    hasText: "Use it from the OpenAI SDK",
+  }).locator("pre");
+  await expect(snippet).toContainText('api_key="sk-rekai-..."');
+  await expect(snippet).not.toContainText("sk-rekai-secret-should-stay-hidden");
+});
