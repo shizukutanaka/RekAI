@@ -76,6 +76,9 @@ export interface ChatOptions {
    * that support it (OpenAI/OpenAI-compatible natively, Gemini best-effort).
    */
   responseFormat?: Record<string, unknown>;
+  /** OpenAI Predicted Outputs (`{ type: 'content', content: ... }`), used to
+   * lower latency when regenerating a mostly unchanged document. */
+  prediction?: Record<string, unknown>;
   /**
    * Sequences that stop generation, as OpenAI's `stop`. A single string is
    * accepted too; the server normalizes it to a one-element list.
@@ -120,6 +123,12 @@ export interface ChatOptions {
    * caller-chosen bucket for similar prompts. OpenAI-compatible providers
    * only; a routing/cost hint, never a RekAI cache key. */
   promptCacheKey?: string;
+  /** OpenAI's `store` — retain the completion upstream for evals/distillation.
+   * Requests carrying it bypass RekAI's cache so the side effect is not skipped. */
+  store?: boolean;
+  /** OpenAI's request `metadata` map, forwarded to OpenAI-compatible providers.
+   * Like `store`, it bypasses RekAI's cache so upstream bookkeeping is recorded. */
+  metadata?: Record<string, string>;
   /** Anthropic extended thinking config, e.g.
    * `{type: "enabled", budget_tokens: 1024}` — forwarded verbatim to Anthropic
    * upstreams. Thinking blocks come back on `ChatResult.thinking_blocks`. */
@@ -351,7 +360,7 @@ export class RekAIClient {
   stream(model: string, messages: Messages, opts?: ChatOptions): AsyncGenerator<string>;
   embeddings(
     model: string,
-    input: string | string[],
+    input: string | string[] | number[] | number[][],
     opts?: EmbeddingsOptions,
   ): Promise<EmbeddingsResult>;
   moderations(

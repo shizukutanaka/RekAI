@@ -149,6 +149,9 @@ export class RekAIClient {
     if (opts.toolChoice != null) payload.tool_choice = opts.toolChoice;
     if (opts.parallelToolCalls != null) payload.parallel_tool_calls = opts.parallelToolCalls;
     if (opts.responseFormat != null) payload.response_format = opts.responseFormat;
+    // OpenAI Predicted Outputs ({type:"content",content:...}); providers that
+    // do not support it ignore the field.
+    if (opts.prediction != null) payload.prediction = opts.prediction;
     if (opts.stop != null) payload.stop = opts.stop;
     if (opts.topP != null) payload.top_p = opts.topP;
     if (opts.seed != null) payload.seed = opts.seed;
@@ -171,6 +174,11 @@ export class RekAIClient {
     if (opts.safetyIdentifier != null) payload.safety_identifier = opts.safetyIdentifier;
     // OpenAI's prompt-cache routing key; a cost/routing hint, never a cache key.
     if (opts.promptCacheKey != null) payload.prompt_cache_key = opts.promptCacheKey;
+    // OpenAI bookkeeping: retaining `store`d completions and searchable
+    // `metadata` are upstream side effects, so the gateway disables its own
+    // response cache when either is present.
+    if (opts.store != null) payload.store = opts.store;
+    if (opts.metadata != null) payload.metadata = opts.metadata;
     // Anthropic extended thinking ({type:"enabled",budget_tokens}) — Anthropic
     // upstreams only; thinking blocks come back on ChatResult.thinking_blocks.
     if (opts.thinking != null) payload.thinking = opts.thinking;
@@ -301,9 +309,9 @@ export class RekAIClient {
   }
 
   /**
-   * Create embeddings for a string or array of strings.
+   * Create embeddings for text or OpenAI token-array input.
    * @param {string} model
-   * @param {string|string[]} input
+   * @param {string|string[]|number[]|number[][]} input
    * @param {object} [opts]
    * @returns {Promise<object>}
    */
