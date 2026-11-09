@@ -142,6 +142,7 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         safety_identifier=req.safety_identifier,
         think=req.think,
         safety_settings=req.safety_settings,
+        ollama_options=req.ollama_options,
         prompt_cache_key=req.prompt_cache_key,
         prompt_cache_options=req.prompt_cache_options,
         prompt_cache_retention=req.prompt_cache_retention,

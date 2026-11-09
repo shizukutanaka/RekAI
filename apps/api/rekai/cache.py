@@ -82,6 +82,7 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         # Ollama's `think` switch changes the trace and the cost the same way.
         "think": request.think,
         "safety_settings": request.safety_settings,
+        "ollama_options": request.ollama_options,
         # Remaining real Anthropic fields — each shapes the answer or its cost.
         "context_management": request.context_management,
         "container": request.container,
@@ -171,6 +172,7 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
         "thinking": request.thinking,
         "think": request.think,
         "safety_settings": request.safety_settings,
+        "ollama_options": request.ollama_options,
         "context_management": request.context_management,
         "container": request.container,
         "inference_geo": request.inference_geo,

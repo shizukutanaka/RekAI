@@ -25,6 +25,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requests now forward `top_k` to Gemini (`topK`) and Ollama (`options.top_k`),
   and the value joins cache identity. OpenAI and Anthropic do not receive it;
   Anthropic's deprecated native `top_k` is intentionally not reintroduced.
+- **Ollama `ollama_options` passthrough.** Native and OpenAI-compatible chat
+  requests can send Ollama's per-request `options` object (`num_ctx`, `top_k`,
+  `min_p`, `repeat_penalty`, runner controls, and future option names) without
+  RekAI adding a one-off field for every knob. The object is merged last so it
+  can intentionally override shared-field mappings, and it joins the cache key.
 - **Prepaid credit balances — sellable metered access.** `POST /admin/keys`
   now accepts `credit_usd`, and a new `POST /admin/keys/{key}/credits` route
   tops up any key's USD balance (static `REKAI_API_KEYS` entries included).
