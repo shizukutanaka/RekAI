@@ -170,6 +170,12 @@ class ChatRequest(BaseModel):
         "level string. Forwarded to Ollama only; other providers ignore it. "
         "Changes the answer and its reasoning cost, so it joins the cache key.",
     )
+    safety_settings: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Gemini's `safetySettings` — category/threshold entries "
+        "controlling upstream safety blocking. Forwarded verbatim to Gemini "
+        "only; it can change the answer, so it joins the cache key.",
+    )
     context_management: dict[str, Any] | None = Field(
         default=None,
         description="Anthropic's `context_management` — context-editing rules "
@@ -384,6 +390,7 @@ class ChatCompletionsRequest(BaseModel):
     n: int | None = None  # 400 unless n is omitted or 1 (RekAI returns one choice)
     provider: str | None = None  # RekAI extension: explicit provider override
     think: bool | str | None = None  # RekAI extension: Ollama thinking switch
+    safety_settings: list[dict[str, Any]] | None = None  # Gemini safety thresholds
     # OpenAI's pre-tools function-calling API (deprecated since 0613 but still
     # emitted by older SDKs and codebases). Normalized to tools/tool_choice in
     # the compat layer; modern `tools` wins when both are sent.
