@@ -47,6 +47,7 @@ for chunk in client.stream(
     on_usage=lambda s: print("\n", s),
     on_tool_calls=lambda calls: print("tools:", calls),  # fired if the model calls tools
     on_thinking=lambda t: print(t, end="", flush=True),  # reasoning, when enabled
+    include_obfuscation=True,  # OpenAI stream_options.include_obfuscation
 ):
     print(chunk, end="", flush=True)
 
@@ -80,6 +81,16 @@ res = client.chat(
     "gpt-4o-mini",
     "Return a JSON object with a 'city' and 'country' field for Tokyo.",
     response_format={"type": "json_object"},
+)
+
+# OpenAI bookkeeping: retain the completion upstream and attach searchable metadata
+client.chat("gpt-4o-mini", "hi", store=True, metadata={"trace": "smoke"})
+
+# OpenAI Predicted Outputs: lower latency when regenerating a mostly unchanged document
+client.chat(
+    "gpt-4o-mini",
+    "Update the year in this report",
+    prediction={"type": "content", "content": "The report was written in 2025."},
 )
 
 # Anthropic prompt-cache breakpoint (ignored by providers that don't support it)

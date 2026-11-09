@@ -38,6 +38,7 @@ for await (const chunk of client.stream("echo", "stream me", {
   onUsage: (s) => console.log("\n", s),
   onToolCalls: (calls) => console.log("tools:", calls), // fired if the model calls tools
   onThinking: (t) => process.stdout.write(`[thinking] ${t}`), // extended thinking only
+  includeObfuscation: true, // OpenAI stream_options.include_obfuscation
 })) {
   process.stdout.write(chunk);
 }
@@ -60,6 +61,9 @@ await client.chat("o3", "hi", {
 
 // OpenAI prompt-cache routing key (a cost hint, not RekAI's cache key)
 await client.chat("gpt-4o-mini", "hi", { provider: "openai", promptCacheKey: "tenant-a" });
+
+// OpenAI bookkeeping: retain the completion upstream and attach searchable metadata
+await client.chat("gpt-4o-mini", "hi", { store: true, metadata: { trace: "smoke" } });
 
 // Tool / function calling (OpenAI-compatible)
 const res = await client.chat("gpt-4o-mini", "weather in Tokyo?", {
@@ -86,6 +90,11 @@ await client.chat("claude-sonnet-4-6", "search the docs", {
 // Structured output (OpenAI/OpenAI-compatible natively, Gemini best-effort)
 await client.chat("gpt-4o-mini", "Return JSON with a 'city' field for Tokyo.", {
   responseFormat: { type: "json_object" },
+});
+
+// OpenAI Predicted Outputs: lower latency when regenerating a mostly unchanged document
+await client.chat("gpt-4o-mini", "Update the year in this report", {
+  prediction: { type: "content", content: "The report was written in 2025." },
 });
 
 // Embeddings (echo works keyless; OpenAI-compatible call the real API)
