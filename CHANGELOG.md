@@ -7,6 +7,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **OpenAI `metadata` bounds are validated.** `/v1/chat` and
+  `/v1/chat/completions` now reject metadata over 16 pairs, keys over 64
+  characters, or values over 512 characters before routing, matching OpenAI's
+  published request contract.
 - **Gemini `safety_settings` passthrough.** Native and OpenAI-compatible chat
   requests can send Gemini `safetySettings` (category + threshold entries)
   instead of having the field swallowed by `extra="allow"`. The setting joins
