@@ -73,6 +73,9 @@ function nextMsgId(): string {
 export default function ChatPage() {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [model, setModel] = useState("echo");
+  // Index into chatModels, not just a model id: providers can advertise the
+  // same id (e.g. an OpenAI-compatible clone), and routing needs the pair.
+  const [modelIndex, setModelIndex] = useState<number | null>(null);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -125,10 +128,11 @@ export default function ChatPage() {
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
-  // The provider that the selected model routes to (from /v1/models), if known.
-  const selectedProvider = models.find((m) => m.id === model)?.provider;
   // Chat selector excludes embedding-only models (they live on /embeddings).
   const chatModels = modelsOfType(models, "chat");
+  const selectedModel = modelIndex == null ? undefined : chatModels[modelIndex];
+  // The provider that the selected model routes to (from /v1/models), if known.
+  const selectedProvider = selectedModel?.provider ?? models.find((m) => m.id === model)?.provider;
   // Seconds of cooldown left on the selected provider, if it is parked.
   const parkedFor = cooldownRemaining(
     selectedProvider ? health?.parked_providers?.[selectedProvider] : undefined,
@@ -459,15 +463,30 @@ export default function ChatPage() {
       <div className="controls">
         <label htmlFor="model">Model</label>
         {chatModels.length ? (
-          <select id="model" value={model} onChange={(e) => setModel(e.target.value)}>
-            {chatModels.map((m) => (
-              <option key={`${m.provider}:${m.id}`} value={m.id}>
+          <select
+            id="model"
+            value={modelIndex ?? chatModels.findIndex((m) => m.id === model)}
+            onChange={(e) => {
+              const index = Number(e.target.value);
+              setModelIndex(index);
+              setModel(chatModels[index].id);
+            }}
+          >
+            {chatModels.map((m, index) => (
+              <option key={`${m.provider}:${m.id}`} value={index}>
                 {m.id} ({m.provider})
               </option>
             ))}
           </select>
         ) : (
-          <input id="model" value={model} onChange={(e) => setModel(e.target.value)} />
+          <input
+            id="model"
+            value={model}
+            onChange={(e) => {
+              setModel(e.target.value);
+              setModelIndex(null);
+            }}
+          />
         )}
         <label className="toggle">
           <input

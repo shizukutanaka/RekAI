@@ -22,6 +22,13 @@ EmbeddingInputs = list[str | TokenArray]
 LogitBias = dict[str, Annotated[int, Field(ge=-100, le=100)]]
 
 
+# OpenAI request metadata: at most 16 pairs, each key <=64 chars and value <=512.
+OpenAIMetadata = Annotated[
+    dict[Annotated[str, Field(max_length=64)], Annotated[str, Field(max_length=512)]],
+    Field(max_length=16),
+]
+
+
 class ChatMessage(BaseModel):
     role: Role
     # Optional because assistant tool-call messages carry tool_calls instead.
@@ -332,7 +339,7 @@ class ChatRequest(BaseModel):
         "only; the OpenAI-compat surface disables RekAI caching when set so the "
         "upstream side effect cannot be skipped by a cache hit.",
     )
-    metadata: dict[str, str] | None = Field(
+    metadata: OpenAIMetadata | None = Field(
         default=None,
         description="OpenAI's request `metadata` map (up to 16 string key/value "
         "pairs), forwarded verbatim to OpenAI/OpenAI-compatible providers only.",
@@ -440,7 +447,7 @@ class ChatCompletionsRequest(BaseModel):
     prompt_cache_options: dict[str, Any] | None = None  # breakpoint mode and TTL
     prompt_cache_retention: str | None = None  # deprecated; use options.ttl
     store: bool | None = None  # retain the completion upstream for evals/distillation
-    metadata: dict[str, str] | None = None  # OpenAI's request metadata map
+    metadata: OpenAIMetadata | None = None  # OpenAI's request metadata map
     n: int | None = None  # 400 unless n is omitted or 1 (RekAI returns one choice)
     provider: str | None = None  # RekAI extension: explicit provider override
     think: bool | str | None = None  # RekAI extension: Ollama thinking switch

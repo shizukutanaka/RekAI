@@ -126,6 +126,26 @@ def test_n_other_than_one_rejected(client: TestClient, n: int) -> None:
     assert resp.json()["error"]["type"] == "invalid_request_error"
 
 
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {f"k{i}": "v" for i in range(17)},
+        {"k" * 65: "v"},
+        {"k": "v" * 513},
+    ],
+)
+def test_out_of_bounds_metadata_rejected(client: TestClient, metadata: dict[str, str]) -> None:
+    resp = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "echo",
+            "messages": [{"role": "user", "content": "hi"}],
+            "metadata": metadata,
+        },
+    )
+    assert resp.status_code == 422
+
+
 @pytest.mark.parametrize("model", ["", "   "])
 def test_blank_model_rejected(client: TestClient, model: str) -> None:
     resp = client.post(

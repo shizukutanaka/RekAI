@@ -7,6 +7,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **Chat model selection keeps duplicate ids provider-specific.** Providers can
+  advertise the same model id; the selector now sends the provider attached to
+  the chosen entry instead of silently routing to the first matching id.
 - **Settings no longer echoes the saved gateway key.** The OpenAI SDK example
   now uses a placeholder instead of exposing a secret in rendered page text.
 
@@ -14,6 +17,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **OpenAI `logit_bias` bounds are validated.** `/v1/chat` and
   `/v1/chat/completions` now reject bias values outside OpenAI's -100..100
   range before routing.
+- **OpenAI `metadata` bounds are validated.** `/v1/chat` and
+  `/v1/chat/completions` now reject metadata over 16 pairs, keys over 64
+  characters, or values over 512 characters before routing, matching OpenAI's
+  published request contract.
 - **`/v1/embeddings` validates OpenAI token budgets.** Tokenized inputs now
   reject arrays over 8,192 tokens and batches over 300,000 total tokens before
   routing, matching OpenAI's published limits instead of waiting for an upstream
