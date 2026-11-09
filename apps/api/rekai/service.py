@@ -1389,6 +1389,17 @@ async def _handle_embeddings(
             "OpenAI token arrays are unsupported.",
             status_code=422,
         )
+    token_arrays = [item for item in inputs if not isinstance(item, str)]
+    if any(len(item) > 8192 for item in token_arrays):
+        raise ProviderError(
+            "'input' token arrays support at most 8192 tokens each.",
+            status_code=422,
+        )
+    if sum(len(item) for item in token_arrays) > 300_000:
+        raise ProviderError(
+            "'input' supports at most 300000 tokens across all token arrays.",
+            status_code=422,
+        )
 
     use_cache = settings.cache_enabled and request.cache
     key = embedding_cache_key(
