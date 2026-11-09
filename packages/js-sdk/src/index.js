@@ -162,6 +162,9 @@ export class RekAIClient {
     // OpenAI reasoning-model controls; OpenAI-compatible providers only.
     if (opts.reasoningEffort != null) payload.reasoning_effort = opts.reasoningEffort;
     if (opts.verbosity != null) payload.verbosity = opts.verbosity;
+    // OpenAI stream_options.include_obfuscation; forwarded by OpenAI-compatible
+    // providers when streaming, ignored on unary calls.
+    if (opts.includeObfuscation != null) payload.include_obfuscation = opts.includeObfuscation;
     // OpenAI's hosted web-search config; OpenAI-compatible providers only.
     if (opts.webSearchOptions != null) payload.web_search_options = opts.webSearchOptions;
     // The providers' end-user id for abuse detection (OpenAI `user`,

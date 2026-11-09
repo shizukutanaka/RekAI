@@ -107,6 +107,9 @@ export interface ChatOptions {
   /** OpenAI's `verbosity` output-length control (e.g. "low" | "medium" |
    * "high"), forwarded verbatim to OpenAI-compatible providers only. */
   verbosity?: string;
+  /** OpenAI's `stream_options.include_obfuscation` — ask compatible providers
+   * to obfuscate streamed tokens. Only affects streaming upstream calls. */
+  includeObfuscation?: boolean;
   /** OpenAI's `web_search_options` — hosted web-search config (context size,
    * user location). OpenAI-compatible providers only. */
   webSearchOptions?: Record<string, unknown>;

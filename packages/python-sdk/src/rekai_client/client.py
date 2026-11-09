@@ -302,6 +302,7 @@ def _build_payload(
     store: bool | None = None,
     metadata: dict[str, str] | None = None,
     prediction: dict[str, Any] | None = None,
+    include_obfuscation: bool | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -346,6 +347,8 @@ def _build_payload(
         payload["reasoning_effort"] = reasoning_effort
     if verbosity is not None:
         payload["verbosity"] = verbosity
+    if include_obfuscation is not None:
+        payload["include_obfuscation"] = include_obfuscation
     if web_search_options is not None:
         payload["web_search_options"] = web_search_options
     if user is not None:
@@ -485,6 +488,7 @@ class RekAIClient:
         store: bool | None = None,
         metadata: dict[str, str] | None = None,
         prediction: dict[str, Any] | None = None,
+        include_obfuscation: bool | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -519,6 +523,7 @@ class RekAIClient:
             store=store,
             metadata=metadata,
             prediction=prediction,
+            include_obfuscation=include_obfuscation,
         )
 
     @staticmethod
@@ -595,6 +600,7 @@ class RekAIClient:
         store: bool | None = None,
         metadata: dict[str, str] | None = None,
         prediction: dict[str, Any] | None = None,
+        include_obfuscation: bool | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -656,6 +662,7 @@ class RekAIClient:
             store=store,
             metadata=metadata,
             prediction=prediction,
+            include_obfuscation=include_obfuscation,
         )
         headers = _build_headers(
             self._provider_key,
@@ -701,6 +708,7 @@ class RekAIClient:
         store: bool | None = None,
         metadata: dict[str, str] | None = None,
         prediction: dict[str, Any] | None = None,
+        include_obfuscation: bool | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], None] | None = None,
@@ -755,6 +763,7 @@ class RekAIClient:
             store=store,
             metadata=metadata,
             prediction=prediction,
+            include_obfuscation=include_obfuscation,
         )
         with self._client.stream(
             "POST",
@@ -998,6 +1007,7 @@ class AsyncRekAIClient:
         store: bool | None = None,
         metadata: dict[str, str] | None = None,
         prediction: dict[str, Any] | None = None,
+        include_obfuscation: bool | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -1036,6 +1046,7 @@ class AsyncRekAIClient:
             store=store,
             metadata=metadata,
             prediction=prediction,
+            include_obfuscation=include_obfuscation,
         )
         headers = _build_headers(
             self._provider_key,
@@ -1081,6 +1092,7 @@ class AsyncRekAIClient:
         store: bool | None = None,
         metadata: dict[str, str] | None = None,
         prediction: dict[str, Any] | None = None,
+        include_obfuscation: bool | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
@@ -1132,6 +1144,7 @@ class AsyncRekAIClient:
             store=store,
             metadata=metadata,
             prediction=prediction,
+            include_obfuscation=include_obfuscation,
         )
         async with self._client.stream(
             "POST",

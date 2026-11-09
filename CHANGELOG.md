@@ -13,6 +13,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **SDKs forward OpenAI `prediction`.** Python and JavaScript `chat()`/`stream()`
   now expose Predicted Outputs (`{'type': 'content', 'content': ...}` /
   `{type: 'content', content: ...}`), matching the gateway's OpenAI passthrough.
+- **SDKs forward OpenAI stream obfuscation.** Python and JavaScript `stream()`
+  now expose `include_obfuscation`/`includeObfuscation`, matching the
+  gateway's `stream_options.include_obfuscation` passthrough.
 - **Gemini `safety_settings` passthrough.** Native and OpenAI-compatible chat
   requests can send Gemini `safetySettings` (category + threshold entries)
   instead of having the field swallowed by `extra="allow"`. The setting joins
