@@ -218,6 +218,64 @@ def test_prompt_cache_key_does_not_change_the_semantic_bucket() -> None:
     assert a == b
 
 
+# --- prompt_cache_options / prompt_cache_retention ---------------------------
+# OpenAI's newer breakpoint/TTL config and the deprecated retention spelling.
+# They change upstream cache behavior and write pricing rather than the prompt,
+# but a cached RekAI response also stores its measured cost, so these join the
+# exact/semantic keys.
+
+
+async def test_prompt_cache_options_reach_openai(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    options = {"mode": "explicit", "ttl": "12h"}
+    await OpenAIProvider().chat(
+        _req(prompt_cache_options=options, prompt_cache_retention="24h"), api_key="sk-x"
+    )
+    assert _Client.captured["prompt_cache_options"] == options
+    assert _Client.captured["prompt_cache_retention"] == "24h"
+
+
+async def test_prompt_cache_options_not_sent_to_anthropic(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    await AnthropicProvider().chat(
+        _req(
+            prompt_cache_options={"mode": "explicit", "ttl": "12h"},
+            prompt_cache_retention="24h",
+        ),
+        api_key="sk-x",
+    )
+    assert "prompt_cache_options" not in _Client.captured
+    assert "prompt_cache_retention" not in _Client.captured
+
+
+def test_openai_compat_maps_prompt_cache_options() -> None:
+    options = {"mode": "explicit", "ttl": "12h"}
+    req = ChatCompletionsRequest(
+        model="m",
+        messages=[{"role": "user", "content": "hi"}],
+        prompt_cache_options=options,
+        prompt_cache_retention="24h",
+    )
+    chat = to_chat_request(req)
+    assert chat.prompt_cache_options == options
+    assert chat.prompt_cache_retention == "24h"
+
+
+def test_prompt_cache_options_change_the_cache_key() -> None:
+    options = {"mode": "explicit", "ttl": "12h"}
+    assert cache_key(_req(), "openai") != cache_key(_req(prompt_cache_options=options), "openai")
+    assert cache_key(_req(), "openai") != cache_key(_req(prompt_cache_retention="24h"), "openai")
+
+
+def test_prompt_cache_options_change_the_semantic_bucket() -> None:
+    options = {"mode": "explicit", "ttl": "12h"}
+    a = semantic_bucket(_req(), "openai", "client-1")
+    b = semantic_bucket(_req(prompt_cache_options=options), "openai", "client-1")
+    c = semantic_bucket(_req(prompt_cache_retention="24h"), "openai", "client-1")
+    assert a != b
+    assert a != c
+
+
 # --- store / metadata --------------------------------------------------------
 # OpenAI's bookkeeping fields have provider-side effects (retain the completion
 # and attach searchable labels). They are not answer-shaping fields, but a

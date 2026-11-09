@@ -7,6 +7,29 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Gemini `safety_settings` passthrough.** Native and OpenAI-compatible chat
+  requests can send Gemini `safetySettings` (category + threshold entries)
+  instead of having the field swallowed by `extra="allow"`. The setting joins
+  RekAI's cache keys because upstream safety blocking changes the response.
+- **`/v1/chat/completions` forwards OpenAI `prediction`.** Predicted Outputs
+  let callers pass known output text to reduce latency when regenerating a
+  mostly unchanged document. The field was previously swallowed by
+  `extra="allow"`; it now reaches OpenAI/OpenAI-compatible providers and joins
+  both cache keys because different predictions produce different responses.
+- **`/v1/chat/completions` forwards OpenAI prompt-cache controls.** The newer
+  `prompt_cache_options` (`mode`/`ttl`) and deprecated `prompt_cache_retention`
+  reach OpenAI/OpenAI-compatible providers instead of being swallowed by
+  `extra="allow"`. Both join RekAI's cache keys because they change the
+  upstream cache-write work and measured cost for an identical prompt.
+- **Gemini/Ollama `top_k` sampling.** Native and OpenAI-compatible chat
+  requests now forward `top_k` to Gemini (`topK`) and Ollama (`options.top_k`),
+  and the value joins cache identity. OpenAI and Anthropic do not receive it;
+  Anthropic's deprecated native `top_k` is intentionally not reintroduced.
+- **Ollama `ollama_options` passthrough.** Native and OpenAI-compatible chat
+  requests can send Ollama's per-request `options` object (`num_ctx`, `top_k`,
+  `min_p`, `repeat_penalty`, runner controls, and future option names) without
+  RekAI adding a one-off field for every knob. The object is merged last so it
+  can intentionally override shared-field mappings, and it joins the cache key.
 - **`/v1/chat/completions` forwards OpenAI `store` and `metadata`.** These
   bookkeeping fields previously disappeared inside `extra="allow"`, so a
   request could not ask OpenAI to retain a completion or attach searchable
@@ -32,6 +55,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   empty input string, empty arrays or empty array members, and more than 2,048
   array items; RekAI now rejects the same shapes before routing, cache lookup,
   or provider billing.
+- **`/v1/embeddings` accepts OpenAI tokenized inputs.** `input: list[int]` is
+  one tokenized input and `input: list[list[int]]` is a tokenized batch, matching
+  OpenAI's API; OpenAI-compatible providers forward them, while text-only
+  providers return a clear 422 instead of mishandling token ids.
 - **`/v1/chat/completions` streams report the upstream model.** OpenAI chunks
   name the served model on every frame, but RekAI discarded it and kept the
   requested model; subsequent chunks now propagate the provider-reported
@@ -209,6 +236,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **`/v1/embeddings` decodes OpenAI `encoding_format="base64"` responses.**
+  The provider forwarded the option but returned OpenAI's base64 float32
+  payload as a string inside RekAI's `list[float]` response schema. OpenAI and
+  OpenAI-compatible providers now decode it back to floats at the provider
+  boundary, so callers and cache entries keep the documented JSON vector shape.
 - **Anthropic tool-result turns kept their required order.** `/v1/messages`
   now emits `tool_result` blocks before any trailing user text and no longer
   leaves an empty `user` message for tool-result-only turns, matching

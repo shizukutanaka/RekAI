@@ -5,9 +5,11 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from rekai.cache import cache_key, semantic_bucket
+from rekai.openai_compat import to_chat_request
 from rekai.providers.base import ProviderError
 from rekai.providers.gemini import GeminiProvider
-from rekai.schemas import ChatMessage, ChatRequest
+from rekai.schemas import ChatCompletionsRequest, ChatMessage, ChatRequest
 
 
 def _req(**kwargs) -> ChatRequest:
@@ -74,6 +76,100 @@ async def test_chat_parses_response(monkeypatch) -> None:
     assert captured["json"]["generationConfig"]["maxOutputTokens"] == 32
     assert captured["headers"]["x-goog-api-key"] == "g-key"
     assert ":generateContent" in captured["url"]
+
+
+async def test_safety_settings_reach_gemini(monkeypatch) -> None:
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json, headers):
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    settings = [{"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"}]
+    await GeminiProvider().chat(_req(safety_settings=settings), api_key="g-key")
+    assert captured["json"]["safetySettings"] == settings
+
+
+def test_openai_compat_maps_safety_settings() -> None:
+    settings = [{"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"}]
+    req = ChatCompletionsRequest(
+        model="gemini-1.5-flash",
+        messages=[{"role": "user", "content": "hi"}],
+        safety_settings=settings,
+    )
+    assert to_chat_request(req).safety_settings == settings
+
+
+def test_safety_settings_change_the_cache_key() -> None:
+    base = _req()
+    guarded = _req(
+        safety_settings=[{"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"}]
+    )
+    assert cache_key(base, "gemini") != cache_key(guarded, "gemini")
+    assert semantic_bucket(base, "gemini", "client-1") != semantic_bucket(
+        guarded, "gemini", "client-1"
+    )
+
+
+async def test_top_k_reaches_gemini(monkeypatch) -> None:
+    captured: dict = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json, headers):
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    await GeminiProvider().chat(_req(top_k=12), api_key="g-key")
+    assert captured["json"]["generationConfig"]["topK"] == 12
+
+
+def test_openai_compat_maps_top_k() -> None:
+    req = ChatCompletionsRequest(
+        model="gemini-1.5-flash",
+        messages=[{"role": "user", "content": "hi"}],
+        top_k=12,
+    )
+    assert to_chat_request(req).top_k == 12
+
+
+def test_top_k_changes_the_cache_key() -> None:
+    assert cache_key(_req(), "gemini") != cache_key(_req(top_k=12), "gemini")
+    assert semantic_bucket(_req(), "gemini", "client-1") != semantic_bucket(
+        _req(top_k=12), "gemini", "client-1"
+    )
 
 
 async def test_chat_omits_gemini_thought_parts(monkeypatch) -> None:

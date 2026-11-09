@@ -18,9 +18,10 @@ from rekai.providers.base import (
     StreamEvent,
     openai_chat_message,
     provider_http_error,
+    text_embedding_inputs,
     trace_headers,
 )
-from rekai.schemas import ChatMessage, ChatRequest, Usage
+from rekai.schemas import ChatMessage, ChatRequest, EmbeddingInputs, Usage
 
 logger = get_logger("rekai.providers.ollama")
 
@@ -51,8 +52,15 @@ def _options(request: ChatRequest) -> dict:
         options["stop"] = request.stop
     if request.top_p is not None:
         options["top_p"] = request.top_p
+    if request.top_k is not None:
+        options["top_k"] = request.top_k
     if request.seed is not None:
         options["seed"] = request.seed
+    if request.ollama_options:
+        # Provider-native escape hatch for Ollama's many runner options. It is
+        # merged last so it can intentionally override shared-field mappings
+        # (e.g. a caller can set num_ctx without inventing another RekAI alias).
+        options.update(request.ollama_options)
     return options
 
 
@@ -312,7 +320,7 @@ class OllamaProvider(Provider):
 
     async def embed(
         self,
-        inputs: list[str],
+        inputs: EmbeddingInputs,
         model: str,
         api_key: str | None,
         *,
@@ -321,11 +329,12 @@ class OllamaProvider(Provider):
         user: str | None = None,
     ) -> EmbeddingResult:
         settings = current_settings()
+        texts = text_embedding_inputs(inputs, self.name)
         url = f"{settings.ollama_base_url.rstrip('/')}/api/embed"
         try:
             client = self._client(settings.request_timeout_seconds)
             resp = await client.post(
-                url, json={"model": model, "input": inputs}, headers=trace_headers()
+                url, json={"model": model, "input": texts}, headers=trace_headers()
             )
         except httpx.HTTPError as exc:
             raise ProviderError(

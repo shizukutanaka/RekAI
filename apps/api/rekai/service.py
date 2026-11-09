@@ -8,7 +8,7 @@ import time
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from rekai import guardrails
 from rekai.cache import CacheBackend, cache_key, embedding_cache_key, semantic_bucket
@@ -30,6 +30,7 @@ from rekai.schemas import (
     ChatMessage,
     ChatRequest,
     ChatResponse,
+    EmbeddingInputs,
     EmbeddingsRequest,
     EmbeddingsResponse,
     ModerationRequest,
@@ -1370,11 +1371,24 @@ async def _handle_embeddings(
     metrics.record_request(provider_name)
     _check_embedding_dimensions(provider_name, provider, request.dimensions)
 
-    inputs = [request.input] if isinstance(request.input, str) else list(request.input)
+    raw_input = request.input
+    if isinstance(raw_input, str):
+        inputs: EmbeddingInputs = [raw_input]
+    elif all(isinstance(item, int) for item in raw_input):
+        # OpenAI's list[int] is one tokenized input, not a batch of tokens.
+        inputs = [cast(list[int], raw_input)]
+    else:
+        inputs = cast(EmbeddingInputs, raw_input)
     if not inputs or any(not item for item in inputs):
         raise ProviderError("'input' must not be empty.", status_code=422)
     if len(inputs) > 2048:
         raise ProviderError("'input' supports at most 2048 items.", status_code=422)
+    if any(not isinstance(item, str) for item in inputs) and not provider.supports_token_embeddings:
+        raise ProviderError(
+            f"Provider '{provider_name}' embeddings require text input; "
+            "OpenAI token arrays are unsupported.",
+            status_code=422,
+        )
 
     use_cache = settings.cache_enabled and request.cache
     key = embedding_cache_key(
