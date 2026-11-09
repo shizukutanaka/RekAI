@@ -31,6 +31,14 @@ test("admin page: wrong key errors, correct key manages runtime keys", async ({ 
   await expect(page.locator(".error")).toHaveCount(0);
   await expect(page.getByText("None added yet.")).toBeVisible();
 
+  // Invalid TTL/credit must not silently become "no expiry" / "unbilled".
+  await page.fill("#newKey", "sk-e2e-added-runtime-key");
+  await page.getByLabel("Key TTL in seconds").fill("not-a-number");
+  await page.getByLabel("Initial credit in USD").fill("0");
+  await expect(page.getByRole("button", { name: "Add" })).toBeDisabled();
+  await page.getByLabel("Key TTL in seconds").fill("");
+  await page.getByLabel("Initial credit in USD").fill("");
+
   // Add a runtime key -> it appears, masked, in the dynamic key list.
   await page.fill("#newKey", "sk-e2e-added-runtime-key");
   await page.click('button:has-text("Add")');

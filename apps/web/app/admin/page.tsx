@@ -33,6 +33,12 @@ export default function AdminPage() {
   const [actionMsg, setActionMsg] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const ttlValue = newKeyTtl.trim();
+  const creditValue = newKeyCredit.trim();
+  const ttlInvalid = ttlValue !== "" && (!Number.isFinite(Number(ttlValue)) || Number(ttlValue) <= 0);
+  const creditInvalid =
+    creditValue !== "" && (!Number.isFinite(Number(creditValue)) || Number(creditValue) <= 0);
+
   const load = useCallback(async (key: string) => {
     if (!key) return;
     setError("");
@@ -76,21 +82,15 @@ export default function AdminPage() {
     setError("");
     setActionMsg("");
     try {
-      const ttl = newKeyTtl.trim() === "" ? undefined : Number(newKeyTtl);
-      const initialCredit =
-        newKeyCredit.trim() === "" ? undefined : Number(newKeyCredit);
-      const creditUsd =
-        initialCredit !== undefined && Number.isFinite(initialCredit) && initialCredit > 0
-          ? initialCredit
-          : undefined;
+      const ttl = ttlValue === "" ? undefined : Number(ttlValue);
       const res = await addAdminKey(
         adminKey,
         newKey.trim(),
-        ttl !== undefined && Number.isFinite(ttl) && ttl > 0 ? ttl : undefined,
-        creditUsd,
+        ttl,
+        creditValue === "" ? undefined : Number(creditValue),
       );
       const creditSuffix =
-        creditUsd === undefined ? "" : ` with $${creditUsd} credit`;
+        creditValue === "" ? "" : ` with $${creditValue} credit`;
       setActionMsg(
         res.expires_at === null
           ? `Added ${res.key}${creditSuffix}. Keep the raw key somewhere safe — it won't be shown again.`
@@ -256,6 +256,7 @@ export default function AdminPage() {
                 value={newKeyTtl}
                 placeholder="TTL seconds (blank = no expiry)"
                 aria-label="Key TTL in seconds"
+                aria-invalid={ttlInvalid}
                 inputMode="numeric"
                 style={{ maxWidth: 220 }}
                 onChange={(e) => setNewKeyTtl(e.target.value)}
@@ -264,14 +265,23 @@ export default function AdminPage() {
                 value={newKeyCredit}
                 placeholder="Credit USD (blank = unbilled)"
                 aria-label="Initial credit in USD"
+                aria-invalid={creditInvalid}
                 inputMode="decimal"
                 style={{ maxWidth: 200 }}
                 onChange={(e) => setNewKeyCredit(e.target.value)}
               />
-              <button type="submit" disabled={busy || !newKey.trim()}>
+              <button
+                type="submit"
+                disabled={busy || !newKey.trim() || ttlInvalid || creditInvalid}
+              >
                 Add
               </button>
             </form>
+            {(ttlInvalid || creditInvalid) && (
+              <p className="hint">
+                TTL and credit must be positive numbers, or blank for no expiry / unbilled.
+              </p>
+            )}
           </div>
 
           <div className="field">
