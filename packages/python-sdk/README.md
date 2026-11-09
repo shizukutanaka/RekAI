@@ -82,6 +82,9 @@ res = client.chat(
     response_format={"type": "json_object"},
 )
 
+# OpenAI bookkeeping: retain the completion upstream and attach searchable metadata
+client.chat("gpt-4o-mini", "hi", store=True, metadata={"trace": "smoke"})
+
 # Anthropic prompt-cache breakpoint (ignored by providers that don't support it)
 client.chat("claude-sonnet-4-6", "stable instructions", cache_control={"type": "ephemeral"})
 

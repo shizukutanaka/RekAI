@@ -621,6 +621,8 @@ def test_stream_forwards_the_same_chat_request_options() -> None:
             user="u-1",
             safety_identifier="s-1",
             prompt_cache_key="cache-1",
+            store=False,
+            metadata={"trace": "sdk-test"},
             thinking={"type": "enabled", "budget_tokens": 16},
             cache_control={"type": "ephemeral"},
             output_config={"effort": "low"},
@@ -652,6 +654,8 @@ def test_stream_forwards_the_same_chat_request_options() -> None:
     assert body["user"] == "u-1"
     assert body["safety_identifier"] == "s-1"
     assert body["prompt_cache_key"] == "cache-1"
+    assert body["store"] is False
+    assert body["metadata"] == {"trace": "sdk-test"}
     assert body["thinking"] == {"type": "enabled", "budget_tokens": 16}
     assert body["cache_control"] == {"type": "ephemeral"}
     assert body["output_config"] == {"effort": "low"}
