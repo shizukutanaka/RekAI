@@ -311,6 +311,12 @@ test("embeddings returns vectors and forwards options", async () => {
   assert.equal(lastRequest.headers["x-provider-key"], "sk-e");
 });
 
+test("embeddings forwards token-array input", async () => {
+  const client = new RekAIClient(baseUrl);
+  await client.embeddings("text-embedding-3-small", [[1, 2], [3, 4]], { provider: "openai" });
+  assert.deepEqual(lastRequest.body.input, [[1, 2], [3, 4]]);
+});
+
 test("embeddings accepts a string input", async () => {
   const client = new RekAIClient(baseUrl);
   await client.embeddings("echo", "hello", { cache: false });

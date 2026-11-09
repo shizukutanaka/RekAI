@@ -765,7 +765,7 @@ class RekAIClient:
     def embeddings(
         self,
         model: str,
-        input: str | list[str],
+        input: str | list[str] | list[int] | list[list[int]],
         *,
         provider: str | None = None,
         cache: bool = True,
@@ -776,7 +776,7 @@ class RekAIClient:
         user: str | None = None,
         idempotency_key: str | None = None,
     ) -> EmbeddingsResult:
-        """Create embeddings for a string or list of strings.
+        """Create embeddings for text or OpenAI token-array input.
 
         ``dimensions``/``encoding_format`` map to OpenAI's embeddings fields
         (supported providers only). ``user`` is the same end-user id as on
@@ -1144,7 +1144,7 @@ class AsyncRekAIClient:
     async def embeddings(
         self,
         model: str,
-        input: str | list[str],
+        input: str | list[str] | list[int] | list[list[int]],
         *,
         provider: str | None = None,
         cache: bool = True,
@@ -1155,7 +1155,7 @@ class AsyncRekAIClient:
         user: str | None = None,
         idempotency_key: str | None = None,
     ) -> EmbeddingsResult:
-        """Create embeddings for a string or list of strings.
+        """Create embeddings for text or OpenAI token-array input.
 
         ``dimensions``/``encoding_format`` map to OpenAI's embeddings fields
         (supported providers only). ``user`` is the same end-user id as on
