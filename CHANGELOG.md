@@ -7,6 +7,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **OpenAI `logit_bias` bounds are validated.** `/v1/chat` and
+  `/v1/chat/completions` now reject bias values outside OpenAI's -100..100
+  range before routing.
 - **Gemini `safety_settings` passthrough.** Native and OpenAI-compatible chat
   requests can send Gemini `safetySettings` (category + threshold entries)
   instead of having the field swallowed by `extra="allow"`. The setting joins

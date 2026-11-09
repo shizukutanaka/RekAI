@@ -228,3 +228,23 @@ def test_anthropic_compat_maps_top_p() -> None:
         top_p=0.9,
     )
     assert to_chat_request(req).top_p == 0.9
+
+
+@pytest.mark.parametrize("path", ["/v1/chat", "/v1/chat/completions"])
+@pytest.mark.parametrize("bias", [-101, 101])
+def test_logit_bias_bounds(path: str, bias: int) -> None:
+    """OpenAI documents logit_bias as -100..100; reject values it cannot use
+    before routing instead of returning the provider's own 400."""
+    c = TestClient(
+        create_app(Settings(environment="test", default_provider="echo")),
+        raise_server_exceptions=False,
+    )
+    resp = c.post(
+        path,
+        json={
+            "model": "echo",
+            "messages": [{"role": "user", "content": "hi"}],
+            "logit_bias": {"1234": bias},
+        },
+    )
+    assert resp.status_code == 422

@@ -18,6 +18,9 @@ TokenArray = Annotated[list[Annotated[int, Field(ge=0)]], Field(min_length=1)]
 EmbeddingInput = str | list[str] | TokenArray | list[TokenArray]
 EmbeddingInputs = list[str | TokenArray]
 
+# OpenAI logit_bias values range from -100 (ban) to +100 (exclusive selection).
+LogitBias = dict[str, Annotated[int, Field(ge=-100, le=100)]]
+
 
 class ChatMessage(BaseModel):
     role: Role
@@ -127,7 +130,7 @@ class ChatRequest(BaseModel):
         description="Token-presence penalty, as OpenAI's `presence_penalty`. "
         "OpenAI/OpenAI-compatible providers only.",
     )
-    logit_bias: dict[str, int] | None = Field(
+    logit_bias: LogitBias | None = Field(
         default=None,
         description="Token-id → bias map, as OpenAI's `logit_bias`. "
         "OpenAI/OpenAI-compatible providers only.",
@@ -420,7 +423,7 @@ class ChatCompletionsRequest(BaseModel):
     seed: int | None = None
     frequency_penalty: float | None = Field(default=None, ge=-2.0, le=2.0)
     presence_penalty: float | None = Field(default=None, ge=-2.0, le=2.0)
-    logit_bias: dict[str, int] | None = None
+    logit_bias: LogitBias | None = None
     stop: str | list[str] | None = None
     service_tier: str | None = None
     web_search_options: dict[str, Any] | None = None
