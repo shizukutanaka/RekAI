@@ -67,6 +67,29 @@ def test_chat_validation_error(client: TestClient) -> None:
     assert resp.status_code == 422
 
 
+@pytest.mark.parametrize(
+    ("metadata", "message"),
+    [
+        ({f"k{i}": "v" for i in range(17)}, "at most 16"),
+        ({"k" * 65: "v"}, "64 characters"),
+        ({"k": "v" * 513}, "512 characters"),
+    ],
+)
+def test_chat_rejects_out_of_bounds_openai_metadata(
+    client: TestClient, metadata: dict[str, str], message: str
+) -> None:
+    resp = client.post(
+        "/v1/chat",
+        json={
+            "model": "echo",
+            "messages": [{"role": "user", "content": "hi"}],
+            "metadata": metadata,
+        },
+    )
+    assert resp.status_code == 422
+    assert message in resp.text
+
+
 @pytest.mark.parametrize("model", ["", "   "])
 def test_chat_rejects_blank_model(client: TestClient, model: str) -> None:
     resp = client.post(
