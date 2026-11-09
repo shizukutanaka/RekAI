@@ -485,9 +485,10 @@ side for streamed requests.
 
 The cache key is a SHA-256 of a payload containing every `ChatRequest` field
 that can change the response: routing (`provider`, `model`), sampling
-(`temperature`, `max_tokens`, `max_completion_tokens`, `verbosity`, `reasoning_effort`, `stop`, `top_p`, `seed`, penalties, `logit_bias`),
+(`temperature`, `max_tokens`, `max_completion_tokens`, `verbosity`, `reasoning_effort`, `stop`, `top_p`, `top_k`, `seed`, penalties, `logit_bias`),
 provider passthroughs (`service_tier`, `anthropic_beta`, `anthropic_fallbacks`,
-`web_search_options`, `thinking`, `think`, `context_management`, `container`,
+`web_search_options`, `prediction`, `prompt_cache_options`, `prompt_cache_retention`,
+`thinking`, `think`, `safety_settings`, `ollama_options`, `context_management`, `container`,
 `inference_geo`, `speed`, `diagnostics`, `user_profile_id`, `mcp_servers`,
 `output_config`), conversation
 state (`messages`, `tools`, `tool_choice`, `parallel_tool_calls`), output
@@ -1395,12 +1396,15 @@ Two deliberate limits:
 
 `POST /v1/embeddings` mirrors the chat path: route → cache → `provider.embed()`.
 It accepts a string or list of strings, returns one vector per input, and is
-cached (keyed by provider/model/inputs). OpenAI's tokenized input shapes are
-accepted too: `list[int]` is one input and `list[list[int]]` is a batch; only
-OpenAI-compatible providers receive them, while text-only providers return 422.
-Echo returns deterministic hash-based
-vectors so the endpoint works with no key; OpenAI and OpenAI-compatible backends
-call the real `/embeddings` API, **Ollama** calls its local `/api/embed`
+cached (keyed by provider/model/inputs plus `dimensions`/`encoding_format`).
+OpenAI's tokenized input shapes are accepted too: `list[int]` is one input and
+`list[list[int]]` is a batch; only OpenAI-compatible providers receive them,
+while text-only providers return 422.
+Echo returns deterministic hash-based vectors so the endpoint works with no key;
+OpenAI and OpenAI-compatible backends call the real `/embeddings` API.
+`encoding_format="base64"` is forwarded upstream and decoded back into the
+public float-vector response, so callers and cache entries keep the same JSON
+shape regardless of wire format. **Ollama** calls its local `/api/embed`
 (keyless, e.g. `nomic-embed-text`), and **Gemini** uses `:batchEmbedContents`
 (e.g. `text-embedding-004`, via `provider="gemini"`). Providers opt in by
 overriding `embed()`. `/v1/models` tags every entry with a `type`

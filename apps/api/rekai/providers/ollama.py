@@ -52,8 +52,15 @@ def _options(request: ChatRequest) -> dict:
         options["stop"] = request.stop
     if request.top_p is not None:
         options["top_p"] = request.top_p
+    if request.top_k is not None:
+        options["top_k"] = request.top_k
     if request.seed is not None:
         options["seed"] = request.seed
+    if request.ollama_options:
+        # Provider-native escape hatch for Ollama's many runner options. It is
+        # merged last so it can intentionally override shared-field mappings
+        # (e.g. a caller can set num_ctx without inventing another RekAI alias).
+        options.update(request.ollama_options)
     return options
 
 
