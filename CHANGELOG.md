@@ -7,6 +7,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **`/v1/messages/count_tokens` honors per-key model ACLs.** A restricted key
+  can no longer use the local Anthropic token counter for a model it is not
+  allowed to request.
 - **Chat model selection keeps duplicate ids provider-specific.** Providers can
   advertise the same model id; the selector now sends the provider attached to
   the chosen entry instead of silently routing to the first matching id.

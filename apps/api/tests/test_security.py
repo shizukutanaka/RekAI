@@ -676,6 +676,18 @@ def test_model_acl_applies_to_anthropic_compat_streaming() -> None:
     assert stream.status_code == 403
     assert stream.json()["error"]["type"] == "permission_error"
 
+    denied_count = client.post("/v1/messages/count_tokens", json=body, headers=headers)
+    assert denied_count.status_code == 403
+    assert denied_count.json()["error"]["type"] == "permission_error"
+    assert (
+        client.post(
+            "/v1/messages/count_tokens",
+            json={**body, "model": "echo"},
+            headers=headers,
+        ).status_code
+        == 200
+    )
+
 
 def test_model_acl_denies_models_reached_through_anthropic_fallbacks() -> None:
     client = TestClient(create_app(_acl_settings()))
