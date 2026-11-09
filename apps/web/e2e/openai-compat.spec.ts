@@ -89,3 +89,40 @@ test("Settings page does not render the saved gateway key in the SDK example", a
   await expect(snippet).toContainText('api_key="sk-rekai-..."');
   await expect(snippet).not.toContainText("sk-rekai-secret-should-stay-hidden");
 });
+
+test("chat page keeps duplicate model ids provider-specific", async ({ page }) => {
+  let requestedProvider: string | undefined;
+  await page.route(`${API_URL}/v1/models`, async (route) => {
+    await route.fulfill({
+      json: {
+        data: [
+          { id: "shared-model", provider: "first", type: "chat" },
+          { id: "shared-model", provider: "second", type: "chat" },
+        ],
+      },
+    });
+  });
+  await page.route(`${API_URL}/v1/chat`, async (route) => {
+    requestedProvider = route.request().postDataJSON().provider;
+    await route.fulfill({
+      json: {
+        id: "chat-1",
+        provider: "second",
+        model: "shared-model",
+        content: "ok",
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        cost_usd: 0,
+        cached: false,
+        created: 0,
+      },
+    });
+  });
+
+  await page.goto("/");
+  await page.locator("#model").selectOption({ index: 1 });
+  await page.getByPlaceholder(/Type a message/).fill("ping");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(page.locator(".msg.assistant").last()).toContainText("ok");
+  expect(requestedProvider).toBe("second");
+});

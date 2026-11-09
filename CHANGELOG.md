@@ -7,6 +7,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **Chat model selection keeps duplicate ids provider-specific.** Providers can
+  advertise the same model id; the selector now sends the provider attached to
+  the chosen entry instead of silently routing to the first matching id.
 - **Settings no longer echoes the saved gateway key.** The OpenAI SDK example
   now uses a placeholder instead of exposing a secret in rendered page text.
 
