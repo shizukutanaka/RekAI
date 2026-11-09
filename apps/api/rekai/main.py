@@ -2536,7 +2536,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             429: {"model": ErrorResponse},
         },
     )
-    async def anthropic_count_tokens(request: AnthropicCountTokensRequest):
+    async def anthropic_count_tokens(request: AnthropicCountTokensRequest, http_request: Request):
         """Anthropic-compatible token counter (``/v1/messages/count_tokens``).
 
         Anthropic's own endpoint returns an exact tokenizer count; a
@@ -2545,6 +2545,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         pre-flight budget checks, and honest about CJK text. No upstream call,
         no billing side effects.
         """
+        denied = _model_acl_denied(http_request, [request.model])
+        if denied is not None:
+            return denied
         return AnthropicTokenCount(input_tokens=anthropic_compat.count_tokens(request))
 
     return app
