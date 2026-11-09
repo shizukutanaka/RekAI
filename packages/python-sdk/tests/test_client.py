@@ -617,10 +617,14 @@ def test_stream_forwards_the_same_chat_request_options() -> None:
             service_tier="priority",
             reasoning_effort="high",
             verbosity="low",
+            prediction={"type": "content", "content": "expected"},
+            include_obfuscation=True,
             web_search_options={"search_context_size": "low"},
             user="u-1",
             safety_identifier="s-1",
             prompt_cache_key="cache-1",
+            store=False,
+            metadata={"trace": "sdk-test"},
             thinking={"type": "enabled", "budget_tokens": 16},
             cache_control={"type": "ephemeral"},
             output_config={"effort": "low"},
@@ -648,10 +652,14 @@ def test_stream_forwards_the_same_chat_request_options() -> None:
     assert body["service_tier"] == "priority"
     assert body["reasoning_effort"] == "high"
     assert body["verbosity"] == "low"
+    assert body["prediction"] == {"type": "content", "content": "expected"}
+    assert body["include_obfuscation"] is True
     assert body["web_search_options"] == {"search_context_size": "low"}
     assert body["user"] == "u-1"
     assert body["safety_identifier"] == "s-1"
     assert body["prompt_cache_key"] == "cache-1"
+    assert body["store"] is False
+    assert body["metadata"] == {"trace": "sdk-test"}
     assert body["thinking"] == {"type": "enabled", "budget_tokens": 16}
     assert body["cache_control"] == {"type": "ephemeral"}
     assert body["output_config"] == {"effort": "low"}
@@ -741,6 +749,27 @@ def test_embeddings_returns_result() -> None:
     }
     assert captured["url"].endswith("/v1/embeddings")
     assert captured["key"] == "sk-e"
+
+
+def test_embeddings_forwards_token_array_input() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "provider": "openai",
+                "model": "text-embedding-3-small",
+                "embeddings": [[0.5]],
+                "usage": {},
+                "cached": False,
+            },
+        )
+
+    client = make_client(handler)
+    client.embeddings("text-embedding-3-small", [[1, 2], [3, 4]], provider="openai")
+    assert captured["body"]["input"] == [[1, 2], [3, 4]]
 
 
 def test_embeddings_accepts_string_input() -> None:
