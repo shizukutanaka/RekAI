@@ -69,10 +69,19 @@ def cache_key(request: ChatRequest, provider: str) -> str:
         # (include_obfuscation is excluded: it changes the streamed encoding,
         # not the content — and a cached body is never streamed.)
         "web_search_options": request.web_search_options,
+        # Predicted Outputs change the generated answer while also lowering
+        # upstream latency; different predictions must not share a response.
+        "prediction": request.prediction,
+        # Upstream prompt-cache behavior changes the work/billing performed for
+        # the same prompt, so requests with different settings must not share a
+        # cached response/cost snapshot.
+        "prompt_cache_options": request.prompt_cache_options,
+        "prompt_cache_retention": request.prompt_cache_retention,
         # Extended thinking changes both the content and its cost.
         "thinking": request.thinking,
         # Ollama's `think` switch changes the trace and the cost the same way.
         "think": request.think,
+        "safety_settings": request.safety_settings,
         # Remaining real Anthropic fields — each shapes the answer or its cost.
         "context_management": request.context_management,
         "container": request.container,
@@ -156,8 +165,12 @@ def semantic_bucket(request: ChatRequest, provider: str, client_id: str) -> str:
         "cache_control": request.cache_control,
         "system_cache_markers": _system_cache_markers(request.system_blocks),
         "web_search_options": request.web_search_options,
+        "prediction": request.prediction,
+        "prompt_cache_options": request.prompt_cache_options,
+        "prompt_cache_retention": request.prompt_cache_retention,
         "thinking": request.thinking,
         "think": request.think,
+        "safety_settings": request.safety_settings,
         "context_management": request.context_management,
         "container": request.container,
         "inference_geo": request.inference_geo,

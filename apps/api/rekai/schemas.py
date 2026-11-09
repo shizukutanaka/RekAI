@@ -141,6 +141,13 @@ class ChatRequest(BaseModel):
         "user location, etc. for models with hosted web search. Forwarded "
         "verbatim to OpenAI-compatible providers only.",
     )
+    prediction: dict[str, Any] | None = Field(
+        default=None,
+        description="OpenAI's `prediction` object ({'type': 'content', 'content': ...}) "
+        "for Predicted Outputs — known output text that lowers latency when "
+        "regenerating a mostly unchanged document. Forwarded verbatim to "
+        "OpenAI/OpenAI-compatible providers only; ignored elsewhere.",
+    )
     anthropic_beta: str | None = Field(
         default=None,
         description="Anthropic `anthropic-beta` header value (comma-joined "
@@ -169,6 +176,12 @@ class ChatRequest(BaseModel):
         description="Ollama's `think` switch — true/false, or a model-defined "
         "level string. Forwarded to Ollama only; other providers ignore it. "
         "Changes the answer and its reasoning cost, so it joins the cache key.",
+    )
+    safety_settings: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Gemini's `safetySettings` — category/threshold entries "
+        "controlling upstream safety blocking. Forwarded verbatim to Gemini "
+        "only; it can change the answer, so it joins the cache key.",
     )
     context_management: dict[str, Any] | None = Field(
         default=None,
@@ -282,6 +295,20 @@ class ChatRequest(BaseModel):
         "to OpenAI/OpenAI-compatible providers only; like `user`, it is a "
         "routing hint and does not join the cache key.",
     )
+    prompt_cache_options: dict[str, Any] | None = Field(
+        default=None,
+        description="OpenAI's `prompt_cache_options` ({'mode': 'explicit', "
+        "'ttl': '12h'}) — controls upstream prompt-cache breakpoints and "
+        "minimum lifetime. Forwarded verbatim to OpenAI-compatible providers "
+        "only; it changes upstream cache behavior and billing, so it joins the "
+        "cache key.",
+    )
+    prompt_cache_retention: str | None = Field(
+        default=None,
+        description="OpenAI's deprecated `prompt_cache_retention` "
+        "('in_memory' | '24h'). Forwarded verbatim to OpenAI-compatible "
+        "providers only; newer callers should use `prompt_cache_options.ttl`.",
+    )
 
     @field_validator("stop", mode="before")
     @classmethod
@@ -372,6 +399,7 @@ class ChatCompletionsRequest(BaseModel):
     stop: str | list[str] | None = None
     service_tier: str | None = None
     web_search_options: dict[str, Any] | None = None
+    prediction: dict[str, Any] | None = None  # OpenAI Predicted Outputs config
     stream: bool = False
     stream_options: StreamOptions | None = None
     tools: list[dict[str, Any]] | None = None
@@ -381,9 +409,12 @@ class ChatCompletionsRequest(BaseModel):
     user: str | None = None  # forwarded to the provider as its end-user id
     safety_identifier: str | None = None  # OpenAI's newer abuse-detection id
     prompt_cache_key: str | None = None  # OpenAI's prompt-cache routing key
+    prompt_cache_options: dict[str, Any] | None = None  # breakpoint mode and TTL
+    prompt_cache_retention: str | None = None  # deprecated; use options.ttl
     n: int | None = None  # 400 unless n is omitted or 1 (RekAI returns one choice)
     provider: str | None = None  # RekAI extension: explicit provider override
     think: bool | str | None = None  # RekAI extension: Ollama thinking switch
+    safety_settings: list[dict[str, Any]] | None = None  # Gemini safety thresholds
     # OpenAI's pre-tools function-calling API (deprecated since 0613 but still
     # emitted by older SDKs and codebases). Normalized to tools/tool_choice in
     # the compat layer; modern `tools` wins when both are sent.

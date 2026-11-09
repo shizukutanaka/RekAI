@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import struct
 from collections.abc import AsyncIterator
 
 import httpx
@@ -38,6 +40,25 @@ def _finish_reason(raw: object) -> FinishReason | None:
     if isinstance(raw, str) and raw in _OPENAI_FINISH_REASONS:
         return raw  # type: ignore[return-value]
     return None
+
+
+def _embedding(raw: object) -> list[float]:
+    """Normalize one OpenAI embedding row to JSON floats.
+
+    With ``encoding_format="base64"`` OpenAI returns a base64 string containing
+    little-endian float32 values rather than a JSON array. RekAI's public
+    embeddings schema is always ``list[float]``, so decode at the provider
+    boundary instead of leaking the wire encoding to callers or the cache.
+    """
+    if not isinstance(raw, str):
+        return raw  # type: ignore[return-value]
+    try:
+        packed = base64.b64decode(raw, validate=True)
+        if len(packed) % 4:
+            raise ValueError("byte length is not a multiple of 4")
+        return list(struct.unpack(f"<{len(packed) // 4}f", packed))
+    except (ValueError, struct.error) as exc:
+        raise ProviderError("OpenAI returned an invalid base64 embedding.") from exc
 
 
 class OpenAIProvider(Provider):
@@ -140,6 +161,8 @@ class OpenAIProvider(Provider):
             payload["response_format"] = request.response_format
         if request.web_search_options is not None:
             payload["web_search_options"] = request.web_search_options
+        if request.prediction is not None:
+            payload["prediction"] = request.prediction
         if request.user is not None:
             # OpenAI's abuse-detection end-user id.
             payload["user"] = request.user
@@ -149,6 +172,10 @@ class OpenAIProvider(Provider):
             # OpenAI buckets similar prompts for cache hits by this key; it does
             # not change the answer, so RekAI's own cache keys ignore it.
             payload["prompt_cache_key"] = request.prompt_cache_key
+        if request.prompt_cache_options is not None:
+            payload["prompt_cache_options"] = request.prompt_cache_options
+        if request.prompt_cache_retention is not None:
+            payload["prompt_cache_retention"] = request.prompt_cache_retention
         return payload
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
@@ -267,7 +294,7 @@ class OpenAIProvider(Provider):
         rows = sorted(data.get("data", []), key=lambda d: d.get("index", 0))
         usage = data.get("usage", {})
         return EmbeddingResult(
-            embeddings=[r["embedding"] for r in rows],
+            embeddings=[_embedding(r["embedding"]) for r in rows],
             model=data.get("model", model),
             usage=Usage(
                 prompt_tokens=usage.get("prompt_tokens", 0),

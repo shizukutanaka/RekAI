@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import struct
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -165,6 +168,81 @@ async def test_openai_embeddings_parsed(monkeypatch) -> None:
     assert result.embeddings == [[0.1, 0.2], [0.4, 0.5]]
     assert captured["url"].endswith("/embeddings")
     assert captured["json"]["input"] == ["x", "y"]
+
+
+async def test_openai_decodes_base64_embeddings(monkeypatch) -> None:
+    captured: dict = {}
+    packed = struct.pack("<3f", 0.25, -1.5, 2.0)
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {
+                "model": "text-embedding-3-small",
+                "data": [
+                    {
+                        "index": 0,
+                        "embedding": base64.b64encode(packed).decode(),
+                    }
+                ],
+                "usage": {"prompt_tokens": 3, "total_tokens": 3},
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json, headers):
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    result = await OpenAIProvider().embed(
+        ["x"],
+        "text-embedding-3-small",
+        api_key="sk-test",
+        encoding_format="base64",
+    )
+    assert captured["json"]["encoding_format"] == "base64"
+    assert result.embeddings == [[0.25, -1.5, 2.0]]
+
+
+async def test_openai_rejects_malformed_base64_embeddings(monkeypatch) -> None:
+    class FakeResponse:
+        status_code = 200
+
+        def json(self) -> dict:
+            return {
+                "model": "text-embedding-3-small",
+                "data": [{"index": 0, "embedding": "not-base64!"}],
+                "usage": {},
+            }
+
+    class FakeClient:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json, headers):
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    with pytest.raises(ProviderError, match="invalid base64 embedding"):
+        await OpenAIProvider().embed(
+            ["x"], "text-embedding-3-small", api_key="sk-test", encoding_format="base64"
+        )
 
 
 async def test_ollama_embeddings_parsed(monkeypatch) -> None:
