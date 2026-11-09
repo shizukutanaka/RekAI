@@ -354,7 +354,7 @@ export class RekAIClient {
   stream(model: string, messages: Messages, opts?: ChatOptions): AsyncGenerator<string>;
   embeddings(
     model: string,
-    input: string | string[],
+    input: string | string[] | number[] | number[][],
     opts?: EmbeddingsOptions,
   ): Promise<EmbeddingsResult>;
   moderations(

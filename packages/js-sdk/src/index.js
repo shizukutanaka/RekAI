@@ -303,9 +303,9 @@ export class RekAIClient {
   }
 
   /**
-   * Create embeddings for a string or array of strings.
+   * Create embeddings for text or OpenAI token-array input.
    * @param {string} model
-   * @param {string|string[]} input
+   * @param {string|string[]|number[]|number[][]} input
    * @param {object} [opts]
    * @returns {Promise<object>}
    */

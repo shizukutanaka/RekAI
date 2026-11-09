@@ -747,6 +747,27 @@ def test_embeddings_returns_result() -> None:
     assert captured["key"] == "sk-e"
 
 
+def test_embeddings_forwards_token_array_input() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "provider": "openai",
+                "model": "text-embedding-3-small",
+                "embeddings": [[0.5]],
+                "usage": {},
+                "cached": False,
+            },
+        )
+
+    client = make_client(handler)
+    client.embeddings("text-embedding-3-small", [[1, 2], [3, 4]], provider="openai")
+    assert captured["body"]["input"] == [[1, 2], [3, 4]]
+
+
 def test_embeddings_accepts_string_input() -> None:
     captured = {}
 
