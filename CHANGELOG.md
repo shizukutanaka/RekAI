@@ -7,6 +7,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Gemini `safety_settings` passthrough.** Native and OpenAI-compatible chat
+  requests can send Gemini `safetySettings` (category + threshold entries)
+  instead of having the field swallowed by `extra="allow"`. The setting joins
+  RekAI's cache keys because upstream safety blocking changes the response.
+- **`/v1/chat/completions` forwards OpenAI `prediction`.** Predicted Outputs
+  let callers pass known output text to reduce latency when regenerating a
+  mostly unchanged document. The field was previously swallowed by
+  `extra="allow"`; it now reaches OpenAI/OpenAI-compatible providers and joins
+  both cache keys because different predictions produce different responses.
 - **`/v1/chat/completions` forwards OpenAI prompt-cache controls.** The newer
   `prompt_cache_options` (`mode`/`ttl`) and deprecated `prompt_cache_retention`
   reach OpenAI/OpenAI-compatible providers instead of being swallowed by
@@ -208,6 +217,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parametrize test, which went with it.
 
 ### Fixed
+- **`/v1/embeddings` decodes OpenAI `encoding_format="base64"` responses.**
+  The provider forwarded the option but returned OpenAI's base64 float32
+  payload as a string inside RekAI's `list[float]` response schema. OpenAI and
+  OpenAI-compatible providers now decode it back to floats at the provider
+  boundary, so callers and cache entries keep the documented JSON vector shape.
 - **Anthropic tool-result turns kept their required order.** `/v1/messages`
   now emits `tool_result` blocks before any trailing user text and no longer
   leaves an empty `user` message for tool-result-only turns, matching

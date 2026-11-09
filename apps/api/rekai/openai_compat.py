@@ -128,6 +128,7 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         logit_bias=req.logit_bias,
         service_tier=req.service_tier,
         web_search_options=req.web_search_options,
+        prediction=req.prediction,
         include_obfuscation=(
             req.stream_options.include_obfuscation if req.stream_options else None
         ),
@@ -139,6 +140,7 @@ def to_chat_request(req: ChatCompletionsRequest) -> ChatRequest:
         user=req.user,
         safety_identifier=req.safety_identifier,
         think=req.think,
+        safety_settings=req.safety_settings,
         prompt_cache_key=req.prompt_cache_key,
         prompt_cache_options=req.prompt_cache_options,
         prompt_cache_retention=req.prompt_cache_retention,
