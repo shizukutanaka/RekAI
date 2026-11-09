@@ -617,6 +617,7 @@ def test_stream_forwards_the_same_chat_request_options() -> None:
             service_tier="priority",
             reasoning_effort="high",
             verbosity="low",
+            prediction={"type": "content", "content": "expected"},
             web_search_options={"search_context_size": "low"},
             user="u-1",
             safety_identifier="s-1",
@@ -648,6 +649,7 @@ def test_stream_forwards_the_same_chat_request_options() -> None:
     assert body["service_tier"] == "priority"
     assert body["reasoning_effort"] == "high"
     assert body["verbosity"] == "low"
+    assert body["prediction"] == {"type": "content", "content": "expected"}
     assert body["web_search_options"] == {"search_context_size": "low"}
     assert body["user"] == "u-1"
     assert body["safety_identifier"] == "s-1"

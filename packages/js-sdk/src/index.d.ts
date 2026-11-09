@@ -76,6 +76,9 @@ export interface ChatOptions {
    * that support it (OpenAI/OpenAI-compatible natively, Gemini best-effort).
    */
   responseFormat?: Record<string, unknown>;
+  /** OpenAI Predicted Outputs (`{ type: 'content', content: ... }`), used to
+   * lower latency when regenerating a mostly unchanged document. */
+  prediction?: Record<string, unknown>;
   /**
    * Sequences that stop generation, as OpenAI's `stop`. A single string is
    * accepted too; the server normalizes it to a one-element list.

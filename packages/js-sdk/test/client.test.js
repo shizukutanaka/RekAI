@@ -155,6 +155,7 @@ test("chat forwards options and BYOK header", async () => {
     promptCacheKey: "tenant-a",
     reasoningEffort: "high",
     verbosity: "low",
+    prediction: { type: "content", content: "expected" },
     fallbacks: [{ provider: "echo" }],
     providerKey: "sk-override",
   });
@@ -164,6 +165,7 @@ test("chat forwards options and BYOK header", async () => {
   assert.equal(lastRequest.body.prompt_cache_key, "tenant-a");
   assert.equal(lastRequest.body.reasoning_effort, "high");
   assert.equal(lastRequest.body.verbosity, "low");
+  assert.deepEqual(lastRequest.body.prediction, { type: "content", content: "expected" });
   assert.deepEqual(lastRequest.body.fallbacks, [{ provider: "echo" }]);
   assert.equal(lastRequest.headers["x-provider-key"], "sk-override");
 });

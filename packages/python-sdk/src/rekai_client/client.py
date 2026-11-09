@@ -299,6 +299,7 @@ def _build_payload(
     prompt_cache_key: str | None = None,
     reasoning_effort: str | None = None,
     verbosity: str | None = None,
+    prediction: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -322,6 +323,8 @@ def _build_payload(
         payload["parallel_tool_calls"] = parallel_tool_calls
     if response_format is not None:
         payload["response_format"] = response_format
+    if prediction is not None:
+        payload["prediction"] = prediction
     if stop is not None:
         payload["stop"] = stop
     if top_p is not None:
@@ -473,6 +476,7 @@ class RekAIClient:
         prompt_cache_key: str | None = None,
         reasoning_effort: str | None = None,
         verbosity: str | None = None,
+        prediction: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return _build_payload(
             model,
@@ -504,6 +508,7 @@ class RekAIClient:
             prompt_cache_key=prompt_cache_key,
             reasoning_effort=reasoning_effort,
             verbosity=verbosity,
+            prediction=prediction,
         )
 
     @staticmethod
@@ -577,6 +582,7 @@ class RekAIClient:
         prompt_cache_key: str | None = None,
         reasoning_effort: str | None = None,
         verbosity: str | None = None,
+        prediction: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -633,6 +639,7 @@ class RekAIClient:
             prompt_cache_key=prompt_cache_key,
             reasoning_effort=reasoning_effort,
             verbosity=verbosity,
+            prediction=prediction,
         )
         headers = _build_headers(
             self._provider_key,
@@ -675,6 +682,7 @@ class RekAIClient:
         prompt_cache_key: str | None = None,
         reasoning_effort: str | None = None,
         verbosity: str | None = None,
+        prediction: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], None] | None = None,
@@ -726,6 +734,7 @@ class RekAIClient:
             prompt_cache_key=prompt_cache_key,
             reasoning_effort=reasoning_effort,
             verbosity=verbosity,
+            prediction=prediction,
         )
         with self._client.stream(
             "POST",
@@ -966,6 +975,7 @@ class AsyncRekAIClient:
         prompt_cache_key: str | None = None,
         reasoning_effort: str | None = None,
         verbosity: str | None = None,
+        prediction: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         idempotency_key: str | None = None,
@@ -1001,6 +1011,7 @@ class AsyncRekAIClient:
             prompt_cache_key=prompt_cache_key,
             reasoning_effort=reasoning_effort,
             verbosity=verbosity,
+            prediction=prediction,
         )
         headers = _build_headers(
             self._provider_key,
@@ -1043,6 +1054,7 @@ class AsyncRekAIClient:
         prompt_cache_key: str | None = None,
         reasoning_effort: str | None = None,
         verbosity: str | None = None,
+        prediction: dict[str, Any] | None = None,
         provider_key: str | None = None,
         gateway_key: str | None = None,
         on_usage: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
@@ -1091,6 +1103,7 @@ class AsyncRekAIClient:
             prompt_cache_key=prompt_cache_key,
             reasoning_effort=reasoning_effort,
             verbosity=verbosity,
+            prediction=prediction,
         )
         async with self._client.stream(
             "POST",
