@@ -6,6 +6,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Settings no longer echoes the saved gateway key.** The OpenAI SDK example
+  now uses a placeholder instead of exposing a secret in rendered page text.
+
 ### Added
 - **SDKs forward OpenAI bookkeeping.** Python and JavaScript `chat()`/`stream()`
   now expose `store`/`metadata`, matching `/v1/chat`'s upstream bookkeeping and
