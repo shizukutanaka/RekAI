@@ -600,7 +600,11 @@ async def _handle_chat(
 ) -> ChatResponse:
     primary_name, primary = select_provider(request, settings)
     attempts = _build_attempts(request, primary_name, primary, settings)
-    use_cache = settings.cache_enabled and request.cache
+    # OpenAI `store`/`metadata` have upstream bookkeeping side effects; serving
+    # them from RekAI's cache would silently skip the record the caller asked
+    # the provider to write.
+    cache_allowed = request.cache and request.store is None and request.metadata is None
+    use_cache = settings.cache_enabled and cache_allowed
     deadline = _request_deadline(settings)
 
     # Semantic cache (its own in-memory store): reuse a response for a paraphrase
@@ -611,7 +615,7 @@ async def _handle_chat(
     # collide on the same cached answer. Skip semantic caching for them.
     sem_enabled = (
         settings.semantic_cache_enabled
-        and request.cache
+        and cache_allowed
         and not any(
             m.thinking_blocks or m.extra_blocks or m.content_blocks for m in request.messages
         )

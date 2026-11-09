@@ -177,6 +177,10 @@ class OpenAIProvider(Provider):
             payload["prompt_cache_options"] = request.prompt_cache_options
         if request.prompt_cache_retention is not None:
             payload["prompt_cache_retention"] = request.prompt_cache_retention
+        if request.store is not None:
+            payload["store"] = request.store
+        if request.metadata is not None:
+            payload["metadata"] = request.metadata
         return payload
 
     async def chat(self, request: ChatRequest, api_key: str | None) -> ProviderResult:
