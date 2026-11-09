@@ -51,6 +51,9 @@ await client.chat("gpt-4o-mini", "hi", {
 // Stop sequences (a string or an array; forwarded to whichever provider you call)
 await client.chat("gpt-4o-mini", "Count to ten.", { stop: ["5", "six"] });
 
+// Top-k sampling for Gemini/Ollama (ignored by OpenAI/Anthropic)
+await client.chat("gemini-2.5-flash", "hi", { provider: "gemini", topK: 20 });
+
 // OpenAI reasoning models: cap completion tokens and control effort/verbosity
 await client.chat("o3", "hi", {
   provider: "openai",

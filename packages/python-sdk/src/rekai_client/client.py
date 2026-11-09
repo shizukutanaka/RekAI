@@ -283,6 +283,7 @@ def _build_payload(
     response_format: dict[str, Any] | None = None,
     stop: list[str] | str | None = None,
     top_p: float | None = None,
+    top_k: int | None = None,
     seed: int | None = None,
     frequency_penalty: float | None = None,
     presence_penalty: float | None = None,
@@ -332,6 +333,8 @@ def _build_payload(
         payload["stop"] = stop
     if top_p is not None:
         payload["top_p"] = top_p
+    if top_k is not None:
+        payload["top_k"] = top_k
     if seed is not None:
         payload["seed"] = seed
     if frequency_penalty is not None:
@@ -469,6 +472,7 @@ class RekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         top_p: float | None = None,
+        top_k: int | None = None,
         seed: int | None = None,
         frequency_penalty: float | None = None,
         presence_penalty: float | None = None,
@@ -504,6 +508,7 @@ class RekAIClient:
             response_format,
             stop,
             top_p,
+            top_k,
             seed,
             frequency_penalty,
             presence_penalty,
@@ -582,6 +587,7 @@ class RekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         top_p: float | None = None,
+        top_k: int | None = None,
         seed: int | None = None,
         frequency_penalty: float | None = None,
         presence_penalty: float | None = None,
@@ -620,9 +626,9 @@ class RekAIClient:
         the gateway bypasses its own cache when either is present so the
         upstream side effect is not skipped.
 
-        ``top_p``/``seed``/``frequency_penalty``/``presence_penalty``/
-        ``logit_bias`` mirror OpenAI's tuning params; providers forward the
-        ones they support and ignore the rest.
+        ``top_p``/``top_k``/``seed``/``frequency_penalty``/
+        ``presence_penalty``/``logit_bias`` mirror provider tuning params;
+        providers forward the ones they support and ignore the rest.
 
         ``idempotency_key`` is sent as the ``Idempotency-Key`` header so the
         server replays the first response on a retry instead of re-processing.
@@ -643,6 +649,7 @@ class RekAIClient:
             response_format,
             stop,
             top_p,
+            top_k,
             seed,
             frequency_penalty,
             presence_penalty,
@@ -690,6 +697,7 @@ class RekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         top_p: float | None = None,
+        top_k: int | None = None,
         seed: int | None = None,
         frequency_penalty: float | None = None,
         presence_penalty: float | None = None,
@@ -744,6 +752,7 @@ class RekAIClient:
             response_format=response_format,
             stop=stop,
             top_p=top_p,
+            top_k=top_k,
             seed=seed,
             frequency_penalty=frequency_penalty,
             presence_penalty=presence_penalty,
@@ -989,6 +998,7 @@ class AsyncRekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         top_p: float | None = None,
+        top_k: int | None = None,
         seed: int | None = None,
         frequency_penalty: float | None = None,
         presence_penalty: float | None = None,
@@ -1027,6 +1037,7 @@ class AsyncRekAIClient:
             response_format,
             stop,
             top_p,
+            top_k,
             seed,
             frequency_penalty,
             presence_penalty,
@@ -1074,6 +1085,7 @@ class AsyncRekAIClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | str | None = None,
         top_p: float | None = None,
+        top_k: int | None = None,
         seed: int | None = None,
         frequency_penalty: float | None = None,
         presence_penalty: float | None = None,
@@ -1125,6 +1137,7 @@ class AsyncRekAIClient:
             response_format=response_format,
             stop=stop,
             top_p=top_p,
+            top_k=top_k,
             seed=seed,
             frequency_penalty=frequency_penalty,
             presence_penalty=presence_penalty,

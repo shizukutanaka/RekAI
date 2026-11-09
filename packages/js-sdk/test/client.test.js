@@ -157,6 +157,7 @@ test("chat forwards options and BYOK header", async () => {
     metadata: { trace: "sdk-test" },
     reasoningEffort: "high",
     verbosity: "low",
+    topK: 20,
     prediction: { type: "content", content: "expected" },
     includeObfuscation: true,
     fallbacks: [{ provider: "echo" }],
@@ -170,6 +171,7 @@ test("chat forwards options and BYOK header", async () => {
   assert.deepEqual(lastRequest.body.metadata, { trace: "sdk-test" });
   assert.equal(lastRequest.body.reasoning_effort, "high");
   assert.equal(lastRequest.body.verbosity, "low");
+  assert.equal(lastRequest.body.top_k, 20);
   assert.deepEqual(lastRequest.body.prediction, { type: "content", content: "expected" });
   assert.equal(lastRequest.body.include_obfuscation, true);
   assert.deepEqual(lastRequest.body.fallbacks, [{ provider: "echo" }]);

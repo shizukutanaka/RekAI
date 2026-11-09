@@ -182,6 +182,7 @@ def test_chat_passes_options() -> None:
         provider="openai",
         max_tokens=64,
         max_completion_tokens=128,
+        top_k=20,
         prompt_cache_key="cache-1",
         fallbacks=[{"provider": "echo"}],
     )
@@ -189,6 +190,7 @@ def test_chat_passes_options() -> None:
     assert body["provider"] == "openai"
     assert body["max_tokens"] == 64
     assert body["max_completion_tokens"] == 128
+    assert body["top_k"] == 20
     assert body["prompt_cache_key"] == "cache-1"
     assert body["fallbacks"] == [{"provider": "echo"}]
 
