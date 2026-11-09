@@ -120,6 +120,7 @@ test("chat page keeps duplicate model ids provider-specific", async ({ page }) =
 
   await page.goto("/");
   await page.locator("#model").selectOption({ index: 1 });
+  await page.getByLabel("Stream").uncheck();
   await page.getByPlaceholder(/Type a message/).fill("ping");
   await page.getByRole("button", { name: "Send" }).click();
 
