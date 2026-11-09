@@ -108,12 +108,16 @@ class GeminiProvider(Provider):
             payload["generationConfig"]["stopSequences"] = request.stop
         if request.top_p is not None:
             payload["generationConfig"]["topP"] = request.top_p
+        if request.top_k is not None:
+            payload["generationConfig"]["topK"] = request.top_k
         if request.seed is not None:
             payload["generationConfig"]["seed"] = request.seed
         if request.frequency_penalty is not None:
             payload["generationConfig"]["frequencyPenalty"] = request.frequency_penalty
         if request.presence_penalty is not None:
             payload["generationConfig"]["presencePenalty"] = request.presence_penalty
+        if request.safety_settings:
+            payload["safetySettings"] = request.safety_settings
 
         # Best-effort structured output: OpenAI's response_format maps onto
         # Gemini's generationConfig. json_object -> JSON mime type; json_schema

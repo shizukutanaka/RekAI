@@ -584,6 +584,19 @@ async def test_no_max_tokens_leaves_ollamas_own_default_alone(monkeypatch) -> No
     assert options["temperature"] == pytest.approx(0.7)
 
 
+async def test_top_k_reaches_ollama_options(monkeypatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    await OllamaProvider().chat(
+        ChatRequest(
+            model="llama3",
+            messages=[ChatMessage(role="user", content="hi")],
+            top_k=20,
+        ),
+        api_key=None,
+    )
+    assert FakeClient.captured["json"]["options"]["top_k"] == 20
+
+
 async def test_ollama_options_reach_ollama_and_can_override(monkeypatch) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
     await OllamaProvider().chat(
