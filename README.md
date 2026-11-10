@@ -9,6 +9,51 @@ RekAI sits between your application and multiple LLM providers (OpenAI, Anthropi
 
 ---
 
+## 👋 Quick start for general users (Docker)
+
+The shortest path from zero to chatting in your browser. You do **not** need
+Python, Node.js, or an API key just to try RekAI — the built-in `echo`
+provider answers without any key.
+
+**Prerequisite:** Docker, with the Compose plugin (`docker compose`).
+On Windows and macOS, installing Docker Desktop gives you both.
+
+```bash
+git clone https://github.com/shizukutanaka/RekAI.git
+cd RekAI
+docker compose up --build        # or: make up, if you have make
+```
+
+The first run builds three services (Redis, the API, and the web UI — see
+[`docker-compose.yml`](./docker-compose.yml)), so it takes a few minutes.
+When the output settles:
+
+- **Chat UI: http://localhost:3000** — this is where you chat.
+- API: http://localhost:8000 (interactive docs at http://localhost:8000/docs)
+
+To stop everything, press `Ctrl+C` in that terminal, then run
+`docker compose down` (or `make down`).
+
+**Use a real AI provider (bring your own key — BYOK):** RekAI never supplies
+provider keys; you use your own OpenAI / Anthropic / Gemini key, and it is
+never persisted on the server. Two ways to supply one:
+
+1. *In the browser (easiest):* open the Chat UI's
+   [Settings page](http://localhost:3000/settings) and paste your provider
+   key there. It is stored only in your browser's local storage and sent
+   per request as the `X-Provider-Key` header.
+2. *On the server, before starting:* copy `apps/api/.env.example` to
+   `apps/api/.env` and add your key(s) there, then start the stack again.
+
+> The Chat UI is currently English-only. How multilingual support could be
+> added later is written up as a design memo in
+> [`docs/i18n-design-memo.md`](./docs/i18n-design-memo.md) — no code yet.
+
+Everything below this section is the full technical reference: features,
+the API surface, SDKs, deployment, and local (non-Docker) development.
+
+---
+
 ## ✨ Features
 
 - **OpenAI-compatible API** — a drop-in `POST /v1/chat/completions` (non-streaming and streaming). Point any OpenAI SDK, LangChain, or OpenAI-format client at RekAI's base URL (`.../v1`) and it just works — no client changes. `response_format` (JSON mode / json_schema) is honored by **every** provider — natively on OpenAI-compatible backends, via `responseSchema` on Gemini, via `format` on Ollama, and via forced tool use on Anthropic (whose API has no `response_format` field), with the result unwrapped back into ordinary JSON content.
