@@ -6,6 +6,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **README opens with a general-user Docker quick start.** The shortest
+  honest path (Docker prerequisite, `docker compose up --build`, Chat UI
+  at http://localhost:3000, BYOK via the Settings page or
+  `apps/api/.env`) now sits at the top; the full technical reference is
+  unchanged below it.
+- **`docs/i18n-design-memo.md`** — design memo only (no code) for adding
+  multilingual support (en/ja first) to the Chat UI later: current state,
+  a typed dictionary extraction approach, detection/storage via the
+  existing `rekai.*` local-storage pattern, and explicit non-goals.
+
 ## [1.4.0] - 2026-11-10
 
 ### Fixed
