@@ -6,6 +6,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-10
+
 ### Fixed
 - **`/v1/messages/count_tokens` honors per-key model ACLs.** A restricted key
   can no longer use the local Anthropic token counter for a model it is not
