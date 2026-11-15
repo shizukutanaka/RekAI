@@ -1,271 +1,78 @@
 # RekAI
 
-> **Consolidated into [Pasture](https://github.com/shizukutanaka/Pasture)** — this repository is no longer developed. RekAI's provider set (including Gemini), its Anthropic Messages API surface, and its Idempotency-Key deduplication were ported into Pasture (IMP-72/73/74); Pasture is the surviving local/cloud LLM router. This repository will be archived; the code remains available for reference.
+**音声またはデスクトップ上で、今見ているものを調べて答えてくれるアシスタント。**
 
-> A lightweight, self-hostable **AI router & gateway** with provider abstraction, response caching, BYOK (Bring Your Own Key), and a built-in chat UI.
+画面（または写真）に写っているものを取り込んで、音声かテキストで質問すると、内容を調べて文章で答え、読み上げることもできます。単一HTMLファイル・外部依存ゼロの Web アプリで、インストールは不要です。PC でもモバイルでも動きます。
 
-RekAI sits between your application and multiple LLM providers (OpenAI, Anthropic, Gemini, Ollama, and any OpenAI-compatible endpoint). It routes each request to the right provider, caches responses to cut cost and latency, supports chat, streaming, tool calling, and embeddings through one API, and lets every user bring their own API key.
+> English summary below.
 
-[![CI](https://github.com/shizukutanaka/RekAI/actions/workflows/ci.yml/badge.svg)](https://github.com/shizukutanaka/RekAI/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+## できること
+
+- **画面を取り込む**: PC では画面共有で今の画面をそのまま撮影。モバイル等では写真を撮る／画像を選ぶ。貼り付け（Ctrl+V）にも対応。
+- **質問する**: 音声入力（日本語対応）またはテキスト入力。画像なしの質問もできます。
+- **答える**: 画像と質問を、あなたが設定した AI（Vision 対応 LLM）に送り、回答を表示。読み上げ（停止ボタン付き）もできます。
+- **履歴**: 質問と回答はこの端末のブラウザ内にだけ残ります（画像は保存しません）。いつでも消せます。
+- **多言語 UI**: 日本語／English／Español／中文／한국어。
+
+## 使い方（3ステップ）
+
+1. **接続先を設定する**（初回のみ）: 右上の「設定」で、使う AI の接続先URL・モデル名・（必要な場合）APIキーを入れます。プリセットから選べます（下記）。
+2. **取り込む**: 「画面を取り込む」か「画像を選ぶ／撮る」で、今見ているものを取り込みます。
+3. **質問する**: 音声かテキストで質問して「調べる」。回答が表示され、必要なら読み上げます。
+
+`index.html` をブラウザで開くだけで使えます（画面共有や音声入力を使う場合は、HTTPS か `localhost` で開いてください。ブラウザの仕様です）。
+
+## 接続先の設定
+
+AI の接続先は**利用者自身のもの**を使う設計です。OpenAI 互換 API（`/v1/chat/completions`）を持つサービスなら使えます。
+
+| プリセット | 接続先の例 | 備考 |
+|---|---|---|
+| Pasture | `http://localhost:8080/v1` | この製品群のローカルLLMルーター。モデル名は Pasture 側の設定に合わせて入力 |
+| Ollama | `http://localhost:11434/v1` | モデル例: `llama3.2-vision` |
+| LM Studio | `http://localhost:1234/v1` | 画像が読めるモデルを読み込んでおく |
+| OpenAI | `https://api.openai.com/v1` | 自分の API キーが必要。モデル例: `gpt-4o-mini` |
+| カスタム | 任意 | OpenAI 互換なら何でも |
+
+- **画像が読める（Vision 対応）モデル**が必要です。テキスト専用モデルでは画像の質問に答えられません。
+- APIキーはこの端末のブラウザ内にのみ保存され、設定した接続先へのリクエストにだけ使われます。
+
+## プライバシー
+
+- 画像と質問が送られるのは、**あなたが設定した接続先だけ**です。
+- 設定と履歴はこの端末のブラウザ内（localStorage）にのみ保存されます。**作成者（開発者）を含む第三者にデータが送られることは一切ありません**（このアプリ自体に送信機能がありません）。
+- 履歴に保存するのは質問と回答のテキストだけです。取り込んだ画像は保存しません。
+- 注意（ブラウザの仕様）: 音声入力はブラウザの音声認識を使います。ブラウザによっては（例: Chrome）音声がブラウザ提供元のサーバーで処理されます。気になる場合はテキスト入力をご利用ください。読み上げもブラウザ依存で、一部の音声は外部で合成される場合があります。
+
+## 失敗したとき
+
+接続できない・認証エラー・モデルが見つからない等は、理由が分かるメッセージで表示します（黙って失敗しません）。メッセージの案内に沿って、接続先URL・モデル名・APIキー・接続先が動いているかを確認してください。
+
+## このリポジトリについて
+
+旧 RekAI は AI ルーター／ゲートウェイでしたが、その機能は [Pasture](https://github.com/shizukutanaka/Pasture) へ統合済みです（Anthropic Messages 互換、Gemini 対応、Idempotency-Key 重複排除、`pasture discover`）。このリポジトリは、製品定義にもとづいて**「今見ているものを調べて答えるアシスタント」として作り直した**ものです。
+
+## 開発
+
+```bash
+node tests/run-tests.js   # 単体テスト（依存ゼロ、Node だけで実行）
+```
+
+核ロジック（リクエスト組み立て、応答パース、設定検証、多言語辞書、履歴）は `index.html` 内の `REKAI CORE` 区間に切り出してあり、テストがそれを抽出して検証します。セキュリティの自己レビューは [SECURITY.md](./SECURITY.md) を参照。
+
+## ライセンス
+
+MIT — [LICENSE](./LICENSE)
 
 ---
 
-## 👋 Quick start for general users (Docker)
+## English summary
 
-The shortest path from zero to chatting in your browser. You do **not** need
-Python, Node.js, or an API key just to try RekAI — the built-in `echo`
-provider answers without any key.
+**RekAI is an assistant that looks at what you are looking at — on your desktop screen or in a photo — and answers your questions about it, by voice or text.**
 
-**Prerequisite:** Docker, with the Compose plugin (`docker compose`).
-On Windows and macOS, installing Docker Desktop gives you both.
-
-```bash
-git clone https://github.com/shizukutanaka/RekAI.git
-cd RekAI
-docker compose up --build        # or: make up, if you have make
-```
-
-The first run builds three services (Redis, the API, and the web UI — see
-[`docker-compose.yml`](./docker-compose.yml)), so it takes a few minutes.
-When the output settles:
-
-- **Chat UI: http://localhost:3000** — this is where you chat.
-- API: http://localhost:8000 (interactive docs at http://localhost:8000/docs)
-
-To stop everything, press `Ctrl+C` in that terminal, then run
-`docker compose down` (or `make down`).
-
-**Use a real AI provider (bring your own key — BYOK):** RekAI never supplies
-provider keys; you use your own OpenAI / Anthropic / Gemini key, and it is
-never persisted on the server. Two ways to supply one:
-
-1. *In the browser (easiest):* open the Chat UI's
-   [Settings page](http://localhost:3000/settings) and paste your provider
-   key there. It is stored only in your browser's local storage and sent
-   per request as the `X-Provider-Key` header.
-2. *On the server, before starting:* copy `apps/api/.env.example` to
-   `apps/api/.env` and add your key(s) there, then start the stack again.
-
-> The Chat UI is currently English-only. How multilingual support could be
-> added later is written up as a design memo in
-> [`docs/i18n-design-memo.md`](./docs/i18n-design-memo.md) — no code yet.
-
-Everything below this section is the full technical reference: features,
-the API surface, SDKs, deployment, and local (non-Docker) development.
-
----
-
-## ✨ Features
-
-- **OpenAI-compatible API** — a drop-in `POST /v1/chat/completions` (non-streaming and streaming). Point any OpenAI SDK, LangChain, or OpenAI-format client at RekAI's base URL (`.../v1`) and it just works — no client changes. `response_format` (JSON mode / json_schema) is honored by **every** provider — natively on OpenAI-compatible backends, via `responseSchema` on Gemini, via `format` on Ollama, and via forced tool use on Anthropic (whose API has no `response_format` field), with the result unwrapped back into ordinary JSON content.
-- **Anthropic-compatible API** — a drop-in `POST /v1/messages` (non-streaming and streaming). Point an Anthropic SDK at RekAI's base URL and it just works — Anthropic's request/response shapes, typed SSE events, error envelope, and `x-api-key` auth included.
-- **Provider abstraction** — one API, many backends (`openai`, `anthropic`, `gemini`, `ollama`, plus an `echo` provider for local dev/tests). Point at **any OpenAI-compatible endpoint** (Groq, Together, OpenRouter, Mistral, vLLM, LM Studio…) with `REKAI_CUSTOM_BASE_URL` — that alone is enough for a keyless local server; add `REKAI_CUSTOM_API_KEY` for a hosted one (or send it per request as BYOK), and `REKAI_CUSTOM_MODELS` to have them listed at `/v1/models`.
-- **Smart routing** — pick a provider explicitly, or let RekAI choose by model name / configured default.
-- **Resilience** — transient upstream errors (5xx/timeouts) are retried in place with exponential backoff + jitter, then fall over down a configured chain of `(provider, model)` targets.
-- **Streaming** — Server-Sent Events at `/v1/chat/stream` for token-by-token responses, with accurate provider-reported usage.
-- **Tool / function calling** — OpenAI-style `tools`/`tool_choice` that work uniformly across OpenAI, Anthropic, and Gemini (RekAI translates the formats per provider).
-- **Embeddings** — `/v1/embeddings` across echo, OpenAI, Gemini, and Ollama, with the same routing, caching, BYOK, and cost; a web playground shows vectors and cosine similarity.
-- **Model discovery** — `/v1/models` lists every model with its `type` (chat/embedding) and per-model `pricing`, filterable via `?type=`.
-- **Moderation** — OpenAI-compatible `POST /v1/moderations` forwards the request verbatim to providers with a moderation endpoint (OpenAI and OpenAI-compatible backends; echo returns a deterministic stub). Same provider routing, model ACL, BYOK, and input-secret scanning as the rest of the API.
-- **Response cache** — Redis-backed with an automatic in-memory fallback. Identical requests are served instantly and for free; near-duplicates can be caught by an opt-in **semantic cache** (embedding similarity, with an opt-in verification band that re-checks borderline hits).
-- **Provider prompt caching** — pass a `cache_control` breakpoint (top-level, or per message) straight through to the provider. Anthropic caches the prefix before it at up to ~90% off; OpenAI caches automatically. Responses report the split via `usage.cache_read_tokens` / `cache_write_tokens`, and cost estimates apply the discount.
-- **Cost awareness** — each response carries an estimated USD cost; cumulative and per-provider spend is exposed at `/v1/usage`. Optional **per-client budgets** (`REKAI_CLIENT_BUDGET_USD`, per-key overrides via `REKAI_CLIENT_BUDGETS_USD`, optional rolling window via `REKAI_CLIENT_BUDGET_WINDOW_SECONDS`) reject over-budget clients with 402.
-- **Idempotency** — `Idempotency-Key` on chat completions de-duplicates retries (Redis `SET NX` when configured, in-process otherwise): a retried request replays the stored response instead of spending again.
-- **Auth & BYOK** — optionally gate the gateway with client API keys (`Authorization: Bearer`, constant-time); users supply their own upstream provider key per request (`X-Provider-Key`), never persisted. **Dynamic keys** can be created/revoked at runtime via `/admin/keys` (gated by `REKAI_ADMIN_KEY`, encrypted at rest with `REKAI_DYNAMIC_KEYS_ENCRYPTION_KEY`) and are listed on the admin UI.
-- **Guardrails** — optional prompt-injection scanning (`REKAI_GUARDRAILS_ENABLED`, flag-or-block via `REKAI_GUARDRAILS_ACTION`) and output secret redaction (`REKAI_OUTPUT_REDACTION_ENABLED`).
-- **Rate limiting & resilience** — per-client token bucket with `Retry-After` and `X-RateLimit-*` headers; oversized bodies are rejected with 413. A **concurrency cap**, a **request deadline** (`REKAI_REQUEST_DEADLINE_SECONDS` — a wall-clock budget shared by retries and fallbacks), and a **provider cooldown** that parks a repeatedly-failing backend so fallbacks skip it rather than re-timing-out every request.
-- **Observability** — structured text or JSON logging (with OpenTelemetry GenAI semantic-convention attributes — `gen_ai.request.model`, `gen_ai.usage.*` — on chat/embeddings log lines), W3C `traceparent` correlation in and out, per-request `X-Request-ID`/`X-Response-Time-Ms`/`X-RekAI-Version` headers, and a Prometheus-style `/metrics` endpoint.
-- **OpenAPI** — auto-generated docs at `/docs` and a machine-readable schema at `/openapi.json` (off in `REKAI_ENVIRONMENT=production`; `REKAI_DOCS_ENABLED` overrides).
-- **SDKs** — official Python (`rekai-client`) and JS/TS (`@rekai/client`) clients.
-- **Chat UI** — a Next.js front-end to try it all in the browser.
-
-## 🏗️ Architecture
-
-```
-                ┌──────────────┐
-   Browser ───▶ │  Next.js Web │ ─┐
-                └──────────────┘  │  HTTP (X-Provider-Key)
-                                  ▼
-                         ┌─────────────────┐
-                         │   FastAPI API   │
-                         │  ┌───────────┐  │
-                         │  │  Router   │  │ ──▶ chooses provider
-                         │  ├───────────┤  │
-                         │  │  Cache    │  │ ──▶ Redis / memory
-                         │  ├───────────┤  │
-                         │  │ Providers │  │ ──▶ OpenAI · Anthropic · Gemini · Ollama · Echo
-                         │  └───────────┘  │
-                         └─────────────────┘
-```
-
-See [`docs/architecture.md`](./docs/architecture.md) for details.
-
-## 🚀 Quick start
-
-### With Docker (recommended)
-
-```bash
-git clone https://github.com/shizukutanaka/RekAI.git
-cd RekAI
-cp apps/api/.env.example apps/api/.env   # optional: add provider keys
-docker compose up --build
-```
-
-- API:  http://localhost:8000  (docs at http://localhost:8000/docs)
-- Web:  http://localhost:3000
-
-### Deploy
-
-One-click on Render (Redis + API + Web) or self-host with Docker — see
-[`deploy/`](./deploy).
-
-### Local development (without Docker)
-
-**Backend**
-
-```bash
-cd apps/api
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-uvicorn rekai.main:app --reload
-```
-
-**Frontend**
-
-```bash
-cd apps/web
-npm install
-npm run dev
-```
-
-## 🧪 Try it
-
-The default `echo` provider needs no API key, so the stack works out of the box:
-
-```bash
-curl -s http://localhost:8000/v1/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"echo","messages":[{"role":"user","content":"hello"}]}' | jq
-```
-
-Or smoke-test a running instance end to end (requires [`jq`](https://jqlang.github.io/jq/)):
-
-```bash
-scripts/smoke.sh                 # or: make smoke   (BASE_URL=http://localhost:8000)
-# If gateway auth is on, authenticate the checks and assert unauth'd 401s:
-REKAI_API_KEY=sk-rekai-... scripts/smoke.sh
-```
-
-Use a real provider by passing your own key (BYOK):
-
-```bash
-curl -s http://localhost:8000/v1/chat \
-  -H 'Content-Type: application/json' \
-  -H 'X-Provider-Key: sk-...' \
-  -d '{"provider":"openai","model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'
-```
-
-Embeddings work the same way (keyless on `echo`):
-
-```bash
-curl -s http://localhost:8000/v1/embeddings \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"echo","input":["hello","world"]}' | jq '.embeddings | length'
-```
-
-Already using the OpenAI SDK? Just change the base URL — RekAI exposes a drop-in
-`POST /v1/chat/completions`:
-
-```python
-from openai import OpenAI
-
-client = OpenAI(base_url="http://localhost:8000/v1", api_key="unused-on-echo")
-print(client.chat.completions.create(
-    model="echo", messages=[{"role": "user", "content": "hello"}]
-).choices[0].message.content)
-```
-
-Set `api_key` to your RekAI gateway key if `REKAI_API_KEYS` is configured —
-otherwise it is forwarded as the BYOK provider key (the OpenRouter
-convention). When gateway auth is on, BYOK goes through `X-Provider-Key` via
-`default_headers`; either way pass a real provider model (`gpt-4o-mini`,
-`claude-...`, `anthropic/claude-...`).
-
-The Anthropic SDK works the same way — RekAI exposes a drop-in
-`POST /v1/messages`:
-
-```python
-import anthropic
-
-client = anthropic.Anthropic(base_url="http://localhost:8000")  # no trailing /v1
-print(client.messages.create(
-    model="echo", max_tokens=64, messages=[{"role": "user", "content": "hello"}]
-).content[0].text)
-```
-
-Runnable client snippets (curl, Python incl. streaming/tools/embeddings,
-JavaScript) live in [`examples/`](./examples), and there are installable
-clients — Python [`packages/python-sdk`](./packages/python-sdk) and
-JS/TS [`packages/js-sdk`](./packages/js-sdk):
-
-```python
-from rekai_client import RekAIClient
-
-client = RekAIClient("http://localhost:8000")
-print(client.chat("echo", "Hello!").content)
-print(len(client.embeddings("echo", ["semantic", "search"]).embeddings))
-```
-
-## 📦 Monorepo layout
-
-```
-RekAI/
-├── apps/
-│   ├── api/   # FastAPI backend (router, cache, providers, BYOK)
-│   └── web/   # Next.js chat UI
-├── packages/
-│   ├── python-sdk/   # rekai-client: official Python client
-│   └── js-sdk/       # @rekai/client: official JS/TS client
-├── examples/  # curl / Python / JavaScript snippets
-├── docs/      # architecture & guides
-├── docker-compose.yml
-└── .github/   # CI, issue & PR templates
-```
-
-## 🗺️ Roadmap
-
-See [`docs/roadmap.md`](./docs/roadmap.md). In short:
-
-| Milestone | Scope |
-|-----------|-------|
-| **M1 Foundation** | Repo, Docker, FastAPI, Next.js, CI, README |
-| **M2 Core** | Router, Cache, Providers, BYOK |
-| **M3 UI** | Chat, settings, usage |
-| **M4 Quality** | Tests, OpenAPI, logging, security |
-| **M5 Release** | OSS docs, demo, v1.0 |
-
-## 🛠️ Development
-
-Common tasks are wrapped in a `Makefile`:
-
-```bash
-make install   # install API + web dependencies
-make check     # lint, type-check, test, and build the web app
-make run-api   # run the API   (make run-web for the UI)
-make up        # docker compose up --build
-```
-
-Run `make help` for the full list. Changes are tracked in [CHANGELOG.md](./CHANGELOG.md).
-
-Working on this repo with an AI agent? Start from [`CLAUDE.md`](./CLAUDE.md)
-(shared conventions and verification gates) and the model-specific task
-assignments in [`docs/ai/`](./docs/ai/).
-
-## 🤝 Contributing
-
-Contributions are welcome! Read [CONTRIBUTING.md](./CONTRIBUTING.md) and our [Code of Conduct](./CODE_OF_CONDUCT.md).
-
-## 📄 License
-
-[MIT](./LICENSE) © RekAI contributors
+- Single-file (`index.html`), zero-dependency web app. No install; works on PC and mobile.
+- Capture your screen (screen sharing), pick/take a photo, or paste an image; ask by voice (Web Speech API) or text; get a written answer, optionally read aloud.
+- **You bring your own AI endpoint**: any OpenAI-compatible API with a vision-capable model. Presets for Pasture (this family's local LLM router), Ollama, LM Studio, and OpenAI.
+- **Privacy**: images and questions go only to the endpoint *you* configure. Settings and history live only in your browser on your device. Nothing is ever sent to the developer or any third party. History stores text only, never images.
+- UI in 日本語 / English / Español / 中文 / 한국어.
+- Note: the previous RekAI (an AI gateway) was consolidated into [Pasture](https://github.com/shizukutanaka/Pasture); this repository has been rebuilt as the assistant described above.

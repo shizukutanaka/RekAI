@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="description" content="RekAI — a voice/desktop assistant that looks at what you are looking at and answers. Single-file, zero-dependency, local-first.">
+<title>RekAI — 見ているものを、調べて答えるアシスタント</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#ffffff; --ink:#1c2430; --sub:#5b6a7a; --line:#d9dee6;
+    --accent:#2563eb; --accent-ink:#ffffff; --danger:#b3261e; --danger-bg:#fdecea;
+    --ok:#146c2e; --radius:14px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#11151b; --card:#1a2029; --ink:#e8edf3; --sub:#9fb0c1; --line:#2c3644;
+      --accent:#4f83f8; --danger:#ff8a80; --danger-bg:#3a2321; --ok:#7bd88f; }
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{ background:var(--bg); color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;
+    line-height:1.55; }
+  header{ display:flex; align-items:center; gap:.6rem; padding:.8rem 1rem;
+    background:var(--card); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; }
+  header h1{ font-size:1.25rem; margin:0; }
+  header .tag{ color:var(--sub); font-size:.85rem; }
+  header .spacer{ flex:1; }
+  select,button,input,textarea{ font:inherit; }
+  select,input[type="text"],input[type="password"],textarea{
+    background:var(--card); color:var(--ink); border:1px solid var(--line);
+    border-radius:10px; padding:.55rem .7rem; }
+  button{ border:1px solid var(--line); background:var(--card); color:var(--ink);
+    border-radius:10px; padding:.6rem 1rem; cursor:pointer; min-height:44px; }
+  button:hover{ border-color:var(--accent); }
+  button.primary{ background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:600; }
+  button:disabled{ opacity:.55; cursor:not-allowed; }
+  main{ max-width:860px; margin:0 auto; padding:1rem; display:flex; flex-direction:column; gap:1rem; }
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:1rem; }
+  .card h2{ font-size:1rem; margin:.1rem 0 .6rem; }
+  .row{ display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; }
+  .row > *{ flex:0 1 auto; }
+  #previewWrap{ margin-top:.7rem; }
+  #preview{ max-width:100%; border-radius:10px; border:1px solid var(--line); display:none; }
+  #screenVideo{ display:none; }
+  textarea#question{ width:100%; min-height:64px; resize:vertical; }
+  #answer{ white-space:pre-wrap; word-break:break-word; min-height:3rem; }
+  .muted{ color:var(--sub); font-size:.9rem; }
+  #status{ display:none; border-radius:10px; padding:.7rem .9rem; }
+  #status.error{ display:block; background:var(--danger-bg); color:var(--danger); border:1px solid var(--danger); }
+  #status.info{ display:block; background:var(--card); color:var(--sub); border:1px solid var(--line); }
+  ul#historyList{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.7rem; }
+  ul#historyList li{ border:1px solid var(--line); border-radius:10px; padding:.6rem .8rem; }
+  ul#historyList .hq{ font-weight:600; }
+  ul#historyList .ha{ white-space:pre-wrap; word-break:break-word; }
+  ul#historyList .ht{ color:var(--sub); font-size:.8rem; }
+  dialog{ border:1px solid var(--line); border-radius:var(--radius); background:var(--card); color:var(--ink);
+    max-width:min(560px,94vw); width:560px; padding:1.2rem; }
+  dialog::backdrop{ background:rgba(0,0,0,.45); }
+  .field{ display:flex; flex-direction:column; gap:.3rem; margin-bottom:.9rem; }
+  .field label{ font-weight:600; font-size:.95rem; }
+  .field input,.field select{ width:100%; }
+  .field .hint{ color:var(--sub); font-size:.85rem; }
+  .field .ferr{ color:var(--danger); font-size:.9rem; display:none; }
+  footer{ max-width:860px; margin:0 auto; padding:0 1rem 2rem; color:var(--sub); font-size:.85rem; }
+  .mic-on{ background:var(--danger-bg); border-color:var(--danger); color:var(--danger); }
+</style>
+</head>
+<body>
+<header>
+  <h1>RekAI</h1>
+  <span class="tag" data-i18n="tagline">見ているものを、調べて答えるアシスタント</span>
+  <span class="spacer"></span>
+  <label class="muted"><span data-i18n="langLabel">言語</span>
+    <select id="langSel" aria-label="Language">
+      <option value="ja">日本語</option>
+      <option value="en">English</option>
+      <option value="es">Español</option>
+      <option value="zh">中文</option>
+      <option value="ko">한국어</option>
+    </select>
+  </label>
+  <button id="openSettingsBtn" type="button" data-i18n="settings">設定</button>
+</header>
+
+<main>
+  <div id="status" role="alert"></div>
+
+  <section class="card" aria-labelledby="capH">
+    <h2 id="capH" data-i18n="captureTitle">1. 今見ているものを取り込む</h2>
+    <div class="row">
+      <button id="captureBtn" type="button" class="primary" data-i18n="captureScreen">画面を取り込む</button>
+      <button id="pickBtn" type="button" data-i18n="chooseImage">画像を選ぶ／撮る</button>
+      <button id="clearImageBtn" type="button" data-i18n="removeImage" disabled>画像を外す</button>
+      <input id="fileInput" type="file" accept="image/*" hidden>
+    </div>
+    <p class="muted" data-i18n="captureHint">画面共有が使えない環境では、画像の選択（モバイルでは撮影も）をご利用ください。画像を貼り付け（Ctrl+V）でも取り込めます。</p>
+    <div id="previewWrap">
+      <img id="preview" alt="">
+      <video id="screenVideo" autoplay playsinline muted></video>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="qH">
+    <h2 id="qH" data-i18n="questionTitle">2. 質問する</h2>
+    <textarea id="question" data-i18n-ph="questionPlaceholder" placeholder="例：この画面のエラーの意味と直し方を教えて"></textarea>
+    <div class="row" style="margin-top:.6rem">
+      <button id="micBtn" type="button" data-i18n="micStart">🎤 音声で入力</button>
+      <button id="askBtn" type="button" class="primary" data-i18n="ask">調べる</button>
+      <span id="busy" class="muted" hidden data-i18n="asking">調べています…</span>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="aH">
+    <h2 id="aH" data-i18n="answerTitle">3. 回答</h2>
+    <div id="answer" class="muted">まだ回答はありません。</div>
+    <div class="row" style="margin-top:.6rem">
+      <button id="speakBtn" type="button" data-i18n="speak" disabled>🔊 読み上げる</button>
+      <button id="stopSpeakBtn" type="button" data-i18n="stopSpeak" disabled>⏹ 止める</button>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="hH">
+    <h2 id="hH" data-i18n="historyTitle">履歴（この端末の中だけ）</h2>
+    <ul id="historyList"></ul>
+    <p id="historyEmpty" class="muted" data-i18n="historyEmpty">履歴はまだありません。</p>
+    <div class="row" style="margin-top:.6rem">
+      <button id="clearHistoryBtn" type="button" data-i18n="clearHistory">履歴を消す</button>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <p data-i18n="privacyNote">プライバシー：画像と質問は、あなたが設定した接続先（AI）にだけ送られます。履歴と設定はこの端末のブラウザ内にのみ保存され、作成者を含む第三者へは一切送られません。</p>
+</footer>
+
+<dialog id="settingsDlg">
+  <form method="dialog" id="settingsForm">
+    <h2 data-i18n="settingsTitle">接続先の設定</h2>
+    <div class="field">
+      <label for="presetSel" data-i18n="preset">プリセット</label>
+      <select id="presetSel"></select>
+    </div>
+    <div class="field">
+      <label for="endpointInput" data-i18n="endpoint">接続先URL（OpenAI互換 API）</label>
+      <input id="endpointInput" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="http://localhost:8080/v1">
+      <span class="ferr" id="errEndpoint"></span>
+    </div>
+    <div class="field">
+      <label for="modelInput" data-i18n="model">モデル名（画像が読めるモデル）</label>
+      <input id="modelInput" type="text" autocomplete="off" spellcheck="false" placeholder="llama3.2-vision">
+      <span class="ferr" id="errModel"></span>
+    </div>
+    <div class="field">
+      <label for="apiKeyInput" data-i18n="apiKey">APIキー</label>
+      <input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false">
+      <span class="hint" data-i18n="apiKeyHint">キーはこの端末のブラウザ内にのみ保存され、設定した接続先へのリクエストにだけ使われます。ローカル接続では空でも構いません。</span>
+    </div>
+    <div class="row">
+      <button id="saveSettingsBtn" type="button" class="primary" data-i18n="save">保存</button>
+      <button id="closeSettingsBtn" type="button" data-i18n="close">閉じる</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+/* ==== REKAI CORE BEGIN ==== */
+(function (g) {
+  'use strict';
+  var REKAI = {};
+  REKAI.version = '1.0.0';
+  REKAI.config = { singleFile: true, zeroDep: true, localFirst: true, zeroTelemetry: true };
+  REKAI.MAX_IMAGE_EDGE = 1280;
+  REKAI.MAX_HISTORY = 50;
+  REKAI.HISTORY_CONTEXT_TURNS = 3;
+  REKAI.REQUEST_TIMEOUT_MS = 120000;
+
+  /* ---------- presets: the AI endpoint is always the user's own ---------- */
+  REKAI.PRESETS = [
+    { id: 'custom',   name: { ja: 'カスタム', en: 'Custom', es: 'Personalizado', zh: '自定义', ko: '사용자 지정' },
+      endpoint: '', model: '', needsKey: false },
+    { id: 'pasture',  name: { ja: 'Pasture（この製品群のローカルLLMルーター）', en: 'Pasture (local LLM router of this product family)', es: 'Pasture (enrutador LLM local)', zh: 'Pasture（本地 LLM 路由器）', ko: 'Pasture(로컬 LLM 라우터)' },
+      endpoint: 'http://localhost:8080/v1', model: '', needsKey: false },
+    { id: 'ollama',   name: { ja: 'Ollama（ローカル）', en: 'Ollama (local)', es: 'Ollama (local)', zh: 'Ollama（本地）', ko: 'Ollama(로컬)' },
+      endpoint: 'http://localhost:11434/v1', model: 'llama3.2-vision', needsKey: false },
+    { id: 'lmstudio', name: { ja: 'LM Studio（ローカル）', en: 'LM Studio (local)', es: 'LM Studio (local)', zh: 'LM Studio（本地）', ko: 'LM Studio(로컬)' },
+      endpoint: 'http://localhost:1234/v1', model: '', needsKey: false },
+    { id: 'openai',   name: { ja: 'OpenAI（自分のキー）', en: 'OpenAI (your own key)', es: 'OpenAI (tu propia clave)', zh: 'OpenAI（自己的密钥）', ko: 'OpenAI(본인 키)' },
+      endpoint: 'https://api.openai.com/v1', model: 'gpt-4o-mini', needsKey: true }
+  ];
+  REKAI.presetById = function (id) {
+    for (var i = 0; i < REKAI.PRESETS.length; i++) if (REKAI.PRESETS[i].id === id) return REKAI.PRESETS[i];
+    return REKAI.PRESETS[0];
+  };
+
+  /* ---------- settings ---------- */
+  REKAI.normalizeEndpoint = function (raw) {
+    if (typeof raw !== 'string') return '';
+    return raw.trim().replace(/\/+$/, '');
+  };
+  REKAI.validateSettings = function (s) {
+    var errors = [];
+    s = s || {};
+    var ep = REKAI.normalizeEndpoint(s.endpoint || '');
+    if (!ep) errors.push('endpoint-required');
+    else {
+      var okUrl = false;
+      try { var u = new URL(ep); okUrl = (u.protocol === 'http:' || u.protocol === 'https:'); } catch (e) { okUrl = false; }
+      if (!okUrl) errors.push('endpoint-invalid');
+    }
+    if (!s.model || !String(s.model).trim()) errors.push('model-required');
+    return { ok: errors.length === 0, errors: errors };
+  };
+  REKAI.buildChatUrl = function (endpoint) {
+    var ep = REKAI.normalizeEndpoint(endpoint || '');
+    if (!ep) return '';
+    if (/\/chat\/completions$/.test(ep)) return ep;
+    return ep + '/chat/completions';
+  };
+  REKAI.buildHeaders = function (apiKey) {
+    var h = { 'Content-Type': 'application/json' };
+    var k = (apiKey || '').trim();
+    if (k) h['Authorization'] = 'Bearer ' + k;
+    return h;
+  };
+
+  /* ---------- request / response (OpenAI-compatible chat completions) ---------- */
+  REKAI.buildRequestBody = function (opts) {
+    opts = opts || {};
+    var question = (opts.question || '').trim() || (opts.defaultQuestion || 'Describe what you see and answer helpfully.');
+    var messages = [];
+    var hist = Array.isArray(opts.history) ? opts.history : [];
+    var start = Math.max(0, hist.length - REKAI.HISTORY_CONTEXT_TURNS);
+    for (var i = start; i < hist.length; i++) {
+      if (hist[i] && hist[i].q) messages.push({ role: 'user', content: String(hist[i].q) });
+      if (hist[i] && hist[i].a) messages.push({ role: 'assistant', content: String(hist[i].a) });
+    }
+    var content;
+    if (opts.imageDataUrl) {
+      content = [
+        { type: 'text', text: question },
+        { type: 'image_url', image_url: { url: opts.imageDataUrl } }
+      ];
+    } else {
+      content = question;
+    }
+    messages.push({ role: 'user', content: content });
+    return { model: opts.model || '', messages: messages };
+  };
+
+  REKAI.parseChatResponse = function (json) {
+    if (!json || typeof json !== 'object') return { ok: false, error: 'bad-response' };
+    if (json.error) {
+      var msg = '';
+      if (typeof json.error === 'string') msg = json.error;
+      else if (json.error && json.error.message) msg = String(json.error.message);
+      return { ok: false, error: 'api-error', message: msg };
+    }
+    var ch = json.choices && json.choices[0];
+    if (!ch || !ch.message) return { ok: false, error: 'bad-response' };
+    var c = ch.message.content;
+    var text = '';
+    if (typeof c === 'string') text = c;
+    else if (Array.isArray(c)) {
+      for (var i = 0; i < c.length; i++) {
+        if (c[i] && c[i].type === 'text' && typeof c[i].text === 'string') text += c[i].text;
+      }
+    }
+    text = text.trim();
+    if (!text) return { ok: false, error: 'empty-answer' };
+    return { ok: true, text: text };
+  };
+
+  REKAI.classifyHttpError = function (status) {
+    if (status === 0) return 'network';
+    if (status === 400) return 'bad-request';
+    if (status === 401 || status === 403) return 'auth';
+    if (status === 404) return 'not-found';
+    if (status === 408) return 'timeout';
+    if (status === 429) return 'rate-limit';
+    if (status >= 500) return 'server';
+    return 'unknown-http';
+  };
+
+  /* ---------- images ---------- */
+  REKAI.isImageDataUrl = function (s) {
+    return typeof s === 'string' && /^data:image\/[a-z0-9.+-]+;base64,/i.test(s);
+  };
+  REKAI.dataUrlBytes = function (s) {
+    if (typeof s !== 'string') return -1;
+    var m = s.match(/^data:[^,]*;base64,([A-Za-z0-9+/=\s]+)$/);
+    if (!m) return -1;
+    var b64 = m[1].replace(/\s/g, '');
+    var pad = 0;
+    if (b64.endsWith('==')) pad = 2; else if (b64.endsWith('=')) pad = 1;
+    return Math.floor(b64.length * 3 / 4) - pad;
+  };
+  REKAI.downscaleDims = function (w, h, maxEdge) {
+    if (!(w > 0) || !(h > 0) || !(maxEdge > 0)) return null;
+    var scale = Math.min(1, maxEdge / Math.max(w, h));
+    return { width: Math.max(1, Math.round(w * scale)), height: Math.max(1, Math.round(h * scale)) };
+  };
+
+  /* ---------- history (device-local only; stores text, never the image) ---------- */
+  REKAI.makeEntry = function (q, a, ts) {
+    return { q: String(q == null ? '' : q), a: String(a == null ? '' : a), ts: typeof ts === 'number' ? ts : Date.now() };
+  };
+  REKAI.trimHistory = function (list, max) {
+    if (!Array.isArray(list)) return [];
+    var m = (typeof max === 'number' && max > 0) ? max : REKAI.MAX_HISTORY;
+    return list.slice(-m);
+  };
+  REKAI.sanitizeHistory = function (parsed) {
+    if (!Array.isArray(parsed)) return [];
+    var out = [];
+    for (var i = 0; i < parsed.length; i++) {
+      var e = parsed[i];
+      if (e && typeof e.q === 'string' && typeof e.a === 'string') {
+        out.push({ q: e.q, a: e.a, ts: typeof e.ts === 'number' ? e.ts : 0 });
+      }
+    }
+    return REKAI.trimHistory(out);
+  };
+
+  /* ---------- i18n ---------- */
+  REKAI.LANGS = ['ja', 'en', 'es', 'zh', 'ko'];
+  REKAI.SPEECH_LANG = { ja: 'ja-JP', en: 'en-US', es: 'es-ES', zh: 'zh-CN', ko: 'ko-KR' };
+  REKAI.STRINGS = {
+    ja: {
+      tagline: '見ているものを、調べて答えるアシスタント',
+      langLabel: '言語', settings: '設定',
+      captureTitle: '1. 今見ているものを取り込む',
+      captureScreen: '画面を取り込む', chooseImage: '画像を選ぶ／撮る', removeImage: '画像を外す',
+      captureHint: '画面共有が使えない環境では、画像の選択（モバイルでは撮影も）をご利用ください。画像を貼り付け（Ctrl+V）でも取り込めます。',
+      questionTitle: '2. 質問する',
+      questionPlaceholder: '例：この画面のエラーの意味と直し方を教えて',
+      micStart: '🎤 音声で入力', micStop: '⏹ 音声入力を止める', listeningNow: '聞き取り中…話しかけてください',
+      ask: '調べる', asking: '調べています…',
+      answerTitle: '3. 回答', noAnswerYet: 'まだ回答はありません。',
+      speak: '🔊 読み上げる', stopSpeak: '⏹ 止める',
+      historyTitle: '履歴（この端末の中だけ）', historyEmpty: '履歴はまだありません。', clearHistory: '履歴を消す',
+      privacyNote: 'プライバシー：画像と質問は、あなたが設定した接続先（AI）にだけ送られます。履歴と設定はこの端末のブラウザ内にのみ保存され、作成者を含む第三者へは一切送られません。',
+      settingsTitle: '接続先の設定', preset: 'プリセット',
+      endpoint: '接続先URL（OpenAI互換 API）', model: 'モデル名（画像が読めるモデル）', apiKey: 'APIキー',
+      apiKeyHint: 'キーはこの端末のブラウザ内にのみ保存され、設定した接続先へのリクエストにだけ使われます。ローカル接続では空でも構いません。',
+      save: '保存', close: '閉じる',
+      defaultQuestion: 'この画像に何が写っているか、詳しく教えてください。',
+      needSettings: '先に接続先の設定をしてください（右上の「設定」から、接続先URLとモデル名が必要です）。',
+      endpointRequired: '接続先URLを入力してください。', endpointInvalid: '接続先URLの形式が正しくありません（http:// または https:// で始まるURL）。', modelRequired: 'モデル名を入力してください。',
+      settingsSaved: '設定を保存しました。',
+      screenUnsupported: 'この環境では画面共有が使えません。代わりに「画像を選ぶ／撮る」から画像を取り込んでください。',
+      screenFailed: '画面の取り込みに失敗しました：',
+      imageFailed: '画像の読み込みに失敗しました：',
+      imageReady: '画像を取り込みました。',
+      speechUnsupported: 'この環境では音声入力が使えません。キーボードで入力してください。',
+      speechFailed: '音声入力でエラーが発生しました：',
+      errNetwork: '接続先に届きませんでした。URLと、接続先が動いているかを確認してください。',
+      errAuth: '接続先に認証で拒否されました。APIキーを確認してください。',
+      errNotFound: '接続先の場所が見つかりませんでした。URL（とモデル名）を確認してください。',
+      errRateLimit: '接続先が混み合っています（利用制限）。少し待ってから再試行してください。',
+      errServer: '接続先の側でエラーが発生しました。',
+      errBadRequest: '接続先がリクエストを受け付けませんでした。モデルが画像対応かどうかを確認してください。',
+      errTimeout: '時間内に回答が返りませんでした。もう一度お試しください。',
+      errBadResponse: '接続先から想定外の応答が返りました。OpenAI互換の接続先かどうかを確認してください。',
+      errEmptyAnswer: '接続先から空の回答が返りました。モデルを変えてお試しください。',
+      errApi: '接続先がエラーを返しました：',
+      errUnknownHttp: '接続先からエラーが返りました。'
+    },
+    en: {
+      tagline: 'An assistant that looks at what you see and answers',
+      langLabel: 'Language', settings: 'Settings',
+      captureTitle: '1. Capture what you are looking at',
+      captureScreen: 'Capture screen', chooseImage: 'Choose / take a picture', removeImage: 'Remove image',
+      captureHint: 'If screen sharing is unavailable, choose an image instead (on mobile you can take a photo). You can also paste an image (Ctrl+V).',
+      questionTitle: '2. Ask a question',
+      questionPlaceholder: 'e.g. What does this error mean, and how do I fix it?',
+      micStart: '🎤 Voice input', micStop: '⏹ Stop voice input', listeningNow: 'Listening… please speak',
+      ask: 'Ask', asking: 'Looking into it…',
+      answerTitle: '3. Answer', noAnswerYet: 'No answer yet.',
+      speak: '🔊 Read aloud', stopSpeak: '⏹ Stop',
+      historyTitle: 'History (on this device only)', historyEmpty: 'No history yet.', clearHistory: 'Clear history',
+      privacyNote: 'Privacy: your image and question are sent only to the AI endpoint you configure. History and settings are stored only in this browser on this device — never sent to the developer or any third party.',
+      settingsTitle: 'Endpoint settings', preset: 'Preset',
+      endpoint: 'Endpoint URL (OpenAI-compatible API)', model: 'Model name (must be able to read images)', apiKey: 'API key',
+      apiKeyHint: 'The key is stored only in this browser on this device and used only for requests to your endpoint. Local endpoints may not need one.',
+      save: 'Save', close: 'Close',
+      defaultQuestion: 'Please describe in detail what is shown in this image.',
+      needSettings: 'Please configure your endpoint first (top-right “Settings”: endpoint URL and model name are required).',
+      endpointRequired: 'Please enter the endpoint URL.', endpointInvalid: 'The endpoint URL looks wrong (it must start with http:// or https://).', modelRequired: 'Please enter the model name.',
+      settingsSaved: 'Settings saved.',
+      screenUnsupported: 'Screen sharing is not available in this environment. Please use “Choose / take a picture” instead.',
+      screenFailed: 'Screen capture failed: ',
+      imageFailed: 'Could not load the image: ',
+      imageReady: 'Image captured.',
+      speechUnsupported: 'Voice input is not available in this environment. Please type instead.',
+      speechFailed: 'Voice input error: ',
+      errNetwork: 'Could not reach the endpoint. Check the URL and that the endpoint is running.',
+      errAuth: 'The endpoint rejected authentication. Check your API key.',
+      errNotFound: 'The endpoint was not found. Check the URL (and model name).',
+      errRateLimit: 'The endpoint is rate-limited. Please wait a moment and retry.',
+      errServer: 'The endpoint returned a server error.',
+      errBadRequest: 'The endpoint rejected the request. Check that the model can read images.',
+      errTimeout: 'No answer arrived in time. Please try again.',
+      errBadResponse: 'The endpoint returned an unexpected response. Check that it is OpenAI-compatible.',
+      errEmptyAnswer: 'The endpoint returned an empty answer. Try a different model.',
+      errApi: 'The endpoint returned an error: ',
+      errUnknownHttp: 'The endpoint returned an error.'
+    },
+    es: {
+      tagline: 'Un asistente que mira lo que tú miras y responde',
+      langLabel: 'Idioma', settings: 'Ajustes',
+      captureTitle: '1. Captura lo que estás viendo',
+      captureScreen: 'Capturar pantalla', chooseImage: 'Elegir / hacer una foto', removeImage: 'Quitar imagen',
+      captureHint: 'Si no puedes compartir la pantalla, elige una imagen (en el móvil puedes hacer una foto). También puedes pegar una imagen (Ctrl+V).',
+      questionTitle: '2. Haz una pregunta',
+      questionPlaceholder: 'Ej.: ¿Qué significa este error y cómo lo corrijo?',
+      micStart: '🎤 Entrada de voz', micStop: '⏹ Detener voz', listeningNow: 'Escuchando… habla ahora',
+      ask: 'Preguntar', asking: 'Consultando…',
+      answerTitle: '3. Respuesta', noAnswerYet: 'Aún no hay respuesta.',
+      speak: '🔊 Leer en voz alta', stopSpeak: '⏹ Detener',
+      historyTitle: 'Historial (solo en este dispositivo)', historyEmpty: 'Aún no hay historial.', clearHistory: 'Borrar historial',
+      privacyNote: 'Privacidad: tu imagen y tu pregunta se envían solo al servicio de IA que configures. El historial y los ajustes se guardan solo en este navegador, en este dispositivo; nunca se envían al desarrollador ni a terceros.',
+      settingsTitle: 'Ajustes del servicio', preset: 'Preajuste',
+      endpoint: 'URL del servicio (API compatible con OpenAI)', model: 'Nombre del modelo (debe poder leer imágenes)', apiKey: 'Clave API',
+      apiKeyHint: 'La clave se guarda solo en este navegador y se usa solo para las solicitudes a tu servicio. Los servicios locales pueden no necesitarla.',
+      save: 'Guardar', close: 'Cerrar',
+      defaultQuestion: 'Describe con detalle lo que se ve en esta imagen.',
+      needSettings: 'Configura primero tu servicio (en «Ajustes», arriba a la derecha: se necesitan la URL y el nombre del modelo).',
+      endpointRequired: 'Introduce la URL del servicio.', endpointInvalid: 'La URL no parece válida (debe empezar por http:// o https://).', modelRequired: 'Introduce el nombre del modelo.',
+      settingsSaved: 'Ajustes guardados.',
+      screenUnsupported: 'Compartir pantalla no está disponible en este entorno. Usa «Elegir / hacer una foto».',
+      screenFailed: 'La captura de pantalla falló: ',
+      imageFailed: 'No se pudo cargar la imagen: ',
+      imageReady: 'Imagen capturada.',
+      speechUnsupported: 'La entrada de voz no está disponible en este entorno. Escribe tu pregunta.',
+      speechFailed: 'Error de entrada de voz: ',
+      errNetwork: 'No se pudo contactar con el servicio. Revisa la URL y que el servicio esté en marcha.',
+      errAuth: 'El servicio rechazó la autenticación. Revisa tu clave API.',
+      errNotFound: 'No se encontró el servicio. Revisa la URL (y el modelo).',
+      errRateLimit: 'El servicio tiene límite de uso. Espera un momento y reinténtalo.',
+      errServer: 'El servicio devolvió un error de servidor.',
+      errBadRequest: 'El servicio rechazó la solicitud. Comprueba que el modelo puede leer imágenes.',
+      errTimeout: 'La respuesta no llegó a tiempo. Inténtalo de nuevo.',
+      errBadResponse: 'El servicio devolvió una respuesta inesperada. Comprueba que sea compatible con OpenAI.',
+      errEmptyAnswer: 'El servicio devolvió una respuesta vacía. Prueba con otro modelo.',
+      errApi: 'El servicio devolvió un error: ',
+      errUnknownHttp: 'El servicio devolvió un error.'
+    },
+    zh: {
+      tagline: '看着你所看的内容并为你解答的助手',
+      langLabel: '语言', settings: '设置',
+      captureTitle: '1. 捕获你正在看的内容',
+      captureScreen: '捕获屏幕', chooseImage: '选择／拍摄图片', removeImage: '移除图片',
+      captureHint: '如果无法共享屏幕，请改为选择图片（在手机上可以拍照）。也可以粘贴图片（Ctrl+V）。',
+      questionTitle: '2. 提问',
+      questionPlaceholder: '例如：这个错误是什么意思？怎么修复？',
+      micStart: '🎤 语音输入', micStop: '⏹ 停止语音', listeningNow: '正在聆听……请说话',
+      ask: '查询', asking: '正在查询…',
+      answerTitle: '3. 回答', noAnswerYet: '暂无回答。',
+      speak: '🔊 朗读', stopSpeak: '⏹ 停止',
+      historyTitle: '历史记录（仅保存在本设备）', historyEmpty: '暂无历史记录。', clearHistory: '清除历史',
+      privacyNote: '隐私：图片和问题只会发送到你自己设置的 AI 服务地址。历史和设置只保存在本设备的浏览器中，绝不会发送给开发者或任何第三方。',
+      settingsTitle: '服务地址设置', preset: '预设',
+      endpoint: '服务地址 URL（OpenAI 兼容 API）', model: '模型名称（需支持读取图片）', apiKey: 'API 密钥',
+      apiKeyHint: '密钥只保存在本设备的浏览器中，仅用于向你设置的服务发送请求。本地服务可以不填。',
+      save: '保存', close: '关闭',
+      defaultQuestion: '请详细描述这张图片里显示的内容。',
+      needSettings: '请先完成服务设置（右上角「设置」：需要填写服务地址和模型名称）。',
+      endpointRequired: '请输入服务地址 URL。', endpointInvalid: '服务地址格式不正确（必须以 http:// 或 https:// 开头）。', modelRequired: '请输入模型名称。',
+      settingsSaved: '设置已保存。',
+      screenUnsupported: '此环境无法共享屏幕。请改用「选择／拍摄图片」。',
+      screenFailed: '屏幕捕获失败：',
+      imageFailed: '图片加载失败：',
+      imageReady: '图片已捕获。',
+      speechUnsupported: '此环境无法使用语音输入。请使用键盘输入。',
+      speechFailed: '语音输入出错：',
+      errNetwork: '无法连接到服务。请检查 URL 以及服务是否正在运行。',
+      errAuth: '服务拒绝了身份验证。请检查 API 密钥。',
+      errNotFound: '找不到服务。请检查 URL（和模型名称）。',
+      errRateLimit: '服务达到使用限制。请稍等片刻后重试。',
+      errServer: '服务返回了服务器错误。',
+      errBadRequest: '服务拒绝了请求。请确认模型支持读取图片。',
+      errTimeout: '回答未在时限内返回。请重试。',
+      errBadResponse: '服务返回了意外的响应。请确认它是 OpenAI 兼容服务。',
+      errEmptyAnswer: '服务返回了空回答。请尝试其他模型。',
+      errApi: '服务返回错误：',
+      errUnknownHttp: '服务返回了错误。'
+    },
+    ko: {
+      tagline: '지금 보고 있는 것을 살펴보고 답해 주는 어시스턴트',
+      langLabel: '언어', settings: '설정',
+      captureTitle: '1. 지금 보고 있는 것 가져오기',
+      captureScreen: '화면 가져오기', chooseImage: '이미지 선택／촬영', removeImage: '이미지 제거',
+      captureHint: '화면 공유를 쓸 수 없는 환경에서는 이미지를 선택하세요(모바일에서는 촬영도 가능). 이미지를 붙여넣기(Ctrl+V)할 수도 있습니다.',
+      questionTitle: '2. 질문하기',
+      questionPlaceholder: '예: 이 오류의 의미와 해결 방법을 알려 주세요',
+      micStart: '🎤 음성 입력', micStop: '⏹ 음성 입력 중지', listeningNow: '듣는 중… 말씀하세요',
+      ask: '물어보기', asking: '찾아보는 중…',
+      answerTitle: '3. 답변', noAnswerYet: '아직 답변이 없습니다.',
+      speak: '🔊 읽어 주기', stopSpeak: '⏹ 중지',
+      historyTitle: '기록(이 기기에만 저장)', historyEmpty: '아직 기록이 없습니다.', clearHistory: '기록 지우기',
+      privacyNote: '개인정보: 이미지와 질문은 당신이 설정한 AI 접속처에만 전송됩니다. 기록과 설정은 이 기기의 브라우저 안에만 저장되며, 제작자를 포함한 제3자에게는 절대 전송되지 않습니다.',
+      settingsTitle: '접속처 설정', preset: '프리셋',
+      endpoint: '접속처 URL(OpenAI 호환 API)', model: '모델 이름(이미지를 읽을 수 있는 모델)', apiKey: 'API 키',
+      apiKeyHint: '키는 이 기기의 브라우저 안에만 저장되며, 설정한 접속처로의 요청에만 사용됩니다. 로컬 접속에서는 비워 두어도 됩니다.',
+      save: '저장', close: '닫기',
+      defaultQuestion: '이 이미지에 무엇이 보이는지 자세히 알려 주세요.',
+      needSettings: '먼저 접속처를 설정하세요(오른쪽 위 「설정」에서 접속처 URL과 모델 이름이 필요합니다).',
+      endpointRequired: '접속처 URL을 입력하세요.', endpointInvalid: '접속처 URL 형식이 올바르지 않습니다(http:// 또는 https://로 시작해야 합니다).', modelRequired: '모델 이름을 입력하세요.',
+      settingsSaved: '설정을 저장했습니다.',
+      screenUnsupported: '이 환경에서는 화면 공유를 쓸 수 없습니다. 대신 「이미지 선택／촬영」을 이용하세요.',
+      screenFailed: '화면 가져오기 실패: ',
+      imageFailed: '이미지를 불러오지 못했습니다: ',
+      imageReady: '이미지를 가져왔습니다.',
+      speechUnsupported: '이 환경에서는 음성 입력을 쓸 수 없습니다. 키보드로 입력하세요.',
+      speechFailed: '음성 입력 오류: ',
+      errNetwork: '접속처에 닿지 못했습니다. URL과 접속처가 실행 중인지 확인하세요.',
+      errAuth: '접속처가 인증을 거부했습니다. API 키를 확인하세요.',
+      errNotFound: '접속처를 찾지 못했습니다. URL(과 모델 이름)을 확인하세요.',
+      errRateLimit: '접속처가 사용 제한 중입니다. 잠시 후 다시 시도하세요.',
+      errServer: '접속처 쪽에서 오류가 발생했습니다.',
+      errBadRequest: '접속처가 요청을 거부했습니다. 모델이 이미지를 읽을 수 있는지 확인하세요.',
+      errTimeout: '시간 안에 답변이 오지 않았습니다. 다시 시도하세요.',
+      errBadResponse: '접속처가 예상과 다른 응답을 반환했습니다. OpenAI 호환 접속처인지 확인하세요.',
+      errEmptyAnswer: '접속처가 빈 답변을 반환했습니다. 다른 모델로 시도하세요.',
+      errApi: '접속처가 오류를 반환했습니다: ',
+      errUnknownHttp: '접속처가 오류를 반환했습니다.'
+    }
+  };
+  REKAI.ERROR_KEY = {
+    'network': 'errNetwork', 'auth': 'errAuth', 'not-found': 'errNotFound',
+    'rate-limit': 'errRateLimit', 'server': 'errServer', 'bad-request': 'errBadRequest',
+    'timeout': 'errTimeout', 'bad-response': 'errBadResponse', 'empty-answer': 'errEmptyAnswer',
+    'api-error': 'errApi', 'unknown-http': 'errUnknownHttp'
+  };
+  REKAI.t = function (lang, key) {
+    var dict = REKAI.STRINGS[lang] || REKAI.STRINGS.en;
+    if (dict && Object.prototype.hasOwnProperty.call(dict, key)) return dict[key];
+    if (REKAI.STRINGS.en && Object.prototype.hasOwnProperty.call(REKAI.STRINGS.en, key)) return REKAI.STRINGS.en[key];
+    return key;
+  };
+  REKAI.errorKey = function (code) { return REKAI.ERROR_KEY[code] || 'errUnknownHttp'; };
+
+  g.REKAI = REKAI;
+})(typeof window !== 'undefined' ? window : globalThis);
+/* ==== REKAI CORE END ==== */
+</script>
+
+<script>
+(function () {
+  'use strict';
+  var R = window.REKAI;
+  var LS_SETTINGS = 'rekai.settings.v1', LS_HISTORY = 'rekai.history.v1', LS_LANG = 'rekai.lang.v1';
+
+  function $(id) { return document.getElementById(id); }
+  var els = {
+    status: $('status'), langSel: $('langSel'),
+    captureBtn: $('captureBtn'), pickBtn: $('pickBtn'), clearImageBtn: $('clearImageBtn'),
+    fileInput: $('fileInput'), preview: $('preview'), video: $('screenVideo'),
+    question: $('question'), micBtn: $('micBtn'), askBtn: $('askBtn'), busy: $('busy'),
+    answer: $('answer'), speakBtn: $('speakBtn'), stopSpeakBtn: $('stopSpeakBtn'),
+    historyList: $('historyList'), historyEmpty: $('historyEmpty'), clearHistoryBtn: $('clearHistoryBtn'),
+    dlg: $('settingsDlg'), presetSel: $('presetSel'), endpointInput: $('endpointInput'),
+    modelInput: $('modelInput'), apiKeyInput: $('apiKeyInput'),
+    errEndpoint: $('errEndpoint'), errModel: $('errModel'),
+    openSettingsBtn: $('openSettingsBtn'), saveSettingsBtn: $('saveSettingsBtn'), closeSettingsBtn: $('closeSettingsBtn')
+  };
+
+  var state = {
+    lang: 'ja',
+    settings: { preset: 'custom', endpoint: '', model: '', apiKey: '' },
+    history: [],
+    imageDataUrl: null,
+    lastAnswer: '',
+    recog: null,
+    listening: false
+  };
+
+  function t(key) { return R.t(state.lang, key); }
+
+  /* ---------- persistence (this device's browser only) ---------- */
+  function loadAll() {
+    try {
+      var s = JSON.parse(localStorage.getItem(LS_SETTINGS) || 'null');
+      if (s && typeof s === 'object') {
+        state.settings = {
+          preset: typeof s.preset === 'string' ? s.preset : 'custom',
+          endpoint: typeof s.endpoint === 'string' ? s.endpoint : '',
+          model: typeof s.model === 'string' ? s.model : '',
+          apiKey: typeof s.apiKey === 'string' ? s.apiKey : ''
+        };
+      }
+    } catch (e) { /* corrupted storage: start clean rather than crash */ }
+    try { state.history = R.sanitizeHistory(JSON.parse(localStorage.getItem(LS_HISTORY) || '[]')); }
+    catch (e) { state.history = []; }
+    var lang = localStorage.getItem(LS_LANG);
+    if (!lang) {
+      var nav = (navigator.language || 'en').slice(0, 2).toLowerCase();
+      lang = R.LANGS.indexOf(nav) >= 0 ? nav : 'en';
+    }
+    state.lang = R.LANGS.indexOf(lang) >= 0 ? lang : 'en';
+  }
+  function saveSettings() { try { localStorage.setItem(LS_SETTINGS, JSON.stringify(state.settings)); } catch (e) {} }
+  function saveHistory() { try { localStorage.setItem(LS_HISTORY, JSON.stringify(state.history)); } catch (e) {} }
+
+  /* ---------- status / errors: never fail silently ---------- */
+  function showStatus(msg, kind) {
+    els.status.textContent = msg;
+    els.status.className = kind || 'info';
+    if (!msg) els.status.style.display = 'none'; else els.status.style.display = '';
+  }
+  function showError(msg) { showStatus(msg, 'error'); }
+  function clearStatus() { els.status.textContent = ''; els.status.className = ''; els.status.style.display = 'none'; }
+  function errorText(code, detail) {
+    var base = t(R.errorKey(code));
+    return detail ? base + ' (' + detail + ')' : base;
+  }
+
+  /* ---------- i18n ---------- */
+  function applyI18n() {
+    document.documentElement.lang = state.lang === 'zh' ? 'zh-CN' : state.lang;
+    var nodes = document.querySelectorAll('[data-i18n]');
+    for (var i = 0; i < nodes.length; i++) nodes[i].textContent = t(nodes[i].getAttribute('data-i18n'));
+    var phs = document.querySelectorAll('[data-i18n-ph]');
+    for (var j = 0; j < phs.length; j++) phs[j].setAttribute('placeholder', t(phs[j].getAttribute('data-i18n-ph')));
+    els.langSel.value = state.lang;
+    if (!state.lastAnswer) { els.answer.textContent = t('noAnswerYet'); els.answer.classList.add('muted'); }
+    renderPresets();
+    renderHistory();
+    if (state.listening) els.micBtn.textContent = t('micStop');
+  }
+  function renderPresets() {
+    var cur = els.presetSel.value || state.settings.preset || 'custom';
+    els.presetSel.textContent = '';
+    R.PRESETS.forEach(function (p) {
+      var o = document.createElement('option');
+      o.value = p.id;
+      o.textContent = p.name[state.lang] || p.name.en;
+      els.presetSel.appendChild(o);
+    });
+    els.presetSel.value = R.presetById(cur) ? cur : 'custom';
+  }
+
+  /* ---------- image intake ---------- */
+  function setImage(dataUrl) {
+    state.imageDataUrl = dataUrl;
+    if (dataUrl) {
+      els.preview.src = dataUrl;
+      els.preview.style.display = 'block';
+      els.clearImageBtn.disabled = false;
+    } else {
+      els.preview.removeAttribute('src');
+      els.preview.style.display = 'none';
+      els.clearImageBtn.disabled = true;
+    }
+  }
+  function blobToDataUrl(blob) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(blob);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var dims = R.downscaleDims(img.naturalWidth, img.naturalHeight, R.MAX_IMAGE_EDGE) ||
+                     { width: img.naturalWidth, height: img.naturalHeight };
+          var cv = document.createElement('canvas');
+          cv.width = dims.width; cv.height = dims.height;
+          cv.getContext('2d').drawImage(img, 0, 0, dims.width, dims.height);
+          URL.revokeObjectURL(url);
+          resolve(cv.toDataURL('image/jpeg', 0.85));
+        } catch (e) { URL.revokeObjectURL(url); reject(e); }
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('image load failed')); };
+      img.src = url;
+    });
+  }
+  function takeImageBlob(blob) {
+    blobToDataUrl(blob).then(function (du) {
+      setImage(du); clearStatus(); showStatus(t('imageReady'), 'info');
+    }).catch(function (e) { showError(t('imageFailed') + (e && e.message ? e.message : String(e))); });
+  }
+
+  function captureScreen() {
+    clearStatus();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      showError(t('screenUnsupported'));
+      els.fileInput.click();
+      return;
+    }
+    navigator.mediaDevices.getDisplayMedia({ video: true, audio: false }).then(function (stream) {
+      els.video.srcObject = stream;
+      return els.video.play().then(function () { return stream; });
+    }).then(function (stream) {
+      // give the video a moment to expose a real frame
+      return new Promise(function (resolve) { setTimeout(function () { resolve(stream); }, 350); });
+    }).then(function (stream) {
+      var w = els.video.videoWidth, h = els.video.videoHeight;
+      var dims = R.downscaleDims(w, h, R.MAX_IMAGE_EDGE);
+      if (!dims) throw new Error('no frame');
+      var cv = document.createElement('canvas');
+      cv.width = dims.width; cv.height = dims.height;
+      cv.getContext('2d').drawImage(els.video, 0, 0, dims.width, dims.height);
+      stream.getTracks().forEach(function (tr) { tr.stop(); });
+      els.video.srcObject = null;
+      setImage(cv.toDataURL('image/jpeg', 0.85));
+      showStatus(t('imageReady'), 'info');
+    }).catch(function (e) {
+      showError(t('screenFailed') + (e && e.message ? e.message : String(e)) + ' — ' + t('screenUnsupported'));
+    });
+  }
+
+  /* ---------- ask the user's own endpoint ---------- */
+  function setBusy(on) {
+    els.busy.hidden = !on;
+    els.askBtn.disabled = on;
+  }
+  function ask() {
+    clearStatus();
+    var v = R.validateSettings(state.settings);
+    if (!v.ok) { showError(t('needSettings')); openSettings(); return; }
+    var questionText = els.question.value.trim();
+    var body = R.buildRequestBody({
+      model: state.settings.model,
+      question: questionText,
+      defaultQuestion: t('defaultQuestion'),
+      imageDataUrl: state.imageDataUrl,
+      history: state.history
+    });
+    var url = R.buildChatUrl(state.settings.endpoint);
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, R.REQUEST_TIMEOUT_MS) : null;
+    setBusy(true);
+    fetch(url, {
+      method: 'POST',
+      headers: R.buildHeaders(state.settings.apiKey),
+      body: JSON.stringify(body),
+      signal: ctrl ? ctrl.signal : undefined
+    }).then(function (res) {
+      return res.text().then(function (txt) {
+        if (timer) clearTimeout(timer);
+        var json = null;
+        try { json = JSON.parse(txt); } catch (e) { /* handled below as bad-response */ }
+        if (!res.ok) {
+          var code = (json && json.error) ? 'api-error' : R.classifyHttpError(res.status);
+          var detail = (json && json.error && json.error.message) ? json.error.message : ('HTTP ' + res.status);
+          throw { rekaiCode: code, detail: detail };
+        }
+        var parsed = R.parseChatResponse(json);
+        if (!parsed.ok) throw { rekaiCode: parsed.error, detail: parsed.message || '' };
+        return parsed.text;
+      });
+    }).then(function (text) {
+      setBusy(false);
+      state.lastAnswer = text;
+      els.answer.textContent = text;
+      els.answer.classList.remove('muted');
+      els.speakBtn.disabled = !('speechSynthesis' in window);
+      var askedQ = questionText || t('defaultQuestion');
+      state.history = R.trimHistory(state.history.concat([R.makeEntry(askedQ, text, Date.now())]));
+      saveHistory();
+      renderHistory();
+    }).catch(function (e) {
+      if (timer) clearTimeout(timer);
+      setBusy(false);
+      if (e && e.rekaiCode) showError(errorText(e.rekaiCode, e.detail));
+      else if (e && e.name === 'AbortError') showError(errorText('timeout'));
+      else showError(errorText('network', e && e.message ? e.message : String(e)));
+    });
+  }
+
+  /* ---------- history UI (textContent only: answers are untrusted text) ---------- */
+  function renderHistory() {
+    els.historyList.textContent = '';
+    els.historyEmpty.style.display = state.history.length ? 'none' : '';
+    state.history.slice().reverse().forEach(function (e) {
+      var li = document.createElement('li');
+      var q = document.createElement('div'); q.className = 'hq'; q.textContent = e.q;
+      var a = document.createElement('div'); a.className = 'ha'; a.textContent = e.a;
+      var ts = document.createElement('div'); ts.className = 'ht';
+      ts.textContent = e.ts ? new Date(e.ts).toLocaleString(R.SPEECH_LANG[state.lang] || 'en-US') : '';
+      li.appendChild(q); li.appendChild(a); li.appendChild(ts);
+      els.historyList.appendChild(li);
+    });
+  }
+
+  /* ---------- speech: recognition in, synthesis out ---------- */
+  function toggleMic() {
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { showError(t('speechUnsupported')); return; }
+    if (state.listening && state.recog) { state.recog.stop(); return; }
+    clearStatus();
+    var rec = new SR();
+    rec.lang = R.SPEECH_LANG[state.lang] || 'en-US';
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    rec.onresult = function (ev) {
+      var txt = '';
+      for (var i = ev.resultIndex; i < ev.results.length; i++) txt += ev.results[i][0].transcript;
+      if (txt) els.question.value = (els.question.value ? els.question.value + ' ' : '') + txt;
+    };
+    rec.onerror = function (ev) { showError(t('speechFailed') + (ev.error || '')); };
+    rec.onend = function () {
+      state.listening = false;
+      els.micBtn.textContent = t('micStart');
+      els.micBtn.classList.remove('mic-on');
+    };
+    state.recog = rec;
+    try {
+      rec.start();
+      state.listening = true;
+      els.micBtn.textContent = t('micStop');
+      els.micBtn.classList.add('mic-on');
+      showStatus(t('listeningNow'), 'info');
+    } catch (e) { showError(t('speechFailed') + (e && e.message ? e.message : String(e))); }
+  }
+  function speak() {
+    if (!('speechSynthesis' in window) || !state.lastAnswer) return;
+    window.speechSynthesis.cancel();
+    var u = new SpeechSynthesisUtterance(state.lastAnswer);
+    u.lang = R.SPEECH_LANG[state.lang] || 'en-US';
+    u.onend = u.onerror = function () { els.stopSpeakBtn.disabled = true; };
+    els.stopSpeakBtn.disabled = false;
+    window.speechSynthesis.speak(u);
+  }
+  function stopSpeak() {
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    els.stopSpeakBtn.disabled = true;
+  }
+
+  /* ---------- settings dialog ---------- */
+  function fieldError(el, msg) { el.textContent = msg || ''; el.style.display = msg ? 'block' : 'none'; }
+  function openSettings() {
+    els.presetSel.value = state.settings.preset || 'custom';
+    els.endpointInput.value = state.settings.endpoint || '';
+    els.modelInput.value = state.settings.model || '';
+    els.apiKeyInput.value = state.settings.apiKey || '';
+    fieldError(els.errEndpoint, ''); fieldError(els.errModel, '');
+    if (typeof els.dlg.showModal === 'function') els.dlg.showModal();
+  }
+  function saveSettingsFromForm() {
+    var next = {
+      preset: els.presetSel.value,
+      endpoint: els.endpointInput.value,
+      model: els.modelInput.value,
+      apiKey: els.apiKeyInput.value
+    };
+    var v = R.validateSettings(next);
+    fieldError(els.errEndpoint, v.errors.indexOf('endpoint-required') >= 0 ? t('endpointRequired')
+      : (v.errors.indexOf('endpoint-invalid') >= 0 ? t('endpointInvalid') : ''));
+    fieldError(els.errModel, v.errors.indexOf('model-required') >= 0 ? t('modelRequired') : '');
+    if (!v.ok) return;
+    state.settings = next;
+    saveSettings();
+    els.dlg.close();
+    showStatus(t('settingsSaved'), 'info');
+  }
+
+  /* ---------- wiring ---------- */
+  els.langSel.addEventListener('change', function () {
+    state.lang = els.langSel.value;
+    try { localStorage.setItem(LS_LANG, state.lang); } catch (e) {}
+    applyI18n();
+  });
+  els.captureBtn.addEventListener('click', captureScreen);
+  els.pickBtn.addEventListener('click', function () { els.fileInput.click(); });
+  els.fileInput.addEventListener('change', function () {
+    if (els.fileInput.files && els.fileInput.files[0]) takeImageBlob(els.fileInput.files[0]);
+    els.fileInput.value = '';
+  });
+  els.clearImageBtn.addEventListener('click', function () { setImage(null); });
+  document.addEventListener('paste', function (ev) {
+    var items = (ev.clipboardData || {}).items || [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].type && items[i].type.indexOf('image/') === 0) {
+        var f = items[i].getAsFile();
+        if (f) { takeImageBlob(f); ev.preventDefault(); }
+        break;
+      }
+    }
+  });
+  els.askBtn.addEventListener('click', ask);
+  els.micBtn.addEventListener('click', toggleMic);
+  els.speakBtn.addEventListener('click', speak);
+  els.stopSpeakBtn.addEventListener('click', stopSpeak);
+  els.clearHistoryBtn.addEventListener('click', function () {
+    state.history = [];
+    saveHistory();
+    renderHistory();
+  });
+  els.openSettingsBtn.addEventListener('click', openSettings);
+  els.saveSettingsBtn.addEventListener('click', saveSettingsFromForm);
+  els.closeSettingsBtn.addEventListener('click', function () { els.dlg.close(); });
+  els.presetSel.addEventListener('change', function () {
+    var p = R.presetById(els.presetSel.value);
+    if (p.id !== 'custom') { els.endpointInput.value = p.endpoint; if (p.model) els.modelInput.value = p.model; }
+  });
+
+  if (!('speechSynthesis' in window)) els.speakBtn.disabled = true;
+
+  loadAll();
+  applyI18n();
+  setImage(null);
+
+  /* Small hook used by the automated UI verification (and handy for debugging). */
+  window.RekAIApp = {
+    state: state,
+    setImageDataUrl: function (du) { setImage(du); },
+    ask: ask,
+    version: R.version
+  };
+})();
+</script>
+</body>
+</html>

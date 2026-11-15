@@ -1,28 +1,49 @@
-# Security Policy
+# Security — RekAI 自己レビュー
 
-## Supported Versions
+RekAI は単一HTMLファイル・外部依存ゼロの Web アプリです。攻撃面は「利用者のブラウザ」「利用者が設定した AI 接続先」「接続先から返る回答テキスト」の3つに限られます。以下は v1.0.0 時点の自己レビューです。
 
-RekAI is pre-1.0. Security fixes are applied to the `main` branch and the most
-recent tagged release.
+## データの行き先
 
-## Reporting a Vulnerability
+| データ | 行き先 | 根拠 |
+|---|---|---|
+| 取り込んだ画像 | 利用者が設定した接続先への POST リクエスト本文のみ | アプリ内のネットワーク送信はこの1種類だけ（後述の静的テストで URL を許可リスト検証） |
+| 質問・履歴の文脈 | 同上 | 同上 |
+| APIキー | localStorage（本人のブラウザ内）と、設定した接続先への `Authorization` ヘッダのみ | コード上で他の送信経路なし |
+| 設定・履歴 | localStorage（本人のブラウザ内）のみ | 外部送信なし。履歴はテキストのみで画像は保存しない |
 
-Please **do not** open a public issue for security vulnerabilities.
+作成者が運用するサーバーは存在せず、作成者にデータが届く経路はありません。テレメトリ／解析の類もありません（静的テストで解析系ドメイン・コードの不在を検証）。
 
-Instead, report them privately via
-[GitHub Security Advisories](https://github.com/shizukutanaka/RekAI/security/advisories/new).
-We aim to acknowledge reports within 72 hours and to provide a remediation
-timeline after triage.
+## APIキーの扱い
 
-## Handling of API keys (BYOK)
+- 保存場所: 本人のブラウザの localStorage。入力欄は `type="password"`。
+- 送信先: 利用者が自分で設定した接続先だけ。
+- 残リスク:
+  - localStorage は同一オリジンで動くスクリプトから読めます。本アプリは外部スクリプトを一切読み込まない（単一ファイル、CDN なし）ため、想定される混入経路は「利用者がこのファイルを改変された状態で入手する」場合に限ります。公式の配布物を使ってください。
+  - `http://` の接続先（ローカル以外）では、キーと画像が暗号化されずに流れます。リモートの接続先には `https://` を使ってください。ローカル（localhost）は http が前提のため許可しています。
 
-RekAI is designed around **Bring Your Own Key**:
+## XSS 面
 
-- Provider API keys are accepted per request via the `X-Provider-Key` header.
-- Keys are used transiently to call the upstream provider and are **never**
-  written to disk, logs, or the cache.
-- The optional `rekai.security` helpers (Fernet encryption) exist only for
-  deployments that explicitly choose to persist keys; this is **off by default**.
+- AI の回答、履歴、エラーメッセージなど、外部由来の文字列はすべて `textContent` で表示します。`innerHTML` への代入と `document.write` はアプリ内に存在せず、単体テストが静的に不在を検証しています。
+- したがって、接続先が侵害されて悪意のある回答を返しても、HTML／スクリプトとして実行されることはありません（テキストとして表示されるだけです）。
+- CSP は単一ファイル配布の都合で meta タグでは付けていません（インラインスクリプト自体が本体のため）。ホスティング側で配信する場合は `script-src 'self' 'unsafe-inline'` 相当が必要な点に注意してください。
 
-When self-hosting, always terminate TLS in front of RekAI so keys are never
-sent in clear text.
+## 画像データ
+
+- 送信前に最大辺 1280px へ縮小し JPEG 化します（帯域とコストの削減を兼ねる）。
+- 画面共有は1フレームだけを撮影し、直ちに全トラックを停止します。常時監視はしません。
+- 履歴には画像を保存しません。
+
+## 音声（ブラウザ依存の注意）
+
+- 音声認識はブラウザの Web Speech API を使います。ブラウザによっては（例: Chrome）音声がブラウザ提供元のクラウドで処理されます。これは本アプリの管理外であり、README にも明記しています。避けたい場合はテキスト入力を使ってください。
+- 読み上げ（speechSynthesis）もブラウザ依存で、一部の音声は外部合成される場合があります。
+
+## 検証
+
+- 単体テスト（`tests/run-tests.js`）: リクエスト組み立て・応答パース・設定検証に加え、静的検証として「innerHTML 代入の不在」「URL 許可リスト（localhost と OpenAI のみ）」「解析系コードの不在」「履歴エントリに画像が含まれない」を固定しています。
+- 実 UI 検証: Electron 上でモック応答を使い、設定→画像取り込み→質問→回答表示の流れとコンソールエラーゼロを確認（実 API へは接続しない検証）。
+
+## 既知の限界
+
+- 接続先の正しさ（そのエンドポイントが信頼できるか）は利用者の設定に委ねられます。アプリは URL の形式（http/https）だけを検証します。
+- ブラウザの localStorage は暗号化されません。共有端末では履歴とキーを消してから離れてください（履歴は画面から消去できます。キーは設定で空にして保存すると消えます）。
