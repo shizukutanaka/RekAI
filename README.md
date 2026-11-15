@@ -1,5 +1,7 @@
 # RekAI
 
+> **Consolidated into [Pasture](https://github.com/shizukutanaka/Pasture)** — this repository is no longer developed. RekAI's provider set (including Gemini), its Anthropic Messages API surface, and its Idempotency-Key deduplication were ported into Pasture (IMP-72/73/74); Pasture is the surviving local/cloud LLM router. This repository will be archived; the code remains available for reference.
+
 > A lightweight, self-hostable **AI router & gateway** with provider abstraction, response caching, BYOK (Bring Your Own Key), and a built-in chat UI.
 
 RekAI sits between your application and multiple LLM providers (OpenAI, Anthropic, Gemini, Ollama, and any OpenAI-compatible endpoint). It routes each request to the right provider, caches responses to cut cost and latency, supports chat, streaming, tool calling, and embeddings through one API, and lets every user bring their own API key.
