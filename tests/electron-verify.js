@@ -181,6 +181,86 @@ app.whenReady().then(async () => {
   await js("document.getElementById('closeSettingsBtn').click(); true");
   await sleep(100);
 
+  /* --- share intake: serve over HTTP, install the SW, then post a real
+         multipart form (image + text) to the share target, exactly like an
+         OS share sheet would. The service worker must stash the payload,
+         redirect to the app, and the app must consume it once. --- */
+  {
+    const http = require('http');
+    const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.md': 'text/plain' };
+    const server = http.createServer((req, res) => {
+      try {
+        let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+        if (p === '/') p = '/index.html';
+        const file = path.join(ROOT, p);
+        if (file.indexOf(ROOT) !== 0 || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+          res.writeHead(404); res.end('not found'); return;
+        }
+        res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+        res.end(fs.readFileSync(file));
+      } catch (e) { res.writeHead(500); res.end(String(e)); }
+    });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    const base = 'http://127.0.0.1:' + server.address().port;
+    const win2 = new BrowserWindow({ width: 900, height: 900, show: true });
+    win2.webContents.on('console-message', (e, level, message) => { if (level >= 3) consoleErrors.push('[share] ' + message); });
+    const js2 = async code => {
+      try { return await win2.webContents.executeJavaScript(code, true); }
+      catch (e) { console.log('JS2-THREW: ' + String(code).slice(0, 120) + ' :: ' + e.message); return '__JS_THREW__'; }
+    };
+    await win2.loadURL(base + '/index.html');
+    let swReady = false;
+    for (let i = 0; i < 40 && !swReady; i++) {
+      await sleep(250);
+      swReady = await js2("navigator.serviceWorker.ready.then(function(){ return true; }).catch(function(){ return false; })");
+      if (swReady) {
+        const active = await js2("navigator.serviceWorker.getRegistration().then(function(r){ return !!(r && r.active); })");
+        if (!active) swReady = false;
+      }
+    }
+    check('service worker registered and active over HTTP', swReady === true);
+    await win2.loadURL(base + '/index.html'); // reload so the SW controls the page
+    await sleep(500);
+    check('service worker controls the page', await js2('!!navigator.serviceWorker.controller'));
+    check('manifest exposes a POST share target',
+      await js2("fetch('manifest.webmanifest').then(function(r){ return r.json(); }).then(function(m){ return !!(m.share_target && m.share_target.method === 'POST' && m.share_target.params && m.share_target.params.files); }).catch(function(){ return false; })"));
+
+    await js2(`(async function () {
+      var resp = await fetch(${JSON.stringify('data:image/png;base64,' + Buffer.from(fs.readFileSync(path.join(ROOT, 'icon-192.png'))).toString('base64'))});
+      var blob = await resp.blob();
+      var file = new File([blob], 'shared-photo.png', { type: 'image/png' });
+      var dt = new DataTransfer(); dt.items.add(file);
+      var form = document.createElement('form');
+      form.method = 'POST'; form.enctype = 'multipart/form-data'; form.action = './share-target';
+      var fi = document.createElement('input'); fi.type = 'file'; fi.name = 'image'; fi.files = dt.files;
+      var ti = document.createElement('input'); ti.type = 'text'; ti.name = 'text'; ti.value = 'Shared question text';
+      form.appendChild(fi); form.appendChild(ti);
+      document.body.appendChild(form);
+      form.submit();
+      return true;
+    })()`);
+    let sharedIn = false;
+    for (let i = 0; i < 40 && !sharedIn; i++) {
+      await sleep(250);
+      sharedIn = await js2("document.getElementById('preview') && document.getElementById('preview').style.display === 'block'");
+    }
+    check('shared image arrived in the preview', sharedIn === true);
+    check('shared image went through the normal intake (re-encoded jpeg)',
+      await js2("(window.RekAIApp.state.imageDataUrl || '').indexOf('data:image/jpeg') === 0"));
+    check('shared text prefilled the question box',
+      await js2("document.getElementById('question').value.indexOf('Shared question text') >= 0"));
+    check('share status message shown',
+      await js2("document.getElementById('status').className === 'info' && document.getElementById('status').textContent.length > 0"));
+    check('share flag cleaned from the address bar',
+      await js2("location.search.indexOf('shared') < 0"));
+    check('share inbox consumed (nothing lingers on the device)',
+      await js2("caches.open('rekai-share-inbox').then(function(c){ return c.keys(); }).then(function(k){ return k.length === 0; }).catch(function(){ return false; })"));
+    check('shared image is not persisted to localStorage',
+      await js2("JSON.stringify(localStorage).indexOf('data:image') < 0"));
+    win2.close();
+    server.close();
+  }
+
   check('zero console errors', consoleErrors.length === 0, consoleErrors.join(' | ').slice(0, 300));
 
   const failed = results.filter(r => !r.ok).length;

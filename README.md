@@ -9,6 +9,7 @@
 ## できること
 
 - **画面を取り込む**: PC では画面共有で今の画面をそのまま撮影。モバイル等では写真を撮る／画像を選ぶ。貼り付け（Ctrl+V）にも対応。
+- **他のアプリから共有する**: インストール済み（PWA）なら、写真アプリ等の「共有」に RekAI が現れ、選ぶだけでその画像を取り込んで質問を始められます（下記）。
 - **質問する**: 音声入力（日本語対応）またはテキスト入力。画像なしの質問もできます。
 - **答える**: 画像と質問を、あなたが設定した AI（Vision 対応 LLM）に送り、回答を表示。読み上げ（停止ボタン付き）もできます。
 - **履歴**: 質問と回答はこの端末のブラウザ内にだけ残ります（画像は保存しません）。いつでも消せます。
@@ -46,9 +47,18 @@ AI の接続先は**利用者自身のもの**を使う設計です。OpenAI 互
 - エンジンは動いているのにモデルが1つも無い場合は、その旨と対処が表示されます。何も見つからない場合は、理由の候補と各エンジンの導入手順が表示され、従来どおり手動設定もできます。
 - 注意: このページを HTTPS で開いていると、ブラウザが端末内（`http://localhost`）への確認を止める場合があります。その場合は手動設定をご利用ください。
 
+## 他のアプリから共有する（PWA）
+
+HTTPS（または `localhost`）で配信された RekAI は、ブラウザから「インストール」できます。インストールすると、他のアプリの共有シートに RekAI が受け口として現れます。
+
+- 写真や画像を見ているアプリで「共有」→ RekAI を選ぶと、その画像が取り込まれた状態で RekAI が開きます。共有にテキストが含まれていれば、質問欄にも入ります。
+- 受け渡しは端末の中で完結します。Service Worker（`sw.js`）が共有をこの端末のブラウザ内の受信箱に一度だけ置き、アプリが取り込んだら消します。**共有された画像がどこかのサーバーへ送られることはありません**（その後、質問するときに初めて、あなたが設定した接続先へ送られます）。
+- 必要なファイルは `manifest.webmanifest`、`sw.js`、アイコン画像です。いずれも任意の付随ファイルで、`index.html` を単体で開く従来の使い方では読み込まれず、アプリ本体（単一HTML・依存ゼロ）はそのままです。`file://` で開いた場合は共有受け口は無効です（OS の共有先には出ません）。
+
 ## プライバシー
 
 - 画像と質問が送られるのは、**あなたが設定した接続先だけ**です。
+- 他のアプリから共有された画像も、端末の中だけで受け渡しされます（受信箱は取り込み後に削除。共有の受け渡し自体にサーバーは介在しません）。
 - 「自動で探す」が確認するのは、この端末の中のローカルAIだけです（ループバックへのモデル一覧の確認のみで、外部への送信はありません）。
 - 設定と履歴はこの端末のブラウザ内（localStorage）にのみ保存されます。**作成者（開発者）を含む第三者にデータが送られることは一切ありません**（このアプリ自体に送信機能がありません）。
 - 履歴に保存するのは質問と回答のテキストだけです。取り込んだ画像は保存しません。
@@ -82,6 +92,7 @@ MIT — [LICENSE](./LICENSE)
 
 - Single-file (`index.html`), zero-dependency web app. No install; works on PC and mobile.
 - Capture your screen (screen sharing), pick/take a photo, or paste an image; ask by voice (Web Speech API) or text; get a written answer, optionally read aloud.
+- **Share into RekAI**: when installed as a PWA (served over HTTPS), RekAI appears in other apps' share sheets; sharing an image opens RekAI with that image already captured. The hand-off stays on the device (a service worker passes it through a local inbox cache, deleted once captured) — no server is involved.
 - **You bring your own AI endpoint**: any OpenAI-compatible API with a vision-capable model. Presets for Pasture (this family's local LLM router), Ollama, LM Studio, and OpenAI.
 - **Zero-config path**: the settings dialog can auto-detect a local engine (Pasture / Ollama / LM Studio, in that order) running on your device. Probing is loopback-only, sends no API key and nothing external, and nothing is saved until you confirm the found endpoint. If nothing is found, it shows the likely reasons and how to set each engine up.
 - **Privacy**: images and questions go only to the endpoint *you* configure. Settings and history live only in your browser on your device. Nothing is ever sent to the developer or any third party. History stores text only, never images.
