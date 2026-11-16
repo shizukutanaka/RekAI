@@ -232,5 +232,92 @@ eq(R.downscaleDims(800, 600, 0), null, 'downscale zero edge');
   ok(!/image/i.test(JSON.stringify(R.makeEntry('q', 'a', 0))), 'history entry has no image');
 }
 
+/* ---- share intake: core helpers ---- */
+eq(R.SHARE_INBOX_CACHE, 'rekai-share-inbox', 'share inbox cache name');
+ok(R.SHARE_IMAGE_KEY.length > 0 && R.SHARE_META_KEY.length > 0 && R.SHARE_IMAGE_KEY !== R.SHARE_META_KEY, 'share inbox keys distinct');
+eq(R.SHARE_ACTION_SUFFIX, '/share-target', 'share action suffix');
+eq(R.parseSharedLaunch('?shared=1'), true, 'shared launch: flag present');
+eq(R.parseSharedLaunch('?x=2&shared=1'), true, 'shared launch: flag among others');
+eq(R.parseSharedLaunch('?shared=0'), false, 'shared launch: 0 is not a launch');
+eq(R.parseSharedLaunch('?shared=10'), false, 'shared launch: 10 is not a launch');
+eq(R.parseSharedLaunch(''), false, 'shared launch: empty');
+eq(R.parseSharedLaunch(null), false, 'shared launch: null');
+eq(R.parseSharedLaunch(undefined), false, 'shared launch: undefined');
+eq(R.sharedQuestionText({ title: 'T', text: 'body', url: 'https://example.com/a' }), 'T\nbody\nhttps://example.com/a', 'shared text joins title/text/url');
+eq(R.sharedQuestionText({ text: '  padded  ' }), 'padded', 'shared text trims');
+eq(R.sharedQuestionText({ title: 42, text: 'ok', url: null }), 'ok', 'shared text drops non-strings');
+eq(R.sharedQuestionText({}), '', 'shared text empty meta');
+eq(R.sharedQuestionText(null), '', 'shared text null meta');
+eq(R.sharedQuestionText('str'), '', 'shared text non-object');
+{
+  const long = R.sharedQuestionText({ text: 'x'.repeat(5000) });
+  eq(long.length, R.SHARE_QUESTION_MAX, 'shared text capped at max length');
+}
+
+/* ---- share intake: PWA manifest ---- */
+{
+  const manifestPath = path.join(__dirname, '..', 'manifest.webmanifest');
+  ok(fs.existsSync(manifestPath), 'manifest.webmanifest exists');
+  let man = null;
+  try { man = JSON.parse(fs.readFileSync(manifestPath, 'utf8')); } catch (e) { /* asserted below */ }
+  ok(man && typeof man === 'object', 'manifest parses as JSON');
+  if (man) {
+    ok(typeof man.name === 'string' && man.name.length > 0, 'manifest has a name');
+    eq(man.start_url, './index.html', 'manifest start_url is the app page');
+    eq(man.display, 'standalone', 'manifest display standalone');
+    const sizes = (man.icons || []).map(i => i.sizes);
+    ok(sizes.indexOf('192x192') >= 0 && sizes.indexOf('512x512') >= 0, 'manifest icons cover 192 and 512');
+    ok((man.icons || []).some(i => i.purpose === 'maskable'), 'manifest has a maskable icon');
+    for (const ic of man.icons || []) {
+      ok(fs.existsSync(path.join(__dirname, '..', ic.src)), 'manifest icon file exists: ' + ic.src);
+    }
+    const st = man.share_target || {};
+    eq(st.method, 'POST', 'share_target method is POST (required for files)');
+    eq(st.enctype, 'multipart/form-data', 'share_target enctype is multipart');
+    ok(typeof st.action === 'string' && st.action.slice(-R.SHARE_ACTION_SUFFIX.length) === R.SHARE_ACTION_SUFFIX,
+       'share_target action matches the core suffix');
+    const files = (st.params && st.params.files) || [];
+    eq(files.length, 1, 'share_target takes exactly one file param');
+    if (files.length === 1) {
+      eq(files[0].name, 'image', 'share_target file param is named image');
+      ok((files[0].accept || []).every(a => typeof a === 'string' && a.indexOf('image/') === 0),
+         'share_target accepts images only');
+    }
+    ok(!/https?:\/\//.test(JSON.stringify(man)), 'manifest contains no absolute URLs');
+  }
+}
+
+/* ---- share intake: service worker contract ---- */
+{
+  const swPath = path.join(__dirname, '..', 'sw.js');
+  ok(fs.existsSync(swPath), 'sw.js exists');
+  const sw = fs.readFileSync(swPath, 'utf8');
+  // The SW and the app must agree on the inbox contract, or shares vanish.
+  ok(sw.indexOf("'" + R.SHARE_INBOX_CACHE + "'") >= 0, 'sw uses the same inbox cache name as the core');
+  ok(sw.indexOf("'" + R.SHARE_IMAGE_KEY + "'") >= 0, 'sw uses the same image key as the core');
+  ok(sw.indexOf("'" + R.SHARE_META_KEY + "'") >= 0, 'sw uses the same meta key as the core');
+  ok(sw.indexOf("'" + R.SHARE_ACTION_SUFFIX + "'") >= 0, 'sw matches the same action suffix as the core');
+  ok(/req\.method === 'POST'/.test(sw) && /formData\(\)/.test(sw), 'sw reads the share POST form data');
+  ok(/Response\.redirect\(/.test(sw) && /303/.test(sw) && sw.indexOf('index.html?shared=1') >= 0,
+     'sw redirects 303 to the app with the shared flag');
+  ok(/image\//.test(sw), 'sw checks the shared payload is an image');
+  // Activate cleanup must never delete the share inbox (a pending shared image).
+  ok(/indexOf\('rekai-shell-'\)/.test(sw), 'sw cleanup is scoped to shell caches only');
+  ok(!/https?:\/\//.test(sw), 'sw.js contains no absolute URLs (nothing external is contacted)');
+}
+
+/* ---- share intake: app wiring in index.html ---- */
+{
+  ok(/<link rel="manifest" href="manifest\.webmanifest">/.test(html), 'index.html links the manifest');
+  ok(/serviceWorker/.test(html) && /location\.protocol !== 'http:'/.test(html),
+     'service worker is registered only over http(s)');
+  ok(/consumeShared/.test(html), 'app consumes the share inbox');
+  ok(/SHARE_INBOX_CACHE/.test(html), 'app reads the inbox via the shared constant');
+  for (const lang of R.LANGS) {
+    ok(R.t(lang, 'sharedImageReady') !== 'sharedImageReady', 'sharedImageReady text in ' + lang);
+    ok(R.t(lang, 'sharedFailed') !== 'sharedFailed', 'sharedFailed text in ' + lang);
+  }
+}
+
 console.log('RekAI tests: ' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

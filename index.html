@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="description" content="RekAI — a voice/desktop assistant that looks at what you are looking at and answers. Single-file, zero-dependency, local-first.">
+<meta name="theme-color" content="#2563eb">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>RekAI — 見ているものを、調べて答えるアシスタント</title>
 <style>
   :root{
@@ -373,6 +376,37 @@
     return { width: Math.max(1, Math.round(w * scale)), height: Math.max(1, Math.round(h * scale)) };
   };
 
+  /* ---------- share intake (Web Share Target) ----------
+     When RekAI is installed as a PWA, other apps can share an image into it.
+     The service worker (sw.js) receives the share POST, stashes the payload
+     in a device-local inbox cache, and redirects here with ?shared=1. The
+     constants below are the contract with sw.js; tests keep them in sync.
+     Nothing in this path ever leaves the device: the inbox is a Cache API
+     store on this browser, consumed once and then deleted. */
+  REKAI.SHARE_INBOX_CACHE = 'rekai-share-inbox';
+  REKAI.SHARE_IMAGE_KEY = '__rekai_shared_image';
+  REKAI.SHARE_META_KEY = '__rekai_shared_meta';
+  REKAI.SHARE_ACTION_SUFFIX = '/share-target';
+  REKAI.SHARE_QUESTION_MAX = 2000;
+  /* True when this launch came from the service worker's share redirect. */
+  REKAI.parseSharedLaunch = function (search) {
+    if (typeof search !== 'string' || !search) return false;
+    try { return new URLSearchParams(search).get('shared') === '1'; }
+    catch (e) { return /[?&]shared=1(&|$)/.test(search); }
+  };
+  /* Builds the question-box prefill from shared title/text/url fields.
+     Untrusted input: strings only, length-capped, no interpretation. */
+  REKAI.sharedQuestionText = function (meta) {
+    if (!meta || typeof meta !== 'object') return '';
+    var parts = [];
+    ['title', 'text', 'url'].forEach(function (k) {
+      var v = meta[k];
+      if (typeof v === 'string' && v.trim()) parts.push(v.trim());
+    });
+    var joined = parts.join('\n');
+    return joined.length > REKAI.SHARE_QUESTION_MAX ? joined.slice(0, REKAI.SHARE_QUESTION_MAX) : joined;
+  };
+
   /* ---------- history (device-local only; stores text, never the image) ---------- */
   REKAI.makeEntry = function (q, a, ts) {
     return { q: String(q == null ? '' : q), a: String(a == null ? '' : a), ts: typeof ts === 'number' ? ts : Date.now() };
@@ -403,7 +437,7 @@
       langLabel: '言語', settings: '設定',
       captureTitle: '1. 今見ているものを取り込む',
       captureScreen: '画面を取り込む', chooseImage: '画像を選ぶ／撮る', removeImage: '画像を外す',
-      captureHint: '画面共有が使えない環境では、画像の選択（モバイルでは撮影も）をご利用ください。画像を貼り付け（Ctrl+V）でも取り込めます。',
+      captureHint: '画面共有が使えない環境では、画像の選択（モバイルでは撮影も）をご利用ください。画像を貼り付け（Ctrl+V）でも取り込めます。インストール済みなら、他のアプリの「共有」から画像を送ることもできます。',
       questionTitle: '2. 質問する',
       questionPlaceholder: '例：この画面のエラーの意味と直し方を教えて',
       micStart: '🎤 音声で入力', micStop: '⏹ 音声入力を止める', listeningNow: '聞き取り中…話しかけてください',
@@ -437,6 +471,9 @@
       screenFailed: '画面の取り込みに失敗しました：',
       imageFailed: '画像の読み込みに失敗しました：',
       imageReady: '画像を取り込みました。',
+      sharedImageReady: '共有された画像を取り込みました。',
+      sharedTextOnly: '共有されたテキストを質問欄に入れました。',
+      sharedFailed: '共有された内容を受け取れませんでした。画像が含まれていない共有だった可能性があります。',
       speechUnsupported: 'この環境では音声入力が使えません。キーボードで入力してください。',
       speechFailed: '音声入力でエラーが発生しました：',
       errNetwork: '接続先に届きませんでした。URLと、接続先が動いているかを確認してください。',
@@ -456,7 +493,7 @@
       langLabel: 'Language', settings: 'Settings',
       captureTitle: '1. Capture what you are looking at',
       captureScreen: 'Capture screen', chooseImage: 'Choose / take a picture', removeImage: 'Remove image',
-      captureHint: 'If screen sharing is unavailable, choose an image instead (on mobile you can take a photo). You can also paste an image (Ctrl+V).',
+      captureHint: 'If screen sharing is unavailable, choose an image instead (on mobile you can take a photo). You can also paste an image (Ctrl+V). If RekAI is installed, you can also send an image from another app via Share.',
       questionTitle: '2. Ask a question',
       questionPlaceholder: 'e.g. What does this error mean, and how do I fix it?',
       micStart: '🎤 Voice input', micStop: '⏹ Stop voice input', listeningNow: 'Listening… please speak',
@@ -490,6 +527,9 @@
       screenFailed: 'Screen capture failed: ',
       imageFailed: 'Could not load the image: ',
       imageReady: 'Image captured.',
+      sharedImageReady: 'Shared image received.',
+      sharedTextOnly: 'The shared text was placed in the question box.',
+      sharedFailed: 'Could not receive the shared content. The share may not have included an image.',
       speechUnsupported: 'Voice input is not available in this environment. Please type instead.',
       speechFailed: 'Voice input error: ',
       errNetwork: 'Could not reach the endpoint. Check the URL and that the endpoint is running.',
@@ -509,7 +549,7 @@
       langLabel: 'Idioma', settings: 'Ajustes',
       captureTitle: '1. Captura lo que estás viendo',
       captureScreen: 'Capturar pantalla', chooseImage: 'Elegir / hacer una foto', removeImage: 'Quitar imagen',
-      captureHint: 'Si no puedes compartir la pantalla, elige una imagen (en el móvil puedes hacer una foto). También puedes pegar una imagen (Ctrl+V).',
+      captureHint: 'Si no puedes compartir la pantalla, elige una imagen (en el móvil puedes hacer una foto). También puedes pegar una imagen (Ctrl+V). Si RekAI está instalada, también puedes enviar una imagen desde otra app con Compartir.',
       questionTitle: '2. Haz una pregunta',
       questionPlaceholder: 'Ej.: ¿Qué significa este error y cómo lo corrijo?',
       micStart: '🎤 Entrada de voz', micStop: '⏹ Detener voz', listeningNow: 'Escuchando… habla ahora',
@@ -543,6 +583,9 @@
       screenFailed: 'La captura de pantalla falló: ',
       imageFailed: 'No se pudo cargar la imagen: ',
       imageReady: 'Imagen capturada.',
+      sharedImageReady: 'Imagen compartida recibida.',
+      sharedTextOnly: 'El texto compartido se colocó en el cuadro de pregunta.',
+      sharedFailed: 'No se pudo recibir el contenido compartido. Es posible que no incluyera una imagen.',
       speechUnsupported: 'La entrada de voz no está disponible en este entorno. Escribe tu pregunta.',
       speechFailed: 'Error de entrada de voz: ',
       errNetwork: 'No se pudo contactar con el servicio. Revisa la URL y que el servicio esté en marcha.',
@@ -562,7 +605,7 @@
       langLabel: '语言', settings: '设置',
       captureTitle: '1. 捕获你正在看的内容',
       captureScreen: '捕获屏幕', chooseImage: '选择／拍摄图片', removeImage: '移除图片',
-      captureHint: '如果无法共享屏幕，请改为选择图片（在手机上可以拍照）。也可以粘贴图片（Ctrl+V）。',
+      captureHint: '如果无法共享屏幕，请改为选择图片（在手机上可以拍照）。也可以粘贴图片（Ctrl+V）。如果已安装 RekAI，也可以从其他应用通过"分享"发送图片。',
       questionTitle: '2. 提问',
       questionPlaceholder: '例如：这个错误是什么意思？怎么修复？',
       micStart: '🎤 语音输入', micStop: '⏹ 停止语音', listeningNow: '正在聆听……请说话',
@@ -596,6 +639,9 @@
       screenFailed: '屏幕捕获失败：',
       imageFailed: '图片加载失败：',
       imageReady: '图片已捕获。',
+      sharedImageReady: '已接收分享的图片。',
+      sharedTextOnly: '已将分享的文字填入问题框。',
+      sharedFailed: '无法接收分享的内容。该分享可能未包含图片。',
       speechUnsupported: '此环境无法使用语音输入。请使用键盘输入。',
       speechFailed: '语音输入出错：',
       errNetwork: '无法连接到服务。请检查 URL 以及服务是否正在运行。',
@@ -615,7 +661,7 @@
       langLabel: '언어', settings: '설정',
       captureTitle: '1. 지금 보고 있는 것 가져오기',
       captureScreen: '화면 가져오기', chooseImage: '이미지 선택／촬영', removeImage: '이미지 제거',
-      captureHint: '화면 공유를 쓸 수 없는 환경에서는 이미지를 선택하세요(모바일에서는 촬영도 가능). 이미지를 붙여넣기(Ctrl+V)할 수도 있습니다.',
+      captureHint: '화면 공유를 쓸 수 없는 환경에서는 이미지를 선택하세요(모바일에서는 촬영도 가능). 이미지를 붙여넣기(Ctrl+V)할 수도 있습니다. RekAI가 설치되어 있으면 다른 앱의 "공유"에서 이미지를 보낼 수도 있습니다.',
       questionTitle: '2. 질문하기',
       questionPlaceholder: '예: 이 오류의 의미와 해결 방법을 알려 주세요',
       micStart: '🎤 음성 입력', micStop: '⏹ 음성 입력 중지', listeningNow: '듣는 중… 말씀하세요',
@@ -649,6 +695,9 @@
       screenFailed: '화면 가져오기 실패: ',
       imageFailed: '이미지를 불러오지 못했습니다: ',
       imageReady: '이미지를 가져왔습니다.',
+      sharedImageReady: '공유된 이미지를 가져왔습니다.',
+      sharedTextOnly: '공유된 텍스트를 질문 칸에 넣었습니다.',
+      sharedFailed: '공유된 내용을 받지 못했습니다. 이미지가 포함되지 않은 공유였을 수 있습니다.',
       speechUnsupported: '이 환경에서는 음성 입력을 쓸 수 없습니다. 키보드로 입력하세요.',
       speechFailed: '음성 입력 오류: ',
       errNetwork: '접속처에 닿지 못했습니다. URL과 접속처가 실행 중인지 확인하세요.',
@@ -819,6 +868,56 @@
     blobToDataUrl(blob).then(function (du) {
       setImage(du); clearStatus(); showStatus(t('imageReady'), 'info');
     }).catch(function (e) { showError(t('imageFailed') + (e && e.message ? e.message : String(e))); });
+  }
+
+  /* ---------- share intake: PWA registration + inbox consumption ---------- */
+  function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+    if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+    try {
+      navigator.serviceWorker.register('sw.js').catch(function () { /* the app works fully without it */ });
+    } catch (e) { /* same: PWA is an enhancement, never a requirement */ }
+  }
+  function inboxKeyUrl(name) { return new URL(name, document.baseURI).href; }
+  /* Reads the payload the service worker stashed for a share launch, feeds
+     the image through the exact same intake path as the file picker, and
+     deletes the stash: shared content is consumed once, never kept around.
+     Resolves true if anything usable arrived. */
+  function consumeShared() {
+    if (!('caches' in window)) return Promise.resolve(false);
+    var inbox = null;
+    return caches.open(R.SHARE_INBOX_CACHE).then(function (c) {
+      inbox = c;
+      return Promise.all([
+        c.match(inboxKeyUrl(R.SHARE_IMAGE_KEY)),
+        c.match(inboxKeyUrl(R.SHARE_META_KEY))
+      ]);
+    }).then(function (res) {
+      var imgRes = res[0], metaRes = res[1];
+      if (!imgRes && !metaRes) return null;
+      var imgP = imgRes ? imgRes.blob().catch(function () { return null; }) : Promise.resolve(null);
+      var metaP = metaRes ? metaRes.json().catch(function () { return null; }) : Promise.resolve(null);
+      return Promise.all([imgP, metaP]).then(function (got) {
+        var dels = [];
+        if (imgRes) dels.push(inbox.delete(inboxKeyUrl(R.SHARE_IMAGE_KEY)));
+        if (metaRes) dels.push(inbox.delete(inboxKeyUrl(R.SHARE_META_KEY)));
+        return Promise.all(dels).then(function () { return got; });
+      });
+    }).then(function (got) {
+      if (!got) return false;
+      var blob = got[0], meta = got[1];
+      var qText = R.sharedQuestionText(meta);
+      if (qText && !els.question.value.trim()) els.question.value = qText;
+      if (blob && blob.size > 0 && typeof blob.type === 'string' && blob.type.indexOf('image/') === 0) {
+        return blobToDataUrl(blob).then(function (du) {
+          setImage(du); clearStatus(); showStatus(t('sharedImageReady'), 'info');
+          return true;
+        }).catch(function () { showError(t('sharedFailed')); return false; });
+      }
+      if (qText) { clearStatus(); showStatus(t('sharedTextOnly'), 'info'); return true; }
+      showError(t('sharedFailed'));
+      return false;
+    }).catch(function () { return false; });
   }
 
   function captureScreen() {
@@ -1165,6 +1264,12 @@
   loadAll();
   applyI18n();
   setImage(null);
+  registerServiceWorker();
+  if (R.parseSharedLaunch(location.search)) {
+    /* do not leave the share flag sitting in the address bar / history */
+    try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {}
+    consumeShared().then(function (got) { if (!got) showError(t('sharedFailed')); });
+  }
 
   /* Small hook used by the automated UI verification (and handy for debugging). */
   window.RekAIApp = {
@@ -1172,6 +1277,7 @@
     setImageDataUrl: function (du) { setImage(du); },
     ask: ask,
     detect: runDetection,
+    consumeShared: consumeShared,
     version: R.version
   };
 })();
