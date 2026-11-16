@@ -137,6 +137,14 @@
   <form method="dialog" id="settingsForm">
     <h2 data-i18n="settingsTitle">接続先の設定</h2>
     <div class="field">
+      <div class="row">
+        <button id="detectBtn" type="button" data-i18n="detectBtn">自動で探す</button>
+        <span id="detectBusy" class="muted" hidden data-i18n="detecting">探しています…</span>
+      </div>
+      <span class="hint" data-i18n="detectHint">この端末で動いているローカルAI（Pasture / Ollama / LM Studio）を探します。探す範囲はこの端末の中だけです。</span>
+      <div id="detectResult"></div>
+    </div>
+    <div class="field">
       <label for="presetSel" data-i18n="preset">プリセット</label>
       <select id="presetSel"></select>
     </div>
@@ -221,6 +229,71 @@
     var k = (apiKey || '').trim();
     if (k) h['Authorization'] = 'Bearer ' + k;
     return h;
+  };
+
+  /* ---------- auto-detection of a local engine (loopback only) ----------
+     Probing never leaves this device: candidates are the local presets, in
+     order, and detectCandidates() re-checks that every endpoint really is
+     loopback. No API key is sent while probing (see SECURITY.md). */
+  REKAI.DETECT_TIMEOUT_MS = 2500;
+  REKAI.isLoopbackEndpoint = function (raw) {
+    var ep = REKAI.normalizeEndpoint(raw || '');
+    if (!ep) return false;
+    var host = '';
+    try { host = new URL(ep).hostname.toLowerCase(); } catch (e) { return false; }
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]' ||
+           /\.localhost$/.test(host);
+  };
+  REKAI.DETECT_CANDIDATE_IDS = ['pasture', 'ollama', 'lmstudio'];
+  REKAI.detectCandidates = function () {
+    var out = [];
+    for (var i = 0; i < REKAI.DETECT_CANDIDATE_IDS.length; i++) {
+      var p = REKAI.presetById(REKAI.DETECT_CANDIDATE_IDS[i]);
+      if (p && p.endpoint && REKAI.isLoopbackEndpoint(p.endpoint)) out.push(p);
+    }
+    return out;
+  };
+  REKAI.buildModelsUrl = function (endpoint) {
+    var ep = REKAI.normalizeEndpoint(endpoint || '');
+    if (!ep) return '';
+    if (/\/models$/.test(ep)) return ep;
+    return ep + '/models';
+  };
+  REKAI.parseModelsResponse = function (json) {
+    if (!json || typeof json !== 'object' || !Array.isArray(json.data)) return { ok: false, models: [] };
+    var models = [];
+    for (var i = 0; i < json.data.length; i++) {
+      var d = json.data[i];
+      if (d && typeof d.id === 'string' && d.id) models.push(d.id);
+    }
+    return { ok: true, models: models };
+  };
+  /* Model names that usually mean "can read images". A hint only: the user
+     confirms the pick before it is saved, and the UI warns when the chosen
+     model does not look vision-capable. */
+  REKAI.VISION_HINTS = ['vision', 'llava', 'multimodal', '-vl', 'vl-', 'moondream',
+    'minicpm-v', 'pixtral', 'gpt-4o', 'gemma3', 'cogvlm', 'internvl'];
+  REKAI.looksVisionCapable = function (id) {
+    if (typeof id !== 'string' || !id) return false;
+    var s = id.toLowerCase();
+    for (var i = 0; i < REKAI.VISION_HINTS.length; i++) {
+      if (s.indexOf(REKAI.VISION_HINTS[i]) >= 0) return true;
+    }
+    return false;
+  };
+  REKAI.pickModel = function (models, preferred) {
+    var list = [];
+    if (Array.isArray(models)) {
+      for (var i = 0; i < models.length; i++) {
+        if (typeof models[i] === 'string' && models[i]) list.push(models[i]);
+      }
+    }
+    if (!list.length) return null;
+    if (preferred && list.indexOf(preferred) >= 0) return preferred;
+    for (var j = 0; j < list.length; j++) {
+      if (REKAI.looksVisionCapable(list[j])) return list[j];
+    }
+    return list[0];
   };
 
   /* ---------- request / response (OpenAI-compatible chat completions) ---------- */
@@ -343,6 +416,19 @@
       endpoint: '接続先URL（OpenAI互換 API）', model: 'モデル名（画像が読めるモデル）', apiKey: 'APIキー',
       apiKeyHint: 'キーはこの端末のブラウザ内にのみ保存され、設定した接続先へのリクエストにだけ使われます。ローカル接続では空でも構いません。',
       save: '保存', close: '閉じる',
+      detectBtn: '自動で探す',
+      detectHint: 'この端末で動いているローカルAI（Pasture / Ollama / LM Studio）を探します。探す範囲はこの端末の中だけです。',
+      detecting: '探しています…',
+      detectFound: '見つかりました：',
+      detectUse: 'この接続先を使う',
+      detectNoModel: '（応答はしましたが、モデルがありませんでした。モデルを用意してから、もう一度お試しください）',
+      detectNone: 'この端末では見つかりませんでした。対象のAIが起動していないか、このページを HTTPS で開いている場合にブラウザが端末内への確認を止めた可能性があります。その場合は下の手動設定をご利用ください。',
+      detectGuideTitle: '使えるようにするには',
+      guidePasture: 'Pasture（この製品群のローカルLLMルーター）: 入手して起動しておくと、自動で見つかります。',
+      guideOllama: 'Ollama: ollama.com から入手して起動し、画像が読めるモデル（例: llama3.2-vision）を用意します。',
+      guideLmstudio: 'LM Studio: lmstudio.ai から入手し、画像が読めるモデルを読み込んでサーバーを開始します。',
+      detectDefaultModelNote: 'モデル一覧が空だったため、プリセットのモデル名を入れています。',
+      detectVisionNote: '選んだモデルが画像を読めるかは未確認です。画像つきの質問に答えられない場合は、画像対応モデルに変えてください。',
       defaultQuestion: 'この画像に何が写っているか、詳しく教えてください。',
       needSettings: '先に接続先の設定をしてください（右上の「設定」から、接続先URLとモデル名が必要です）。',
       endpointRequired: '接続先URLを入力してください。', endpointInvalid: '接続先URLの形式が正しくありません（http:// または https:// で始まるURL）。', modelRequired: 'モデル名を入力してください。',
@@ -383,6 +469,19 @@
       endpoint: 'Endpoint URL (OpenAI-compatible API)', model: 'Model name (must be able to read images)', apiKey: 'API key',
       apiKeyHint: 'The key is stored only in this browser on this device and used only for requests to your endpoint. Local endpoints may not need one.',
       save: 'Save', close: 'Close',
+      detectBtn: 'Find automatically',
+      detectHint: 'Looks for a local AI running on this device (Pasture / Ollama / LM Studio). The search never leaves this device.',
+      detecting: 'Searching…',
+      detectFound: 'Found: ',
+      detectUse: 'Use this endpoint',
+      detectNoModel: ' (it responded, but no models were returned — load or download a model there, then try again)',
+      detectNone: 'Nothing was found on this device. Either none of the engines is running, or — if you opened this page over HTTPS — your browser may have blocked the checks to local addresses. In that case, please use the manual settings below.',
+      detectGuideTitle: 'To get one running',
+      guidePasture: 'Pasture (this family’s local LLM router): get it and start it — it will then be found automatically.',
+      guideOllama: 'Ollama: get it from ollama.com, start it, and pull a vision-capable model (e.g. llama3.2-vision).',
+      guideLmstudio: 'LM Studio: get it from lmstudio.ai, load a vision-capable model, and start its server.',
+      detectDefaultModelNote: 'The model list came back empty, so the preset’s model name was filled in.',
+      detectVisionNote: 'Whether the chosen model can read images is unconfirmed. If it cannot answer questions about an image, switch to a vision-capable model.',
       defaultQuestion: 'Please describe in detail what is shown in this image.',
       needSettings: 'Please configure your endpoint first (top-right “Settings”: endpoint URL and model name are required).',
       endpointRequired: 'Please enter the endpoint URL.', endpointInvalid: 'The endpoint URL looks wrong (it must start with http:// or https://).', modelRequired: 'Please enter the model name.',
@@ -423,6 +522,19 @@
       endpoint: 'URL del servicio (API compatible con OpenAI)', model: 'Nombre del modelo (debe poder leer imágenes)', apiKey: 'Clave API',
       apiKeyHint: 'La clave se guarda solo en este navegador y se usa solo para las solicitudes a tu servicio. Los servicios locales pueden no necesitarla.',
       save: 'Guardar', close: 'Cerrar',
+      detectBtn: 'Buscar automáticamente',
+      detectHint: 'Busca una IA local en marcha en este dispositivo (Pasture / Ollama / LM Studio). La búsqueda no sale de este dispositivo.',
+      detecting: 'Buscando…',
+      detectFound: 'Encontrado: ',
+      detectUse: 'Usar este servicio',
+      detectNoModel: ' (respondió, pero no devolvió modelos: carga o descarga un modelo allí y vuelve a intentarlo)',
+      detectNone: 'No se encontró nada en este dispositivo. O bien ningún motor está en marcha, o —si abriste esta página por HTTPS— el navegador puede haber bloqueado las comprobaciones a direcciones locales. En ese caso, usa los ajustes manuales de abajo.',
+      detectGuideTitle: 'Para poner uno en marcha',
+      guidePasture: 'Pasture (el enrutador LLM local de esta familia): consíguelo e inícialo; después se detectará automáticamente.',
+      guideOllama: 'Ollama: consíguelo en ollama.com, inícialo y descarga un modelo que lea imágenes (p. ej., llama3.2-vision).',
+      guideLmstudio: 'LM Studio: consíguelo en lmstudio.ai, carga un modelo que lea imágenes e inicia su servidor.',
+      detectDefaultModelNote: 'La lista de modelos vino vacía, así que se rellenó el nombre del modelo del preajuste.',
+      detectVisionNote: 'No está confirmado que el modelo elegido pueda leer imágenes. Si no responde sobre imágenes, cambia a un modelo con visión.',
       defaultQuestion: 'Describe con detalle lo que se ve en esta imagen.',
       needSettings: 'Configura primero tu servicio (en «Ajustes», arriba a la derecha: se necesitan la URL y el nombre del modelo).',
       endpointRequired: 'Introduce la URL del servicio.', endpointInvalid: 'La URL no parece válida (debe empezar por http:// o https://).', modelRequired: 'Introduce el nombre del modelo.',
@@ -463,6 +575,19 @@
       endpoint: '服务地址 URL（OpenAI 兼容 API）', model: '模型名称（需支持读取图片）', apiKey: 'API 密钥',
       apiKeyHint: '密钥只保存在本设备的浏览器中，仅用于向你设置的服务发送请求。本地服务可以不填。',
       save: '保存', close: '关闭',
+      detectBtn: '自动查找',
+      detectHint: '查找正在此设备上运行的本地 AI（Pasture / Ollama / LM Studio）。查找范围仅限此设备。',
+      detecting: '正在查找…',
+      detectFound: '找到了：',
+      detectUse: '使用这个服务地址',
+      detectNoModel: '（有响应，但没有返回模型：请先在其中加载或下载模型，然后重试）',
+      detectNone: '在此设备上没有找到。可能是这些引擎都没有运行；或者，如果你是通过 HTTPS 打开此页面的，浏览器可能阻止了对本地地址的检查。这种情况请使用下方的手动设置。',
+      detectGuideTitle: '如何准备一个',
+      guidePasture: 'Pasture（本产品系列的本地 LLM 路由器）：获取并启动它，之后即可被自动找到。',
+      guideOllama: 'Ollama：从 ollama.com 获取并启动，再准备一个能读图片的模型（例如 llama3.2-vision）。',
+      guideLmstudio: 'LM Studio：从 lmstudio.ai 获取，加载一个能读图片的模型，并启动服务器。',
+      detectDefaultModelNote: '模型列表为空，因此填入了预设的模型名称。',
+      detectVisionNote: '尚未确认所选模型能否读取图片。如果它无法回答关于图片的问题，请换成支持图片的模型。',
       defaultQuestion: '请详细描述这张图片里显示的内容。',
       needSettings: '请先完成服务设置（右上角「设置」：需要填写服务地址和模型名称）。',
       endpointRequired: '请输入服务地址 URL。', endpointInvalid: '服务地址格式不正确（必须以 http:// 或 https:// 开头）。', modelRequired: '请输入模型名称。',
@@ -503,6 +628,19 @@
       endpoint: '접속처 URL(OpenAI 호환 API)', model: '모델 이름(이미지를 읽을 수 있는 모델)', apiKey: 'API 키',
       apiKeyHint: '키는 이 기기의 브라우저 안에만 저장되며, 설정한 접속처로의 요청에만 사용됩니다. 로컬 접속에서는 비워 두어도 됩니다.',
       save: '저장', close: '닫기',
+      detectBtn: '자동으로 찾기',
+      detectHint: '이 기기에서 실행 중인 로컬 AI(Pasture / Ollama / LM Studio)를 찾습니다. 찾기는 이 기기 안에서만 이루어집니다.',
+      detecting: '찾는 중…',
+      detectFound: '찾았습니다: ',
+      detectUse: '이 접속처 사용',
+      detectNoModel: ' (응답했지만 모델이 없습니다. 모델을 불러오거나 내려받은 뒤 다시 시도하세요)',
+      detectNone: '이 기기에서 찾지 못했습니다. 엔진이 실행 중이 아니거나, 이 페이지를 HTTPS로 연 경우 브라우저가 로컬 주소 확인을 막았을 수 있습니다. 그럴 때는 아래 수동 설정을 이용하세요.',
+      detectGuideTitle: '사용할 수 있게 하려면',
+      guidePasture: 'Pasture(이 제품군의 로컬 LLM 라우터): 구해서 실행해 두면 자동으로 찾습니다.',
+      guideOllama: 'Ollama: ollama.com에서 구해 실행하고, 이미지를 읽을 수 있는 모델(예: llama3.2-vision)을 준비합니다.',
+      guideLmstudio: 'LM Studio: lmstudio.ai에서 구해 이미지를 읽을 수 있는 모델을 불러오고 서버를 시작합니다.',
+      detectDefaultModelNote: '모델 목록이 비어 있어 프리셋의 모델 이름을 채웠습니다.',
+      detectVisionNote: '선택한 모델이 이미지를 읽을 수 있는지는 확인되지 않았습니다. 이미지에 대해 답하지 못하면 이미지 지원 모델로 바꾸세요.',
       defaultQuestion: '이 이미지에 무엇이 보이는지 자세히 알려 주세요.',
       needSettings: '먼저 접속처를 설정하세요(오른쪽 위 「설정」에서 접속처 URL과 모델 이름이 필요합니다).',
       endpointRequired: '접속처 URL을 입력하세요.', endpointInvalid: '접속처 URL 형식이 올바르지 않습니다(http:// 또는 https://로 시작해야 합니다).', modelRequired: '모델 이름을 입력하세요.',
@@ -560,6 +698,7 @@
     answer: $('answer'), speakBtn: $('speakBtn'), stopSpeakBtn: $('stopSpeakBtn'),
     historyList: $('historyList'), historyEmpty: $('historyEmpty'), clearHistoryBtn: $('clearHistoryBtn'),
     dlg: $('settingsDlg'), presetSel: $('presetSel'), endpointInput: $('endpointInput'),
+    detectBtn: $('detectBtn'), detectBusy: $('detectBusy'), detectResult: $('detectResult'),
     modelInput: $('modelInput'), apiKeyInput: $('apiKeyInput'),
     errEndpoint: $('errEndpoint'), errModel: $('errModel'),
     openSettingsBtn: $('openSettingsBtn'), saveSettingsBtn: $('saveSettingsBtn'), closeSettingsBtn: $('closeSettingsBtn')
@@ -574,6 +713,9 @@
     recog: null,
     listening: false
   };
+
+  /* auto-detection view state: what the result area currently shows */
+  var detectView = { shown: false, running: false, found: null, noModelHit: null };
 
   function t(key) { return R.t(state.lang, key); }
 
@@ -626,6 +768,7 @@
     if (!state.lastAnswer) { els.answer.textContent = t('noAnswerYet'); els.answer.classList.add('muted'); }
     renderPresets();
     renderHistory();
+    if (detectView.shown && !detectView.running) renderDetect();
     if (state.listening) els.micBtn.textContent = t('micStop');
   }
   function renderPresets() {
@@ -833,6 +976,8 @@
     els.modelInput.value = state.settings.model || '';
     els.apiKeyInput.value = state.settings.apiKey || '';
     fieldError(els.errEndpoint, ''); fieldError(els.errModel, '');
+    detectView = { shown: false, running: false, found: null, noModelHit: null };
+    els.detectResult.textContent = '';
     if (typeof els.dlg.showModal === 'function') els.dlg.showModal();
   }
   function saveSettingsFromForm() {
@@ -851,6 +996,127 @@
     saveSettings();
     els.dlg.close();
     showStatus(t('settingsSaved'), 'info');
+  }
+
+  /* ---------- auto-detection: probe local engines, in order ----------
+     Loopback only (CORE guarantees the candidates), one GET per engine to
+     its OpenAI-compatible /models, no credentials attached. Nothing is
+     saved until the user presses "Use this endpoint". */
+  function probeCandidate(preset) {
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, R.DETECT_TIMEOUT_MS) : null;
+    var done = function (r) { if (timer) clearTimeout(timer); return r; };
+    var p;
+    try {
+      p = fetch(R.buildModelsUrl(preset.endpoint), {
+        method: 'GET',
+        signal: ctrl ? ctrl.signal : undefined
+      });
+    } catch (e) { return Promise.resolve({ state: 'fail' }); }
+    return p.then(function (res) {
+      if (!res.ok) throw new Error('http ' + res.status);
+      return res.text();
+    }).then(function (txt) {
+      var parsed = R.parseModelsResponse(JSON.parse(txt));
+      if (!parsed.ok) return { state: 'fail' };
+      if (!parsed.models.length) return { state: 'responded-no-models' };
+      return { state: 'ok', models: parsed.models };
+    }).catch(function () { return { state: 'fail' }; }).then(done);
+  }
+
+  function runDetection() {
+    if (detectView.running) return;
+    detectView = { shown: true, running: true, found: null, noModelHit: null };
+    els.detectBtn.disabled = true;
+    els.detectBusy.hidden = false;
+    els.detectResult.textContent = '';
+    var fallback = null; /* engine that responded but reported no models */
+    var chain = Promise.resolve(null);
+    R.detectCandidates().forEach(function (preset) {
+      chain = chain.then(function (found) {
+        if (found) return found;
+        return probeCandidate(preset).then(function (r) {
+          if (r.state === 'ok') {
+            return {
+              preset: preset, model: R.pickModel(r.models, preset.model),
+              models: r.models, defaultModelUsed: false
+            };
+          }
+          if (r.state === 'responded-no-models') {
+            if (!detectView.noModelHit) detectView.noModelHit = preset;
+            if (preset.model && !fallback) {
+              fallback = {
+                preset: preset, model: preset.model, models: [], defaultModelUsed: true
+              };
+            }
+          }
+          return null;
+        });
+      });
+    });
+    chain.then(function (found) {
+      detectView.running = false;
+      detectView.found = found || fallback;
+      els.detectBtn.disabled = false;
+      els.detectBusy.hidden = true;
+      renderDetect();
+    });
+  }
+
+  function mkEl(tag, text, cls) {
+    var n = document.createElement(tag);
+    if (text != null) n.textContent = text;
+    if (cls) n.className = cls;
+    n.style.margin = '.35rem 0';
+    return n;
+  }
+  function renderDetect() {
+    var box = els.detectResult;
+    box.textContent = '';
+    if (!detectView.shown || detectView.running) return;
+    var found = detectView.found;
+    if (found) {
+      var name = found.preset.name[state.lang] || found.preset.name.en;
+      var head = mkEl('p');
+      head.appendChild(mkEl('strong', t('detectFound') + name));
+      box.appendChild(head);
+      box.appendChild(mkEl('p', found.preset.endpoint + ' / ' + found.model, 'muted'));
+      if (found.defaultModelUsed) box.appendChild(mkEl('p', t('detectDefaultModelNote'), 'muted'));
+      else if (!R.looksVisionCapable(found.model)) box.appendChild(mkEl('p', t('detectVisionNote'), 'muted'));
+      var useBtn = mkEl('button', t('detectUse'));
+      useBtn.type = 'button';
+      useBtn.className = 'primary';
+      useBtn.addEventListener('click', function () { applyDetected(found); });
+      var row = mkEl('div');
+      row.className = 'row';
+      row.appendChild(useBtn);
+      box.appendChild(row);
+      return;
+    }
+    if (detectView.noModelHit) {
+      var hit = detectView.noModelHit;
+      box.appendChild(mkEl('p', (hit.name[state.lang] || hit.name.en) + t('detectNoModel')));
+    }
+    box.appendChild(mkEl('p', t('detectNone')));
+    box.appendChild(mkEl('p', t('detectGuideTitle')));
+    var ul = mkEl('ul');
+    ul.style.margin = '.2rem 0';
+    ul.style.paddingLeft = '1.2rem';
+    ['guidePasture', 'guideOllama', 'guideLmstudio'].forEach(function (k) {
+      ul.appendChild(mkEl('li', t(k)));
+    });
+    box.appendChild(ul);
+  }
+
+  function applyDetected(found) {
+    els.presetSel.value = found.preset.id;
+    els.endpointInput.value = found.preset.endpoint;
+    els.modelInput.value = found.model;
+    saveSettingsFromForm();
+    if (!els.dlg.open) { /* saved and closed: report what is now in use */
+      var name = found.preset.name[state.lang] || found.preset.name.en;
+      showStatus(t('detectFound') + name + ' (' + found.preset.endpoint + ' / ' + found.model + ')', 'info');
+    }
   }
 
   /* ---------- wiring ---------- */
@@ -886,6 +1152,7 @@
     renderHistory();
   });
   els.openSettingsBtn.addEventListener('click', openSettings);
+  els.detectBtn.addEventListener('click', runDetection);
   els.saveSettingsBtn.addEventListener('click', saveSettingsFromForm);
   els.closeSettingsBtn.addEventListener('click', function () { els.dlg.close(); });
   els.presetSel.addEventListener('change', function () {
@@ -904,6 +1171,7 @@
     state: state,
     setImageDataUrl: function (du) { setImage(du); },
     ask: ask,
+    detect: runDetection,
     version: R.version
   };
 })();

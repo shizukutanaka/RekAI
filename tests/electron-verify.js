@@ -137,6 +137,50 @@ app.whenReady().then(async () => {
   }
   check('network failure shows error message', errShown);
 
+  /* --- auto-detection: Ollama answers /models -> found -> confirm -> saved --- */
+  await js("localStorage.removeItem('rekai.settings.v1'); true");
+  await js(`window.fetch = function (url) {
+    if (String(url) === 'http://localhost:11434/v1/models') {
+      return Promise.resolve({ ok: true, status: 200, text: function () {
+        return Promise.resolve(JSON.stringify({ data: [{ id: 'some-text-model' }, { id: 'llama3.2-vision' }] }));
+      }});
+    }
+    return Promise.reject(new Error('Failed to fetch'));
+  }; true`);
+  await js("document.getElementById('openSettingsBtn').click(); true");
+  await sleep(200);
+  await js("document.getElementById('detectBtn').click(); true");
+  let foundTxt = '';
+  for (let i = 0; i < 30; i++) {
+    await sleep(200);
+    foundTxt = await js("document.getElementById('detectResult').textContent");
+    if (foundTxt.indexOf('Ollama') >= 0 && foundTxt.indexOf('llama3.2-vision') >= 0) break;
+  }
+  check('detection found the running engine', foundTxt.indexOf('Ollama') >= 0, foundTxt.slice(0, 80));
+  check('detection picked the vision model', foundTxt.indexOf('llama3.2-vision') >= 0, foundTxt.slice(0, 120));
+  check('nothing saved before the user confirms',
+    await js("localStorage.getItem('rekai.settings.v1') === null"));
+  await js("document.querySelector('#detectResult button').click(); true");
+  await sleep(200);
+  check('confirming closes the dialog', await js("!document.getElementById('settingsDlg').open"));
+  check('detected settings persisted',
+    await js("(function(){ var s = JSON.parse(localStorage.getItem('rekai.settings.v1') || '{}'); return s.endpoint === 'http://localhost:11434/v1' && s.model === 'llama3.2-vision' && s.preset === 'ollama'; })()"));
+
+  /* --- auto-detection: nothing running -> reasons + setup guidance --- */
+  await js("window.fetch = function () { return Promise.reject(new Error('Failed to fetch')); }; true");
+  await js("document.getElementById('openSettingsBtn').click(); true");
+  await sleep(200);
+  await js("document.getElementById('detectBtn').click(); true");
+  let noneTxt = '';
+  for (let i = 0; i < 30; i++) {
+    await sleep(200);
+    noneTxt = await js("document.getElementById('detectResult').textContent");
+    if (noneTxt.indexOf('ollama.com') >= 0) break;
+  }
+  check('not-found shows setup guidance', noneTxt.indexOf('ollama.com') >= 0 && noneTxt.indexOf('lmstudio.ai') >= 0, noneTxt.slice(0, 80));
+  await js("document.getElementById('closeSettingsBtn').click(); true");
+  await sleep(100);
+
   check('zero console errors', consoleErrors.length === 0, consoleErrors.join(' | ').slice(0, 300));
 
   const failed = results.filter(r => !r.ok).length;

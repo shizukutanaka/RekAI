@@ -16,7 +16,7 @@
 
 ## 使い方（3ステップ）
 
-1. **接続先を設定する**（初回のみ）: 右上の「設定」で、使う AI の接続先URL・モデル名・（必要な場合）APIキーを入れます。プリセットから選べます（下記）。
+1. **接続先を設定する**（初回のみ）: 右上の「設定」を開き、まず「自動で探す」を押してみてください。この端末で動いているローカルAI（Pasture / Ollama / LM Studio）を探し、見つかれば確認してそのまま使えます。見つからない場合は理由と導入手順が表示されます。手動で接続先URL・モデル名・（必要な場合）APIキーを入れることもできます（プリセットあり、下記）。
 2. **取り込む**: 「画面を取り込む」か「画像を選ぶ／撮る」で、今見ているものを取り込みます。
 3. **質問する**: 音声かテキストで質問して「調べる」。回答が表示され、必要なら読み上げます。
 
@@ -37,9 +37,19 @@ AI の接続先は**利用者自身のもの**を使う設計です。OpenAI 互
 - **画像が読める（Vision 対応）モデル**が必要です。テキスト専用モデルでは画像の質問に答えられません。
 - APIキーはこの端末のブラウザ内にのみ保存され、設定した接続先へのリクエストにだけ使われます。
 
+### 自動で探す（ゼロ設定パス）
+
+設定画面の「自動で探す」は、この端末上のローカルAIを **Pasture → Ollama → LM Studio** の順に探します。
+
+- 探す範囲は**この端末の中（ループバック）だけ**です。外部へは何も送らず、探している間は API キーも送りません。確認するのは各エンジンのモデル一覧（OpenAI互換の `/models`）だけです。
+- 見つかると、接続先とモデル名（そのエンジンの既定モデルか、画像が読めそうなモデルを優先して選択）が表示されます。**保存されるのは「この接続先を使う」を押したときだけ**です。
+- エンジンは動いているのにモデルが1つも無い場合は、その旨と対処が表示されます。何も見つからない場合は、理由の候補と各エンジンの導入手順が表示され、従来どおり手動設定もできます。
+- 注意: このページを HTTPS で開いていると、ブラウザが端末内（`http://localhost`）への確認を止める場合があります。その場合は手動設定をご利用ください。
+
 ## プライバシー
 
 - 画像と質問が送られるのは、**あなたが設定した接続先だけ**です。
+- 「自動で探す」が確認するのは、この端末の中のローカルAIだけです（ループバックへのモデル一覧の確認のみで、外部への送信はありません）。
 - 設定と履歴はこの端末のブラウザ内（localStorage）にのみ保存されます。**作成者（開発者）を含む第三者にデータが送られることは一切ありません**（このアプリ自体に送信機能がありません）。
 - 履歴に保存するのは質問と回答のテキストだけです。取り込んだ画像は保存しません。
 - 注意（ブラウザの仕様）: 音声入力はブラウザの音声認識を使います。ブラウザによっては（例: Chrome）音声がブラウザ提供元のサーバーで処理されます。気になる場合はテキスト入力をご利用ください。読み上げもブラウザ依存で、一部の音声は外部で合成される場合があります。
@@ -73,6 +83,7 @@ MIT — [LICENSE](./LICENSE)
 - Single-file (`index.html`), zero-dependency web app. No install; works on PC and mobile.
 - Capture your screen (screen sharing), pick/take a photo, or paste an image; ask by voice (Web Speech API) or text; get a written answer, optionally read aloud.
 - **You bring your own AI endpoint**: any OpenAI-compatible API with a vision-capable model. Presets for Pasture (this family's local LLM router), Ollama, LM Studio, and OpenAI.
+- **Zero-config path**: the settings dialog can auto-detect a local engine (Pasture / Ollama / LM Studio, in that order) running on your device. Probing is loopback-only, sends no API key and nothing external, and nothing is saved until you confirm the found endpoint. If nothing is found, it shows the likely reasons and how to set each engine up.
 - **Privacy**: images and questions go only to the endpoint *you* configure. Settings and history live only in your browser on your device. Nothing is ever sent to the developer or any third party. History stores text only, never images.
 - UI in 日本語 / English / Español / 中文 / 한국어.
 - Note: the previous RekAI (an AI gateway) was consolidated into [Pasture](https://github.com/shizukutanaka/Pasture); this repository has been rebuilt as the assistant described above.

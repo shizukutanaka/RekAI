@@ -121,6 +121,54 @@ eq(R.classifyHttpError(500), 'server', 'classify 500');
 eq(R.classifyHttpError(503), 'server', 'classify 503');
 eq(R.classifyHttpError(418), 'unknown-http', 'classify 418');
 
+/* ---- auto-detection: loopback-only candidates, in order ---- */
+eq(R.isLoopbackEndpoint('http://localhost:8080/v1'), true, 'loopback: localhost');
+eq(R.isLoopbackEndpoint('http://127.0.0.1:11434/v1'), true, 'loopback: 127.0.0.1');
+eq(R.isLoopbackEndpoint('http://[::1]:1234/v1'), true, 'loopback: [::1]');
+eq(R.isLoopbackEndpoint('http://foo.localhost:8080/v1'), true, 'loopback: *.localhost');
+eq(R.isLoopbackEndpoint('https://api.openai.com/v1'), false, 'not loopback: openai');
+eq(R.isLoopbackEndpoint('http://192.168.1.10:11434/v1'), false, 'not loopback: LAN address is not probed');
+eq(R.isLoopbackEndpoint('http://localhost.evil.example/v1'), false, 'not loopback: lookalike host');
+eq(R.isLoopbackEndpoint(''), false, 'not loopback: empty');
+eq(R.isLoopbackEndpoint('not a url'), false, 'not loopback: garbage');
+eq(R.isLoopbackEndpoint(null), false, 'not loopback: null');
+{
+  const cands = R.detectCandidates();
+  eq(cands.map(p => p.id), ['pasture', 'ollama', 'lmstudio'], 'detect candidates: local presets in order');
+  for (const p of cands) ok(R.isLoopbackEndpoint(p.endpoint), 'detect candidate is loopback: ' + p.id);
+  ok(cands.every(p => p.id !== 'openai' && p.id !== 'custom'), 'detect candidates exclude openai/custom');
+}
+ok(R.DETECT_TIMEOUT_MS > 0 && R.DETECT_TIMEOUT_MS <= 10000, 'detect timeout is short');
+
+/* ---- auto-detection: /models URL, response parsing, model picking ---- */
+eq(R.buildModelsUrl('http://localhost:11434/v1'), 'http://localhost:11434/v1/models', 'models url appended');
+eq(R.buildModelsUrl('http://localhost:11434/v1/'), 'http://localhost:11434/v1/models', 'models url with trailing slash');
+eq(R.buildModelsUrl('http://x/v1/models'), 'http://x/v1/models', 'models url not doubled');
+eq(R.buildModelsUrl(''), '', 'models url empty');
+eq(R.parseModelsResponse({ data: [{ id: 'a' }, { id: 'b' }] }), { ok: true, models: ['a', 'b'] }, 'parse models list');
+eq(R.parseModelsResponse({ data: [{ id: 'a' }, { name: 'no-id' }, null, { id: '' }, { id: 7 }] }),
+   { ok: true, models: ['a'] }, 'parse models drops entries without a string id');
+eq(R.parseModelsResponse({ data: [] }), { ok: true, models: [] }, 'parse models empty list is ok');
+eq(R.parseModelsResponse({ choices: [] }), { ok: false, models: [] }, 'parse models rejects chat-shaped body');
+eq(R.parseModelsResponse(null), { ok: false, models: [] }, 'parse models null');
+eq(R.parseModelsResponse('str'), { ok: false, models: [] }, 'parse models non-object');
+
+eq(R.looksVisionCapable('llama3.2-vision'), true, 'vision hint: llama3.2-vision');
+eq(R.looksVisionCapable('llava:7b'), true, 'vision hint: llava');
+eq(R.looksVisionCapable('qwen2.5-vl-7b'), true, 'vision hint: qwen vl');
+eq(R.looksVisionCapable('moondream'), true, 'vision hint: moondream');
+eq(R.looksVisionCapable('llama3.1:8b'), false, 'vision hint: text model not flagged');
+eq(R.looksVisionCapable(''), false, 'vision hint: empty');
+eq(R.looksVisionCapable(null), false, 'vision hint: null');
+
+eq(R.pickModel(['a', 'llama3.2-vision'], 'llama3.2-vision'), 'llama3.2-vision', 'pick: preferred present wins');
+eq(R.pickModel(['text-only', 'llava:7b'], 'not-installed'), 'llava:7b', 'pick: vision-looking model');
+eq(R.pickModel(['only-one'], ''), 'only-one', 'pick: single model');
+eq(R.pickModel(['m1', 'm2'], ''), 'm1', 'pick: falls back to first reported');
+eq(R.pickModel([], 'x'), null, 'pick: empty list -> null');
+eq(R.pickModel(null, 'x'), null, 'pick: null list -> null');
+eq(R.pickModel([42, 'real'], ''), 'real', 'pick: non-string entries ignored');
+
 /* ---- images ---- */
 ok(R.isImageDataUrl('data:image/png;base64,AAAA'), 'isImageDataUrl png');
 ok(R.isImageDataUrl('data:image/jpeg;base64,/9j/'), 'isImageDataUrl jpeg');
