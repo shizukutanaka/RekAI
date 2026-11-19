@@ -310,6 +310,47 @@ eq(R.sharedQuestionText('str'), '', 'shared text non-object');
   }
 }
 
+/* ---- pre-send confirmation summary ---- */
+{
+  eq(R.confirmEnabled(undefined), true, 'confirm: on when settings missing');
+  eq(R.confirmEnabled({}), true, 'confirm: on by default (old saved settings)');
+  eq(R.confirmEnabled({ confirmBeforeSend: true }), true, 'confirm: on when enabled');
+  eq(R.confirmEnabled({ confirmBeforeSend: false }), false, 'confirm: off only when explicitly disabled');
+  eq(R.formatBytes(512), '512 B', 'formatBytes: bytes');
+  eq(R.formatBytes(2048), '2.0 KB', 'formatBytes: KB');
+  eq(R.formatBytes(3 * 1048576), '3.0 MB', 'formatBytes: MB');
+  eq(R.formatBytes(-1), '', 'formatBytes: invalid');
+  const img = 'data:image/jpeg;base64,' + 'A'.repeat(400);
+  const hist = [R.makeEntry('q1', 'a1', 1), R.makeEntry('q2', 'a2', 2)];
+  const body = R.buildRequestBody({ model: 'm1', question: 'What?', defaultQuestion: 'D', imageDataUrl: img, history: hist });
+  const d = R.describeOutgoing({ endpoint: 'http://localhost:11434/v1', apiKey: '', body: body });
+  eq(d.url, R.buildChatUrl('http://localhost:11434/v1'), 'describe: url is the chat URL that is posted to');
+  eq(d.host, 'localhost:11434', 'describe: host');
+  eq(d.local, true, 'describe: loopback is local');
+  eq(d.insecure, false, 'describe: local http is not flagged');
+  eq(d.model, 'm1', 'describe: model from body');
+  eq(d.question, 'What?', 'describe: question from body');
+  eq(d.hasImage, true, 'describe: image detected in body');
+  eq(d.imageBytes, R.dataUrlBytes(img), 'describe: image size from body');
+  eq(d.historyTurns, 2, 'describe: history turns counted from body');
+  eq(d.sendsKey, false, 'describe: no key');
+  const body2 = R.buildRequestBody({ model: 'm2', question: '', defaultQuestion: 'Describe', imageDataUrl: null, history: [] });
+  const d2 = R.describeOutgoing({ endpoint: 'http://192.168.1.5:8080/v1', apiKey: ' sk-x ', body: body2 });
+  eq(d2.local, false, 'describe: LAN host is not local');
+  eq(d2.insecure, true, 'describe: non-local http flagged');
+  eq(d2.hasImage, false, 'describe: no image');
+  eq(d2.imageBytes, 0, 'describe: no image bytes');
+  eq(d2.question, 'Describe', 'describe: default question is what is sent');
+  eq(d2.historyTurns, 0, 'describe: no history');
+  eq(d2.sendsKey, true, 'describe: key sent');
+  const d3 = R.describeOutgoing({ endpoint: 'https://api.openai.com/v1', apiKey: 'k', body: body2 });
+  eq(d3.local === false && d3.insecure === false, true, 'describe: https remote is not flagged insecure');
+  const d4 = R.describeOutgoing({});
+  eq(typeof d4.url === 'string' && d4.hasImage === false && d4.historyTurns === 0, true, 'describe: tolerates empty input');
+  ok(/id="confirmDlg"/.test(html) && /id="confirmSendBtn"/.test(html) && /id="confirmCancelBtn"/.test(html), 'confirm dialog present');
+  ok(/id="confirmInput" type="checkbox" checked/.test(html), 'confirm setting present and on by default');
+}
+
 /* ---- share intake: service worker contract ---- */
 {
   const swPath = path.join(__dirname, '..', 'sw.js');

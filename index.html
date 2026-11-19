@@ -65,6 +65,13 @@
   .field label{ font-weight:600; font-size:.95rem; }
   .field input,.field select{ width:100%; }
   .field .hint{ color:var(--sub); font-size:.85rem; }
+  .field label.check{ display:flex; align-items:center; gap:.5rem; font-weight:600; }
+  .field input[type="checkbox"]{ width:auto; margin:0; }
+  #confirmList{ margin:0 0 .6rem; }
+  #confirmList dt{ font-weight:600; font-size:.9rem; color:var(--sub); margin-top:.5rem; }
+  #confirmList dd{ margin:.15rem 0 0; overflow-wrap:anywhere; white-space:pre-wrap; }
+  #confirmList dd.warn{ color:var(--danger); }
+  #confirmImg{ display:block; max-width:100%; max-height:220px; border:1px solid var(--line); border-radius:6px; margin:.3rem 0 .6rem; }
   .field .ferr{ color:var(--danger); font-size:.9rem; display:none; }
   footer{ max-width:860px; margin:0 auto; padding:0 1rem 2rem; color:var(--sub); font-size:.85rem; }
   .mic-on{ background:var(--danger-bg); border-color:var(--danger); color:var(--danger); }
@@ -171,11 +178,25 @@
       <input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false">
       <span class="hint" data-i18n="apiKeyHint">キーはこの端末のブラウザ内にのみ保存され、設定した接続先へのリクエストにだけ使われます。ローカル接続では空でも構いません。</span>
     </div>
+    <div class="field">
+      <label class="check"><input id="confirmInput" type="checkbox" checked> <span data-i18n="confirmSetting">送信前に、送る内容を確認する</span></label>
+      <span class="hint" data-i18n="confirmSettingHint">送信先・画像・質問・文脈として送る履歴を、送る前に毎回表示します。</span>
+    </div>
     <div class="row">
       <button id="saveSettingsBtn" type="button" class="primary" data-i18n="save">保存</button>
       <button id="closeSettingsBtn" type="button" data-i18n="close">閉じる</button>
     </div>
   </form>
+</dialog>
+
+<dialog id="confirmDlg" aria-labelledby="confirmH">
+  <h2 id="confirmH" data-i18n="confirmTitle">送信内容の確認</h2>
+  <dl id="confirmList"></dl>
+  <img id="confirmImg" alt="" hidden>
+  <div class="row">
+    <button id="confirmSendBtn" type="button" class="primary" data-i18n="confirmSend">送信する</button>
+    <button id="confirmCancelBtn" type="button" data-i18n="confirmCancel">やめる</button>
+  </div>
 </dialog>
 
 <script>
@@ -403,6 +424,42 @@
     return { x: left, y: top, w: Math.max(1, right - left), h: Math.max(1, bottom - top) };
   };
 
+  /* ---------- pre-send summary (derived from the exact request body) ---------- */
+  REKAI.confirmEnabled = function (settings) { return !(settings && settings.confirmBeforeSend === false); };
+  REKAI.formatBytes = function (n) {
+    if (typeof n !== 'number' || !(n >= 0)) return '';
+    if (n < 1024) return n + ' B';
+    if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+    return (n / 1048576).toFixed(1) + ' MB';
+  };
+  REKAI.describeOutgoing = function (opts) {
+    opts = opts || {};
+    var endpoint = String(opts.endpoint || '');
+    var url = REKAI.buildChatUrl(endpoint);
+    var host = '', protocol = '';
+    try { var u = new URL(url); host = u.host; protocol = u.protocol; } catch (e) { /* invalid: shown as-is */ }
+    var local = REKAI.isLoopbackEndpoint(endpoint);
+    var body = (opts.body && typeof opts.body === 'object') ? opts.body : {};
+    var msgs = Array.isArray(body.messages) ? body.messages : [];
+    var last = msgs.length ? msgs[msgs.length - 1] : null;
+    var question = '', image = '';
+    if (last && Array.isArray(last.content)) {
+      for (var i = 0; i < last.content.length; i++) {
+        var part = last.content[i] || {};
+        if (part.type === 'text') question += String(part.text || '');
+        else if (part.type === 'image_url' && part.image_url && typeof part.image_url.url === 'string') image = part.image_url.url;
+      }
+    } else if (last && typeof last.content === 'string') question = last.content;
+    var turns = 0;
+    for (var j = 0; j < msgs.length - 1; j++) if (msgs[j] && msgs[j].role === 'user') turns++;
+    return {
+      url: url, host: host, local: local, insecure: protocol === 'http:' && !local,
+      model: String(body.model || ''), question: question,
+      hasImage: !!image, imageBytes: image ? REKAI.dataUrlBytes(image) : 0,
+      historyTurns: turns, sendsKey: !!String(opts.apiKey || '').trim()
+    };
+  };
+
   /* ---------- share intake (Web Share Target) ----------
      When RekAI is installed as a PWA, other apps can share an image into it.
      The service worker (sw.js) receives the share POST, stashes the payload
@@ -501,6 +558,13 @@
       cropSelect: '範囲を選ぶ', cropReset: '全体に戻す',
       cropHint: '画像の上で、送りたい部分をドラッグして囲んでください。送られるのは囲んだ範囲だけです。',
       cropApplied: '選んだ範囲だけを送ります（細かい文字も読みやすくなります）。', cropTooSmall: '範囲が小さすぎます。もう少し大きく囲んでください。',
+      confirmTitle: '送信内容の確認', confirmDest: '送信先', confirmLocal: 'この端末の中（ローカル）',
+      confirmRemote: 'この端末の外のサービス', confirmInsecure: '暗号化されていない接続（http）です。画像と質問がそのまま流れます。', confirmModel: 'モデル',
+      confirmImage: '画像', confirmNoImage: '送りません（質問のテキストだけ）', confirmQuestion: '質問',
+      confirmHistory: '文脈として送る履歴', confirmTurns: '件（これまでの質問と回答のテキスト）', confirmNoHistory: 'なし',
+      confirmKey: 'APIキー', confirmKeyYes: '付けて送ります', confirmKeyNo: '付けません',
+      confirmSend: '送信する', confirmCancel: 'やめる', sendCanceled: '送信をやめました。何も送っていません。',
+      confirmSetting: '送信前に、送る内容を確認する', confirmSettingHint: '送信先・画像・質問・文脈として送る履歴を、送る前に毎回表示します。',
       sharedImageReady: '共有された画像を取り込みました。',
       sharedTextOnly: '共有されたテキストを質問欄に入れました。',
       sharedFailed: '共有された内容を受け取れませんでした。画像が含まれていない共有だった可能性があります。',
@@ -560,6 +624,13 @@
       cropSelect: 'Select area', cropReset: 'Use whole image',
       cropHint: 'Drag over the image to select the part to send. Only the selected area is sent.',
       cropApplied: 'Only the selected area will be sent (small text stays readable).', cropTooSmall: 'The area is too small. Please select a larger area.',
+      confirmTitle: 'Check what will be sent', confirmDest: 'Destination', confirmLocal: 'On this device (local)',
+      confirmRemote: 'A service outside this device', confirmInsecure: 'This connection is not encrypted (http). The image and question travel in plain text.', confirmModel: 'Model',
+      confirmImage: 'Image', confirmNoImage: 'Not sent (question text only)', confirmQuestion: 'Question',
+      confirmHistory: 'History sent as context', confirmTurns: 'turn(s) (earlier question and answer text)', confirmNoHistory: 'None',
+      confirmKey: 'API key', confirmKeyYes: 'Included', confirmKeyNo: 'Not included',
+      confirmSend: 'Send', confirmCancel: 'Cancel', sendCanceled: 'Sending canceled. Nothing was sent.',
+      confirmSetting: 'Check what will be sent before sending', confirmSettingHint: 'Shows the destination, image, question and history context every time, before anything is sent.',
       sharedImageReady: 'Shared image received.',
       sharedTextOnly: 'The shared text was placed in the question box.',
       sharedFailed: 'Could not receive the shared content. The share may not have included an image.',
@@ -619,6 +690,13 @@
       cropSelect: 'Seleccionar área', cropReset: 'Usar imagen completa',
       cropHint: 'Arrastra sobre la imagen para elegir la parte que se enviará. Solo se envía el área seleccionada.',
       cropApplied: 'Solo se enviará el área seleccionada (el texto pequeño sigue siendo legible).', cropTooSmall: 'El área es demasiado pequeña. Selecciona un área más grande.',
+      confirmTitle: 'Revisa lo que se enviará', confirmDest: 'Destino', confirmLocal: 'En este dispositivo (local)',
+      confirmRemote: 'Un servicio fuera de este dispositivo', confirmInsecure: 'Esta conexión no está cifrada (http). La imagen y la pregunta viajan sin cifrar.', confirmModel: 'Modelo',
+      confirmImage: 'Imagen', confirmNoImage: 'No se envía (solo el texto de la pregunta)', confirmQuestion: 'Pregunta',
+      confirmHistory: 'Historial enviado como contexto', confirmTurns: 'turno(s) (texto de preguntas y respuestas anteriores)', confirmNoHistory: 'Ninguno',
+      confirmKey: 'Clave de API', confirmKeyYes: 'Incluida', confirmKeyNo: 'No incluida',
+      confirmSend: 'Enviar', confirmCancel: 'Cancelar', sendCanceled: 'Envío cancelado. No se envió nada.',
+      confirmSetting: 'Revisar lo que se enviará antes de enviar', confirmSettingHint: 'Muestra el destino, la imagen, la pregunta y el historial de contexto cada vez, antes de enviar nada.',
       sharedImageReady: 'Imagen compartida recibida.',
       sharedTextOnly: 'El texto compartido se colocó en el cuadro de pregunta.',
       sharedFailed: 'No se pudo recibir el contenido compartido. Es posible que no incluyera una imagen.',
@@ -678,6 +756,13 @@
       cropSelect: '选择区域', cropReset: '使用整张图片',
       cropHint: '在图片上拖动，框选要发送的部分。只会发送框选的区域。',
       cropApplied: '只发送所选区域（小字也更清晰）。', cropTooSmall: '区域太小，请框选更大的范围。',
+      confirmTitle: '确认发送内容', confirmDest: '发送目标', confirmLocal: '本设备内（本地）',
+      confirmRemote: '本设备以外的服务', confirmInsecure: '此连接未加密（http），图片和问题将以明文传输。', confirmModel: '模型',
+      confirmImage: '图片', confirmNoImage: '不发送（仅发送问题文本）', confirmQuestion: '问题',
+      confirmHistory: '作为上下文发送的历史', confirmTurns: '条（之前的问题和回答文本）', confirmNoHistory: '无',
+      confirmKey: 'API 密钥', confirmKeyYes: '附带', confirmKeyNo: '不附带',
+      confirmSend: '发送', confirmCancel: '取消', sendCanceled: '已取消发送，未发送任何内容。',
+      confirmSetting: '发送前确认发送内容', confirmSettingHint: '每次发送前显示发送目标、图片、问题和作为上下文的历史。',
       sharedImageReady: '已接收分享的图片。',
       sharedTextOnly: '已将分享的文字填入问题框。',
       sharedFailed: '无法接收分享的内容。该分享可能未包含图片。',
@@ -737,6 +822,13 @@
       cropSelect: '영역 선택', cropReset: '전체 이미지 사용',
       cropHint: '이미지 위를 드래그해 보낼 부분을 선택하세요. 선택한 영역만 전송됩니다.',
       cropApplied: '선택한 영역만 전송합니다(작은 글자도 읽기 쉬워집니다).', cropTooSmall: '영역이 너무 작습니다. 더 크게 선택하세요.',
+      confirmTitle: '전송 내용 확인', confirmDest: '전송 대상', confirmLocal: '이 기기 안(로컬)',
+      confirmRemote: '이 기기 밖의 서비스', confirmInsecure: '암호화되지 않은 연결(http)입니다. 이미지와 질문이 그대로 전송됩니다.', confirmModel: '모델',
+      confirmImage: '이미지', confirmNoImage: '보내지 않음(질문 텍스트만)', confirmQuestion: '질문',
+      confirmHistory: '문맥으로 보내는 기록', confirmTurns: '건(이전 질문과 답변 텍스트)', confirmNoHistory: '없음',
+      confirmKey: 'API 키', confirmKeyYes: '포함', confirmKeyNo: '포함하지 않음',
+      confirmSend: '보내기', confirmCancel: '취소', sendCanceled: '전송을 취소했습니다. 아무것도 보내지 않았습니다.',
+      confirmSetting: '보내기 전에 전송 내용 확인', confirmSettingHint: '보내기 전에 매번 전송 대상, 이미지, 질문, 문맥으로 보내는 기록을 표시합니다.',
       sharedImageReady: '공유된 이미지를 가져왔습니다.',
       sharedTextOnly: '공유된 텍스트를 질문 칸에 넣었습니다.',
       sharedFailed: '공유된 내용을 받지 못했습니다. 이미지가 포함되지 않은 공유였을 수 있습니다.',
@@ -793,12 +885,14 @@
     detectBtn: $('detectBtn'), detectBusy: $('detectBusy'), detectResult: $('detectResult'),
     modelInput: $('modelInput'), apiKeyInput: $('apiKeyInput'),
     errEndpoint: $('errEndpoint'), errModel: $('errModel'),
-    openSettingsBtn: $('openSettingsBtn'), saveSettingsBtn: $('saveSettingsBtn'), closeSettingsBtn: $('closeSettingsBtn')
+    openSettingsBtn: $('openSettingsBtn'), saveSettingsBtn: $('saveSettingsBtn'), closeSettingsBtn: $('closeSettingsBtn'),
+    confirmInput: $('confirmInput'), confirmDlg: $('confirmDlg'), confirmList: $('confirmList'), confirmImg: $('confirmImg'),
+    confirmSendBtn: $('confirmSendBtn'), confirmCancelBtn: $('confirmCancelBtn')
   };
 
   var state = {
     lang: 'ja',
-    settings: { preset: 'custom', endpoint: '', model: '', apiKey: '' },
+    settings: { preset: 'custom', endpoint: '', model: '', apiKey: '', confirmBeforeSend: true },
     history: [],
     imageDataUrl: null,
     source: null,   /* full-resolution frame (canvas), memory only, never persisted */
@@ -823,7 +917,8 @@
           preset: typeof s.preset === 'string' ? s.preset : 'custom',
           endpoint: typeof s.endpoint === 'string' ? s.endpoint : '',
           model: typeof s.model === 'string' ? s.model : '',
-          apiKey: typeof s.apiKey === 'string' ? s.apiKey : ''
+          apiKey: typeof s.apiKey === 'string' ? s.apiKey : '',
+          confirmBeforeSend: s.confirmBeforeSend !== false
         };
       }
     } catch (e) { /* corrupted storage: start clean rather than crash */ }
@@ -1080,13 +1175,65 @@
       imageDataUrl: state.imageDataUrl,
       history: state.history
     });
-    var url = R.buildChatUrl(state.settings.endpoint);
+    var req = { questionText: questionText, body: body, url: R.buildChatUrl(state.settings.endpoint), apiKey: state.settings.apiKey };
+    if (R.confirmEnabled(state.settings) && typeof els.confirmDlg.showModal === 'function') openConfirm(req);
+    else send(req);
+  }
+
+  /* pre-send confirmation: shows the request exactly as built; nothing leaves until "Send" */
+  var pendingSend = null;
+  function confirmRow(label, value, cls) {
+    var dt = document.createElement('dt'); dt.textContent = label;
+    var dd = document.createElement('dd'); dd.textContent = value;
+    if (cls) dd.className = cls;
+    els.confirmList.appendChild(dt); els.confirmList.appendChild(dd);
+    return dd;
+  }
+  function openConfirm(req) {
+    var d = R.describeOutgoing({ endpoint: state.settings.endpoint, apiKey: req.apiKey, body: req.body });
+    els.confirmList.textContent = '';
+    confirmRow(t('confirmDest'), d.url);
+    var where = document.createElement('dd');
+    where.textContent = d.local ? t('confirmLocal') : t('confirmRemote') + (d.host ? ' (' + d.host + ')' : '');
+    els.confirmList.appendChild(where);
+    if (d.insecure) { var w = document.createElement('dd'); w.className = 'warn'; w.textContent = t('confirmInsecure'); els.confirmList.appendChild(w); }
+    confirmRow(t('confirmModel'), d.model);
+    if (d.hasImage) {
+      var dims = els.preview.naturalWidth ? els.preview.naturalWidth + ' × ' + els.preview.naturalHeight + ' px, ' : '';
+      confirmRow(t('confirmImage'), dims + R.formatBytes(d.imageBytes));
+      els.confirmImg.src = state.imageDataUrl;
+      els.confirmImg.hidden = false;
+    } else {
+      confirmRow(t('confirmImage'), t('confirmNoImage'));
+      els.confirmImg.removeAttribute('src');
+      els.confirmImg.hidden = true;
+    }
+    confirmRow(t('confirmQuestion'), d.question);
+    confirmRow(t('confirmHistory'), d.historyTurns ? d.historyTurns + ' ' + t('confirmTurns') : t('confirmNoHistory'));
+    confirmRow(t('confirmKey'), d.sendsKey ? t('confirmKeyYes') : t('confirmKeyNo'));
+    pendingSend = req;
+    els.confirmDlg.showModal();
+    els.confirmSendBtn.focus();
+  }
+  function confirmSend() {
+    var req = pendingSend;
+    pendingSend = null;
+    els.confirmDlg.close();
+    if (req) send(req);
+  }
+  function onConfirmClosed() {
+    els.confirmImg.removeAttribute('src');
+    if (pendingSend) { pendingSend = null; showStatus(t('sendCanceled'), 'info'); }
+  }
+
+  function send(req) {
+    var url = req.url, body = req.body, questionText = req.questionText;
     var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, R.REQUEST_TIMEOUT_MS) : null;
     setBusy(true);
     fetch(url, {
       method: 'POST',
-      headers: R.buildHeaders(state.settings.apiKey),
+      headers: R.buildHeaders(req.apiKey),
       body: JSON.stringify(body),
       signal: ctrl ? ctrl.signal : undefined
     }).then(function (res) {
@@ -1188,6 +1335,7 @@
     els.endpointInput.value = state.settings.endpoint || '';
     els.modelInput.value = state.settings.model || '';
     els.apiKeyInput.value = state.settings.apiKey || '';
+    els.confirmInput.checked = R.confirmEnabled(state.settings);
     fieldError(els.errEndpoint, ''); fieldError(els.errModel, '');
     detectView = { shown: false, running: false, found: null, noModelHit: null };
     els.detectResult.textContent = '';
@@ -1198,7 +1346,8 @@
       preset: els.presetSel.value,
       endpoint: els.endpointInput.value,
       model: els.modelInput.value,
-      apiKey: els.apiKeyInput.value
+      apiKey: els.apiKeyInput.value,
+      confirmBeforeSend: els.confirmInput.checked
     };
     var v = R.validateSettings(next);
     fieldError(els.errEndpoint, v.errors.indexOf('endpoint-required') >= 0 ? t('endpointRequired')
@@ -1333,6 +1482,9 @@
   }
 
   /* ---------- wiring ---------- */
+  els.confirmSendBtn.addEventListener('click', confirmSend);
+  els.confirmCancelBtn.addEventListener('click', function () { els.confirmDlg.close(); });
+  els.confirmDlg.addEventListener('close', onConfirmClosed);
   els.langSel.addEventListener('change', function () {
     state.lang = els.langSel.value;
     try { localStorage.setItem(LS_LANG, state.lang); } catch (e) {}
