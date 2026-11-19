@@ -42,8 +42,10 @@
   .card h2{ font-size:1rem; margin:.1rem 0 .6rem; }
   .row{ display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; }
   .row > *{ flex:0 1 auto; }
-  #previewWrap{ margin-top:.7rem; }
+  #previewWrap{ margin-top:.7rem; position:relative; display:inline-block; max-width:100%; }
   #preview{ max-width:100%; border-radius:10px; border:1px solid var(--line); display:none; }
+  #preview.cropping{ cursor:crosshair; touch-action:none; outline:2px solid var(--accent); outline-offset:2px; }
+  #cropBox{ position:absolute; display:none; pointer-events:none; border:2px dashed var(--accent); background:rgba(37,99,235,.18); }
   #screenVideo{ display:none; }
   textarea#question{ width:100%; min-height:64px; resize:vertical; }
   #answer{ white-space:pre-wrap; word-break:break-word; min-height:3rem; }
@@ -94,11 +96,14 @@
       <button id="captureBtn" type="button" class="primary" data-i18n="captureScreen">画面を取り込む</button>
       <button id="pickBtn" type="button" data-i18n="chooseImage">画像を選ぶ／撮る</button>
       <button id="clearImageBtn" type="button" data-i18n="removeImage" disabled>画像を外す</button>
+      <button id="cropBtn" type="button" data-i18n="cropSelect" disabled>範囲を選ぶ</button>
+      <button id="uncropBtn" type="button" data-i18n="cropReset" disabled>全体に戻す</button>
       <input id="fileInput" type="file" accept="image/*" hidden>
     </div>
     <p class="muted" data-i18n="captureHint">画面共有が使えない環境では、画像の選択（モバイルでは撮影も）をご利用ください。画像を貼り付け（Ctrl+V）でも取り込めます。</p>
     <div id="previewWrap">
-      <img id="preview" alt="">
+      <img id="preview" alt="" draggable="false">
+      <div id="cropBox"></div>
       <video id="screenVideo" autoplay playsinline muted></video>
     </div>
   </section>
@@ -375,6 +380,28 @@
     var scale = Math.min(1, maxEdge / Math.max(w, h));
     return { width: Math.max(1, Math.round(w * scale)), height: Math.max(1, Math.round(h * scale)) };
   };
+  /* Region crop: the captured frame is kept in memory at up to MAX_SOURCE_EDGE
+     (never persisted), and only the region the user selects is downscaled to
+     MAX_IMAGE_EDGE and sent. Small text in that region keeps its resolution,
+     and the rest of the screen never leaves the device. */
+  REKAI.MAX_SOURCE_EDGE = 3840;
+  REKAI.MIN_CROP_PX = 12;
+  /* Maps a drag on the preview (display px, any corner order) to a rect in
+     source px inside the current view {x,y,w,h}. null if too small/invalid. */
+  REKAI.selectionToSource = function (sel, dispW, dispH, view) {
+    var fin = function (n) { return typeof n === 'number' && isFinite(n); };
+    if (!sel || !view || !(dispW > 0) || !(dispH > 0) || !(view.w > 0) || !(view.h > 0)) return null;
+    if (![sel.x0, sel.y0, sel.x1, sel.y1, view.x, view.y].every(fin)) return null;
+    var cl = function (n, hi) { return Math.min(hi, Math.max(0, n)); };
+    var x0 = cl(Math.min(sel.x0, sel.x1), dispW), x1 = cl(Math.max(sel.x0, sel.x1), dispW);
+    var y0 = cl(Math.min(sel.y0, sel.y1), dispH), y1 = cl(Math.max(sel.y0, sel.y1), dispH);
+    if (x1 - x0 < REKAI.MIN_CROP_PX || y1 - y0 < REKAI.MIN_CROP_PX) return null;
+    var kx = view.w / dispW, ky = view.h / dispH;
+    var left = Math.floor(view.x + x0 * kx), top = Math.floor(view.y + y0 * ky);
+    var right = Math.min(view.x + view.w, Math.ceil(view.x + x1 * kx));
+    var bottom = Math.min(view.y + view.h, Math.ceil(view.y + y1 * ky));
+    return { x: left, y: top, w: Math.max(1, right - left), h: Math.max(1, bottom - top) };
+  };
 
   /* ---------- share intake (Web Share Target) ----------
      When RekAI is installed as a PWA, other apps can share an image into it.
@@ -471,6 +498,9 @@
       screenFailed: '画面の取り込みに失敗しました：',
       imageFailed: '画像の読み込みに失敗しました：',
       imageReady: '画像を取り込みました。',
+      cropSelect: '範囲を選ぶ', cropReset: '全体に戻す',
+      cropHint: '画像の上で、送りたい部分をドラッグして囲んでください。送られるのは囲んだ範囲だけです。',
+      cropApplied: '選んだ範囲だけを送ります（細かい文字も読みやすくなります）。', cropTooSmall: '範囲が小さすぎます。もう少し大きく囲んでください。',
       sharedImageReady: '共有された画像を取り込みました。',
       sharedTextOnly: '共有されたテキストを質問欄に入れました。',
       sharedFailed: '共有された内容を受け取れませんでした。画像が含まれていない共有だった可能性があります。',
@@ -527,6 +557,9 @@
       screenFailed: 'Screen capture failed: ',
       imageFailed: 'Could not load the image: ',
       imageReady: 'Image captured.',
+      cropSelect: 'Select area', cropReset: 'Use whole image',
+      cropHint: 'Drag over the image to select the part to send. Only the selected area is sent.',
+      cropApplied: 'Only the selected area will be sent (small text stays readable).', cropTooSmall: 'The area is too small. Please select a larger area.',
       sharedImageReady: 'Shared image received.',
       sharedTextOnly: 'The shared text was placed in the question box.',
       sharedFailed: 'Could not receive the shared content. The share may not have included an image.',
@@ -583,6 +616,9 @@
       screenFailed: 'La captura de pantalla falló: ',
       imageFailed: 'No se pudo cargar la imagen: ',
       imageReady: 'Imagen capturada.',
+      cropSelect: 'Seleccionar área', cropReset: 'Usar imagen completa',
+      cropHint: 'Arrastra sobre la imagen para elegir la parte que se enviará. Solo se envía el área seleccionada.',
+      cropApplied: 'Solo se enviará el área seleccionada (el texto pequeño sigue siendo legible).', cropTooSmall: 'El área es demasiado pequeña. Selecciona un área más grande.',
       sharedImageReady: 'Imagen compartida recibida.',
       sharedTextOnly: 'El texto compartido se colocó en el cuadro de pregunta.',
       sharedFailed: 'No se pudo recibir el contenido compartido. Es posible que no incluyera una imagen.',
@@ -639,6 +675,9 @@
       screenFailed: '屏幕捕获失败：',
       imageFailed: '图片加载失败：',
       imageReady: '图片已捕获。',
+      cropSelect: '选择区域', cropReset: '使用整张图片',
+      cropHint: '在图片上拖动，框选要发送的部分。只会发送框选的区域。',
+      cropApplied: '只发送所选区域（小字也更清晰）。', cropTooSmall: '区域太小，请框选更大的范围。',
       sharedImageReady: '已接收分享的图片。',
       sharedTextOnly: '已将分享的文字填入问题框。',
       sharedFailed: '无法接收分享的内容。该分享可能未包含图片。',
@@ -695,6 +734,9 @@
       screenFailed: '화면 가져오기 실패: ',
       imageFailed: '이미지를 불러오지 못했습니다: ',
       imageReady: '이미지를 가져왔습니다.',
+      cropSelect: '영역 선택', cropReset: '전체 이미지 사용',
+      cropHint: '이미지 위를 드래그해 보낼 부분을 선택하세요. 선택한 영역만 전송됩니다.',
+      cropApplied: '선택한 영역만 전송합니다(작은 글자도 읽기 쉬워집니다).', cropTooSmall: '영역이 너무 작습니다. 더 크게 선택하세요.',
       sharedImageReady: '공유된 이미지를 가져왔습니다.',
       sharedTextOnly: '공유된 텍스트를 질문 칸에 넣었습니다.',
       sharedFailed: '공유된 내용을 받지 못했습니다. 이미지가 포함되지 않은 공유였을 수 있습니다.',
@@ -743,6 +785,7 @@
     status: $('status'), langSel: $('langSel'),
     captureBtn: $('captureBtn'), pickBtn: $('pickBtn'), clearImageBtn: $('clearImageBtn'),
     fileInput: $('fileInput'), preview: $('preview'), video: $('screenVideo'),
+    cropBtn: $('cropBtn'), uncropBtn: $('uncropBtn'), cropBox: $('cropBox'),
     question: $('question'), micBtn: $('micBtn'), askBtn: $('askBtn'), busy: $('busy'),
     answer: $('answer'), speakBtn: $('speakBtn'), stopSpeakBtn: $('stopSpeakBtn'),
     historyList: $('historyList'), historyEmpty: $('historyEmpty'), clearHistoryBtn: $('clearHistoryBtn'),
@@ -758,6 +801,9 @@
     settings: { preset: 'custom', endpoint: '', model: '', apiKey: '' },
     history: [],
     imageDataUrl: null,
+    source: null,   /* full-resolution frame (canvas), memory only, never persisted */
+    view: null,     /* region of source that is sent: {x,y,w,h} */
+    cropping: false,
     lastAnswer: '',
     recog: null,
     listening: false
@@ -833,8 +879,11 @@
   }
 
   /* ---------- image intake ---------- */
-  function setImage(dataUrl) {
+  function setImage(dataUrl, keepSource) {
     state.imageDataUrl = dataUrl;
+    if (!keepSource) { state.source = null; state.view = null; }
+    setCropping(false);
+    updateCropButtons();
     if (dataUrl) {
       els.preview.src = dataUrl;
       els.preview.style.display = 'block';
@@ -845,19 +894,38 @@
       els.clearImageBtn.disabled = true;
     }
   }
-  function blobToDataUrl(blob) {
+  /* Draws any image/video frame into a canvas capped at MAX_SOURCE_EDGE. */
+  function toSourceCanvas(el, w, h) {
+    var dims = R.downscaleDims(w, h, R.MAX_SOURCE_EDGE);
+    if (!dims) throw new Error('no frame');
+    var cv = document.createElement('canvas');
+    cv.width = dims.width; cv.height = dims.height;
+    cv.getContext('2d').drawImage(el, 0, 0, dims.width, dims.height);
+    return cv;
+  }
+  /* Encodes the current view of the source as the JPEG that will be sent. */
+  function encodeView() {
+    var v = state.view;
+    var dims = R.downscaleDims(v.w, v.h, R.MAX_IMAGE_EDGE);
+    var cv = document.createElement('canvas');
+    cv.width = dims.width; cv.height = dims.height;
+    cv.getContext('2d').drawImage(state.source, v.x, v.y, v.w, v.h, 0, 0, dims.width, dims.height);
+    return cv.toDataURL('image/jpeg', 0.85);
+  }
+  function setSource(cv) {
+    state.source = cv;
+    state.view = { x: 0, y: 0, w: cv.width, h: cv.height };
+    setImage(encodeView(), true);
+  }
+  function blobToSource(blob) {
     return new Promise(function (resolve, reject) {
       var url = URL.createObjectURL(blob);
       var img = new Image();
       img.onload = function () {
         try {
-          var dims = R.downscaleDims(img.naturalWidth, img.naturalHeight, R.MAX_IMAGE_EDGE) ||
-                     { width: img.naturalWidth, height: img.naturalHeight };
-          var cv = document.createElement('canvas');
-          cv.width = dims.width; cv.height = dims.height;
-          cv.getContext('2d').drawImage(img, 0, 0, dims.width, dims.height);
+          var cv = toSourceCanvas(img, img.naturalWidth, img.naturalHeight);
           URL.revokeObjectURL(url);
-          resolve(cv.toDataURL('image/jpeg', 0.85));
+          resolve(cv);
         } catch (e) { URL.revokeObjectURL(url); reject(e); }
       };
       img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('image load failed')); };
@@ -865,9 +933,57 @@
     });
   }
   function takeImageBlob(blob) {
-    blobToDataUrl(blob).then(function (du) {
-      setImage(du); clearStatus(); showStatus(t('imageReady'), 'info');
+    blobToSource(blob).then(function (cv) {
+      setSource(cv); clearStatus(); showStatus(t('imageReady'), 'info');
     }).catch(function (e) { showError(t('imageFailed') + (e && e.message ? e.message : String(e))); });
+  }
+
+  /* ---------- region crop (on-device; only the selected area is sent) ---------- */
+  var drag = null;
+  function updateCropButtons() {
+    var v = state.view, s = state.source;
+    els.cropBtn.disabled = !s;
+    els.uncropBtn.disabled = !(s && v && (v.x || v.y || v.w !== s.width || v.h !== s.height));
+  }
+  function setCropping(on) {
+    state.cropping = !!on && !!state.source;
+    els.preview.classList.toggle('cropping', state.cropping);
+    els.cropBox.style.display = 'none';
+    drag = null;
+  }
+  function previewPoint(ev) {
+    var r = els.preview.getBoundingClientRect();
+    return { x: ev.clientX - r.left, y: ev.clientY - r.top, w: r.width, h: r.height };
+  }
+  function drawCropBox(a, b) {
+    var bs = els.cropBox.style;
+    bs.left = (els.preview.offsetLeft + Math.min(a.x, b.x)) + 'px';
+    bs.top = (els.preview.offsetTop + Math.min(a.y, b.y)) + 'px';
+    bs.width = Math.abs(b.x - a.x) + 'px';
+    bs.height = Math.abs(b.y - a.y) + 'px';
+    bs.display = 'block';
+  }
+  function onCropDown(ev) {
+    if (!state.cropping) return;
+    ev.preventDefault();
+    drag = { start: previewPoint(ev) };
+    try { els.preview.setPointerCapture(ev.pointerId); } catch (e) {}
+    drawCropBox(drag.start, drag.start);
+  }
+  function onCropMove(ev) {
+    if (!drag) return;
+    ev.preventDefault();
+    drawCropBox(drag.start, previewPoint(ev));
+  }
+  function onCropUp(ev) {
+    if (!drag) return;
+    var a = drag.start, b = previewPoint(ev);
+    var rect = R.selectionToSource({ x0: a.x, y0: a.y, x1: b.x, y1: b.y }, a.w, a.h, state.view);
+    setCropping(false);
+    if (!rect) { showStatus(t('cropTooSmall'), 'info'); return; }
+    state.view = rect;
+    setImage(encodeView(), true);
+    showStatus(t('cropApplied') + ' ' + rect.w + '×' + rect.h, 'info');
   }
 
   /* ---------- share intake: PWA registration + inbox consumption ---------- */
@@ -909,8 +1025,8 @@
       var qText = R.sharedQuestionText(meta);
       if (qText && !els.question.value.trim()) els.question.value = qText;
       if (blob && blob.size > 0 && typeof blob.type === 'string' && blob.type.indexOf('image/') === 0) {
-        return blobToDataUrl(blob).then(function (du) {
-          setImage(du); clearStatus(); showStatus(t('sharedImageReady'), 'info');
+        return blobToSource(blob).then(function (cv) {
+          setSource(cv); clearStatus(); showStatus(t('sharedImageReady'), 'info');
           return true;
         }).catch(function () { showError(t('sharedFailed')); return false; });
       }
@@ -934,15 +1050,13 @@
       // give the video a moment to expose a real frame
       return new Promise(function (resolve) { setTimeout(function () { resolve(stream); }, 350); });
     }).then(function (stream) {
-      var w = els.video.videoWidth, h = els.video.videoHeight;
-      var dims = R.downscaleDims(w, h, R.MAX_IMAGE_EDGE);
-      if (!dims) throw new Error('no frame');
-      var cv = document.createElement('canvas');
-      cv.width = dims.width; cv.height = dims.height;
-      cv.getContext('2d').drawImage(els.video, 0, 0, dims.width, dims.height);
-      stream.getTracks().forEach(function (tr) { tr.stop(); });
-      els.video.srcObject = null;
-      setImage(cv.toDataURL('image/jpeg', 0.85));
+      var cv;
+      try { cv = toSourceCanvas(els.video, els.video.videoWidth, els.video.videoHeight); }
+      finally {
+        stream.getTracks().forEach(function (tr) { tr.stop(); });
+        els.video.srcObject = null;
+      }
+      setSource(cv);
       showStatus(t('imageReady'), 'info');
     }).catch(function (e) {
       showError(t('screenFailed') + (e && e.message ? e.message : String(e)) + ' — ' + t('screenUnsupported'));
@@ -1231,6 +1345,22 @@
     els.fileInput.value = '';
   });
   els.clearImageBtn.addEventListener('click', function () { setImage(null); });
+  els.cropBtn.addEventListener('click', function () {
+    var on = !state.cropping;
+    setCropping(on);
+    if (state.cropping) showStatus(t('cropHint'), 'info'); else clearStatus();
+  });
+  els.uncropBtn.addEventListener('click', function () {
+    if (!state.source) return;
+    state.view = { x: 0, y: 0, w: state.source.width, h: state.source.height };
+    setImage(encodeView(), true);
+    clearStatus();
+  });
+  els.preview.addEventListener('pointerdown', onCropDown);
+  els.preview.addEventListener('pointermove', onCropMove);
+  els.preview.addEventListener('pointerup', onCropUp);
+  els.preview.addEventListener('pointercancel', function () { if (drag) setCropping(false); });
+  els.preview.addEventListener('dragstart', function (ev) { ev.preventDefault(); });
   document.addEventListener('paste', function (ev) {
     var items = (ev.clipboardData || {}).items || [];
     for (var i = 0; i < items.length; i++) {
