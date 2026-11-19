@@ -351,6 +351,26 @@ eq(R.sharedQuestionText('str'), '', 'shared text non-object');
   ok(/id="confirmInput" type="checkbox" checked/.test(html), 'confirm setting present and on by default');
 }
 
+/* ---- local engine setup commands (CORS origin) ---- */
+{
+  eq(R.pageOriginToAllow('file://'), '', 'origin: file page needs no allow');
+  eq(R.pageOriginToAllow('null'), '', 'origin: opaque needs no allow');
+  eq(R.pageOriginToAllow('http://localhost:8080'), '', 'origin: localhost needs no allow');
+  eq(R.pageOriginToAllow('http://127.0.0.1:5500'), '', 'origin: loopback needs no allow');
+  eq(R.pageOriginToAllow('https://shizukutanaka.github.io'), 'https://shizukutanaka.github.io', 'origin: pages origin must be allowed');
+  eq(R.pageOriginToAllow('https://a.example:8443/x?y'), 'https://a.example:8443', 'origin: only scheme+host+port');
+  eq(R.pageOriginToAllow('app://rekai'), '', 'origin: non-http scheme ignored');
+  const local = R.localSetupCommands('file://');
+  eq(local.ollama.map(c => c.cmd), ['ollama pull llama3.2-vision'], 'setup: file page shows only the model pull');
+  eq(local.lmstudio.map(c => c.cmd), ['lms server start --cors'], 'setup: LM Studio always needs CORS');
+  const web = R.localSetupCommands('https://shizukutanaka.github.io');
+  eq(web.origin, 'https://shizukutanaka.github.io', 'setup: origin reported');
+  eq(web.ollama.map(c => c.cmd), ['ollama pull llama3.2-vision',
+    'OLLAMA_ORIGINS=https://shizukutanaka.github.io ollama serve',
+    '$env:OLLAMA_ORIGINS="https://shizukutanaka.github.io"; ollama serve'], 'setup: web page adds OLLAMA_ORIGINS');
+  ok(web.ollama.concat(web.lmstudio).every(c => typeof R.STRINGS.ja[c.key] === 'string'), 'setup: every step has a label');
+}
+
 /* ---- history export / import (the user's own file) ---- */
 {
   const h = [R.makeEntry('q1', 'a1', 1000), R.makeEntry('q2', 'a2', 2000)];

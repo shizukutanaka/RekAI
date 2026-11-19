@@ -273,6 +273,12 @@ app.whenReady().then(async () => {
     if (noneTxt.indexOf('ollama.com') >= 0) break;
   }
   check('not-found shows setup guidance', noneTxt.indexOf('ollama.com') >= 0 && noneTxt.indexOf('lmstudio.ai') >= 0, noneTxt.slice(0, 80));
+  check('setup guidance: copyable commands for this page (file: no OLLAMA_ORIGINS)',
+    noneTxt.indexOf('ollama pull llama3.2-vision') >= 0 && noneTxt.indexOf('lms server start --cors') >= 0 && noneTxt.indexOf('OLLAMA_ORIGINS') < 0, noneTxt.slice(-200));
+  await js("window.__copied = null; navigator.clipboard.writeText = function (v) { window.__copied = v; return Promise.resolve(); }; document.querySelector('#detectResult code.cmd + button').click(); true");
+  await sleep(150);
+  check('setup guidance: copy button copies the exact command',
+    await js("window.__copied === 'ollama pull llama3.2-vision' && document.querySelector('#detectResult code.cmd + button').textContent !== ''"));
   await js("document.getElementById('closeSettingsBtn').click(); true");
   await sleep(100);
 
