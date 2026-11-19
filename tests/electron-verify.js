@@ -84,7 +84,26 @@ app.whenReady().then(async () => {
   const png1x1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
   await js('window.RekAIApp.setImageDataUrl(' + JSON.stringify(png1x1) + '); true');
   check('preview shown after setImage', await js("document.getElementById('preview').style.display === 'block'"));
-  await js("document.getElementById('question').value = 'What is this?'; document.getElementById('askBtn').click(); true");
+  await js("window.__lastRequest = null; document.getElementById('question').value = 'What is this?'; document.getElementById('askBtn').click(); true");
+  await sleep(200);
+  check('confirm: dialog opens before anything is sent',
+    await js("document.getElementById('confirmDlg').open && window.__lastRequest === null"));
+  const confirmTxt = await js("document.getElementById('confirmList').textContent");
+  check('confirm: shows the exact chat URL, local, the question and no history',
+    confirmTxt.indexOf('http://localhost:11434/v1/chat/completions') >= 0 && confirmTxt.indexOf('What is this?') >= 0 &&
+    confirmTxt.indexOf('llama3.2-vision') >= 0 && confirmTxt.indexOf('(local)') >= 0, confirmTxt.slice(0, 200));
+  check('confirm: thumbnail is the image that will be sent',
+    await js("!document.getElementById('confirmImg').hidden && document.getElementById('confirmImg').src === window.RekAIApp.state.imageDataUrl"));
+  await sleep(300);
+  await win.capturePage().then(img => fs.writeFileSync(path.join(ROOT, 'docs', 'screenshot-confirm.png'), img.toPNG()));
+  await js("document.getElementById('confirmCancelBtn').click(); true");
+  await sleep(200);
+  check('confirm: cancel sends nothing and says so',
+    await js("!document.getElementById('confirmDlg').open && window.__lastRequest === null && document.getElementById('status').textContent.length > 0"));
+  check('confirm: thumbnail copy dropped after closing', await js("!document.getElementById('confirmImg').getAttribute('src')"));
+  await js("document.getElementById('askBtn').click(); true");
+  await sleep(200);
+  await js("document.getElementById('confirmSendBtn').click(); true");
   let answered = false;
   for (let i = 0; i < 30; i++) {
     await sleep(200);
@@ -130,6 +149,10 @@ app.whenReady().then(async () => {
   /* --- network failure path: error is shown with a reason --- */
   await js("window.fetch = function () { return Promise.reject(new Error('Failed to fetch')); }; true");
   await js("document.getElementById('askBtn').click(); true");
+  await sleep(200);
+  const confirmTxt2 = await js("document.getElementById('confirmList').textContent");
+  check('confirm: earlier turn is listed as history context', /1 (件|turn)/.test(confirmTxt2), confirmTxt2.slice(-120));
+  await js("document.getElementById('confirmSendBtn').click(); true");
   let errShown = false;
   for (let i = 0; i < 30; i++) {
     await sleep(200);
@@ -180,6 +203,10 @@ app.whenReady().then(async () => {
     window.__lastRequest = { url: String(url), body: JSON.parse(opts.body) };
     return Promise.resolve({ ok: true, status: 200, text: function () { return Promise.resolve(JSON.stringify({ choices: [{ message: { content: 'CROP ANSWER' } }] })); } });
   }; document.getElementById('askBtn').click(); true`);
+  await sleep(200);
+  check('crop: confirmation shows the cropped image and its real size',
+    await js("document.getElementById('confirmImg').src === window.RekAIApp.state.imageDataUrl && document.getElementById('confirmList').textContent.indexOf('" + cropDims.replace('x', ' × ') + " px') >= 0"));
+  await js("document.getElementById('confirmSendBtn').click(); true");
   await sleep(500);
   check('crop: the request carries only the cropped image',
     await js("(function(){ var m = window.__lastRequest.body.messages; var c = m[m.length-1].content; return c[1].image_url.url === window.RekAIApp.state.imageDataUrl; })()"));
@@ -188,6 +215,22 @@ app.whenReady().then(async () => {
   check('crop: reset restores the whole frame', (await dimsOf(await js('window.RekAIApp.state.imageDataUrl'))) === '1280x720');
   await js("document.getElementById('clearImageBtn').click(); true");
   check('crop: removing the image drops the in-memory frame', await js("window.RekAIApp.state.source === null && document.getElementById('cropBtn').disabled"));
+
+  /* --- confirmation can be turned off in Settings; then a click sends directly --- */
+  await js("document.getElementById('openSettingsBtn').click(); true");
+  await sleep(150);
+  check('confirm: setting is on by default', await js("document.getElementById('confirmInput').checked"));
+  await js("document.getElementById('confirmInput').checked = false; document.getElementById('saveSettingsBtn').click(); true");
+  await sleep(150);
+  check('confirm: opt-out persisted', await js("JSON.parse(localStorage.getItem('rekai.settings.v1')).confirmBeforeSend === false"));
+  await js("window.__lastRequest = null; document.getElementById('askBtn').click(); true");
+  await sleep(300);
+  check('confirm: off -> sent without the dialog', await js("!document.getElementById('confirmDlg').open && window.__lastRequest !== null"));
+  await js("document.getElementById('openSettingsBtn').click(); true");
+  await sleep(150);
+  check('confirm: opt-out shown when reopening Settings', await js("document.getElementById('confirmInput').checked === false"));
+  await js("document.getElementById('confirmInput').checked = true; document.getElementById('saveSettingsBtn').click(); true");
+  await sleep(150);
 
   /* --- auto-detection: Ollama answers /models -> found -> confirm -> saved --- */
   await js("localStorage.removeItem('rekai.settings.v1'); true");
