@@ -66,6 +66,7 @@ HTTPS（または `localhost`）で配信された RekAI は、ブラウザか�
 - 「自動で探す」が確認するのは、この端末の中のローカルAIだけです（ループバックへのモデル一覧の確認のみで、外部への送信はありません）。
 - 設定と履歴はこの端末のブラウザ内（localStorage）にのみ保存されます。**作成者（開発者）を含む第三者にデータが送られることは一切ありません**（このアプリ自体に送信機能がありません）。
 - 履歴に保存するのは質問と回答のテキストだけです。取り込んだ画像は保存しません。
+- 履歴は「履歴を書き出す」で自分のファイル（JSON、テキストのみ）に保存し、「履歴を読み込む」で別の端末や消去のあとに戻せます。読み込みは重複を除いて今の履歴に統合します。どちらも端末の中だけで行い、どこにも送信しません（アカウントや同期の代わり）。
 - 注意（ブラウザの仕様）: 音声入力はブラウザの音声認識を使います。ブラウザによっては（例: Chrome）音声がブラウザ提供元のサーバーで処理されます。気になる場合はテキスト入力をご利用ください。読み上げもブラウザ依存で、一部の音声は外部で合成される場合があります。
 
 ## 失敗したとき
@@ -116,6 +117,6 @@ MIT — [LICENSE](./LICENSE)
 - **Share into RekAI**: when installed as a PWA (served over HTTPS), RekAI appears in other apps' share sheets; sharing an image opens RekAI with that image already captured. The hand-off stays on the device (a service worker passes it through a local inbox cache, deleted once captured) — no server is involved.
 - **You bring your own AI endpoint**: any OpenAI-compatible API with a vision-capable model. Presets for Pasture (this family's local LLM router), Ollama, LM Studio, and OpenAI.
 - **Zero-config path**: the settings dialog can auto-detect a local engine (Pasture / Ollama / LM Studio, in that order) running on your device. Probing is loopback-only, sends no API key and nothing external, and nothing is saved until you confirm the found endpoint. If nothing is found, it shows the likely reasons and how to set each engine up.
-- **Privacy**: images and questions go only to the endpoint *you* configure. Before each send, a confirmation shows exactly what goes where (the chat URL and whether it is on this device or outside it, the model, the image itself with its size, the question, how many earlier turns go along as context, and whether the API key is attached); nothing is sent until you press Send. It can be turned off in Settings. Settings and history live only in your browser on your device. Nothing is ever sent to the developer or any third party. History stores text only, never images.
+- **Privacy**: images and questions go only to the endpoint *you* configure. Before each send, a confirmation shows exactly what goes where (the chat URL and whether it is on this device or outside it, the model, the image itself with its size, the question, how many earlier turns go along as context, and whether the API key is attached); nothing is sent until you press Send. It can be turned off in Settings. Settings and history live only in your browser on your device. Nothing is ever sent to the developer or any third party. History stores text only, never images. History can be exported to your own JSON file and imported on another device or after clearing (merged without duplicates); both stay on the device, as the alternative to accounts or sync.
 - UI in 日本語 / English / Español / 中文 / 한국어.
 - Note: the previous RekAI (an AI gateway) was consolidated into [Pasture](https://github.com/shizukutanaka/Pasture); this repository has been rebuilt as the assistant described above.

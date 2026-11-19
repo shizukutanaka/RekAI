@@ -351,6 +351,36 @@ eq(R.sharedQuestionText('str'), '', 'shared text non-object');
   ok(/id="confirmInput" type="checkbox" checked/.test(html), 'confirm setting present and on by default');
 }
 
+/* ---- history export / import (the user's own file) ---- */
+{
+  const h = [R.makeEntry('q1', 'a1', 1000), R.makeEntry('q2', 'a2', 2000)];
+  const txt = R.exportHistory(h, Date.UTC(2026, 10, 19));
+  const obj = JSON.parse(txt);
+  eq(obj.format, 'rekai-history', 'export: format tag');
+  eq(obj.version, 1, 'export: version');
+  eq(obj.entries, h, 'export: entries are the history');
+  ok(txt.indexOf('data:image') < 0, 'export: no image data');
+  eq(R.exportHistory([{ q: 'x', a: 'y', ts: 1, img: 'data:image/png;base64,AA' }, { bad: 1 }]).indexOf('data:image'), -1, 'export: strips unknown fields and bad entries');
+  ok(/^rekai-history-\d{4}-\d{2}-\d{2}\.json$/.test(R.historyFileName(Date.now())), 'export: file name');
+  eq(R.parseHistoryFile(txt), { ok: true, entries: h }, 'import: round trip');
+  eq(R.parseHistoryFile(JSON.stringify(h)).ok, true, 'import: bare array accepted');
+  eq(R.parseHistoryFile('').error, 'empty', 'import: empty');
+  eq(R.parseHistoryFile('{nope').error, 'not-json', 'import: not json');
+  eq(R.parseHistoryFile('{"format":"other","entries":[]}').error, 'wrong-format', 'import: other format rejected');
+  eq(R.parseHistoryFile('[{"x":1}]').error, 'wrong-format', 'import: array without entries rejected');
+  eq(R.parseHistoryFile('x'.repeat(R.MAX_HISTORY_FILE_BYTES + 1)).error, 'too-large', 'import: size cap');
+  eq(R.parseHistoryFile('{"format":"rekai-history","entries":[{"q":"a","a":"b","ts":"x"}]}').entries, [{ q: 'a', a: 'b', ts: 0 }], 'import: bad ts normalized');
+  const m1 = R.mergeHistory(h, [R.makeEntry('q2', 'a2', 2000), R.makeEntry('q0', 'a0', 500), R.makeEntry('q3', 'a3', 3000)]);
+  eq(m1.added, 2, 'merge: duplicates skipped');
+  eq(m1.history.map(e => e.q), ['q0', 'q1', 'q2', 'q3'], 'merge: sorted by time');
+  eq(R.mergeHistory(h, h).added, 0, 'merge: same file twice adds nothing');
+  const many = []; for (let i = 0; i < 80; i++) many.push(R.makeEntry('m' + i, 'a', i));
+  const m2 = R.mergeHistory([], many);
+  eq(m2.history.length, R.MAX_HISTORY, 'merge: trimmed to MAX_HISTORY');
+  eq(m2.history[m2.history.length - 1].q, 'm79', 'merge: newest kept');
+  ok(/id="historyFileInput" type="file" accept="application\/json,\.json" hidden/.test(html), 'import file input present');
+}
+
 /* ---- share intake: service worker contract ---- */
 {
   const swPath = path.join(__dirname, '..', 'sw.js');

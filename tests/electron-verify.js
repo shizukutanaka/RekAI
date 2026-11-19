@@ -276,6 +276,46 @@ app.whenReady().then(async () => {
   await js("document.getElementById('closeSettingsBtn').click(); true");
   await sleep(100);
 
+  /* --- history export / import: the user's own file, text only --- */
+  {
+    await js(`window.__dl = null; window.__origCreate = URL.createObjectURL; window.__origClick = HTMLAnchorElement.prototype.click;
+      URL.createObjectURL = function (b) { window.__dlBlob = b; return 'blob:test'; };
+      HTMLAnchorElement.prototype.click = function () { window.__dl = { name: this.download, href: this.getAttribute('href') }; };
+      localStorage.setItem('rekai.history.v1', JSON.stringify([{ q: 'old q', a: 'old a', ts: 1000 }]));
+      true`);
+    await js("location.reload(); true");
+    await sleep(800);
+    await js(`URL.createObjectURL = function (b) { window.__dlBlob = b; return 'blob:test'; };
+      HTMLAnchorElement.prototype.click = function () { window.__dl = { name: this.download }; }; true`);
+    await js("document.getElementById('exportHistoryBtn').click(); true");
+    await sleep(200);
+    const dl = JSON.parse(await js("JSON.stringify(window.__dl)") || 'null') || {};
+    const exported = await js("window.__dlBlob ? window.__dlBlob.text() : ''");
+    let ex = {}; try { ex = JSON.parse(exported); } catch (e) {}
+    check('history export: downloads a dated json file', /^rekai-history-\d{4}-\d{2}-\d{2}\.json$/.test(dl.name || ''), dl.name);
+    check('history export: file holds the stored history, text only',
+      ex.format === 'rekai-history' && Array.isArray(ex.entries) && ex.entries.length === 1 && ex.entries[0].q === 'old q' && exported.indexOf('data:image') < 0);
+    const importFile = async (text) => js(`(function(){ var dt = new DataTransfer();
+      dt.items.add(new File([${JSON.stringify(text)}], 'h.json', { type: 'application/json' }));
+      var inp = document.getElementById('historyFileInput'); inp.files = dt.files;
+      inp.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await js("localStorage.removeItem('rekai.history.v1'); document.getElementById('clearHistoryBtn').click(); true");
+    await importFile(exported);
+    await sleep(400);
+    check('history import: restores the exported file after clearing',
+      await js("document.querySelectorAll('#historyList li').length === 1 && document.getElementById('historyList').textContent.indexOf('old q') >= 0"));
+    check('history import: persisted', await js("JSON.parse(localStorage.getItem('rekai.history.v1')).length === 1"));
+    await importFile(JSON.stringify({ format: 'rekai-history', version: 1, entries: [{ q: 'old q', a: 'old a', ts: 1000 }, { q: 'new q', a: 'new a', ts: 2000 }] }));
+    await sleep(400);
+    check('history import: merges without duplicates',
+      await js("document.querySelectorAll('#historyList li').length === 2 && document.getElementById('status').textContent.indexOf('1') >= 0"));
+    await importFile('not json at all');
+    await sleep(400);
+    check('history import: bad file shows a reason and changes nothing',
+      await js("document.getElementById('status').className === 'error' && document.querySelectorAll('#historyList li').length === 2"));
+    await js("URL.createObjectURL = window.__origCreate || URL.createObjectURL; true");
+  }
+
   /* --- share intake: serve over HTTP, install the SW, then post a real
          multipart form (image + text) to the share target, exactly like an
          OS share sheet would. The service worker must stash the payload,
