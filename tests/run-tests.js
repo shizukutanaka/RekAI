@@ -184,6 +184,29 @@ eq(R.downscaleDims(800, 600, 1280), { width: 800, height: 600 }, 'no upscale');
 eq(R.downscaleDims(0, 600, 1280), null, 'downscale zero width');
 eq(R.downscaleDims(800, 600, 0), null, 'downscale zero edge');
 
+/* ---- region crop: selection (display px) -> source px ---- */
+ok(R.MAX_SOURCE_EDGE > R.MAX_IMAGE_EDGE, 'source keeps more pixels than what is sent');
+{
+  const full = { x: 0, y: 0, w: 2560, h: 1440 };
+  eq(R.selectionToSource({ x0: 0, y0: 0, x1: 640, y1: 360 }, 640, 360, full), { x: 0, y: 0, w: 2560, h: 1440 }, 'crop: whole preview -> whole source');
+  eq(R.selectionToSource({ x0: 100, y0: 50, x1: 300, y1: 162.5 }, 640, 360, full), { x: 400, y: 200, w: 800, h: 450 }, 'crop: scaled to source px');
+  eq(R.selectionToSource({ x0: 300, y0: 162.5, x1: 100, y1: 50 }, 640, 360, full), { x: 400, y: 200, w: 800, h: 450 }, 'crop: any drag direction');
+  eq(R.selectionToSource({ x0: -50, y0: -50, x1: 9999, y1: 9999 }, 640, 360, full), full, 'crop: clamped to the image');
+  eq(R.selectionToSource({ x0: 10, y0: 10, x1: 15, y1: 200 }, 640, 360, full), null, 'crop: too narrow -> null');
+  eq(R.selectionToSource({ x0: 10, y0: 10, x1: 10, y1: 10 }, 640, 360, full), null, 'crop: click without drag -> null');
+  const view = { x: 400, y: 200, w: 800, h: 450 };
+  eq(R.selectionToSource({ x0: 0, y0: 0, x1: 400, y1: 225 }, 800, 450, view), { x: 400, y: 200, w: 400, h: 225 }, 'crop: nested crop is relative to the current view');
+  eq(R.selectionToSource({ x0: 0, y0: 0, x1: 800, y1: 450 }, 800, 450, view), view, 'crop: nested crop never exceeds the view');
+  eq(R.selectionToSource(null, 640, 360, full), null, 'crop: null selection');
+  eq(R.selectionToSource({ x0: 0, y0: 0, x1: 100, y1: 100 }, 0, 360, full), null, 'crop: zero display size');
+  eq(R.selectionToSource({ x0: 0, y0: 0, x1: 100, y1: 100 }, 640, 360, null), null, 'crop: no view');
+  eq(R.selectionToSource({ x0: NaN, y0: 0, x1: 100, y1: 100 }, 640, 360, full), null, 'crop: NaN rejected');
+  // Sending only the region keeps its resolution: 800x450 of a 2560x1440 screen
+  // is sent 1:1 instead of at half scale inside a 1280x720 full-screen image.
+  eq(R.downscaleDims(800, 450, R.MAX_IMAGE_EDGE), { width: 800, height: 450 }, 'crop: region sent at native resolution');
+  eq(R.downscaleDims(2560, 1440, R.MAX_IMAGE_EDGE), { width: 1280, height: 720 }, 'crop: full screen is halved');
+}
+
 /* ---- history ---- */
 {
   const e = R.makeEntry('q', 'a', 123);

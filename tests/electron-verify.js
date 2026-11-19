@@ -137,6 +137,58 @@ app.whenReady().then(async () => {
   }
   check('network failure shows error message', errShown);
 
+  /* --- region crop: paste a 2560x1440 "screen" -> select an area -> only it is sent, at native resolution --- */
+  await js(`(function(){
+    var cv = document.createElement('canvas'); cv.width = 2560; cv.height = 1440;
+    var g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 2560, 1440);
+    g.fillStyle = '#000'; g.font = '12px sans-serif';
+    for (var y = 20; y < 1440; y += 18) g.fillText('Error 0x' + y + ': small text that must stay readable', 10 + (y % 300), y);
+    cv.toBlob(function (b) {
+      var dt = new DataTransfer(); dt.items.add(new File([b], 'screen.png', { type: 'image/png' }));
+      document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true }));
+    }, 'image/png');
+    return true; })()`);
+  await sleep(800);
+  const dimsOf = du => js(`new Promise(function (r) { var i = new Image(); i.onload = function () { r(i.naturalWidth + 'x' + i.naturalHeight); }; i.src = ${JSON.stringify(du)}; })`);
+  const fullDu = await js('window.RekAIApp.state.imageDataUrl');
+  check('crop: pasted image goes through intake (full frame sent at 1280 edge)', (await dimsOf(fullDu)) === '1280x720', await dimsOf(fullDu));
+  check('crop: select button enabled once an image is in', await js("!document.getElementById('cropBtn').disabled"));
+  check('crop: reset disabled before cropping', await js("document.getElementById('uncropBtn').disabled"));
+  await js("document.getElementById('cropBtn').click(); document.getElementById('preview').scrollIntoView({ block: 'center' }); true");
+  await sleep(200);
+  check('crop: crop mode shows a hint', await js("document.getElementById('preview').classList.contains('cropping') && document.getElementById('status').textContent.length > 0"));
+  const r = await js("(function(){ var b = document.getElementById('preview').getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; })()");
+  const at = (fx, fy) => ({ x: Math.round(r[0] + r[2] * fx), y: Math.round(r[1] + r[3] * fy) });
+  const p0 = at(400 / 2560, 200 / 1440), p1 = at(1200 / 2560, 650 / 1440);
+  wc.sendInputEvent({ type: 'mouseDown', x: p0.x, y: p0.y, button: 'left', clickCount: 1 });
+  for (let k = 1; k <= 5; k++) {
+    wc.sendInputEvent({ type: 'mouseMove', x: Math.round(p0.x + (p1.x - p0.x) * k / 5), y: Math.round(p0.y + (p1.y - p0.y) * k / 5), button: 'left' });
+    await sleep(30);
+  }
+  wc.sendInputEvent({ type: 'mouseUp', x: p1.x, y: p1.y, button: 'left', clickCount: 1 });
+  await sleep(400);
+  const view = await js('JSON.stringify(window.RekAIApp.state.view)');
+  const v = JSON.parse(view || 'null') || {};
+  check('crop: selection mapped to source px (~800x450 at 400,200)',
+    Math.abs(v.x - 400) <= 8 && Math.abs(v.y - 200) <= 8 && Math.abs(v.w - 800) <= 12 && Math.abs(v.h - 450) <= 12, view);
+  const cropDu = await js('window.RekAIApp.state.imageDataUrl');
+  const cropDims = await dimsOf(cropDu);
+  check('crop: region kept at native resolution (not halved)', cropDims === v.w + 'x' + v.h, cropDims);
+  console.log('MEASURE full-frame jpeg bytes=' + Math.round(fullDu.length * 3 / 4) + ' (1280x720, scale 0.5)  cropped jpeg bytes=' + Math.round(cropDu.length * 3 / 4) + ' (' + cropDims + ', scale 1.0)');
+  check('crop: reset enabled after cropping', await js("!document.getElementById('uncropBtn').disabled"));
+  await js(`window.fetch = function (url, opts) {
+    window.__lastRequest = { url: String(url), body: JSON.parse(opts.body) };
+    return Promise.resolve({ ok: true, status: 200, text: function () { return Promise.resolve(JSON.stringify({ choices: [{ message: { content: 'CROP ANSWER' } }] })); } });
+  }; document.getElementById('askBtn').click(); true`);
+  await sleep(500);
+  check('crop: the request carries only the cropped image',
+    await js("(function(){ var m = window.__lastRequest.body.messages; var c = m[m.length-1].content; return c[1].image_url.url === window.RekAIApp.state.imageDataUrl; })()"));
+  check('crop: full frame never persisted', await js("JSON.stringify(localStorage).indexOf('data:image') < 0"));
+  await js("document.getElementById('uncropBtn').click(); true");
+  check('crop: reset restores the whole frame', (await dimsOf(await js('window.RekAIApp.state.imageDataUrl'))) === '1280x720');
+  await js("document.getElementById('clearImageBtn').click(); true");
+  check('crop: removing the image drops the in-memory frame', await js("window.RekAIApp.state.source === null && document.getElementById('cropBtn').disabled"));
+
   /* --- auto-detection: Ollama answers /models -> found -> confirm -> saved --- */
   await js("localStorage.removeItem('rekai.settings.v1'); true");
   await js(`window.fetch = function (url) {
