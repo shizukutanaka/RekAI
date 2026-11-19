@@ -139,8 +139,12 @@
     <ul id="historyList"></ul>
     <p id="historyEmpty" class="muted" data-i18n="historyEmpty">履歴はまだありません。</p>
     <div class="row" style="margin-top:.6rem">
+      <button id="exportHistoryBtn" type="button" data-i18n="exportHistory">履歴を書き出す</button>
+      <button id="importHistoryBtn" type="button" data-i18n="importHistory">履歴を読み込む</button>
       <button id="clearHistoryBtn" type="button" data-i18n="clearHistory">履歴を消す</button>
+      <input id="historyFileInput" type="file" accept="application/json,.json" hidden>
     </div>
+    <p class="muted" data-i18n="historyIoHint">書き出したファイルはこの端末に保存されます。別の端末や消去のあとでも、読み込めば戻せます（画像は含まれません）。</p>
   </section>
 </main>
 
@@ -511,6 +515,53 @@
     }
     return REKAI.trimHistory(out);
   };
+  /* export / import: the user's own file, text only (same shape as stored history) */
+  REKAI.HISTORY_FILE_FORMAT = 'rekai-history';
+  REKAI.HISTORY_FILE_VERSION = 1;
+  REKAI.MAX_HISTORY_FILE_BYTES = 5 * 1024 * 1024;
+  REKAI.exportHistory = function (list, now) {
+    return JSON.stringify({
+      format: REKAI.HISTORY_FILE_FORMAT, version: REKAI.HISTORY_FILE_VERSION,
+      exportedAt: new Date(typeof now === 'number' ? now : Date.now()).toISOString(),
+      entries: REKAI.sanitizeHistory(list)
+    }, null, 2);
+  };
+  REKAI.historyFileName = function (now) {
+    var d = new Date(typeof now === 'number' ? now : Date.now());
+    function p2(n) { return (n < 10 ? '0' : '') + n; }
+    return 'rekai-history-' + d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + '.json';
+  };
+  REKAI.parseHistoryFile = function (text) {
+    if (typeof text !== 'string' || !text) return { ok: false, error: 'empty' };
+    if (text.length > REKAI.MAX_HISTORY_FILE_BYTES) return { ok: false, error: 'too-large' };
+    var data;
+    try { data = JSON.parse(text); } catch (e) { return { ok: false, error: 'not-json' }; }
+    var raw = Array.isArray(data) ? data
+      : (data && data.format === REKAI.HISTORY_FILE_FORMAT && Array.isArray(data.entries) ? data.entries : null);
+    if (!raw) return { ok: false, error: 'wrong-format' };
+    var out = [];
+    for (var i = 0; i < raw.length; i++) {
+      var e = raw[i];
+      if (e && typeof e.q === 'string' && typeof e.a === 'string') out.push({ q: e.q, a: e.a, ts: typeof e.ts === 'number' ? e.ts : 0 });
+    }
+    if (raw.length && !out.length) return { ok: false, error: 'wrong-format' };
+    return { ok: true, entries: out };
+  };
+  REKAI.mergeHistory = function (existing, incoming) {
+    var base = REKAI.sanitizeHistory(existing);
+    var seen = {};
+    function key(e) { return e.ts + '\u0000' + e.q + '\u0000' + e.a; }
+    for (var i = 0; i < base.length; i++) seen[key(base[i])] = true;
+    var added = [];
+    var inc = Array.isArray(incoming) ? incoming : [];
+    for (var j = 0; j < inc.length; j++) {
+      var k = key(inc[j]);
+      if (!seen[k]) { seen[k] = true; added.push(inc[j]); }
+    }
+    var all = base.concat(added).map(function (e, idx) { return { e: e, idx: idx }; });
+    all.sort(function (x, y) { return (x.e.ts - y.e.ts) || (x.idx - y.idx); });
+    return { history: REKAI.trimHistory(all.map(function (x) { return x.e; })), added: added.length };
+  };
 
   /* ---------- i18n ---------- */
   REKAI.LANGS = ['ja', 'en', 'es', 'zh', 'ko'];
@@ -529,6 +580,14 @@
       answerTitle: '3. 回答', noAnswerYet: 'まだ回答はありません。',
       speak: '🔊 読み上げる', stopSpeak: '⏹ 止める',
       historyTitle: '履歴（この端末の中だけ）', historyEmpty: '履歴はまだありません。', clearHistory: '履歴を消す',
+      exportHistory: '履歴を書き出す',
+      importHistory: '履歴を読み込む',
+      historyIoHint: '書き出したファイルはこの端末に保存されます。別の端末や消去のあとでも、読み込めば戻せます（画像は含まれません）。',
+      historyExported: '履歴をファイルに書き出しました。件数: ',
+      historyNothingToExport: '書き出す履歴がありません。',
+      historyImported: '履歴を読み込みました。追加した件数: ',
+      historyImportNone: '新しく追加する履歴はありませんでした（すべて登録済みです）。',
+      historyImportBad: 'RekAI の履歴ファイルとして読み込めませんでした。',
       privacyNote: 'プライバシー：画像と質問は、あなたが設定した接続先（AI）にだけ送られます。履歴と設定はこの端末のブラウザ内にのみ保存され、作成者を含む第三者へは一切送られません。',
       settingsTitle: '接続先の設定', preset: 'プリセット',
       endpoint: '接続先URL（OpenAI互換 API）', model: 'モデル名（画像が読めるモデル）', apiKey: 'APIキー',
@@ -595,6 +654,14 @@
       answerTitle: '3. Answer', noAnswerYet: 'No answer yet.',
       speak: '🔊 Read aloud', stopSpeak: '⏹ Stop',
       historyTitle: 'History (on this device only)', historyEmpty: 'No history yet.', clearHistory: 'Clear history',
+      exportHistory: 'Export history',
+      importHistory: 'Import history',
+      historyIoHint: 'The exported file is saved on this device. You can import it on another device or after clearing (images are not included).',
+      historyExported: 'History exported to a file. Entries: ',
+      historyNothingToExport: 'There is no history to export.',
+      historyImported: 'History imported. Entries added: ',
+      historyImportNone: 'Nothing new to add (every entry is already here).',
+      historyImportBad: 'This file could not be read as a RekAI history file.',
       privacyNote: 'Privacy: your image and question are sent only to the AI endpoint you configure. History and settings are stored only in this browser on this device — never sent to the developer or any third party.',
       settingsTitle: 'Endpoint settings', preset: 'Preset',
       endpoint: 'Endpoint URL (OpenAI-compatible API)', model: 'Model name (must be able to read images)', apiKey: 'API key',
@@ -661,6 +728,14 @@
       answerTitle: '3. Respuesta', noAnswerYet: 'Aún no hay respuesta.',
       speak: '🔊 Leer en voz alta', stopSpeak: '⏹ Detener',
       historyTitle: 'Historial (solo en este dispositivo)', historyEmpty: 'Aún no hay historial.', clearHistory: 'Borrar historial',
+      exportHistory: 'Exportar historial',
+      importHistory: 'Importar historial',
+      historyIoHint: 'El archivo exportado se guarda en este dispositivo. Puedes importarlo en otro dispositivo o después de borrar (no incluye imágenes).',
+      historyExported: 'Historial exportado a un archivo. Entradas: ',
+      historyNothingToExport: 'No hay historial para exportar.',
+      historyImported: 'Historial importado. Entradas añadidas: ',
+      historyImportNone: 'No hay nada nuevo que añadir (todas las entradas ya están aquí).',
+      historyImportBad: 'No se pudo leer este archivo como historial de RekAI.',
       privacyNote: 'Privacidad: tu imagen y tu pregunta se envían solo al servicio de IA que configures. El historial y los ajustes se guardan solo en este navegador, en este dispositivo; nunca se envían al desarrollador ni a terceros.',
       settingsTitle: 'Ajustes del servicio', preset: 'Preajuste',
       endpoint: 'URL del servicio (API compatible con OpenAI)', model: 'Nombre del modelo (debe poder leer imágenes)', apiKey: 'Clave API',
@@ -727,6 +802,14 @@
       answerTitle: '3. 回答', noAnswerYet: '暂无回答。',
       speak: '🔊 朗读', stopSpeak: '⏹ 停止',
       historyTitle: '历史记录（仅保存在本设备）', historyEmpty: '暂无历史记录。', clearHistory: '清除历史',
+      exportHistory: '导出历史',
+      importHistory: '导入历史',
+      historyIoHint: '导出的文件保存在本设备上。可在其他设备或清除后导入恢复（不包含图片）。',
+      historyExported: '已将历史导出到文件。条数：',
+      historyNothingToExport: '没有可导出的历史。',
+      historyImported: '已导入历史。新增条数：',
+      historyImportNone: '没有需要新增的历史（全部已存在）。',
+      historyImportBad: '无法将此文件读取为 RekAI 历史文件。',
       privacyNote: '隐私：图片和问题只会发送到你自己设置的 AI 服务地址。历史和设置只保存在本设备的浏览器中，绝不会发送给开发者或任何第三方。',
       settingsTitle: '服务地址设置', preset: '预设',
       endpoint: '服务地址 URL（OpenAI 兼容 API）', model: '模型名称（需支持读取图片）', apiKey: 'API 密钥',
@@ -793,6 +876,14 @@
       answerTitle: '3. 답변', noAnswerYet: '아직 답변이 없습니다.',
       speak: '🔊 읽어 주기', stopSpeak: '⏹ 중지',
       historyTitle: '기록(이 기기에만 저장)', historyEmpty: '아직 기록이 없습니다.', clearHistory: '기록 지우기',
+      exportHistory: '기록 내보내기',
+      importHistory: '기록 가져오기',
+      historyIoHint: '내보낸 파일은 이 기기에 저장됩니다. 다른 기기나 지운 뒤에도 가져오면 복원할 수 있습니다(이미지는 포함되지 않음).',
+      historyExported: '기록을 파일로 내보냈습니다. 건수: ',
+      historyNothingToExport: '내보낼 기록이 없습니다.',
+      historyImported: '기록을 가져왔습니다. 추가한 건수: ',
+      historyImportNone: '새로 추가할 기록이 없습니다(모두 이미 있습니다).',
+      historyImportBad: '이 파일을 RekAI 기록 파일로 읽을 수 없습니다.',
       privacyNote: '개인정보: 이미지와 질문은 당신이 설정한 AI 접속처에만 전송됩니다. 기록과 설정은 이 기기의 브라우저 안에만 저장되며, 제작자를 포함한 제3자에게는 절대 전송되지 않습니다.',
       settingsTitle: '접속처 설정', preset: '프리셋',
       endpoint: '접속처 URL(OpenAI 호환 API)', model: '모델 이름(이미지를 읽을 수 있는 모델)', apiKey: 'API 키',
@@ -881,6 +972,7 @@
     question: $('question'), micBtn: $('micBtn'), askBtn: $('askBtn'), busy: $('busy'),
     answer: $('answer'), speakBtn: $('speakBtn'), stopSpeakBtn: $('stopSpeakBtn'),
     historyList: $('historyList'), historyEmpty: $('historyEmpty'), clearHistoryBtn: $('clearHistoryBtn'),
+    exportHistoryBtn: $('exportHistoryBtn'), importHistoryBtn: $('importHistoryBtn'), historyFileInput: $('historyFileInput'),
     dlg: $('settingsDlg'), presetSel: $('presetSel'), endpointInput: $('endpointInput'),
     detectBtn: $('detectBtn'), detectBusy: $('detectBusy'), detectResult: $('detectResult'),
     modelInput: $('modelInput'), apiKeyInput: $('apiKeyInput'),
@@ -1284,6 +1376,33 @@
     });
   }
 
+  /* export to / import from the user's own file; nothing leaves the device */
+  function exportHistory() {
+    if (!state.history.length) { showStatus(t('historyNothingToExport'), 'info'); return; }
+    var now = Date.now();
+    var blob = new Blob([R.exportHistory(state.history, now)], { type: 'application/json' });
+    var href = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = href; a.download = R.historyFileName(now);
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(href); }, 0);
+    showStatus(t('historyExported') + state.history.length, 'info');
+  }
+  function importHistoryFile(file) {
+    if (!file) return;
+    if (file.size > R.MAX_HISTORY_FILE_BYTES) { showError(t('historyImportBad')); return; }
+    file.text().then(function (text) {
+      var parsed = R.parseHistoryFile(text);
+      if (!parsed.ok) { showError(t('historyImportBad')); return; }
+      var merged = R.mergeHistory(state.history, parsed.entries);
+      if (!merged.added) { showStatus(t('historyImportNone'), 'info'); return; }
+      state.history = merged.history;
+      saveHistory();
+      renderHistory();
+      showStatus(t('historyImported') + merged.added, 'info');
+    }).catch(function () { showError(t('historyImportBad')); });
+  }
+
   /* ---------- speech: recognition in, synthesis out ---------- */
   function toggleMic() {
     var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1531,6 +1650,13 @@
     state.history = [];
     saveHistory();
     renderHistory();
+  });
+  els.exportHistoryBtn.addEventListener('click', exportHistory);
+  els.importHistoryBtn.addEventListener('click', function () { els.historyFileInput.click(); });
+  els.historyFileInput.addEventListener('change', function () {
+    var f = els.historyFileInput.files && els.historyFileInput.files[0];
+    els.historyFileInput.value = '';
+    importHistoryFile(f);
   });
   els.openSettingsBtn.addEventListener('click', openSettings);
   els.detectBtn.addEventListener('click', runDetection);
