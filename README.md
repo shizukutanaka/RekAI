@@ -47,7 +47,7 @@ AI の接続先は**利用者自身のもの**を使う設計です。OpenAI 互
 
 - 探す範囲は**この端末の中（ループバック）だけ**です。外部へは何も送らず、探している間は API キーも送りません。確認するのは各エンジンのモデル一覧（OpenAI互換の `/models`）だけです。
 - 見つかると、接続先とモデル名（そのエンジンの既定モデルか、画像が読めそうなモデルを優先して選択）が表示されます。**保存されるのは「この接続先を使う」を押したときだけ**です。
-- エンジンは動いているのにモデルが1つも無い場合は、その旨と対処が表示されます。何も見つからない場合は、理由の候補と各エンジンの導入手順が表示され、従来どおり手動設定もできます。
+- エンジンは動いているのにモデルが1つも無い場合は、その旨と対処が表示されます。何も見つからない場合は、理由の候補と各エンジンの導入手順が表示され、従来どおり手動設定もできます。導入手順には、そのままコピーできるコマンドを添えています（`ollama pull llama3.2-vision`、LM Studio の `lms server start --cors`）。GitHub Pages など Web のアドレスからこのページを開いた場合は、ローカルAIの側でその接続元を許可する必要があります。そのため `OLLAMA_ORIGINS=<その接続元> ollama serve`（PowerShell 版も）を表示します。
 - 注意: このページを HTTPS で開いていると、ブラウザが端末内（`http://localhost`）への確認を止める場合があります。その場合は手動設定をご利用ください。
 
 ## 他のアプリから共有する（PWA）
@@ -116,7 +116,7 @@ MIT — [LICENSE](./LICENSE)
 - Capture your screen (screen sharing), pick/take a photo, or paste an image; ask by voice (Web Speech API) or text; get a written answer, optionally read aloud.
 - **Share into RekAI**: when installed as a PWA (served over HTTPS), RekAI appears in other apps' share sheets; sharing an image opens RekAI with that image already captured. The hand-off stays on the device (a service worker passes it through a local inbox cache, deleted once captured) — no server is involved.
 - **You bring your own AI endpoint**: any OpenAI-compatible API with a vision-capable model. Presets for Pasture (this family's local LLM router), Ollama, LM Studio, and OpenAI.
-- **Zero-config path**: the settings dialog can auto-detect a local engine (Pasture / Ollama / LM Studio, in that order) running on your device. Probing is loopback-only, sends no API key and nothing external, and nothing is saved until you confirm the found endpoint. If nothing is found, it shows the likely reasons and how to set each engine up.
+- **Zero-config path**: the settings dialog can auto-detect a local engine (Pasture / Ollama / LM Studio, in that order) running on your device. Probing is loopback-only, sends no API key and nothing external, and nothing is saved until you confirm the found endpoint. If nothing is found, it shows the likely reasons and how to set each engine up. The guidance includes copyable commands: `ollama pull llama3.2-vision`, `lms server start --cors` for LM Studio, and, when the page is opened from a web address such as GitHub Pages, `OLLAMA_ORIGINS=<that origin> ollama serve` (and the PowerShell form), because the local engine must allow that origin.
 - **Privacy**: images and questions go only to the endpoint *you* configure. Before each send, a confirmation shows exactly what goes where (the chat URL and whether it is on this device or outside it, the model, the image itself with its size, the question, how many earlier turns go along as context, and whether the API key is attached); nothing is sent until you press Send. It can be turned off in Settings. Settings and history live only in your browser on your device. Nothing is ever sent to the developer or any third party. History stores text only, never images. History can be exported to your own JSON file and imported on another device or after clearing (merged without duplicates); both stay on the device, as the alternative to accounts or sync.
 - UI in 日本語 / English / Español / 中文 / 한국어.
 - Note: the previous RekAI (an AI gateway) was consolidated into [Pasture](https://github.com/shizukutanaka/Pasture); this repository has been rebuilt as the assistant described above.

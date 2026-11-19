@@ -277,6 +277,23 @@
     return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]' ||
            /\.localhost$/.test(host);
   };
+  /* A page served from a non-loopback web origin must be allowed by the local engine (CORS). */
+  REKAI.pageOriginToAllow = function (origin) {
+    var o = String(origin || '');
+    var u;
+    try { u = new URL(o); } catch (e) { return ''; }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+    return REKAI.isLoopbackEndpoint(u.origin) ? '' : u.origin;
+  };
+  REKAI.localSetupCommands = function (origin) {
+    var allow = REKAI.pageOriginToAllow(origin);
+    var ollama = [{ key: 'guideCmdPull', cmd: 'ollama pull llama3.2-vision' }];
+    if (allow) {
+      ollama.push({ key: 'guideCmdServe', cmd: 'OLLAMA_ORIGINS=' + allow + ' ollama serve' });
+      ollama.push({ key: 'guideCmdServeWin', cmd: '$env:OLLAMA_ORIGINS="' + allow + '"; ollama serve' });
+    }
+    return { origin: allow, ollama: ollama, lmstudio: [{ key: 'guideCmdLms', cmd: 'lms server start --cors' }] };
+  };
   REKAI.DETECT_CANDIDATE_IDS = ['pasture', 'ollama', 'lmstudio'];
   REKAI.detectCandidates = function () {
     var out = [];
@@ -604,6 +621,13 @@
       guidePasture: 'Pasture（この製品群のローカルLLMルーター）: 入手して起動しておくと、自動で見つかります。',
       guideOllama: 'Ollama: ollama.com から入手して起動し、画像が読めるモデル（例: llama3.2-vision）を用意します。',
       guideLmstudio: 'LM Studio: lmstudio.ai から入手し、画像が読めるモデルを読み込んでサーバーを開始します。',
+      guideOriginNote: 'このページは次の場所から開いているため、ローカルAIの側でこの接続元を許可する必要があります: ',
+      guideCmdPull: '画像が読めるモデルを用意する:',
+      guideCmdServe: 'この接続元を許可して起動する（macOS / Linux）:',
+      guideCmdServeWin: '同じく Windows（PowerShell）:',
+      guideCmdLms: 'CORS を有効にしてサーバーを開始する（LM Studio の Developer 画面で「Enable CORS」をオンにしても同じです）:',
+      copyCmd: 'コピー',
+      copiedCmd: 'コピーしました',
       detectDefaultModelNote: 'モデル一覧が空だったため、プリセットのモデル名を入れています。',
       detectVisionNote: '選んだモデルが画像を読めるかは未確認です。画像つきの質問に答えられない場合は、画像対応モデルに変えてください。',
       defaultQuestion: 'この画像に何が写っているか、詳しく教えてください。',
@@ -678,6 +702,13 @@
       guidePasture: 'Pasture (this family’s local LLM router): get it and start it — it will then be found automatically.',
       guideOllama: 'Ollama: get it from ollama.com, start it, and pull a vision-capable model (e.g. llama3.2-vision).',
       guideLmstudio: 'LM Studio: get it from lmstudio.ai, load a vision-capable model, and start its server.',
+      guideOriginNote: 'This page is opened from the address below, so the local engine must allow it as an origin: ',
+      guideCmdPull: 'Get a vision-capable model:',
+      guideCmdServe: 'Start it allowing this origin (macOS / Linux):',
+      guideCmdServeWin: 'Same on Windows (PowerShell):',
+      guideCmdLms: "Start the server with CORS on (or turn on \"Enable CORS\" in LM Studio's Developer view):",
+      copyCmd: 'Copy',
+      copiedCmd: 'Copied',
       detectDefaultModelNote: 'The model list came back empty, so the preset’s model name was filled in.',
       detectVisionNote: 'Whether the chosen model can read images is unconfirmed. If it cannot answer questions about an image, switch to a vision-capable model.',
       defaultQuestion: 'Please describe in detail what is shown in this image.',
@@ -752,6 +783,13 @@
       guidePasture: 'Pasture (el enrutador LLM local de esta familia): consíguelo e inícialo; después se detectará automáticamente.',
       guideOllama: 'Ollama: consíguelo en ollama.com, inícialo y descarga un modelo que lea imágenes (p. ej., llama3.2-vision).',
       guideLmstudio: 'LM Studio: consíguelo en lmstudio.ai, carga un modelo que lea imágenes e inicia su servidor.',
+      guideOriginNote: 'Esta página se abrió desde la dirección siguiente, así que el motor local debe permitirla como origen: ',
+      guideCmdPull: 'Descarga un modelo que lea imágenes:',
+      guideCmdServe: 'Inícialo permitiendo este origen (macOS / Linux):',
+      guideCmdServeWin: 'Lo mismo en Windows (PowerShell):',
+      guideCmdLms: 'Inicia el servidor con CORS activado (o activa «Enable CORS» en la vista Developer de LM Studio):',
+      copyCmd: 'Copiar',
+      copiedCmd: 'Copiado',
       detectDefaultModelNote: 'La lista de modelos vino vacía, así que se rellenó el nombre del modelo del preajuste.',
       detectVisionNote: 'No está confirmado que el modelo elegido pueda leer imágenes. Si no responde sobre imágenes, cambia a un modelo con visión.',
       defaultQuestion: 'Describe con detalle lo que se ve en esta imagen.',
@@ -826,6 +864,13 @@
       guidePasture: 'Pasture（本产品系列的本地 LLM 路由器）：获取并启动它，之后即可被自动找到。',
       guideOllama: 'Ollama：从 ollama.com 获取并启动，再准备一个能读图片的模型（例如 llama3.2-vision）。',
       guideLmstudio: 'LM Studio：从 lmstudio.ai 获取，加载一个能读图片的模型，并启动服务器。',
+      guideOriginNote: '此页面是从下面的地址打开的，因此需要在本地 AI 一侧允许这个来源：',
+      guideCmdPull: '准备一个能读图片的模型：',
+      guideCmdServe: '允许此来源并启动（macOS / Linux）：',
+      guideCmdServeWin: 'Windows（PowerShell）同样：',
+      guideCmdLms: '启用 CORS 并启动服务器（也可以在 LM Studio 的 Developer 界面打开“Enable CORS”）：',
+      copyCmd: '复制',
+      copiedCmd: '已复制',
       detectDefaultModelNote: '模型列表为空，因此填入了预设的模型名称。',
       detectVisionNote: '尚未确认所选模型能否读取图片。如果它无法回答关于图片的问题，请换成支持图片的模型。',
       defaultQuestion: '请详细描述这张图片里显示的内容。',
@@ -900,6 +945,13 @@
       guidePasture: 'Pasture(이 제품군의 로컬 LLM 라우터): 구해서 실행해 두면 자동으로 찾습니다.',
       guideOllama: 'Ollama: ollama.com에서 구해 실행하고, 이미지를 읽을 수 있는 모델(예: llama3.2-vision)을 준비합니다.',
       guideLmstudio: 'LM Studio: lmstudio.ai에서 구해 이미지를 읽을 수 있는 모델을 불러오고 서버를 시작합니다.',
+      guideOriginNote: '이 페이지는 아래 주소에서 열었으므로, 로컬 AI 쪽에서 이 출처를 허용해야 합니다: ',
+      guideCmdPull: '이미지를 읽을 수 있는 모델 준비:',
+      guideCmdServe: '이 출처를 허용하고 실행(macOS / Linux):',
+      guideCmdServeWin: 'Windows(PowerShell)에서도 동일:',
+      guideCmdLms: "CORS를 켜고 서버 시작(LM Studio의 Developer 화면에서 \"Enable CORS\"를 켜도 됩니다):",
+      copyCmd: '복사',
+      copiedCmd: '복사했습니다',
       detectDefaultModelNote: '모델 목록이 비어 있어 프리셋의 모델 이름을 채웠습니다.',
       detectVisionNote: '선택한 모델이 이미지를 읽을 수 있는지는 확인되지 않았습니다. 이미지에 대해 답하지 못하면 이미지 지원 모델로 바꾸세요.',
       defaultQuestion: '이 이미지에 무엇이 보이는지 자세히 알려 주세요.',
@@ -1551,6 +1603,21 @@
     n.style.margin = '.35rem 0';
     return n;
   }
+  function cmdRow(cmd) {
+    var row = mkEl('div', null, 'row');
+    var code = mkEl('code', cmd, 'cmd');
+    code.style.fontFamily = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    code.style.userSelect = 'all';
+    code.style.wordBreak = 'break-all';
+    var btn = mkEl('button', t('copyCmd'));
+    btn.type = 'button';
+    btn.addEventListener('click', function () {
+      if (!navigator.clipboard || !navigator.clipboard.writeText) return;
+      navigator.clipboard.writeText(cmd).then(function () { btn.textContent = t('copiedCmd'); }, function () {});
+    });
+    row.appendChild(code); row.appendChild(btn);
+    return row;
+  }
   function renderDetect() {
     var box = els.detectResult;
     box.textContent = '';
@@ -1583,9 +1650,17 @@
     var ul = mkEl('ul');
     ul.style.margin = '.2rem 0';
     ul.style.paddingLeft = '1.2rem';
+    var cmds = R.localSetupCommands(location.origin);
+    var steps = { guideOllama: cmds.ollama, guideLmstudio: cmds.lmstudio };
     ['guidePasture', 'guideOllama', 'guideLmstudio'].forEach(function (k) {
-      ul.appendChild(mkEl('li', t(k)));
+      var li = mkEl('li', t(k));
+      (steps[k] || []).forEach(function (c) {
+        li.appendChild(mkEl('div', t(c.key), 'hint'));
+        li.appendChild(cmdRow(c.cmd));
+      });
+      ul.appendChild(li);
     });
+    if (cmds.origin) box.appendChild(mkEl('p', t('guideOriginNote') + cmds.origin));
     box.appendChild(ul);
   }
 
