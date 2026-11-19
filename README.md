@@ -4,6 +4,8 @@
 
 画面（または写真）に写っているものを取り込んで、音声かテキストで質問すると、内容を調べて文章で答え、読み上げることもできます。単一HTMLファイル・外部依存ゼロの Web アプリで、インストールは不要です。PC でもモバイルでも動きます。
 
+**正規の配布形態はデスクトップアプリ（ソフトウェア）です。** 同じ `index.html` を Electron の殻で包んだもので、[Releases](https://github.com/shizukutanaka/RekAI/releases) から入手する形を基準とします（Windows=portable `.exe`／macOS=`.zip`／Linux=`.AppImage`）。単一 HTML 版（ブラウザ・PWA）も引き続き使えます。デスクトップ版は**未署名**のため、初回起動時に OS の警告が出ることがあります（下記「デスクトップ版」）。
+
 > English summary below.
 
 ## できること
@@ -73,6 +75,22 @@ HTTPS（または `localhost`）で配信された RekAI は、ブラウザか�
 
 旧 RekAI は AI ルーター／ゲートウェイでしたが、その機能は [Pasture](https://github.com/shizukutanaka/Pasture) へ統合済みです（Anthropic Messages 互換、Gemini 対応、Idempotency-Key 重複排除、`pasture discover`）。このリポジトリは、製品定義にもとづいて**「今見ているものを調べて答えるアシスタント」として作り直した**ものです。
 
+## デスクトップ版
+
+- 殻（`desktop/main.js`）は `index.html` をそのまま読み込むだけで、アプリ本体には手を加えていません。contextIsolation 有効／nodeIntegration 無効／sandbox 有効／preload なしで動きます。
+- 新しいウィンドウと `index.html` 以外への遷移は遮断します。http／https のリンクは OS の既定ブラウザで開きます。二重起動はせず、既に開いているウィンドウを前面に出します。
+- 権限はメディア関連（マイク／画面共有）のみ許可し、それ以外（位置情報・通知など）は拒否します。
+- **画面を取り込む**: OS の画面共有ピッカーが開きます（macOS 15 以降はシステムのピッカー）。ピッカーで約10秒以内に選ばないと「Timeout starting video source」で失敗することがあります。その場合はもう一度押してください。
+- **音声入力は使えない場合があります。** ブラウザの音声認識（Web Speech API）は、Chrome では Google のサーバーで処理されますが、Electron にはその仕組みが含まれていないため、デスクトップ版では音声入力がエラーになることがあります。テキスト入力をご利用ください（読み上げは OS の音声で動きます）。
+- **他のアプリから共有する（PWA）** はデスクトップ版では使えません（`file://` で読み込むため Service Worker を登録しません）。画像は「画像を選ぶ」か貼り付け（Ctrl+V / ⌘V）で取り込めます。
+- **未署名です。** Windows では SmartScreen（「Windows によって PC が保護されました」→「詳細情報」→「実行」）、macOS では Gatekeeper（右クリック→「開く」、または「システム設定 > プライバシーとセキュリティ」から許可）の警告が出ることがあります。macOS では初回の画面取り込み時に「画面収録」の許可も求められます。
+
+```sh
+npm ci            # electron / electron-builder は版数固定（package-lock 同梱）
+npm start         # 殻を起動
+npm run dist:win  # または dist:mac / dist:linux（出力先 dist-desktop/）
+```
+
 ## 開発
 
 ```bash
@@ -92,6 +110,7 @@ MIT — [LICENSE](./LICENSE)
 **RekAI is an assistant that looks at what you are looking at — on your desktop screen or in a photo — and answers your questions about it, by voice or text.**
 
 - Single-file (`index.html`), zero-dependency web app. No install; works on PC and mobile.
+- **The desktop app is the canonical distribution**: the same `index.html` wrapped in a minimal Electron shell (`desktop/main.js`; contextIsolation on, nodeIntegration off, sandbox on, no preload; only microphone/screen-capture permissions). Builds: Windows portable `.exe`, macOS `.zip`, Linux `.AppImage`. The builds are **unsigned**, so Windows SmartScreen / macOS Gatekeeper may warn on first launch. In the desktop app, voice input may not work (Electron does not include Chrome's speech recognition backend) and PWA share-target is unavailable; use text input and pick/paste images instead.
 - Capture your screen (screen sharing), pick/take a photo, or paste an image; ask by voice (Web Speech API) or text; get a written answer, optionally read aloud.
 - **Share into RekAI**: when installed as a PWA (served over HTTPS), RekAI appears in other apps' share sheets; sharing an image opens RekAI with that image already captured. The hand-off stays on the device (a service worker passes it through a local inbox cache, deleted once captured) — no server is involved.
 - **You bring your own AI endpoint**: any OpenAI-compatible API with a vision-capable model. Presets for Pasture (this family's local LLM router), Ollama, LM Studio, and OpenAI.

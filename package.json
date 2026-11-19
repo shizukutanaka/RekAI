@@ -1,0 +1,52 @@
+{
+  "name": "rekai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "RekAI: an assistant that looks at what you are looking at and answers. Single-file app wrapped in a minimal Electron shell.",
+  "license": "MIT",
+  "main": "desktop/main.js",
+  "scripts": {
+    "test": "node tests/run-tests.js",
+    "start": "electron .",
+    "dist:win": "electron-builder --win --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:linux": "electron-builder --linux --publish never"
+  },
+  "build": {
+    "appId": "io.github.shizukutanaka.rekai",
+    "productName": "RekAI",
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "files": [
+      "index.html",
+      "manifest.webmanifest",
+      "icon-192.png",
+      "icon-512.png",
+      "icon-512-maskable.png",
+      "desktop/main.js",
+      "LICENSE"
+    ],
+    "icon": "icon-512.png",
+    "artifactName": "RekAI-${version}-${os}-${arch}.${ext}",
+    "win": {
+      "target": "portable"
+    },
+    "mac": {
+      "target": "zip",
+      "category": "public.app-category.productivity",
+      "identity": null,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "RekAI uses the microphone for voice questions (speech recognition)."
+      }
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Utility"
+    }
+  },
+  "devDependencies": {
+    "electron": "45.3.4",
+    "electron-builder": "26.0.12"
+  }
+}
