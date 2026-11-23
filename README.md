@@ -15,6 +15,7 @@
 - **他のアプリから共有する**: インストール済み（PWA）なら、写真アプリ等の「共有」に RekAI が現れ、選ぶだけでその画像を取り込んで質問を始められます（下記）。
 - **質問する**: 音声入力（日本語対応）またはテキスト入力。画像なしの質問もできます。
 - **答える**: 画像と質問を、あなたが設定した AI（Vision 対応 LLM）に送り、回答を表示。読み上げ（停止ボタン付き）もできます。
+- **途中でやめられる**: 回答を待っている間も「やめる」で止められます。止めた場合は失敗として扱わず、履歴にも残しません。
 - **履歴**: 質問と回答はこの端末のブラウザ内にだけ残ります（画像は保存しません）。いつでも消せます。
 - **多言語 UI**: 日本語／English／Español／中文／한국어。
 
@@ -113,7 +114,7 @@ MIT — [LICENSE](./LICENSE)
 
 - Single-file (`index.html`), zero-dependency web app. No install; works on PC and mobile.
 - **The desktop app is the canonical distribution**: the same `index.html` wrapped in a minimal Electron shell (`desktop/main.js`; contextIsolation on, nodeIntegration off, sandbox on, no preload; only microphone/screen-capture permissions). Builds: Windows portable `.exe`, macOS `.zip`, Linux `.AppImage`. The builds are **unsigned**, so Windows SmartScreen / macOS Gatekeeper may warn on first launch. In the desktop app, voice input may not work (Electron does not include Chrome's speech recognition backend) and PWA share-target is unavailable; use text input and pick/paste images instead.
-- Capture your screen (screen sharing), pick/take a photo, or paste an image; ask by voice (Web Speech API) or text; get a written answer, optionally read aloud.
+- Capture your screen (screen sharing), pick/take a photo, or paste an image; ask by voice (Web Speech API) or text; get a written answer, optionally read aloud. While an answer is being fetched you can cancel it; a cancel is reported as a cancel, not an error, and leaves no history entry.
 - **Share into RekAI**: when installed as a PWA (served over HTTPS), RekAI appears in other apps' share sheets; sharing an image opens RekAI with that image already captured. The hand-off stays on the device (a service worker passes it through a local inbox cache, deleted once captured) — no server is involved.
 - **You bring your own AI endpoint**: any OpenAI-compatible API with a vision-capable model. Presets for Pasture (this family's local LLM router), Ollama, LM Studio, and OpenAI.
 - **Zero-config path**: the settings dialog can auto-detect a local engine (Pasture / Ollama / LM Studio, in that order) running on your device. Probing is loopback-only, sends no API key and nothing external, and nothing is saved until you confirm the found endpoint. If nothing is found, it shows the likely reasons and how to set each engine up. The guidance includes copyable commands: `ollama pull llama3.2-vision`, `lms server start --cors` for LM Studio, and, when the page is opened from a web address such as GitHub Pages, `OLLAMA_ORIGINS=<that origin> ollama serve` (and the PowerShell form), because the local engine must allow that origin.
