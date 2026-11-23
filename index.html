@@ -122,6 +122,7 @@
       <button id="micBtn" type="button" data-i18n="micStart">🎤 音声で入力</button>
       <button id="askBtn" type="button" class="primary" data-i18n="ask">調べる</button>
       <span id="busy" class="muted" hidden data-i18n="asking">調べています…</span>
+      <button id="cancelAskBtn" type="button" data-i18n="cancelAsk" hidden>⏹ やめる</button>
     </div>
   </section>
 
@@ -393,6 +394,16 @@
     return { ok: true, text: text };
   };
 
+  /* What a failed ask means. A cancel the user asked for is not a failure:
+     the same abort the timeout fires must not be reported as a timeout when
+     the user pressed "Cancel" — and it leaves no history entry. */
+  REKAI.askFailureKind = function (e, userCanceled) {
+    if (userCanceled) return 'canceled';
+    if (e && e.rekaiCode) return String(e.rekaiCode);
+    if (e && e.name === 'AbortError') return 'timeout';
+    return 'network';
+  };
+
   REKAI.classifyHttpError = function (status) {
     if (status === 0) return 'network';
     if (status === 400) return 'bad-request';
@@ -594,6 +605,7 @@
       questionPlaceholder: '例：この画面のエラーの意味と直し方を教えて',
       micStart: '🎤 音声で入力', micStop: '⏹ 音声入力を止める', listeningNow: '聞き取り中…話しかけてください',
       ask: '調べる', asking: '調べています…',
+      cancelAsk: '⏹ やめる', askCanceled: '調べるのをやめました。回答は届いておらず、履歴にも残していません。',
       answerTitle: '3. 回答', noAnswerYet: 'まだ回答はありません。',
       speak: '🔊 読み上げる', stopSpeak: '⏹ 止める',
       historyTitle: '履歴（この端末の中だけ）', historyEmpty: '履歴はまだありません。', clearHistory: '履歴を消す',
@@ -675,6 +687,7 @@
       questionPlaceholder: 'e.g. What does this error mean, and how do I fix it?',
       micStart: '🎤 Voice input', micStop: '⏹ Stop voice input', listeningNow: 'Listening… please speak',
       ask: 'Ask', asking: 'Looking into it…',
+      cancelAsk: '⏹ Cancel', askCanceled: 'Stopped. No answer arrived, and nothing was added to history.',
       answerTitle: '3. Answer', noAnswerYet: 'No answer yet.',
       speak: '🔊 Read aloud', stopSpeak: '⏹ Stop',
       historyTitle: 'History (on this device only)', historyEmpty: 'No history yet.', clearHistory: 'Clear history',
@@ -756,6 +769,7 @@
       questionPlaceholder: 'Ej.: ¿Qué significa este error y cómo lo corrijo?',
       micStart: '🎤 Entrada de voz', micStop: '⏹ Detener voz', listeningNow: 'Escuchando… habla ahora',
       ask: 'Preguntar', asking: 'Consultando…',
+      cancelAsk: '⏹ Cancelar', askCanceled: 'Detenido. No llegó ninguna respuesta y no se añadió nada al historial.',
       answerTitle: '3. Respuesta', noAnswerYet: 'Aún no hay respuesta.',
       speak: '🔊 Leer en voz alta', stopSpeak: '⏹ Detener',
       historyTitle: 'Historial (solo en este dispositivo)', historyEmpty: 'Aún no hay historial.', clearHistory: 'Borrar historial',
@@ -837,6 +851,7 @@
       questionPlaceholder: '例如：这个错误是什么意思？怎么修复？',
       micStart: '🎤 语音输入', micStop: '⏹ 停止语音', listeningNow: '正在聆听……请说话',
       ask: '查询', asking: '正在查询…',
+      cancelAsk: '⏹ 取消', askCanceled: '已停止。没有收到回答，也没有记入历史。',
       answerTitle: '3. 回答', noAnswerYet: '暂无回答。',
       speak: '🔊 朗读', stopSpeak: '⏹ 停止',
       historyTitle: '历史记录（仅保存在本设备）', historyEmpty: '暂无历史记录。', clearHistory: '清除历史',
@@ -918,6 +933,7 @@
       questionPlaceholder: '예: 이 오류의 의미와 해결 방법을 알려 주세요',
       micStart: '🎤 음성 입력', micStop: '⏹ 음성 입력 중지', listeningNow: '듣는 중… 말씀하세요',
       ask: '물어보기', asking: '찾아보는 중…',
+      cancelAsk: '⏹ 취소', askCanceled: '중지했습니다. 답변이 오지 않았고 기록에도 남기지 않았습니다.',
       answerTitle: '3. 답변', noAnswerYet: '아직 답변이 없습니다.',
       speak: '🔊 읽어 주기', stopSpeak: '⏹ 중지',
       historyTitle: '기록(이 기기에만 저장)', historyEmpty: '아직 기록이 없습니다.', clearHistory: '기록 지우기',
@@ -1021,7 +1037,7 @@
     captureBtn: $('captureBtn'), pickBtn: $('pickBtn'), clearImageBtn: $('clearImageBtn'),
     fileInput: $('fileInput'), preview: $('preview'), video: $('screenVideo'),
     cropBtn: $('cropBtn'), uncropBtn: $('uncropBtn'), cropBox: $('cropBox'),
-    question: $('question'), micBtn: $('micBtn'), askBtn: $('askBtn'), busy: $('busy'),
+    question: $('question'), micBtn: $('micBtn'), askBtn: $('askBtn'), busy: $('busy'), cancelAskBtn: $('cancelAskBtn'),
     answer: $('answer'), speakBtn: $('speakBtn'), stopSpeakBtn: $('stopSpeakBtn'),
     historyList: $('historyList'), historyEmpty: $('historyEmpty'), clearHistoryBtn: $('clearHistoryBtn'),
     exportHistoryBtn: $('exportHistoryBtn'), importHistoryBtn: $('importHistoryBtn'), historyFileInput: $('historyFileInput'),
@@ -1306,6 +1322,7 @@
   function setBusy(on) {
     els.busy.hidden = !on;
     els.askBtn.disabled = on;
+    els.cancelAskBtn.hidden = !on || typeof AbortController === 'undefined';
   }
   function ask() {
     clearStatus();
@@ -1370,10 +1387,19 @@
     if (pendingSend) { pendingSend = null; showStatus(t('sendCanceled'), 'info'); }
   }
 
+  /* The in-flight ask, if any. The user can cancel it with the same abort
+     the timeout uses; askFailureKind keeps a user cancel from being
+     reported as a timeout failure. */
+  var inflight = null;
+  function cancelAsk() {
+    if (inflight && inflight.ctrl) { inflight.canceled = true; inflight.ctrl.abort(); }
+  }
   function send(req) {
     var url = req.url, body = req.body, questionText = req.questionText;
     var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, R.REQUEST_TIMEOUT_MS) : null;
+    var flight = { ctrl: ctrl, canceled: false };
+    inflight = flight;
     setBusy(true);
     fetch(url, {
       method: 'POST',
@@ -1395,6 +1421,7 @@
         return parsed.text;
       });
     }).then(function (text) {
+      if (inflight === flight) inflight = null;
       setBusy(false);
       state.lastAnswer = text;
       els.answer.textContent = text;
@@ -1406,9 +1433,12 @@
       renderHistory();
     }).catch(function (e) {
       if (timer) clearTimeout(timer);
+      if (inflight === flight) inflight = null;
       setBusy(false);
-      if (e && e.rekaiCode) showError(errorText(e.rekaiCode, e.detail));
-      else if (e && e.name === 'AbortError') showError(errorText('timeout'));
+      var kind = R.askFailureKind(e, flight.canceled);
+      if (kind === 'canceled') showStatus(t('askCanceled'), 'info');
+      else if (e && e.rekaiCode) showError(errorText(kind, e.detail));
+      else if (kind === 'timeout') showError(errorText('timeout'));
       else showError(errorText('network', e && e.message ? e.message : String(e)));
     });
   }
@@ -1718,6 +1748,7 @@
     }
   });
   els.askBtn.addEventListener('click', ask);
+  els.cancelAskBtn.addEventListener('click', cancelAsk);
   els.micBtn.addEventListener('click', toggleMic);
   els.speakBtn.addEventListener('click', speak);
   els.stopSpeakBtn.addEventListener('click', stopSpeak);
@@ -1759,6 +1790,7 @@
     state: state,
     setImageDataUrl: function (du) { setImage(du); },
     ask: ask,
+    cancelAsk: cancelAsk,
     detect: runDetection,
     consumeShared: consumeShared,
     version: R.version

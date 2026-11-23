@@ -433,5 +433,22 @@ eq(R.sharedQuestionText('str'), '', 'shared text non-object');
   }
 }
 
+/* ---- cancel an in-flight ask: a user cancel is not a failure ---- */
+{
+  eq(R.askFailureKind({ name: 'AbortError' }, true), 'canceled', 'ask failure: user cancel wins over abort');
+  eq(R.askFailureKind({ name: 'AbortError' }, false), 'timeout', 'ask failure: abort without a user cancel is the timeout');
+  eq(R.askFailureKind({ rekaiCode: 'auth' }, false), 'auth', 'ask failure: classified error passes through');
+  eq(R.askFailureKind({ rekaiCode: 'auth' }, true), 'canceled', 'ask failure: user cancel wins over an api error');
+  eq(R.askFailureKind(new Error('boom'), false), 'network', 'ask failure: plain error is network');
+  eq(R.askFailureKind(null, false), 'network', 'ask failure: null is network');
+  ok(/id="cancelAskBtn"/.test(html), 'cancel button present');
+  ok(/cancelAskBtn\.hidden = !on/.test(html), 'cancel button follows the busy state');
+  ok(/addEventListener\('click', cancelAsk\)/.test(html), 'cancel button wired');
+  for (const lang of R.LANGS) {
+    ok(R.t(lang, 'cancelAsk') !== 'cancelAsk', 'cancelAsk text in ' + lang);
+    ok(R.t(lang, 'askCanceled') !== 'askCanceled', 'askCanceled text in ' + lang);
+  }
+}
+
 console.log('RekAI tests: ' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);
